@@ -9,7 +9,8 @@ import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.config.SkillConfig;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
-import com.privateflow.modules.skill.infra.PersonalityTagRepository;
+import com.privateflow.modules.tags.TagCacheService;
+import com.privateflow.modules.tags.TagValue;
 import java.math.BigDecimal;
 import java.time.temporal.TemporalAccessor;
 import java.util.HashMap;
@@ -25,17 +26,17 @@ public class SkillRequestBuilder {
   private static final Logger log = LoggerFactory.getLogger(SkillRequestBuilder.class);
   private final SkillConfigProvider configProvider;
   private final CustomerQueryService customerQueryService;
-  private final PersonalityTagRepository tagRepository;
+  private final TagCacheService tagCacheService;
   private final ObjectMapper objectMapper;
 
   public SkillRequestBuilder(
       SkillConfigProvider configProvider,
       CustomerQueryService customerQueryService,
-      PersonalityTagRepository tagRepository,
+      TagCacheService tagCacheService,
       ObjectMapper objectMapper) {
     this.configProvider = configProvider;
     this.customerQueryService = customerQueryService;
-    this.tagRepository = tagRepository;
+    this.tagCacheService = tagCacheService;
     this.objectMapper = objectMapper;
   }
 
@@ -126,18 +127,22 @@ public class SkillRequestBuilder {
 
   private String availableTags() {
     try {
-      List<PersonalityTagRepository.PersonalityTag> tags = tagRepository.findEnabled();
+      Map<String, List<TagValue>> tags = tagCacheService.getAllEnabledTags();
       if (tags.isEmpty()) {
         return "当前无可用标签";
       }
       StringBuilder builder = new StringBuilder();
-      for (PersonalityTagRepository.PersonalityTag tag : tags) {
-        builder.append(tag.value()).append(": ").append(tag.label());
-        if (tag.description() != null && !tag.description().isBlank()) {
-          builder.append("/").append(tag.description());
+      tags.forEach((category, values) -> {
+        builder.append("Available ").append(category).append(" tags: [");
+        for (int i = 0; i < values.size(); i++) {
+          TagValue value = values.get(i);
+          if (i > 0) {
+            builder.append(", ");
+          }
+          builder.append(value.displayName()).append("(").append(value.tagValue()).append(")");
         }
-        builder.append("\n");
-      }
+        builder.append("]\n");
+      });
       return builder.toString().trim();
     } catch (RuntimeException ex) {
       return "当前无可用标签";

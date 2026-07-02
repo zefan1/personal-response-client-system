@@ -82,7 +82,8 @@ public class ConfigAdminService {
   private void validate(String key, String value) {
     if (key.startsWith("system.") || key.startsWith("cache.") || key.startsWith("skill.")
         || key.startsWith("image.") || key.startsWith("match.") || key.startsWith("profile.")
-        || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.")) {
+        || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.")
+        || key.startsWith("tag.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
           || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")) {
         int parsed;
@@ -146,6 +147,12 @@ public class ConfigAdminService {
     }
     if ("system.login_fail_window_s".equals(key) && (value < 60 || value > 3600)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.login_fail_window_s range is 60-3600");
+    }
+    if ("tag.cache_refresh_interval_s".equals(key) && (value < 60 || value > 3600)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "tag.cache_refresh_interval_s range is 60-3600");
+    }
+    if ("tag.value_max_per_category".equals(key) && (value < 1 || value > 200)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "tag.value_max_per_category range is 1-200");
     }
   }
 
