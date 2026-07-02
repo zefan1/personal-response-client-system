@@ -1,5 +1,6 @@
 package com.privateflow.modules.api.alert;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -37,6 +38,26 @@ public class SystemAlertRepository {
         ORDER BY occurred_at DESC
         LIMIT 100
         """);
+  }
+
+  public List<Map<String, Object>> recentAlerts(int days, int limit) {
+    return jdbcTemplate.query("""
+        SELECT id, alert_type, level, status, detail, occurred_at, resolved_at
+        FROM system_alerts
+        WHERE occurred_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+        ORDER BY status ASC, occurred_at DESC
+        LIMIT ?
+        """, (rs, rowNum) -> {
+          Map<String, Object> alert = new LinkedHashMap<>();
+          alert.put("alertId", rs.getLong("id"));
+          alert.put("alertType", rs.getString("alert_type"));
+          alert.put("alertLevel", rs.getString("level"));
+          alert.put("status", rs.getString("status"));
+          alert.put("detail", rs.getString("detail") == null ? "" : rs.getString("detail"));
+          alert.put("occurredAt", rs.getTimestamp("occurred_at").toLocalDateTime());
+          alert.put("resolvedAt", rs.getTimestamp("resolved_at") == null ? null : rs.getTimestamp("resolved_at").toLocalDateTime());
+          return alert;
+        }, days, limit);
   }
 
   public void cleanupResolved(int retentionDays) {

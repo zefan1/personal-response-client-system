@@ -46,6 +46,10 @@ public class SkillHealthMonitor {
     return lastCallAt;
   }
 
+  public String circuitState() {
+    return circuitBreaker.state().name();
+  }
+
   @Scheduled(fixedDelay = 300_000)
   public void checkHealth() {
     int total = totalCalls5Min();

@@ -82,7 +82,7 @@ public class ConfigAdminService {
   private void validate(String key, String value) {
     if (key.startsWith("system.") || key.startsWith("cache.") || key.startsWith("skill.")
         || key.startsWith("image.") || key.startsWith("match.") || key.startsWith("profile.")
-        || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.")
+        || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.") || key.startsWith("health.")
         || key.startsWith("tag.") || key.startsWith("version.") || key.startsWith("notice.") || key.startsWith("audit.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
           || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")
@@ -205,6 +205,15 @@ public class ConfigAdminService {
     }
     if ("audit.list_max_page_size".equals(key) && (value < 50 || value > 500)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "audit.list_max_page_size range is 50-500");
+    }
+    if ("health.refresh_interval_s".equals(key) && value != 0 && (value < 15 || value > 120)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "health.refresh_interval_s range is 0 or 15-120");
+    }
+    if ("health.alert_history_days".equals(key) && (value < 1 || value > 30)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "health.alert_history_days range is 1-30");
+    }
+    if ("health.alert_history_max".equals(key) && (value < 50 || value > 200)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "health.alert_history_max range is 50-200");
     }
   }
 
