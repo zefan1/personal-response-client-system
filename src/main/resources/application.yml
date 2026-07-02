@@ -105,3 +105,20 @@ table:
   alert-notify-target: ADMIN
   queue-warn-threshold: 100
   queue-alert-threshold: 1000
+
+system:
+  jwt-secret: ${SYSTEM_JWT_SECRET:change-me-in-production-private-domain-assistant}
+  jwt-expire-hours: 24
+  jwt-refresh-days: 7
+  ws-heartbeat-s: 30
+  ws-timeout-s: 60
+  ws-replay-queue-size: 100
+  request-total-timeout-ms: 15000
+  audit-log-retention-days: 90
+  login-fail-limit: 10
+  login-lock-minutes: 15
+  request-context-ttl-s: 300
+  ws-offline-retention-days: 7
+  alert-retention-days: 30
+  config-change-channel: "config:change"
+  ws-push-channel: "ws:push"
