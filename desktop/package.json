@@ -1,0 +1,23 @@
+{
+  "name": "private-domain-assistant-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.main.json --noEmit",
+    "build": "vite build && tsc -p tsconfig.main.json",
+    "dev": "vite --host 127.0.0.1"
+  },
+  "dependencies": {
+    "electron": "^31.7.7",
+    "vue": "^3.5.17"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.4",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.19",
+    "vue-tsc": "^2.2.10"
+  }
+}

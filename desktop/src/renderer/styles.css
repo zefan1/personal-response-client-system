@@ -1,0 +1,91 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Microsoft YaHei", Arial, sans-serif;
+  color: #202124;
+  background: #f6f7f9;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.recognition {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  height: 36px;
+  border: 1px solid #c8d0da;
+  border-radius: 6px;
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.primary {
+  color: #fff;
+  background: #1677ff;
+  border-color: #1677ff;
+}
+
+.secondary {
+  color: #1f2937;
+  background: #fff;
+}
+
+.banner {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #d99b00;
+  background: #fff7d6;
+}
+
+.two-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid #ccd3dc;
+  border-radius: 6px;
+  padding: 10px;
+  background: #fff;
+}
+
+textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+
+.toast {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: #1f2937;
+  background: #eaf2ff;
+}
