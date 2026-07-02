@@ -307,6 +307,28 @@ textarea {
   gap: 12px;
 }
 
+.suggestion-item.stage-change {
+  border-left: 4px solid #f59e0b;
+}
+
+.stage-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  margin-left: 6px;
+  border-radius: 999px;
+  padding: 0 8px;
+  color: #b54708;
+  background: #fff4e5;
+  font-size: 12px;
+}
+
+.stage-warning {
+  margin: 8px 0 0;
+  color: #b54708;
+  font-size: 12px;
+}
+
 .suggestion-item p {
   margin: 6px 0 0;
 }

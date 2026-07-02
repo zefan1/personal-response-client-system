@@ -32,6 +32,7 @@ export type DesktopConfig = {
   saveRetryIntervalMs: number;
   saveMaxRetries: number;
   savePendingExpireHours: number;
+  stageSuggestPendingTtlS: number;
 };
 
 const defaults: DesktopConfig = {
@@ -67,7 +68,8 @@ const defaults: DesktopConfig = {
   saveToTableTimeoutMs: 15000,
   saveRetryIntervalMs: 5000,
   saveMaxRetries: 3,
-  savePendingExpireHours: 24
+  savePendingExpireHours: 24,
+  stageSuggestPendingTtlS: 300
 };
 
 export function loadDesktopConfig(): DesktopConfig {

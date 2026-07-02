@@ -90,11 +90,22 @@
       </ProfileSection>
       <ProfileSection :title="`AI 更新建议 (${state.suggestions.length})`" section-key="suggestions">
         <div v-if="state.suggestions.length" class="suggestion-list">
-          <article v-for="suggestion in state.suggestions" :key="suggestionKey(suggestion)" class="suggestion-item">
+          <article
+            v-for="suggestion in state.suggestions"
+            :key="suggestionKey(suggestion)"
+            :class="['suggestion-item', { 'stage-change': suggestion.suggestionType === 'STAGE_CHANGE' || suggestion.fieldName === 'customerStage' }]"
+          >
             <div>
-              <strong>{{ suggestion.fieldName }}</strong>
+              <strong>
+                {{ suggestion.fieldName }}
+                <span v-if="suggestion.suggestionType === 'STAGE_CHANGE' || suggestion.fieldName === 'customerStage'" class="stage-label">阶段建议</span>
+              </strong>
               <p>{{ formatValue(suggestion.currentValue) }} → {{ formatValue(suggestion.suggestedValue) }}</p>
               <p class="reason">{{ suggestion.reason || suggestion.confidence || 'AI 建议更新该字段' }}</p>
+              <p v-if="suggestion.stageOptionMatch === false" class="stage-warning">
+                此阶段值不在表格当前可选范围内，请手动核对后再确认。
+                表格当前可选阶段：{{ suggestion.validOptions?.join('、') || '-' }}
+              </p>
             </div>
             <div class="suggestion-actions">
               <button class="secondary small" :disabled="suggestion.resolving || state.editMode" @click="resolveProfileSuggestion('CONFIRM', suggestion)">确认</button>

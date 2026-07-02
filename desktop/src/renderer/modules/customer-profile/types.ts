@@ -63,6 +63,12 @@ export type ProfileSuggestion = {
   confidence?: string;
   status?: string;
   reason?: string;
+  suggestionType?: 'FIELD_UPDATE' | 'STAGE_CHANGE';
+  fromStage?: string;
+  toStage?: string;
+  stageOptionMatch?: boolean;
+  validOptions?: string[];
+  createdAt?: string;
   resolved?: boolean;
   resolving?: boolean;
 };
@@ -94,4 +100,6 @@ export type StageSuggestPayload = {
   reason?: string;
   stageOptionMatch?: boolean;
   validOptions?: string[];
+  createdAt?: string;
+  suggestionType?: 'STAGE_CHANGE';
 };

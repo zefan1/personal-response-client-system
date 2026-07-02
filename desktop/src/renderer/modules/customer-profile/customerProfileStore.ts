@@ -10,6 +10,11 @@ import {
   saveProfile,
   syncProfileToTable
 } from '../save-to-table/saveToTableService';
+import {
+  confirmStageSuggestion,
+  handleCustomerProfileLoaded,
+  ignoreStageSuggestion
+} from '../stage-suggestion/stageSuggestionHandler';
 import type { SaveProfileInput } from '../save-to-table/types';
 import type {
   Customer,
@@ -153,6 +158,7 @@ export async function openProfile(phone: string, sourceFrom: SourceFrom): Promis
     }
     renderProfile(response.data, false, false, '');
     cacheCustomer(response.data);
+    handleCustomerProfileLoaded(response.data);
     await recoverPendingForProfile(response.data);
     emitCustomerSelected(response.data.customer, sourceFrom);
   } catch {
@@ -289,6 +295,20 @@ export async function resolveProfileSuggestion(action: 'CONFIRM' | 'REJECT', sug
   targets.forEach((item) => {
     item.resolving = true;
   });
+  const stageTargets = targets.filter((item) => item.suggestionType === 'STAGE_CHANGE' || item.fieldName === 'customerStage');
+  if (stageTargets.length > 0) {
+    for (const item of stageTargets) {
+      const ok = action === 'CONFIRM' ? await confirmStageSuggestion(item) : await ignoreStageSuggestion(item);
+      if (ok) {
+        item.resolved = true;
+      } else {
+        item.resolving = false;
+        customerProfileState.toast = '阶段变更保存失败，请稍后重试';
+      }
+    }
+    customerProfileState.suggestions = customerProfileState.suggestions.filter((item) => !item.resolved);
+    return;
+  }
   const suggestionIds = targets.map((item) => item.id ?? item.suggestionId).filter((id): id is number => typeof id === 'number');
   try {
     await postJson(`/api/v1/customers/${encodeURIComponent(customer.phone)}/suggestions/batch-resolve`, {
@@ -326,9 +346,15 @@ export function appendStageSuggestion(payload: StageSuggestPayload): void {
     suggestionId: payload.suggestionId,
     phone: payload.phone,
     fieldName: 'customerStage',
+    suggestionType: 'STAGE_CHANGE',
     currentValue: payload.fromStage,
     suggestedValue: payload.toStage,
-    reason: payload.reason
+    fromStage: payload.fromStage,
+    toStage: payload.toStage,
+    reason: payload.reason,
+    stageOptionMatch: payload.stageOptionMatch,
+    validOptions: payload.validOptions,
+    createdAt: payload.createdAt
   }]);
 }
 
