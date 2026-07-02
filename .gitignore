@@ -8,3 +8,4 @@ target/
 !.env.example
 desktop/node_modules/
 desktop/dist/
+.tools/
