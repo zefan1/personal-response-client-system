@@ -83,7 +83,7 @@ public class ConfigAdminService {
     if (key.startsWith("system.") || key.startsWith("cache.") || key.startsWith("skill.")
         || key.startsWith("image.") || key.startsWith("match.") || key.startsWith("profile.")
         || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.")
-        || key.startsWith("tag.") || key.startsWith("version.")) {
+        || key.startsWith("tag.") || key.startsWith("version.") || key.startsWith("notice.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
           || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")) {
         int parsed;
@@ -162,6 +162,27 @@ public class ConfigAdminService {
     }
     if ("version.report_interval_hours".equals(key) && (value < 6 || value > 72)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "version.report_interval_hours range is 6-72");
+    }
+    if ("notice.max_title_chars".equals(key) && (value < 50 || value > 200)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "notice.max_title_chars range is 50-200");
+    }
+    if ("notice.max_content_chars".equals(key) && (value < 100 || value > 2000)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "notice.max_content_chars range is 100-2000");
+    }
+    if ("notice.default_expire_days".equals(key) && (value < 1 || value > 30)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "notice.default_expire_days range is 1-30");
+    }
+    if ("notice.max_schedule_days".equals(key) && (value < 7 || value > 90)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "notice.max_schedule_days range is 7-90");
+    }
+    if ("notice.scan_interval_s".equals(key) && (value < 15 || value > 120)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "notice.scan_interval_s range is 15-120");
+    }
+    if ("notice.auto_expire_hours".equals(key) && (value < 1 || value > 24)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "notice.auto_expire_hours range is 1-24");
+    }
+    if ("notice.list_page_size".equals(key) && (value < 10 || value > 50)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "notice.list_page_size range is 10-50");
     }
   }
 
