@@ -2,6 +2,7 @@ import { reactive } from 'vue';
 import { getJson, postJson } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
+import { getAlertsByPhone, loadAlertsByPhone } from '../abnormal-alert/alertStore';
 import {
   cleanupExpiredPendingSaves,
   cleanupSaveToTableService,
@@ -17,6 +18,7 @@ import {
 } from '../stage-suggestion/stageSuggestionHandler';
 import type { SaveProfileInput } from '../save-to-table/types';
 import type {
+  AbnormalAlertPayload,
   Customer,
   CustomerProfileView,
   CustomerSearchResult,
@@ -51,6 +53,7 @@ export const customerProfileState = reactive({
   saving: false,
   editFields: {} as Record<string, unknown>,
   pendingSaveBanner: '',
+  profileAlert: null as AbnormalAlertPayload | null,
   tableSyncPrompt: null as SaveProfileInput | null,
   generating: false,
   suggestions: [] as ProfileSuggestion[],
@@ -157,6 +160,7 @@ export async function openProfile(phone: string, sourceFrom: SourceFrom): Promis
       return;
     }
     renderProfile(response.data, false, false, '');
+    await refreshProfileAlert(response.data.customer.phone);
     cacheCustomer(response.data);
     handleCustomerProfileLoaded(response.data);
     await recoverPendingForProfile(response.data);
@@ -358,6 +362,14 @@ export function appendStageSuggestion(payload: StageSuggestPayload): void {
   }]);
 }
 
+export function handleProfileAbnormalAlert(payload: AbnormalAlertPayload): void {
+  const currentPhone = customerProfileState.profile?.customer.phone;
+  if (!currentPhone || payload.phone !== currentPhone) {
+    return;
+  }
+  customerProfileState.profileAlert = payload.acknowledged ? null : payload;
+}
+
 export function handleStageUpdated(payload: { phone?: string; newStage?: string }): void {
   const customer = customerProfileState.profile?.customer;
   if (!customer || payload.phone !== customer.phone) {
@@ -411,12 +423,18 @@ export async function skipTableSync(): Promise<void> {
 
 function renderProfile(profile: CustomerProfileView, fromCache: boolean, offline: boolean, cachedAt: string): void {
   customerProfileState.profile = profile;
+  customerProfileState.profileAlert = getAlertsByPhone(profile.customer.phone)[0] ?? null;
   customerProfileState.fromCache = fromCache;
   customerProfileState.offline = offline;
   customerProfileState.cachedAt = cachedAt;
   customerProfileState.suggestions = (profile.pendingSuggestions ?? []).map((item) => ({ ...item, resolved: false, resolving: false }));
   customerProfileState.pendingSaveBanner = getPendingSave(profile.customer.phone) ? '上次编辑内容未保存成功，系统将在稍后自动重试' : '';
   resetSectionState();
+}
+
+async function refreshProfileAlert(phone: string): Promise<void> {
+  const alerts = await loadAlertsByPhone(phone);
+  customerProfileState.profileAlert = alerts[0] ?? null;
 }
 
 function emitCustomerSelected(customer: Customer, sourceFrom: SourceFrom): void {

@@ -23,6 +23,131 @@ textarea {
   gap: 16px;
 }
 
+.alert-bell-wrap {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 55;
+}
+
+.alert-bell {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  padding: 0;
+  background: #fff;
+  box-shadow: 0 10px 28px rgb(16 24 40 / 14%);
+}
+
+.bell-mark {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  background: #d92d20;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.bell-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  padding: 0 5px;
+  color: #fff;
+  background: #d92d20;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.alert-panel {
+  position: absolute;
+  top: 46px;
+  right: 0;
+  width: min(360px, calc(100vw - 28px));
+  max-height: min(460px, calc(100vh - 80px));
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+  box-shadow: 0 18px 48px rgb(16 24 40 / 18%);
+}
+
+.alert-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.alert-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #e4e7ec;
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.alert-row p {
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+}
+
+.alert-row span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.alert-row.level-error,
+.profile-alert-banner.level-error {
+  border-left-color: #d92d20;
+  background: #fff1f0;
+}
+
+.alert-row.level-warn,
+.profile-alert-banner.level-warn {
+  border-left-color: #f79009;
+  background: #fff7d6;
+}
+
+.alert-row.level-info,
+.profile-alert-banner.level-info {
+  border-left-color: #fdb022;
+  background: #fffaeb;
+}
+
+.alert-row.acknowledged {
+  opacity: 0.72;
+}
+
+.alert-history-link {
+  align-self: flex-start;
+}
+
+.alert-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .recognition,
 .reply-panel,
 .customer-panel,
@@ -70,6 +195,13 @@ button:disabled {
   padding: 10px 12px;
   border-left: 3px solid #d99b00;
   background: #fff7d6;
+}
+
+.profile-alert-banner {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #d92d20;
+  border-radius: 6px;
 }
 
 .two-box {

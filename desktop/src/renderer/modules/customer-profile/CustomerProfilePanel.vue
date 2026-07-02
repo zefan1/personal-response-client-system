@@ -57,6 +57,9 @@
       {{ state.offline ? '离线数据' : '缓存数据' }}，上次缓存于 {{ formatDate(state.cachedAt) }}
     </p>
     <p v-if="state.pendingSaveBanner" class="banner">{{ state.pendingSaveBanner }}</p>
+    <p v-if="state.profileAlert" :class="['profile-alert-banner', `level-${state.profileAlert.level.toLowerCase()}`]">
+      {{ state.profileAlert.message }}
+    </p>
 
     <article v-if="state.profile" class="profile-card">
       <div class="profile-summary">
@@ -147,6 +150,7 @@ import {
   dismissCandidates,
   enterEditMode,
   generateReplyFromProfile,
+  handleProfileAbnormalAlert,
   handleSendConfirmed,
   handleStageUpdated,
   openProfile,
@@ -157,7 +161,7 @@ import {
   skipTableSync,
   showCandidates
 } from './customerProfileStore';
-import type { Customer, ProfileSuggestion, RecognizeMultiplePayload, StageSuggestPayload } from './types';
+import type { AbnormalAlertPayload, Customer, ProfileSuggestion, RecognizeMultiplePayload, StageSuggestPayload } from './types';
 
 const customer = computed(() => state.profile?.customer ?? {} as Customer);
 const summaryText = computed(() => `${customer.value.nickname || '-'} · ${maskPhone(customer.value.phone || '')} · ${customer.value.customerStage || '-'}`);
@@ -196,6 +200,7 @@ onMounted(() => {
   disposers.push(eventBus.on<RecognizeMultiplePayload>('recognize:multiple', showCandidates));
   disposers.push(eventBus.on<{ phone?: string; suggestions?: ProfileSuggestion[] }>('suggestion:show', appendProfileSuggestions));
   disposers.push(eventBus.on<StageSuggestPayload>('stage:suggest', appendStageSuggestion));
+  disposers.push(eventBus.on<AbnormalAlertPayload>('abnormal:alert', handleProfileAbnormalAlert));
   disposers.push(eventBus.on<{ phone?: string; newStage?: string }>('stage:updated', handleStageUpdated));
   disposers.push(eventBus.on<{ phone?: string }>('reply:send-confirmed', handleSendConfirmed));
 });

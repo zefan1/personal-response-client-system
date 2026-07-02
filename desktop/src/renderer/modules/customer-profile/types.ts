@@ -103,3 +103,14 @@ export type StageSuggestPayload = {
   createdAt?: string;
   suggestionType?: 'STAGE_CHANGE';
 };
+
+export type AbnormalAlertPayload = {
+  alertId: string;
+  phone: string;
+  alertType: 'CUSTOMER_COMPLAINT' | 'CHURN_RISK';
+  message: string;
+  level: 'ERROR' | 'WARN' | 'INFO';
+  occurredAt: string;
+  acknowledged: boolean;
+  acknowledgedAt?: string | null;
+};

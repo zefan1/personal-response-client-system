@@ -134,7 +134,7 @@ onMounted(() => {
   disposers.push(eventBus.on<{ helpId?: string | number; phone?: string }>('help:pending', handleHelpPending));
   disposers.push(eventBus.on<{ helpId?: string | number; phone?: string }>('help:resolved', handleHelpResolved));
   disposers.push(eventBus.on<ProfileSuggestionsPayload>('PROFILE_SUGGESTIONS', handleProfileSuggestions));
-  disposers.push(eventBus.on<AbnormalAlertPayload>('ABNORMAL_ALERT', handleAbnormalAlert));
+  disposers.push(eventBus.on<AbnormalAlertPayload>('abnormal:alert', handleAbnormalAlert));
 });
 
 onBeforeUnmount(() => {

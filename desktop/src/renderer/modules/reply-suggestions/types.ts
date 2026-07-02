@@ -55,10 +55,14 @@ export type ProfileSuggestionsPayload = {
 };
 
 export type AbnormalAlertPayload = {
-  phone?: string;
-  alertType?: string;
-  message?: string;
-  level?: string;
+  alertId: string;
+  phone: string;
+  alertType: 'CUSTOMER_COMPLAINT' | 'CHURN_RISK';
+  message: string;
+  level: 'ERROR' | 'WARN' | 'INFO';
+  occurredAt: string;
+  acknowledged: boolean;
+  acknowledgedAt?: string | null;
 };
 
 export type ReplySelectedPayload = {

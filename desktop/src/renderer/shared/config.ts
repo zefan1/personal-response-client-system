@@ -33,6 +33,9 @@ export type DesktopConfig = {
   saveMaxRetries: number;
   savePendingExpireHours: number;
   stageSuggestPendingTtlS: number;
+  alertHistoryMaxCount: number;
+  alertHistoryRetentionDays: number;
+  alertBellRefreshIntervalS: number;
 };
 
 const defaults: DesktopConfig = {
@@ -69,7 +72,10 @@ const defaults: DesktopConfig = {
   saveRetryIntervalMs: 5000,
   saveMaxRetries: 3,
   savePendingExpireHours: 24,
-  stageSuggestPendingTtlS: 300
+  stageSuggestPendingTtlS: 300,
+  alertHistoryMaxCount: 50,
+  alertHistoryRetentionDays: 7,
+  alertBellRefreshIntervalS: 86400
 };
 
 export function loadDesktopConfig(): DesktopConfig {

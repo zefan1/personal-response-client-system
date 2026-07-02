@@ -2,6 +2,7 @@ import { computed, reactive } from 'vue';
 import { postJson } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
+import { getAlertsByPhone } from '../abnormal-alert/alertStore';
 import type {
   AbnormalAlertPayload,
   ChatResponse,
@@ -206,6 +207,10 @@ export function handleAbnormalAlert(payload: AbnormalAlertPayload): void {
   if (payload.phone && replySuggestionState.currentPhone && payload.phone !== replySuggestionState.currentPhone) {
     return;
   }
+  if (payload.acknowledged) {
+    replySuggestionState.abnormalAlert = null;
+    return;
+  }
   replySuggestionState.abnormalAlert = payload;
 }
 
@@ -251,6 +256,7 @@ function showChatResponse(response: ChatResponse, scene: ReplyScene): void {
   replySuggestionState.loadingMode = 'NONE';
   replySuggestionState.currentScene = scene;
   replySuggestionState.currentPhone = response.phone ?? replySuggestionState.currentPhone;
+  refreshAbnormalAlertForCurrentPhone();
   replySuggestionState.currentNickname = response.nickname ?? replySuggestionState.currentNickname;
   replySuggestionState.currentMatchType = response.match?.matchType ?? (response.needsCustomerIdentifier ? 'NONE' : replySuggestionState.currentMatchType);
   const suggestions = response.skill?.suggestions ?? [];
@@ -359,6 +365,14 @@ function resetForNewEntry(): void {
   replySuggestionState.abnormalAlert = null;
   replySuggestionState.activeHelpId = '';
   replySuggestionState.toast = '';
+}
+
+function refreshAbnormalAlertForCurrentPhone(): void {
+  if (!replySuggestionState.currentPhone) {
+    replySuggestionState.abnormalAlert = null;
+    return;
+  }
+  replySuggestionState.abnormalAlert = getAlertsByPhone(replySuggestionState.currentPhone)[0] ?? null;
 }
 
 function normalizeResponse(payload: RecognizeResultPayload): ChatResponse {
