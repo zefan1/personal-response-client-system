@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, nativeImage } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net } from 'electron';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,7 +21,8 @@ const DESKTOP_DEFAULTS = {
   clipboardMd5CacheSize: 5,
   clipboardMinImageDimension: 200,
   clipboardImageTextCoverMs: 2000,
-  requestTotalTimeoutMs: 15000
+  requestTotalTimeoutMs: 15000,
+  quickSearchShortcut: 'CommandOrControl+Shift+F'
 };
 
 function createWindow() {
@@ -48,7 +49,10 @@ function createWindow() {
 app.whenReady().then(() => {
   registerScreenshotCapture();
   registerClipboardWriteText();
+  registerClipboardWriteImage();
+  registerQuickSearchIpc();
   createWindow();
+  registerQuickSearchShortcut();
   startClipboardPolling();
 });
 
@@ -57,6 +61,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 function registerScreenshotCapture() {
@@ -104,6 +112,47 @@ function registerClipboardWriteText() {
     }
     clipboard.writeText(text);
     return { success: true };
+  });
+}
+
+function registerClipboardWriteImage() {
+  ipcMain.handle('clipboard:write-image', async (_event, payload: { imageUrl?: string }) => {
+    try {
+      if (!payload.imageUrl) {
+        return { success: false, error: 'IMAGE_LOAD_FAILED', message: 'Missing imageUrl' };
+      }
+      const response = await net.fetch(payload.imageUrl);
+      if (!response.ok) {
+        return { success: false, error: 'IMAGE_LOAD_FAILED', message: 'Image download failed' };
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const image = nativeImage.createFromBuffer(buffer);
+      if (image.isEmpty()) {
+        return { success: false, error: 'IMAGE_LOAD_FAILED', message: 'Image decode failed' };
+      }
+      clipboard.writeImage(image);
+      return { success: true };
+    } catch {
+      return { success: false, error: 'IMAGE_LOAD_FAILED', message: 'Image load failed' };
+    }
+  });
+}
+
+function registerQuickSearchIpc() {
+  ipcMain.handle('quicksearch:hide', () => {
+    mainWindow?.webContents.send('quicksearch:hide');
+    return { success: true };
+  });
+}
+
+function registerQuickSearchShortcut() {
+  globalShortcut.register(DESKTOP_DEFAULTS.quickSearchShortcut, () => {
+    if (mainWindow?.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow?.show();
+    mainWindow?.focus();
+    mainWindow?.webContents.send('quicksearch:show');
   });
 }
 

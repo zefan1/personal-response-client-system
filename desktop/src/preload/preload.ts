@@ -20,6 +20,18 @@ type ClipboardImagePayload = {
 const api = {
   captureScreenshot: (): Promise<ScreenshotResult> => ipcRenderer.invoke('screenshot:capture'),
   writeClipboardText: (text: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('clipboard:write-text', { text }),
+  writeClipboardImage: (imageUrl: string): Promise<{ success: boolean; error?: string; message?: string }> => ipcRenderer.invoke('clipboard:write-image', { imageUrl }),
+  hideQuickSearch: (): Promise<{ success: boolean }> => ipcRenderer.invoke('quicksearch:hide'),
+  onQuickSearchShow: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('quicksearch:show', listener);
+    return () => ipcRenderer.removeListener('quicksearch:show', listener);
+  },
+  onQuickSearchHide: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('quicksearch:hide', listener);
+    return () => ipcRenderer.removeListener('quicksearch:hide', listener);
+  },
   onClipboardImage: (callback: (payload: ClipboardImagePayload) => void) => {
     const listener = (_: Electron.IpcRendererEvent, payload: ClipboardImagePayload) => callback(payload);
     ipcRenderer.on('clipboard:new-image', listener);

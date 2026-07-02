@@ -19,6 +19,11 @@ export type DesktopConfig = {
   newReminderFlashMs: number;
   toastMaxCount: number;
   toastNewLeadDismissS: number;
+  quicksearchShortcut: string;
+  quicksearchResultLimit: number;
+  quicksearchAutoCloseS: number;
+  quicksearchCacheRefreshOnStartup: boolean;
+  searchInputDebounceMs: number;
 };
 
 const defaults: DesktopConfig = {
@@ -41,7 +46,12 @@ const defaults: DesktopConfig = {
   editLogRetentionDays: 7,
   newReminderFlashMs: 3000,
   toastMaxCount: 3,
-  toastNewLeadDismissS: 15
+  toastNewLeadDismissS: 15,
+  quicksearchShortcut: 'CommandOrControl+Shift+F',
+  quicksearchResultLimit: 10,
+  quicksearchAutoCloseS: 3,
+  quicksearchCacheRefreshOnStartup: true,
+  searchInputDebounceMs: 100
 };
 
 export function loadDesktopConfig(): DesktopConfig {

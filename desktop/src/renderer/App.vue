@@ -2,6 +2,7 @@
   <main class="shell">
     <CopyBackfillAgent />
     <NewLeadToastAgent />
+    <QuickSearchOverlay />
     <ChatRecognitionPanel />
     <FollowupListPanel />
     <CustomerProfilePanel />
@@ -15,5 +16,6 @@ import CopyBackfillAgent from './modules/copy-backfill/CopyBackfillAgent.vue';
 import CustomerProfilePanel from './modules/customer-profile/CustomerProfilePanel.vue';
 import FollowupListPanel from './modules/followup-list/FollowupListPanel.vue';
 import NewLeadToastAgent from './modules/new-lead-toast/NewLeadToastAgent.vue';
+import QuickSearchOverlay from './modules/quick-search/QuickSearchOverlay.vue';
 import ReplySuggestionPanel from './modules/reply-suggestions/ReplySuggestionPanel.vue';
 </script>
