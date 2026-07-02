@@ -19,6 +19,7 @@ type ClipboardImagePayload = {
 
 const api = {
   captureScreenshot: (): Promise<ScreenshotResult> => ipcRenderer.invoke('screenshot:capture'),
+  writeClipboardText: (text: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('clipboard:write-text', { text }),
   onClipboardImage: (callback: (payload: ClipboardImagePayload) => void) => {
     const listener = (_: Electron.IpcRendererEvent, payload: ClipboardImagePayload) => callback(payload);
     ipcRenderer.on('clipboard:new-image', listener);

@@ -230,6 +230,45 @@ textarea {
   white-space: nowrap;
 }
 
+.suggestion-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 32px));
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgb(16 24 40 / 16%);
+}
+
+.suggestion-toast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.suggestion-reopen {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+}
+
+.copy-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 72px;
+  z-index: 21;
+}
+
 @keyframes pulse {
   0%,
   100% {

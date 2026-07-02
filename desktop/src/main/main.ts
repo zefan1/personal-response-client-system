@@ -47,6 +47,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerScreenshotCapture();
+  registerClipboardWriteText();
   createWindow();
   startClipboardPolling();
 });
@@ -92,6 +93,17 @@ function registerScreenshotCapture() {
     } catch (error) {
       return { success: false, error: 'CAPTURE_FAILED', message: 'Screenshot capture failed' };
     }
+  });
+}
+
+function registerClipboardWriteText() {
+  ipcMain.handle('clipboard:write-text', (_event, payload: { text?: string }) => {
+    const text = payload.text ?? '';
+    if (!text.trim()) {
+      return { success: false, error: 'EMPTY_TEXT' };
+    }
+    clipboard.writeText(text);
+    return { success: true };
   });
 }
 
