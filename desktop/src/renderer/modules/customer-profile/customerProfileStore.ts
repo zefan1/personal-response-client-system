@@ -1,7 +1,16 @@
 import { reactive } from 'vue';
-import { getJson, postJson, putJson } from '../../shared/apiClient';
+import { getJson, postJson } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
+import {
+  cleanupExpiredPendingSaves,
+  cleanupSaveToTableService,
+  getPendingSave,
+  recoverPendingSave,
+  saveProfile,
+  syncProfileToTable
+} from '../save-to-table/saveToTableService';
+import type { SaveProfileInput } from '../save-to-table/types';
 import type {
   Customer,
   CustomerProfileView,
@@ -36,6 +45,8 @@ export const customerProfileState = reactive({
   editMode: false,
   saving: false,
   editFields: {} as Record<string, unknown>,
+  pendingSaveBanner: '',
+  tableSyncPrompt: null as SaveProfileInput | null,
   generating: false,
   suggestions: [] as ProfileSuggestion[],
   sectionCollapsed: {
@@ -51,6 +62,9 @@ export const customerProfileState = reactive({
 let searchTimer: number | null = null;
 let searchAbort: AbortController | null = null;
 let profileAbort: AbortController | null = null;
+let tableSyncTimer: number | null = null;
+
+cleanupExpiredPendingSaves();
 
 export function scheduleSearch(keyword: string): void {
   customerProfileState.keyword = keyword;
@@ -139,6 +153,7 @@ export async function openProfile(phone: string, sourceFrom: SourceFrom): Promis
     }
     renderProfile(response.data, false, false, '');
     cacheCustomer(response.data);
+    await recoverPendingForProfile(response.data);
     emitCustomerSelected(response.data.customer, sourceFrom);
   } catch {
     const cached = loadCachedCustomer(phone);
@@ -225,23 +240,39 @@ export async function saveProfileEdits(): Promise<void> {
     return;
   }
   customerProfileState.saving = true;
+  customerProfileState.pendingSaveBanner = '';
   try {
-    const response = await putJson(`/api/v1/customers/${encodeURIComponent(customer.phone)}`, {
+    const input: SaveProfileInput = {
+      phone: customer.phone,
+      editedFields: fields,
       version: customer.version ?? 0,
-      fields,
-      operator: 'desktop'
-    }, SAVE_TIMEOUT_MS);
-    if (!response.success) {
-      customerProfileState.toast = response.errorCode === '50-10002' ? '档案刚刚被自动更新，正在刷新' : '保存超时，请重试';
-      if (response.errorCode === '50-10002') {
-        void openProfile(customer.phone, 'PROFILE_CARD');
-      }
+      hasTableRow: Boolean(customer.sourceRowId),
+      sourceTable: customer.sourceTable,
+      sourceRowId: customer.sourceRowId
+    };
+    const result = await saveProfile(input);
+    customerProfileState.toast = result.message;
+    if (result.status === 'CONFLICT') {
+      const editingSnapshot = { ...customerProfileState.editFields };
+      void openProfile(customer.phone, 'PROFILE_CARD');
+      customerProfileState.editFields = editingSnapshot;
+      customerProfileState.editMode = true;
       return;
     }
-    customerProfileState.toast = '已保存';
+    if (result.status === 'BUSY') {
+      return;
+    }
+    if (result.status === 'GIVE_UP') {
+      customerProfileState.pendingSaveBanner = result.message;
+      return;
+    }
     customerProfileState.editMode = false;
     customerProfileState.editFields = {};
-    await openProfile(customer.phone, 'PROFILE_CARD');
+    if (result.askTableSync) {
+      showTableSyncPrompt(input);
+    } else if (result.needRefresh) {
+      await openProfile(customer.phone, 'PROFILE_CARD');
+    }
   } catch {
     customerProfileState.toast = '保存超时，请重试';
   } finally {
@@ -324,6 +355,32 @@ export function cleanupCustomerProfileStore(): void {
   }
   searchAbort?.abort();
   profileAbort?.abort();
+  if (tableSyncTimer) {
+    window.clearTimeout(tableSyncTimer);
+    tableSyncTimer = null;
+  }
+  cleanupSaveToTableService();
+}
+
+export async function confirmTableSync(): Promise<void> {
+  const input = customerProfileState.tableSyncPrompt;
+  if (!input) {
+    return;
+  }
+  clearTableSyncPrompt();
+  const result = await syncProfileToTable(input);
+  customerProfileState.toast = result.message;
+  if (result.needRefresh) {
+    await openProfile(input.phone, 'PROFILE_CARD');
+  }
+}
+
+export async function skipTableSync(): Promise<void> {
+  const input = customerProfileState.tableSyncPrompt;
+  clearTableSyncPrompt();
+  if (input) {
+    await openProfile(input.phone, 'PROFILE_CARD');
+  }
 }
 
 function renderProfile(profile: CustomerProfileView, fromCache: boolean, offline: boolean, cachedAt: string): void {
@@ -332,6 +389,7 @@ function renderProfile(profile: CustomerProfileView, fromCache: boolean, offline
   customerProfileState.offline = offline;
   customerProfileState.cachedAt = cachedAt;
   customerProfileState.suggestions = (profile.pendingSuggestions ?? []).map((item) => ({ ...item, resolved: false, resolving: false }));
+  customerProfileState.pendingSaveBanner = getPendingSave(profile.customer.phone) ? '上次编辑内容未保存成功，系统将在稍后自动重试' : '';
   resetSectionState();
 }
 
@@ -425,4 +483,35 @@ function enforceCacheLimit(): void {
   }
   items.sort((a, b) => a.lastViewedAt.localeCompare(b.lastViewedAt));
   items.slice(0, Math.max(0, items.length - limit)).forEach((item) => localStorage.removeItem(item.key));
+}
+
+async function recoverPendingForProfile(profile: CustomerProfileView): Promise<void> {
+  const pending = getPendingSave(profile.customer.phone);
+  if (!pending) {
+    return;
+  }
+  customerProfileState.pendingSaveBanner = '上次编辑内容未保存成功，系统正在自动重试';
+  const result = await recoverPendingSave(profile.customer.phone, profile.customer.version ?? pending.version);
+  if (result?.status === 'OK') {
+    customerProfileState.pendingSaveBanner = '';
+    customerProfileState.toast = '上次未保存内容已恢复保存';
+  } else if (result) {
+    customerProfileState.pendingSaveBanner = result.message;
+  }
+}
+
+function showTableSyncPrompt(input: SaveProfileInput): void {
+  clearTableSyncPrompt();
+  customerProfileState.tableSyncPrompt = input;
+  tableSyncTimer = window.setTimeout(() => {
+    void skipTableSync();
+  }, 15000);
+}
+
+function clearTableSyncPrompt(): void {
+  if (tableSyncTimer) {
+    window.clearTimeout(tableSyncTimer);
+    tableSyncTimer = null;
+  }
+  customerProfileState.tableSyncPrompt = null;
 }

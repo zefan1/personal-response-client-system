@@ -56,6 +56,7 @@
     <p v-if="state.offline || state.fromCache" class="banner">
       {{ state.offline ? '离线数据' : '缓存数据' }}，上次缓存于 {{ formatDate(state.cachedAt) }}
     </p>
+    <p v-if="state.pendingSaveBanner" class="banner">{{ state.pendingSaveBanner }}</p>
 
     <article v-if="state.profile" class="profile-card">
       <div class="profile-summary">
@@ -112,7 +113,12 @@
       </ProfileSection>
     </article>
 
-    <p v-if="state.toast" class="toast">{{ state.toast }}</p>
+    <div v-if="state.tableSyncPrompt" class="toast table-sync-toast">
+      <span>{{ state.toast }}</span>
+      <button class="primary small" @click="confirmTableSync">同步</button>
+      <button class="secondary small" @click="skipTableSync">暂不</button>
+    </div>
+    <p v-else-if="state.toast" class="toast">{{ state.toast }}</p>
   </section>
 </template>
 
@@ -125,6 +131,7 @@ import {
   cancelEditMode,
   chooseCandidate,
   cleanupCustomerProfileStore,
+  confirmTableSync,
   customerProfileState as state,
   dismissCandidates,
   enterEditMode,
@@ -136,6 +143,7 @@ import {
   saveProfileEdits,
   scheduleSearch,
   searchImmediately,
+  skipTableSync,
   showCandidates
 } from './customerProfileStore';
 import type { Customer, ProfileSuggestion, RecognizeMultiplePayload, StageSuggestPayload } from './types';

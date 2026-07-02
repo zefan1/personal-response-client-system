@@ -73,7 +73,8 @@ def main() -> None:
 
     assert_contains(panel_vue, "@paste", "paste immediate search")
     assert_contains(store_ts, "window.setTimeout", "debounce timer")
-    assert_contains(store_ts, "response.errorCode === '50-10002'", "edit conflict handling")
+    assert_contains(store_ts, "result.status === 'CONFLICT'", "edit conflict handling")
+    assert_contains(store_ts, "saveProfile(input)", "desktop H save integration")
     assert_contains(panel_vue, "maskPhone", "phone masking")
 
     for forbidden in ["TODO", "FIXME", "待补充", "console.log"]:

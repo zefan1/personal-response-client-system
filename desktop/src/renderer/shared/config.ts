@@ -26,6 +26,10 @@ export type DesktopConfig = {
   searchInputDebounceMs: number;
   batchMaxCustomers: number;
   batchCustomerBatchTimeoutMs: number;
+  saveToTableTimeoutMs: number;
+  saveRetryIntervalMs: number;
+  saveMaxRetries: number;
+  savePendingExpireHours: number;
 };
 
 const defaults: DesktopConfig = {
@@ -55,7 +59,11 @@ const defaults: DesktopConfig = {
   quicksearchCacheRefreshOnStartup: true,
   searchInputDebounceMs: 100,
   batchMaxCustomers: 100,
-  batchCustomerBatchTimeoutMs: 3000
+  batchCustomerBatchTimeoutMs: 3000,
+  saveToTableTimeoutMs: 15000,
+  saveRetryIntervalMs: 5000,
+  saveMaxRetries: 3,
+  savePendingExpireHours: 24
 };
 
 export function loadDesktopConfig(): DesktopConfig {
