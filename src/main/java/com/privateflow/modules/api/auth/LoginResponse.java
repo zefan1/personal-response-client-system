@@ -4,6 +4,9 @@ public record LoginResponse(
     String accessToken,
     String refreshToken,
     long expiresIn,
-    AuthUser userInfo
+    AuthUser account
 ) {
+  public AuthUser userInfo() {
+    return account;
+  }
 }

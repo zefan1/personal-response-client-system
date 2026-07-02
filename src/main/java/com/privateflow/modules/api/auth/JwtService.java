@@ -31,9 +31,11 @@ public class JwtService {
   public String issue(AuthUser user) {
     try {
       long now = Instant.now().getEpochSecond();
-      long exp = now + configProvider.get().jwtExpireHours() * 3600L;
+      // Compatibility note: module H originally used jwtExpireHours; module 44 prefers seconds.
+      long exp = now + configProvider.get().jwtAccessTokenTtlS();
       Map<String, Object> header = Map.of("alg", "HS256", "typ", "JWT");
       Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("phone", user.username());
       payload.put("username", user.username());
       payload.put("displayName", user.displayName());
       payload.put("role", user.role().name());
@@ -63,8 +65,9 @@ public class JwtService {
         throw new ApiException(ApiErrorCodes.AUTH_FAILED, "Token expired");
       }
       Object leaderId = payload.get("leaderId");
+      Object phone = payload.get("phone") == null ? payload.get("username") : payload.get("phone");
       return new AuthUser(
-          payload.get("username").toString(),
+          phone.toString(),
           payload.get("displayName").toString(),
           Role.valueOf(payload.get("role").toString()),
           leaderId == null ? null : Long.valueOf(leaderId.toString()));

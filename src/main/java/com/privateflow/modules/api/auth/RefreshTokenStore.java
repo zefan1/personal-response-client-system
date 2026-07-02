@@ -33,6 +33,14 @@ public class RefreshTokenStore {
     }
   }
 
+  public void revoke(String username) {
+    try {
+      redisTemplate.delete(key(username));
+    } catch (RuntimeException ex) {
+      // Token revocation is best effort when Redis is unavailable.
+    }
+  }
+
   private String key(String username) {
     return "refresh:" + username;
   }

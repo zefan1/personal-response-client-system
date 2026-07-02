@@ -5,8 +5,11 @@ import com.privateflow.modules.api.auth.AuthService;
 import com.privateflow.modules.api.auth.LoginRequest;
 import com.privateflow.modules.api.auth.LoginResponse;
 import com.privateflow.modules.api.auth.RefreshRequest;
+import com.privateflow.modules.api.config.SystemConfigProvider;
 import com.privateflow.modules.match.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Map;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,9 +19,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
   private final AuthService authService;
+  private final SystemConfigProvider configProvider;
 
-  public AuthController(AuthService authService) {
+  public AuthController(AuthService authService, SystemConfigProvider configProvider) {
     this.authService = authService;
+    this.configProvider = configProvider;
   }
 
   @PostMapping("/api/v1/auth/login")
@@ -34,6 +39,13 @@ public class AuthController {
   @PostMapping("/api/v1/auth/refresh")
   public ApiResponse<LoginResponse> refresh(@RequestBody RefreshRequest request) {
     return ApiResponse.ok(authService.refresh(request, AuthContext.current()));
+  }
+
+  @GetMapping("/api/v1/auth/config")
+  public ApiResponse<Map<String, Object>> config() {
+    return ApiResponse.ok(Map.of(
+        "captchaEnabled", configProvider.get().captchaEnabled(),
+        "captchaProvider", configProvider.get().captchaProvider()));
   }
 
   private String clientIp(HttpServletRequest request) {

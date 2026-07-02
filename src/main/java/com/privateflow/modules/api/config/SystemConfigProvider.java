@@ -26,7 +26,11 @@ public class SystemConfigProvider {
       @Value("${system.request-total-timeout-ms:15000}") int requestTotalTimeoutMs,
       @Value("${system.audit-log-retention-days:90}") int auditLogRetentionDays,
       @Value("${system.login-fail-limit:10}") int loginFailLimit,
-      @Value("${system.login-lock-minutes:15}") int loginLockMinutes,
+      @Value("${system.login-fail-window-s:300}") int loginFailWindowS,
+      @Value("${system.captcha-enabled:false}") boolean captchaEnabled,
+      @Value("${system.captcha-provider:}") String captchaProvider,
+      @Value("${system.captcha-app-id:}") String captchaAppId,
+      @Value("${system.captcha-secret:}") String captchaSecret,
       @Value("${system.request-context-ttl-s:300}") int requestContextTtlS,
       @Value("${system.ws-offline-retention-days:7}") int wsOfflineRetentionDays,
       @Value("${system.alert-retention-days:30}") int alertRetentionDays,
@@ -43,7 +47,11 @@ public class SystemConfigProvider {
         clamp(requestTotalTimeoutMs, 10000, 20000),
         clamp(auditLogRetentionDays, 30, 365),
         clamp(loginFailLimit, 3, 20),
-        clamp(loginLockMinutes, 5, 60),
+        clamp(loginFailWindowS, 60, 3600),
+        captchaEnabled,
+        string(captchaProvider, ""),
+        string(captchaAppId, ""),
+        string(captchaSecret, ""),
         clamp(requestContextTtlS, 60, 600),
         clamp(wsOfflineRetentionDays, 1, 30),
         clamp(alertRetentionDays, 7, 90),
@@ -72,15 +80,37 @@ public class SystemConfigProvider {
     Map<String, String> values = configRepository.findByPrefix("system.");
     current.set(new SystemConfig(
         string(values.get("system.jwt_secret"), previous.jwtSecret()),
-        integer(values.get("system.jwt_expire_hours"), previous.jwtExpireHours(), 1, 168),
-        integer(values.get("system.jwt_refresh_days"), previous.jwtRefreshDays(), 1, 30),
+        integer(
+            secondsToHours(values.get("system.jwt_access_token_ttl_s")) == null
+                ? values.get("system.jwt_expire_hours")
+                : secondsToHours(values.get("system.jwt_access_token_ttl_s")),
+            previous.jwtExpireHours(),
+            1,
+            168),
+        integer(
+            secondsToDays(values.get("system.jwt_refresh_token_ttl_s")) == null
+                ? values.get("system.jwt_refresh_days")
+                : secondsToDays(values.get("system.jwt_refresh_token_ttl_s")),
+            previous.jwtRefreshDays(),
+            1,
+            30),
         integer(values.get("system.ws_heartbeat_s"), previous.wsHeartbeatS(), 15, 60),
         integer(values.get("system.ws_timeout_s"), previous.wsTimeoutS(), 30, 120),
         integer(values.get("system.ws_replay_queue_size"), previous.wsReplayQueueSize(), 50, 500),
         integer(values.get("system.request_total_timeout_ms"), previous.requestTotalTimeoutMs(), 10000, 20000),
         integer(values.get("system.audit_log_retention_days"), previous.auditLogRetentionDays(), 30, 365),
         integer(values.get("system.login_fail_limit"), previous.loginFailLimit(), 3, 20),
-        integer(values.get("system.login_lock_minutes"), previous.loginLockMinutes(), 5, 60),
+        integer(
+            values.get("system.login_fail_window_s") == null
+                ? legacyMinutesToSeconds(values.get("system.login_lock_minutes"))
+                : values.get("system.login_fail_window_s"),
+            previous.loginFailWindowS(),
+            60,
+            3600),
+        bool(values.get("system.captcha_enabled"), previous.captchaEnabled()),
+        string(values.get("system.captcha_provider"), previous.captchaProvider()),
+        string(values.get("system.captcha_app_id"), previous.captchaAppId()),
+        string(values.get("system.captcha_secret"), previous.captchaSecret()),
         integer(values.get("system.request_context_ttl_s"), previous.requestContextTtlS(), 60, 600),
         integer(values.get("system.ws_offline_retention_days"), previous.wsOfflineRetentionDays(), 1, 30),
         integer(values.get("system.alert_retention_days"), previous.alertRetentionDays(), 7, 90),
@@ -98,6 +128,40 @@ public class SystemConfigProvider {
 
   private static String string(String raw, String fallback) {
     return raw == null || raw.isBlank() ? fallback : raw.trim();
+  }
+
+  private static boolean bool(String raw, boolean fallback) {
+    return raw == null || raw.isBlank() ? fallback : Boolean.parseBoolean(raw.trim());
+  }
+
+  private String legacyMinutesToSeconds(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return null;
+    }
+    try {
+      return String.valueOf(Integer.parseInt(raw.trim()) * 60);
+    } catch (NumberFormatException ex) {
+      return null;
+    }
+  }
+
+  private String secondsToHours(String raw) {
+    return secondsToUnit(raw, 3600);
+  }
+
+  private String secondsToDays(String raw) {
+    return secondsToUnit(raw, 86400);
+  }
+
+  private String secondsToUnit(String raw, int unit) {
+    if (raw == null || raw.isBlank()) {
+      return null;
+    }
+    try {
+      return String.valueOf(Math.max(1, Integer.parseInt(raw.trim()) / unit));
+    } catch (NumberFormatException ex) {
+      return null;
+    }
   }
 
   private static int clamp(int value, int min, int max) {

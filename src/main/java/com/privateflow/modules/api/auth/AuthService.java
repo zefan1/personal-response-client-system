@@ -31,14 +31,19 @@ public class AuthService {
   }
 
   public LoginResponse login(LoginRequest request, String ip, boolean adminLogin) {
-    if (request == null || blank(request.username()) || blank(request.password())) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "username and password are required");
+    String phone = request == null ? null : request.loginPhone();
+    if (blank(phone) || blank(request.password())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "phone and password are required");
     }
     if (rateLimiter.locked(ip)) {
-      throw new ApiException(ApiErrorCodes.AUTH_FAILED, "login failed too many times");
+      throw new ApiException(ApiErrorCodes.LOGIN_RATE_LIMITED, "login failed too many times");
     }
-    Account account = accountRepository.findEnabledByUsername(request.username())
+    validateCaptcha(request);
+    Account account = accountRepository.findByPhone(phone.trim())
         .orElseThrow(() -> authFailure(ip));
+    if (!account.enabled()) {
+      throw new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "account disabled");
+    }
     if (adminLogin && account.role() == Role.KEEPER) {
       throw new ApiException(ApiErrorCodes.FORBIDDEN, "permission denied");
     }
@@ -46,10 +51,11 @@ public class AuthService {
       throw authFailure(ip);
     }
     rateLimiter.clear(ip);
+    accountRepository.updateLastLogin(account.username());
     AuthUser user = new AuthUser(account.username(), account.displayName(), account.role(), account.leaderId());
     String accessToken = jwtService.issue(user);
-    String refreshToken = refreshTokenStore.issue(user.username(), Duration.ofDays(configProvider.get().jwtRefreshDays()));
-    return new LoginResponse(accessToken, refreshToken, configProvider.get().jwtExpireHours() * 3600L, user);
+    String refreshToken = refreshTokenStore.issue(user.username(), Duration.ofSeconds(configProvider.get().jwtRefreshTokenTtlS()));
+    return new LoginResponse(accessToken, refreshToken, configProvider.get().jwtAccessTokenTtlS(), user);
   }
 
   public LoginResponse refresh(RefreshRequest request, AuthUser user) {
@@ -61,9 +67,14 @@ public class AuthService {
     if (!stored.equals(request.refreshToken())) {
       throw new ApiException(ApiErrorCodes.AUTH_FAILED, "refresh token invalid");
     }
-    String accessToken = jwtService.issue(user);
-    String refreshToken = refreshTokenStore.issue(user.username(), Duration.ofDays(configProvider.get().jwtRefreshDays()));
-    return new LoginResponse(accessToken, refreshToken, configProvider.get().jwtExpireHours() * 3600L, user);
+    Account account = accountRepository.findByPhone(user.username())
+        .orElseThrow(() -> new ApiException(ApiErrorCodes.AUTH_FAILED, "refresh token invalid"));
+    if (!account.enabled()) {
+      throw new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "account disabled");
+    }
+    AuthUser freshUser = new AuthUser(account.username(), account.displayName(), account.role(), account.leaderId());
+    String accessToken = jwtService.issue(freshUser);
+    return new LoginResponse(accessToken, request.refreshToken(), configProvider.get().jwtAccessTokenTtlS(), freshUser);
   }
 
   private ApiException authFailure(String ip) {
@@ -80,5 +91,18 @@ public class AuthService {
 
   private boolean blank(String value) {
     return value == null || value.isBlank();
+  }
+
+  private void validateCaptcha(LoginRequest request) {
+    if (!configProvider.get().captchaEnabled()) {
+      return;
+    }
+    if (blank(configProvider.get().captchaProvider()) || blank(configProvider.get().captchaAppId())
+        || blank(configProvider.get().captchaSecret())) {
+      throw new ApiException(ApiErrorCodes.INTERNAL_ERROR, "captcha service unavailable");
+    }
+    if (blank(request.captcha()) || blank(request.captchaTicket())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "captcha and captchaTicket are required");
+    }
   }
 }

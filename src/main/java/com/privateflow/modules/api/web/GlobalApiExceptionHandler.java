@@ -21,6 +21,10 @@ public class GlobalApiExceptionHandler {
       status = HttpStatus.BAD_REQUEST;
     } else if (ApiErrorCodes.AUTH_FAILED.equals(ex.getErrorCode())) {
       status = HttpStatus.UNAUTHORIZED;
+    } else if (ApiErrorCodes.ACCOUNT_DISABLED.equals(ex.getErrorCode())) {
+      status = HttpStatus.UNAUTHORIZED;
+    } else if (ApiErrorCodes.LOGIN_RATE_LIMITED.equals(ex.getErrorCode())) {
+      status = HttpStatus.TOO_MANY_REQUESTS;
     } else if (ApiErrorCodes.FORBIDDEN.equals(ex.getErrorCode())) {
       status = HttpStatus.FORBIDDEN;
     }

@@ -138,6 +138,15 @@ public class ConfigAdminService {
     if ("quicksearch.admin.cos_retention_days".equals(key) && (value < 7 || value > 90)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "quicksearch.admin.cos_retention_days range is 7-90");
     }
+    if ("system.jwt_access_token_ttl_s".equals(key) && (value < 300 || value > 86400)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.jwt_access_token_ttl_s range is 300-86400");
+    }
+    if ("system.jwt_refresh_token_ttl_s".equals(key) && (value < 3600 || value > 2592000)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.jwt_refresh_token_ttl_s range is 3600-2592000");
+    }
+    if ("system.login_fail_window_s".equals(key) && (value < 60 || value > 3600)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.login_fail_window_s range is 60-3600");
+    }
   }
 
   private void validateJsonArray(String key, String value) {

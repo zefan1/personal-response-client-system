@@ -9,6 +9,8 @@ public final class ApiErrorCodes {
   public static final String WS_CONNECT_FAILED = "80-10005";
   public static final String CONFLICT = "80-10006";
   public static final String CONFIG_INVALID = "80-10007";
+  public static final String ACCOUNT_DISABLED = "80-10008";
+  public static final String LOGIN_RATE_LIMITED = "80-10009";
 
   private ApiErrorCodes() {
   }

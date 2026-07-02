@@ -4,11 +4,14 @@ import com.privateflow.modules.api.Role;
 
 public record Account(
     Long id,
-    String username,
+    String phone,
     String passwordHash,
     String displayName,
     Role role,
     Long leaderId,
     boolean enabled
 ) {
+  public String username() {
+    return phone;
+  }
 }

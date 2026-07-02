@@ -2,6 +2,7 @@ package com.privateflow.modules.api.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.api.ApiErrorCodes;
+import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.match.ApiResponse;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -18,16 +19,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
   private static final Set<String> PUBLIC_POSTS = Set.of("/api/v1/auth/login", "/admin/api/v1/auth/login");
   private final JwtService jwtService;
+  private final AccountRepository accountRepository;
   private final ObjectMapper objectMapper;
 
-  public JwtAuthenticationFilter(JwtService jwtService, ObjectMapper objectMapper) {
+  public JwtAuthenticationFilter(JwtService jwtService, AccountRepository accountRepository, ObjectMapper objectMapper) {
     this.jwtService = jwtService;
+    this.accountRepository = accountRepository;
     this.objectMapper = objectMapper;
   }
 
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
     String path = request.getRequestURI();
+    if ("GET".equalsIgnoreCase(request.getMethod()) && "/api/v1/auth/config".equals(path)) {
+      return true;
+    }
     return !path.startsWith("/api/v1/") && !path.startsWith("/admin/api/v1/")
         || ("POST".equalsIgnoreCase(request.getMethod()) && PUBLIC_POSTS.contains(path));
   }
@@ -43,8 +49,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return;
       }
       user = jwtService.verify(header.substring("Bearer ".length()));
+      Account account = accountRepository.findByPhone(user.username())
+          .orElseThrow(() -> new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "account disabled"));
+      if (!account.enabled()) {
+        throw new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "account disabled");
+      }
+      user = new AuthUser(account.username(), account.displayName(), account.role(), account.leaderId());
     } catch (RuntimeException ex) {
-      writeError(response, HttpServletResponse.SC_UNAUTHORIZED, ApiErrorCodes.AUTH_FAILED, "Token invalid or expired");
+      String code = ex instanceof ApiException apiEx ? apiEx.getErrorCode() : ApiErrorCodes.AUTH_FAILED;
+      writeError(response, HttpServletResponse.SC_UNAUTHORIZED, code, "Token invalid or expired");
       return;
     }
     if (request.getRequestURI().startsWith("/admin/api/v1/") && user.role() == com.privateflow.modules.api.Role.KEEPER) {

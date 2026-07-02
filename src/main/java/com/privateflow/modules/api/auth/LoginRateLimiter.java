@@ -30,7 +30,7 @@ public class LoginRateLimiter {
     try {
       Long count = redisTemplate.opsForValue().increment(key(ip));
       if (count != null && count == 1L) {
-        redisTemplate.expire(key(ip), Duration.ofMinutes(configProvider.get().loginLockMinutes()));
+        redisTemplate.expire(key(ip), Duration.ofSeconds(configProvider.get().loginFailWindowS()));
       }
     } catch (RuntimeException ex) {
       // Redis login throttling degrades open.
