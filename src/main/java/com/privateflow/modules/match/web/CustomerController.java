@@ -2,6 +2,8 @@ package com.privateflow.modules.match.web;
 
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.match.ApiResponse;
+import com.privateflow.modules.match.CustomerBatchRequest;
+import com.privateflow.modules.match.CustomerBatchResponse;
 import com.privateflow.modules.match.CustomerMatchErrorCodes;
 import com.privateflow.modules.match.CustomerMatchException;
 import com.privateflow.modules.match.CustomerSearchResult;
@@ -21,6 +23,9 @@ import com.privateflow.modules.tablewrite.ManualSaveResult;
 import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
 import com.privateflow.modules.tablewrite.TableWriteException;
 import com.privateflow.modules.tablewrite.service.ManualSaveHandler;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -66,6 +71,31 @@ public class CustomerController {
   @GetMapping("/{phone}")
   public ApiResponse<CustomerProfileView> profile(@PathVariable("phone") String phone) {
     return ApiResponse.ok(customerProfileService.getProfile(phone));
+  }
+
+  @PostMapping("/batch")
+  public ApiResponse<CustomerBatchResponse> batch(@RequestBody CustomerBatchRequest request) {
+    if (request == null || request.phones() == null || request.phones().isEmpty()) {
+      throw new CustomerMatchException(CustomerMatchErrorCodes.BAD_REQUEST, "phones is required");
+    }
+    LinkedHashSet<String> phones = new LinkedHashSet<>();
+    request.phones().stream()
+        .filter(phone -> phone != null && !phone.isBlank())
+        .forEach(phone -> phones.add(phone.trim()));
+    if (phones.isEmpty() || phones.size() > 100) {
+      throw new CustomerMatchException(CustomerMatchErrorCodes.BAD_REQUEST, "phones size must be 1-100");
+    }
+    List<CustomerProfileView> customers = new ArrayList<>();
+    for (String phone : phones) {
+      try {
+        customers.add(customerProfileService.getProfile(phone));
+      } catch (CustomerMatchException ex) {
+        if (!CustomerMatchErrorCodes.CUSTOMER_NOT_FOUND.equals(ex.getErrorCode())) {
+          throw ex;
+        }
+      }
+    }
+    return ApiResponse.ok(new CustomerBatchResponse(customers));
   }
 
   @PutMapping("/{phone}")

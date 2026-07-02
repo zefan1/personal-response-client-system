@@ -24,6 +24,8 @@ export type DesktopConfig = {
   quicksearchAutoCloseS: number;
   quicksearchCacheRefreshOnStartup: boolean;
   searchInputDebounceMs: number;
+  batchMaxCustomers: number;
+  batchCustomerBatchTimeoutMs: number;
 };
 
 const defaults: DesktopConfig = {
@@ -51,7 +53,9 @@ const defaults: DesktopConfig = {
   quicksearchResultLimit: 10,
   quicksearchAutoCloseS: 3,
   quicksearchCacheRefreshOnStartup: true,
-  searchInputDebounceMs: 100
+  searchInputDebounceMs: 100,
+  batchMaxCustomers: 100,
+  batchCustomerBatchTimeoutMs: 3000
 };
 
 export function loadDesktopConfig(): DesktopConfig {
