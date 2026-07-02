@@ -18,6 +18,8 @@ export function connectWsMessageBus(): void {
   const lastMessageId = localStorage.getItem('ws_last_message_id') ?? '0';
   socket = new WebSocket(`${config.wsUrl}?token=${encodeURIComponent(config.accessToken)}&lastMessageId=${lastMessageId}`);
   socket.onopen = () => {
+    eventBus.emit('ws:status-change', { connected: true });
+    socket?.send(JSON.stringify({ type: 'RECONNECT', lastMessageId }));
     heartbeatTimer = window.setInterval(() => {
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'PING' }));
@@ -40,5 +42,9 @@ export function connectWsMessageBus(): void {
       heartbeatTimer = null;
     }
     socket = null;
+    eventBus.emit('ws:status-change', { connected: false });
+  };
+  socket.onerror = () => {
+    eventBus.emit('ws:status-change', { connected: false });
   };
 }

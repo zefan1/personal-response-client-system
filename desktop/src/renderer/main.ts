@@ -1,5 +1,8 @@
 import { createApp } from 'vue';
 import App from './App.vue';
+import { initializeOfflineManager } from './shared/offlineManager';
 import './styles.css';
 
-createApp(App).mount('#app');
+void initializeOfflineManager().finally(() => {
+  createApp(App).mount('#app');
+});

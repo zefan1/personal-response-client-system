@@ -40,6 +40,10 @@ export type DesktopConfig = {
   workbenchFollowupListLimit: number;
   workbenchNewLeadListLimit: number;
   workbenchMaxNotices: number;
+  offlineApiFailCount: number;
+  offlineWsDisconnectWaitS: number;
+  onlineToastDurationMs: number;
+  recoverSyncTimeoutS: number;
 };
 
 const defaults: DesktopConfig = {
@@ -83,7 +87,11 @@ const defaults: DesktopConfig = {
   workbenchRefreshIntervalS: 300,
   workbenchFollowupListLimit: 5,
   workbenchNewLeadListLimit: 3,
-  workbenchMaxNotices: 3
+  workbenchMaxNotices: 3,
+  offlineApiFailCount: 3,
+  offlineWsDisconnectWaitS: 15,
+  onlineToastDurationMs: 2000,
+  recoverSyncTimeoutS: 30
 };
 
 export function loadDesktopConfig(): DesktopConfig {

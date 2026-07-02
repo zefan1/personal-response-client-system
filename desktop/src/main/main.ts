@@ -10,10 +10,17 @@ type ClipboardHistoryItem = {
   timestamp: number;
 };
 
+type OnlineStatusPayload = {
+  online: boolean;
+  type: 'unknown';
+};
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
 const clipboardImageHistory: ClipboardHistoryItem[] = [];
 let clipboardPollTimer: NodeJS.Timeout | null = null;
+let onlineStatusPollTimer: NodeJS.Timeout | null = null;
+let lastBroadcastOnlineStatus: boolean | null = null;
 let mainWindow: BrowserWindow | null = null;
 
 const DESKTOP_DEFAULTS = {
@@ -47,25 +54,65 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  registerOnlineStatusIpc();
   registerScreenshotCapture();
   registerClipboardWriteText();
   registerClipboardWriteImage();
   registerQuickSearchIpc();
   createWindow();
+  broadcastOnlineStatus();
+  startOnlineStatusPolling();
   registerQuickSearchShortcut();
   startClipboardPolling();
 });
 
 app.on('window-all-closed', () => {
   stopClipboardPolling();
+  stopOnlineStatusPolling();
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('will-quit', () => {
+  stopOnlineStatusPolling();
   globalShortcut.unregisterAll();
 });
+
+function getOnlineStatus(): OnlineStatusPayload {
+  return {
+    online: net.isOnline(),
+    type: 'unknown'
+  };
+}
+
+function registerOnlineStatusIpc() {
+  ipcMain.handle('app:get-online-status', () => getOnlineStatus());
+}
+
+function broadcastOnlineStatus() {
+  const status = getOnlineStatus();
+  lastBroadcastOnlineStatus = status.online;
+  mainWindow?.webContents.send('app:online-status', status);
+}
+
+function startOnlineStatusPolling() {
+  stopOnlineStatusPolling();
+  lastBroadcastOnlineStatus = net.isOnline();
+  onlineStatusPollTimer = setInterval(() => {
+    const current = net.isOnline();
+    if (current !== lastBroadcastOnlineStatus) {
+      broadcastOnlineStatus();
+    }
+  }, 1000);
+}
+
+function stopOnlineStatusPolling() {
+  if (onlineStatusPollTimer) {
+    clearInterval(onlineStatusPollTimer);
+    onlineStatusPollTimer = null;
+  }
+}
 
 function registerScreenshotCapture() {
   ipcMain.handle('screenshot:capture', async () => {

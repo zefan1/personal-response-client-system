@@ -17,10 +17,21 @@ type ClipboardImagePayload = {
   height: number;
 };
 
+type OnlineStatusPayload = {
+  online: boolean;
+  type?: string;
+};
+
 const api = {
   captureScreenshot: (): Promise<ScreenshotResult> => ipcRenderer.invoke('screenshot:capture'),
   writeClipboardText: (text: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('clipboard:write-text', { text }),
   writeClipboardImage: (imageUrl: string): Promise<{ success: boolean; error?: string; message?: string }> => ipcRenderer.invoke('clipboard:write-image', { imageUrl }),
+  getOnlineStatus: (): Promise<OnlineStatusPayload> => ipcRenderer.invoke('app:get-online-status'),
+  onOnlineStatusChange: (callback: (payload: OnlineStatusPayload) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, payload: OnlineStatusPayload) => callback(payload);
+    ipcRenderer.on('app:online-status', listener);
+    return () => ipcRenderer.removeListener('app:online-status', listener);
+  },
   hideQuickSearch: (): Promise<{ success: boolean }> => ipcRenderer.invoke('quicksearch:hide'),
   onQuickSearchShow: (callback: () => void) => {
     const listener = () => callback();

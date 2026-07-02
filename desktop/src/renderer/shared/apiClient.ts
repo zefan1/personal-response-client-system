@@ -1,4 +1,5 @@
 import { loadDesktopConfig } from './config';
+import { recordApiNetworkFailure, recordApiSuccess } from './offlineManager';
 
 export type ApiResponse<T> = {
   success: boolean;
@@ -51,7 +52,11 @@ async function requestJson<T>(
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal
     });
+    recordApiSuccess();
     return await response.json() as ApiResponse<T>;
+  } catch (error) {
+    recordApiNetworkFailure(error);
+    throw error;
   } finally {
     window.clearTimeout(timer);
     signal?.removeEventListener('abort', abort);
