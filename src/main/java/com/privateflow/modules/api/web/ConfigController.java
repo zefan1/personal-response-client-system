@@ -26,6 +26,11 @@ public class ConfigController {
     return ApiResponse.ok(configAdminService.list(prefix));
   }
 
+  @GetMapping("/{key:.+}")
+  public ApiResponse<Map<String, Object>> get(@PathVariable("key") String key) {
+    return ApiResponse.ok(configAdminService.get(key));
+  }
+
   @PutMapping("/{key:.+}")
   public ApiResponse<Map<String, Object>> update(@PathVariable("key") String key, @RequestBody Map<String, Object> body) {
     return ApiResponse.ok(configAdminService.update(key, body));

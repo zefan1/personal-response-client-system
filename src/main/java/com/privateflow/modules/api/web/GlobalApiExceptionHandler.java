@@ -17,7 +17,7 @@ public class GlobalApiExceptionHandler {
   @ExceptionHandler(ApiException.class)
   public ResponseEntity<ApiResponse<Void>> handleApi(ApiException ex) {
     HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
-    if (ApiErrorCodes.BAD_REQUEST.equals(ex.getErrorCode())) {
+    if (ApiErrorCodes.BAD_REQUEST.equals(ex.getErrorCode()) || ApiErrorCodes.CONFIG_INVALID.equals(ex.getErrorCode())) {
       status = HttpStatus.BAD_REQUEST;
     } else if (ApiErrorCodes.AUTH_FAILED.equals(ex.getErrorCode())) {
       status = HttpStatus.UNAUTHORIZED;

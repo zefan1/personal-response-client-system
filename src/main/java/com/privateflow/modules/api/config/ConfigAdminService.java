@@ -3,12 +3,17 @@ package com.privateflow.modules.api.config;
 import com.privateflow.common.events.ConfigChangedEvent;
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.ai.PromptVersionService;
+import com.privateflow.modules.api.audit.AuditLogger;
+import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.ws.WsMessage;
 import com.privateflow.modules.api.ws.WsPushService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ConfigAdminService {
@@ -16,11 +21,23 @@ public class ConfigAdminService {
   private final JdbcTemplate jdbcTemplate;
   private final ApplicationEventPublisher eventPublisher;
   private final WsPushService wsPushService;
+  private final PromptVersionService promptVersionService;
+  private final AuditLogger auditLogger;
+  private final ObjectMapper objectMapper;
 
-  public ConfigAdminService(JdbcTemplate jdbcTemplate, ApplicationEventPublisher eventPublisher, WsPushService wsPushService) {
+  public ConfigAdminService(
+      JdbcTemplate jdbcTemplate,
+      ApplicationEventPublisher eventPublisher,
+      WsPushService wsPushService,
+      PromptVersionService promptVersionService,
+      AuditLogger auditLogger,
+      ObjectMapper objectMapper) {
     this.jdbcTemplate = jdbcTemplate;
     this.eventPublisher = eventPublisher;
     this.wsPushService = wsPushService;
+    this.promptVersionService = promptVersionService;
+    this.auditLogger = auditLogger;
+    this.objectMapper = objectMapper;
   }
 
   public Map<String, String> list(String prefix) {
@@ -33,6 +50,15 @@ public class ConfigAdminService {
         .stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
   }
 
+  public Map<String, Object> get(String key) {
+    String value = jdbcTemplate.query("""
+        SELECT config_value FROM system_configs WHERE config_key = ? LIMIT 1
+        """, (rs, rowNum) -> rs.getString("config_value"), key).stream().findFirst()
+        .orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "unknown config key"));
+    return Map.of("configKey", key, "value", value);
+  }
+
+  @Transactional
   public Map<String, Object> update(String key, Map<String, Object> body) {
     if (key == null || key.isBlank() || body == null || !body.containsKey("value")) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "config key and value are required");
@@ -46,6 +72,8 @@ public class ConfigAdminService {
     if (updated == 0) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "unknown config key");
     }
+    promptVersionService.snapshotIfPrompt(key, value, AuthContext.username(), "update config");
+    auditLogger.log("UPDATE_CONFIG", AuthContext.username(), "system_configs", key, "updated config " + key);
     eventPublisher.publishEvent(new ConfigChangedEvent(key));
     wsPushService.broadcastWs(WsMessage.unsaved("CONFIG_REFRESH", Map.of("configKey", key)));
     return Map.of("updated", true, "configKey", key);
@@ -57,14 +85,49 @@ public class ConfigAdminService {
         || key.startsWith("followup.") || key.startsWith("table.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
           || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")) {
+        int parsed;
         try {
-          Integer.parseInt(value);
+          parsed = Integer.parseInt(value);
         } catch (NumberFormatException ex) {
-          throw new ApiException(ApiErrorCodes.BAD_REQUEST, "config value must be integer");
+          throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "config value must be integer");
         }
+        validateIntegerRange(key, parsed);
+      }
+      if ("skill.system_prompt_red_lines".equals(key) || "match.tag_removal_rules".equals(key)) {
+        validateJsonArray(key, value);
+      }
+      if (key.endsWith("api_base_url") && !value.isBlank() && !value.startsWith("http://") && !value.startsWith("https://")) {
+        throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "config value must be valid URL");
       }
       return;
     }
     throw new ApiException(ApiErrorCodes.BAD_REQUEST, "unknown config key");
+  }
+
+  private void validateIntegerRange(String key, int value) {
+    if ("skill.regenerate_max_count".equals(key) && (value < 0 || value > 10)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "skill.regenerate_max_count range is 0-10");
+    }
+    if ("skill.prompt_version_max".equals(key) && (value < 20 || value > 200)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "skill.prompt_version_max range is 20-200");
+    }
+    if ("skill.timeout_ms".equals(key) && (value < 5000 || value > 15000)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "skill.timeout_ms range is 5000-15000");
+    }
+    if ("image.compress_quality".equals(key) && (value < 1 || value > 100)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "image.compress_quality range is 1-100");
+    }
+  }
+
+  private void validateJsonArray(String key, String value) {
+    try {
+      if (!objectMapper.readTree(value).isArray()) {
+        throw new ApiException(ApiErrorCodes.CONFIG_INVALID, key + " must be JSON array");
+      }
+    } catch (ApiException ex) {
+      throw ex;
+    } catch (Exception ex) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, key + " must be JSON array");
+    }
   }
 }
