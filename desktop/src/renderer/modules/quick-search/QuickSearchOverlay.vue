@@ -77,6 +77,10 @@ onMounted(() => {
   disposers.push(eventBus.on('CONFIG_REFRESH', handleQuickSearchConfigRefresh));
   disposers.push(eventBus.on('network:offline', handleQuickSearchOffline));
   disposers.push(eventBus.on('network:online', handleQuickSearchOnline));
+  disposers.push(eventBus.on('quick-search:show', () => {
+    showQuickSearch();
+    void nextTick(() => inputRef.value?.focus());
+  }));
 });
 
 onBeforeUnmount(() => {

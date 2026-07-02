@@ -39,6 +39,7 @@ const captureTitle = computed(() => state.imageServiceStatus === 'DOWN'
 
 let removeClipboardListener: (() => void) | null = null;
 let removeStatusListener: (() => void) | null = null;
+let removeWorkbenchCaptureListener: (() => void) | null = null;
 
 onMounted(() => {
   connectWsMessageBus();
@@ -46,11 +47,13 @@ onMounted(() => {
     void recognizeClipboardImage(payload);
   });
   removeStatusListener = eventBus.on('image:status-changed', handleImageServiceStatus);
+  removeWorkbenchCaptureListener = eventBus.on('workbench:capture-chat', captureFromWindow);
 });
 
 onBeforeUnmount(() => {
   removeClipboardListener?.();
   removeStatusListener?.();
+  removeWorkbenchCaptureListener?.();
 });
 
 async function captureFromWindow() {

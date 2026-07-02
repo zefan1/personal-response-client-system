@@ -149,6 +149,7 @@ textarea {
 }
 
 .recognition,
+.workbench-panel,
 .reply-panel,
 .customer-panel,
 .followup-panel {
@@ -159,6 +160,144 @@ textarea {
   border: 1px solid #d8dee8;
   border-radius: 8px;
   background: #fff;
+}
+
+.workbench-panel {
+  gap: 14px;
+}
+
+.workbench-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workbench-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #d0d5dd;
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.workbench-notice.level-info {
+  border-left-color: #1677ff;
+  background: #eef4ff;
+}
+
+.workbench-notice.level-warn {
+  border-left-color: #f79009;
+  background: #fff7d6;
+}
+
+.workbench-notice.level-error {
+  border-left-color: #d92d20;
+  background: #fff1f0;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+
+.metric-card span {
+  color: #667085;
+  font-size: 13px;
+}
+
+.metric-card strong {
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.metric-card small {
+  color: #475467;
+}
+
+.workbench-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workbench-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.section-inline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.section-inline-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.workbench-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #e4e7ec;
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.workbench-row.overdue {
+  border-left-color: #d92d20;
+}
+
+.workbench-row.due_today,
+.workbench-row.new-lead {
+  border-left-color: #1677ff;
+}
+
+.workbench-row-main {
+  height: auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+}
+
+.workbench-row-main span {
+  color: #667085;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .toolbar {

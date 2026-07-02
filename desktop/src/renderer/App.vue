@@ -6,6 +6,7 @@
     <QuickSearchOverlay />
     <BatchTemplateOverlay />
     <HelpModeAgent />
+    <WorkbenchPanel />
     <ChatRecognitionPanel />
     <FollowupListPanel />
     <CustomerProfilePanel />
@@ -27,6 +28,7 @@ import NewLeadToastAgent from './modules/new-lead-toast/NewLeadToastAgent.vue';
 import QuickSearchOverlay from './modules/quick-search/QuickSearchOverlay.vue';
 import ReplySuggestionPanel from './modules/reply-suggestions/ReplySuggestionPanel.vue';
 import { cleanupStageSuggestionHandler, initializeStageSuggestionHandler } from './modules/stage-suggestion/stageSuggestionHandler';
+import WorkbenchPanel from './modules/workbench/WorkbenchPanel.vue';
 
 onMounted(() => {
   initializeAbnormalAlertRouter();

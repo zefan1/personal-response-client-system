@@ -36,6 +36,10 @@ export type DesktopConfig = {
   alertHistoryMaxCount: number;
   alertHistoryRetentionDays: number;
   alertBellRefreshIntervalS: number;
+  workbenchRefreshIntervalS: number;
+  workbenchFollowupListLimit: number;
+  workbenchNewLeadListLimit: number;
+  workbenchMaxNotices: number;
 };
 
 const defaults: DesktopConfig = {
@@ -75,7 +79,11 @@ const defaults: DesktopConfig = {
   stageSuggestPendingTtlS: 300,
   alertHistoryMaxCount: 50,
   alertHistoryRetentionDays: 7,
-  alertBellRefreshIntervalS: 86400
+  alertBellRefreshIntervalS: 86400,
+  workbenchRefreshIntervalS: 300,
+  workbenchFollowupListLimit: 5,
+  workbenchNewLeadListLimit: 3,
+  workbenchMaxNotices: 3
 };
 
 export function loadDesktopConfig(): DesktopConfig {
