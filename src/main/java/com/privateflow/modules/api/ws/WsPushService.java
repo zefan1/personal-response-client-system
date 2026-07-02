@@ -59,6 +59,11 @@ public class WsPushService {
         .ifPresent(WsSessionContext::heartbeat);
   }
 
+  public boolean isOnline(String username) {
+    WsSessionContext context = sessions.get(username);
+    return context != null && context.session().isOpen();
+  }
+
   public void pushWsMessage(String username, WsMessage message) {
     WsMessage saved = ensureId(message);
     WsSessionContext context = sessions.get(username);

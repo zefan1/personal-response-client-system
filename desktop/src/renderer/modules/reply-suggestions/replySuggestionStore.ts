@@ -42,6 +42,7 @@ export const replySuggestionState = reactive({
   profileSuggestions: [] as ProfileSuggestion[],
   profileSuggestionsExpanded: true,
   abnormalAlert: null as AbnormalAlertPayload | null,
+  activeHelpId: '' as string | number | '',
   toast: ''
 });
 
@@ -144,6 +145,14 @@ export function selectReply(suggestion: ReplySuggestion): void {
 
 export function requestLeaderHelp(): void {
   stopFallbackRetry();
+  if (replySuggestionState.activeHelpId) {
+    replySuggestionState.toast = '你已有等待中的求助，请等待组长回复后再发起新求助';
+    return;
+  }
+  if (!replySuggestionState.currentPhone) {
+    replySuggestionState.toast = '请先识别聊天或选择客户';
+    return;
+  }
   eventBus.emit('help:request', {
     phone: replySuggestionState.currentPhone,
     clientMessage: '',
@@ -152,12 +161,29 @@ export function requestLeaderHelp(): void {
   replySuggestionState.toast = '已发起求助入口';
 }
 
+export function handleHelpPending(payload: { helpId?: string | number; phone?: string }): void {
+  if (payload.phone && replySuggestionState.currentPhone && payload.phone !== replySuggestionState.currentPhone) {
+    return;
+  }
+  replySuggestionState.activeHelpId = payload.helpId ?? 'pending';
+  replySuggestionState.toast = '等待组长回复...';
+}
+
+export function handleHelpResolved(payload: { helpId?: string | number; phone?: string }): void {
+  if (payload.phone && replySuggestionState.currentPhone && payload.phone !== replySuggestionState.currentPhone) {
+    return;
+  }
+  replySuggestionState.activeHelpId = '';
+  replySuggestionState.toast = '组长已回复你的求助';
+}
+
 export function handleHelpTimeout(payload: { phone?: string; reason?: string }): void {
   if (payload.phone && replySuggestionState.currentPhone && payload.phone !== replySuggestionState.currentPhone) {
     return;
   }
   replySuggestionState.showHelpHint = true;
-  replySuggestionState.helpHintMessage = '组长暂时不在线，请选择最接近的一条回复后在微信里手动调整。';
+  replySuggestionState.activeHelpId = '';
+  replySuggestionState.helpHintMessage = '当前所有组长均不在线，建议参考已有回复选择最接近的手动调整后发送';
 }
 
 export function handleProfileSuggestions(payload: ProfileSuggestionsPayload): void {
@@ -331,6 +357,7 @@ function resetForNewEntry(): void {
   replySuggestionState.profileSuggestions = [];
   replySuggestionState.profileSuggestionsExpanded = true;
   replySuggestionState.abnormalAlert = null;
+  replySuggestionState.activeHelpId = '';
   replySuggestionState.toast = '';
 }
 

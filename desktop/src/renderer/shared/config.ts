@@ -10,6 +10,8 @@ export type DesktopConfig = {
   fallbackRetryIntervalMs: number;
   fallbackMaxRetries: number;
   helpTimeoutS: number;
+  helpOfflineExpireHours: number;
+  helpMaxReplies: number;
   searchDebounceMs: number;
   searchResultLimit: number;
   customerCacheLimit: number;
@@ -44,6 +46,8 @@ const defaults: DesktopConfig = {
   fallbackRetryIntervalMs: 10000,
   fallbackMaxRetries: 3,
   helpTimeoutS: 30,
+  helpOfflineExpireHours: 4,
+  helpMaxReplies: 3,
   searchDebounceMs: 300,
   searchResultLimit: 10,
   customerCacheLimit: 50,

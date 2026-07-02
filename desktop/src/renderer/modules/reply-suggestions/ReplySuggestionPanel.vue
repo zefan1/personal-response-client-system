@@ -49,7 +49,9 @@
         >
           {{ state.regenerating ? '生成中...' : '换一组' }}
         </button>
-        <button class="secondary" :disabled="!state.currentPhone" @click="requestLeaderHelp">求助组长</button>
+        <button class="secondary" :disabled="!state.currentPhone || Boolean(state.activeHelpId)" @click="requestLeaderHelp">
+          {{ state.activeHelpId ? '等待组长回复...' : '求助组长' }}
+        </button>
       </footer>
     </template>
 
@@ -94,6 +96,8 @@ import {
   cleanupReplySuggestionStore,
   handleAbnormalAlert,
   handleHelpTimeout,
+  handleHelpPending,
+  handleHelpResolved,
   handleProfileSuggestions,
   pauseForMultipleMatch,
   pendingProfileSuggestionCount,
@@ -127,6 +131,8 @@ onMounted(() => {
   disposers.push(eventBus.on('recognize:timeout', stopForTimeout));
   disposers.push(eventBus.on<CustomerSelectedPayload>('customer:selected', startGenerateLoading));
   disposers.push(eventBus.on<{ phone?: string; reason?: string }>('help:timeout', handleHelpTimeout));
+  disposers.push(eventBus.on<{ helpId?: string | number; phone?: string }>('help:pending', handleHelpPending));
+  disposers.push(eventBus.on<{ helpId?: string | number; phone?: string }>('help:resolved', handleHelpResolved));
   disposers.push(eventBus.on<ProfileSuggestionsPayload>('PROFILE_SUGGESTIONS', handleProfileSuggestions));
   disposers.push(eventBus.on<AbnormalAlertPayload>('ABNORMAL_ALERT', handleAbnormalAlert));
 });
