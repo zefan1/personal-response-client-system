@@ -82,7 +82,7 @@ public class ConfigAdminService {
   private void validate(String key, String value) {
     if (key.startsWith("system.") || key.startsWith("cache.") || key.startsWith("skill.")
         || key.startsWith("image.") || key.startsWith("match.") || key.startsWith("profile.")
-        || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.")) {
+        || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
           || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")) {
         int parsed;
@@ -128,6 +128,15 @@ public class ConfigAdminService {
     }
     if ("datasource.sync_status_refresh_s".equals(key) && (value < 15 || value > 120)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "datasource.sync_status_refresh_s range is 15-120");
+    }
+    if ("quicksearch.admin.page_size".equals(key) && (value < 10 || value > 50)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "quicksearch.admin.page_size range is 10-50");
+    }
+    if ("quicksearch.admin.image_max_size_mb".equals(key) && (value < 1 || value > 50)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "quicksearch.admin.image_max_size_mb range is 1-50");
+    }
+    if ("quicksearch.admin.cos_retention_days".equals(key) && (value < 7 || value > 90)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "quicksearch.admin.cos_retention_days range is 7-90");
     }
   }
 
