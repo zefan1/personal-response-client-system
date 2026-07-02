@@ -35,6 +35,18 @@ public class FollowupRuleRepository {
         .stream().findFirst();
   }
 
+  public boolean nameExists(String name, Long excludeId) {
+    List<Object> args = new ArrayList<>();
+    StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM followup_rules WHERE name = ?");
+    args.add(name);
+    if (excludeId != null) {
+      sql.append(" AND id <> ?");
+      args.add(excludeId);
+    }
+    Integer count = jdbcTemplate.queryForObject(sql.toString(), Integer.class, args.toArray());
+    return count != null && count > 0;
+  }
+
   public RulePage search(RuleSearchCriteria criteria) {
     int page = Math.max(1, criteria.page());
     int size = Math.max(1, Math.min(criteria.size(), 100));
