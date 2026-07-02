@@ -17,8 +17,12 @@ public class GlobalApiExceptionHandler {
   @ExceptionHandler(ApiException.class)
   public ResponseEntity<ApiResponse<Void>> handleApi(ApiException ex) {
     HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
-    if (ApiErrorCodes.BAD_REQUEST.equals(ex.getErrorCode()) || ApiErrorCodes.CONFIG_INVALID.equals(ex.getErrorCode())) {
+    if (ApiErrorCodes.BAD_REQUEST.equals(ex.getErrorCode()) || ApiErrorCodes.CONFIG_INVALID.equals(ex.getErrorCode())
+        || ApiErrorCodes.VERSION_EXISTS.equals(ex.getErrorCode()) || ApiErrorCodes.VERSION_PACKAGE_MISSING.equals(ex.getErrorCode())
+        || ApiErrorCodes.VERSION_UPLOAD_FAILED.equals(ex.getErrorCode())) {
       status = HttpStatus.BAD_REQUEST;
+    } else if (ApiErrorCodes.VERSION_STATUS_INVALID.equals(ex.getErrorCode()) || ApiErrorCodes.CONFLICT.equals(ex.getErrorCode())) {
+      status = HttpStatus.CONFLICT;
     } else if (ApiErrorCodes.AUTH_FAILED.equals(ex.getErrorCode())) {
       status = HttpStatus.UNAUTHORIZED;
     } else if (ApiErrorCodes.ACCOUNT_DISABLED.equals(ex.getErrorCode())) {

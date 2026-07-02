@@ -83,7 +83,7 @@ public class ConfigAdminService {
     if (key.startsWith("system.") || key.startsWith("cache.") || key.startsWith("skill.")
         || key.startsWith("image.") || key.startsWith("match.") || key.startsWith("profile.")
         || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.")
-        || key.startsWith("tag.")) {
+        || key.startsWith("tag.") || key.startsWith("version.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
           || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")) {
         int parsed;
@@ -153,6 +153,15 @@ public class ConfigAdminService {
     }
     if ("tag.value_max_per_category".equals(key) && (value < 1 || value > 200)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "tag.value_max_per_category range is 1-200");
+    }
+    if ("version.max_file_size_mb".equals(key) && (value < 100 || value > 1000)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "version.max_file_size_mb range is 100-1000");
+    }
+    if ("version.cos_upload_timeout_s".equals(key) && (value < 60 || value > 600)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "version.cos_upload_timeout_s range is 60-600");
+    }
+    if ("version.report_interval_hours".equals(key) && (value < 6 || value > 72)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "version.report_interval_hours range is 6-72");
     }
   }
 
