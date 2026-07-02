@@ -5,18 +5,22 @@ import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.match.CustomerMatchErrorCodes;
 import com.privateflow.modules.match.CustomerMatchException;
 import com.privateflow.modules.match.util.PhoneUtils;
+import com.privateflow.modules.profile.CustomerProfileView;
+import com.privateflow.modules.profile.service.SuggestionQueueManager;
 import org.springframework.stereotype.Service;
 
 @Service
 public class CustomerProfileService {
 
   private final CustomerQueryService customerQueryService;
+  private final SuggestionQueueManager suggestionQueueManager;
 
-  public CustomerProfileService(CustomerQueryService customerQueryService) {
+  public CustomerProfileService(CustomerQueryService customerQueryService, SuggestionQueueManager suggestionQueueManager) {
     this.customerQueryService = customerQueryService;
+    this.suggestionQueueManager = suggestionQueueManager;
   }
 
-  public Customer getProfile(String rawPhone) {
+  public CustomerProfileView getProfile(String rawPhone) {
     String phone = PhoneUtils.clean(rawPhone);
     if (!PhoneUtils.isValid(phone)) {
       throw new CustomerMatchException(CustomerMatchErrorCodes.BAD_REQUEST, "手机号格式不正确");
@@ -28,7 +32,7 @@ public class CustomerProfileService {
       }
       Customer copy = copy(customer);
       copy.setPhone(PhoneUtils.mask(customer.getPhone()));
-      return copy;
+      return new CustomerProfileView(copy, suggestionQueueManager.listPending(phone));
     } catch (CustomerMatchException ex) {
       throw ex;
     } catch (RuntimeException ex) {

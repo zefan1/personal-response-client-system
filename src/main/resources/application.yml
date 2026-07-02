@@ -54,3 +54,31 @@ match:
 
 followup:
   scan-batch-size: 5000
+
+profile:
+  extract-fields:
+    - postpartumMonths
+    - parity
+    - deliveryMethod
+    - breastfeeding
+    - lochiaPeriod
+    - bodyConcerns
+    - diastasisRecti
+    - urineLeakage
+    - pubicLumbago
+    - prevRepairExp
+    - postpartumCheck
+    - exerciseHabits
+    - worries
+    - intentLevel
+    - personalityType
+    - nextFollowupAt
+    - nextFollowupDir
+    - followupNotes
+  extract-timeout-ms: 8000
+  send-confirm-window-s: 5
+  suggestion-expire-days: 7
+  suggestion-cleanup-cron: "0 0 3 * * *"
+  suggestion-max-per-customer: 20
+  dedup-window-s: 5
+  fallback-summary-chars: 500

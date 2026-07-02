@@ -1,4 +1,10 @@
 package com.privateflow.common.events;
 
-public record ProfileUpdatedEvent(String phone) {
+import java.util.List;
+
+public record ProfileUpdatedEvent(String phone, List<String> updatedFields) {
+
+  public ProfileUpdatedEvent(String phone) {
+    this(phone, List.of());
+  }
 }
