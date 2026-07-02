@@ -25,7 +25,8 @@ textarea {
 
 .recognition,
 .reply-panel,
-.customer-panel {
+.customer-panel,
+.followup-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -270,6 +271,120 @@ textarea {
   z-index: 21;
 }
 
+.tab-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tab-button {
+  min-width: 0;
+  padding: 0 8px;
+  background: #fff;
+}
+
+.tab-button.active {
+  border-color: #1677ff;
+  color: #175cd3;
+  background: #eef4ff;
+}
+
+.tab-button span {
+  margin-left: 4px;
+  color: #667085;
+}
+
+.new-reminder-banner {
+  justify-content: flex-start;
+  border-color: #f59e0b;
+  background: #fff7d6;
+}
+
+.followup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.followup-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e4e7ec;
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.followup-row.warning {
+  border-left-color: #f59e0b;
+}
+
+.followup-row.danger {
+  border-left-color: #ef4444;
+}
+
+.followup-row.normal {
+  border-left-color: #1677ff;
+}
+
+.followup-row.flash {
+  animation: reminder-flash 3s ease;
+}
+
+.followup-main {
+  height: auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+}
+
+.followup-main span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.followup-main i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 5px;
+  border-radius: 999px;
+  background: #ef4444;
+}
+
+.followup-main em {
+  margin-left: 6px;
+  color: #667085;
+  font-style: normal;
+  font-size: 12px;
+}
+
+.keeper {
+  color: #667085;
+  font-size: 12px;
+}
+
+.batch-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+  box-shadow: 0 -8px 24px rgb(16 24 40 / 10%);
+}
+
 .search-row,
 .profile-summary,
 .profile-actions {
@@ -408,5 +523,14 @@ textarea {
   }
   100% {
     background-position: 0 0;
+  }
+}
+
+@keyframes reminder-flash {
+  0% {
+    background: #fff7d6;
+  }
+  100% {
+    background: #fff;
   }
 }

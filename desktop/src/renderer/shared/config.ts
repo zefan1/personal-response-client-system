@@ -16,6 +16,7 @@ export type DesktopConfig = {
   followupHistoryVisible: number;
   profileCacheOfflineBannerS: number;
   editLogRetentionDays: number;
+  newReminderFlashMs: number;
 };
 
 const defaults: DesktopConfig = {
@@ -35,7 +36,8 @@ const defaults: DesktopConfig = {
   customerCacheLimit: 50,
   followupHistoryVisible: 3,
   profileCacheOfflineBannerS: 5,
-  editLogRetentionDays: 7
+  editLogRetentionDays: 7,
+  newReminderFlashMs: 3000
 };
 
 export function loadDesktopConfig(): DesktopConfig {
