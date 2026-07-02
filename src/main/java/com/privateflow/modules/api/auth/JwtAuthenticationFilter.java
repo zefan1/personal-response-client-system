@@ -60,7 +60,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       writeError(response, HttpServletResponse.SC_UNAUTHORIZED, code, "Token invalid or expired");
       return;
     }
-    if (request.getRequestURI().startsWith("/admin/api/v1/") && user.role() == com.privateflow.modules.api.Role.KEEPER) {
+    if (request.getRequestURI().startsWith("/admin/api/v1/")
+        && user.role() == com.privateflow.modules.api.Role.KEEPER
+        && !keeperAnalyticsOverview(request)) {
       writeError(response, HttpServletResponse.SC_FORBIDDEN, ApiErrorCodes.FORBIDDEN, "permission denied");
       return;
     }
@@ -76,5 +78,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     response.setStatus(status);
     response.setContentType(MediaType.APPLICATION_JSON_VALUE);
     objectMapper.writeValue(response.getWriter(), ApiResponse.error(code, message));
+  }
+
+  private boolean keeperAnalyticsOverview(HttpServletRequest request) {
+    return "GET".equalsIgnoreCase(request.getMethod())
+        && "/admin/api/v1/analytics/overview".equals(request.getRequestURI());
   }
 }
