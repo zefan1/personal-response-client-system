@@ -82,7 +82,7 @@ public class ConfigAdminService {
   private void validate(String key, String value) {
     if (key.startsWith("system.") || key.startsWith("cache.") || key.startsWith("skill.")
         || key.startsWith("image.") || key.startsWith("match.") || key.startsWith("profile.")
-        || key.startsWith("followup.") || key.startsWith("table.")) {
+        || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
           || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")) {
         int parsed;
@@ -116,6 +116,18 @@ public class ConfigAdminService {
     }
     if ("image.compress_quality".equals(key) && (value < 1 || value > 100)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "image.compress_quality range is 1-100");
+    }
+    if ("datasource.mapping_version_max".equals(key) && (value < 20 || value > 200)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "datasource.mapping_version_max range is 20-200");
+    }
+    if ("datasource.import_max_rows".equals(key) && (value < 1000 || value > 10000)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "datasource.import_max_rows range is 1000-10000");
+    }
+    if ("datasource.manual_sync_timeout_s".equals(key) && (value < 30 || value > 120)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "datasource.manual_sync_timeout_s range is 30-120");
+    }
+    if ("datasource.sync_status_refresh_s".equals(key) && (value < 15 || value > 120)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "datasource.sync_status_refresh_s range is 15-120");
     }
   }
 
