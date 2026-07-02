@@ -54,6 +54,20 @@ match:
 
 followup:
   scan-batch-size: 5000
+  full-scan-cron: "0 0 9 * * *"
+  lightweight-scan-cron: "0 0 * * * *"
+  rule-refresh-interval-s: 30
+  tuan-alert-hours: 24
+  xiansuo-alert-hours: 72
+  pending-alert-hours: 24
+  sleep-risk-days: 7
+  loss-risk-days: 14
+  appointment-remind-hours: 24
+  scan-timeout-s: 300
+  reminder-dedup-days: 1
+  tag-suggestion-dedup-days: 7
+  cursor-ttl-s: 3600
+  keeper-overdue-leader-hours: 48
 
 profile:
   extract-fields:
