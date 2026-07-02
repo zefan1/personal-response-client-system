@@ -11,7 +11,7 @@
 - 最新完成模块：`51_运营L_系统健康监控`
 - 最新进度卡：`dev-progress/51_progress.md`
 - 最新验证脚本：`scripts/verify_module_51.py`
-- 最新提交：`b3bfecd Implement admin module L health monitor`
+- 最新提交请以 `git log --oneline -1` 为准。
 
 ## 验证命令
 
