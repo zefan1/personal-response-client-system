@@ -7,10 +7,33 @@ export type ApiResponse<T> = {
   message: string | null;
 };
 
+export async function getJson<T>(path: string, timeoutMs = loadDesktopConfig().requestTotalTimeoutMs, signal?: AbortSignal): Promise<ApiResponse<T>> {
+  return requestJson<T>('GET', path, undefined, timeoutMs, signal);
+}
+
 export async function postJson<T>(
   path: string,
   body: unknown,
   timeoutMs = loadDesktopConfig().requestTotalTimeoutMs,
+  signal?: AbortSignal
+): Promise<ApiResponse<T>> {
+  return requestJson<T>('POST', path, body, timeoutMs, signal);
+}
+
+export async function putJson<T>(
+  path: string,
+  body: unknown,
+  timeoutMs = loadDesktopConfig().requestTotalTimeoutMs,
+  signal?: AbortSignal
+): Promise<ApiResponse<T>> {
+  return requestJson<T>('PUT', path, body, timeoutMs, signal);
+}
+
+async function requestJson<T>(
+  method: 'GET' | 'POST' | 'PUT',
+  path: string,
+  body: unknown,
+  timeoutMs: number,
   signal?: AbortSignal
 ): Promise<ApiResponse<T>> {
   const config = loadDesktopConfig();
@@ -20,12 +43,12 @@ export async function postJson<T>(
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${config.apiBaseUrl}${path}`, {
-      method: 'POST',
+      method,
       headers: {
         'Content-Type': 'application/json',
         ...(config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : {})
       },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal
     });
     return await response.json() as ApiResponse<T>;

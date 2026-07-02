@@ -10,6 +10,12 @@ export type DesktopConfig = {
   fallbackRetryIntervalMs: number;
   fallbackMaxRetries: number;
   helpTimeoutS: number;
+  searchDebounceMs: number;
+  searchResultLimit: number;
+  customerCacheLimit: number;
+  followupHistoryVisible: number;
+  profileCacheOfflineBannerS: number;
+  editLogRetentionDays: number;
 };
 
 const defaults: DesktopConfig = {
@@ -23,7 +29,13 @@ const defaults: DesktopConfig = {
   requestTotalTimeoutMs: 15000,
   fallbackRetryIntervalMs: 10000,
   fallbackMaxRetries: 3,
-  helpTimeoutS: 30
+  helpTimeoutS: 30,
+  searchDebounceMs: 300,
+  searchResultLimit: 10,
+  customerCacheLimit: 50,
+  followupHistoryVisible: 3,
+  profileCacheOfflineBannerS: 5,
+  editLogRetentionDays: 7
 };
 
 export function loadDesktopConfig(): DesktopConfig {
