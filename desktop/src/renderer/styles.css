@@ -271,6 +271,67 @@ textarea {
   z-index: 21;
 }
 
+.new-lead-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 25;
+  width: min(360px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.new-lead-toast {
+  border: 1px solid #d0d5dd;
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgb(16 24 40 / 16%);
+}
+
+.new-lead-toast.lead-red {
+  border-left-color: #ef4444;
+}
+
+.new-lead-toast.lead-blue {
+  border-left-color: #1677ff;
+}
+
+.new-lead-toast.lead-gray {
+  border-left-color: #98a2b3;
+}
+
+.new-lead-toast p {
+  margin: 6px 0;
+}
+
+.new-lead-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.new-lead-head span {
+  color: #667085;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.new-lead-collapsed {
+  justify-content: flex-start;
+  border-color: #f59e0b;
+  background: #fff7d6;
+}
+
+.new-lead-light-toast {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 26;
+}
+
 .tab-bar {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

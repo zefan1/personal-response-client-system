@@ -17,6 +17,8 @@ export type DesktopConfig = {
   profileCacheOfflineBannerS: number;
   editLogRetentionDays: number;
   newReminderFlashMs: number;
+  toastMaxCount: number;
+  toastNewLeadDismissS: number;
 };
 
 const defaults: DesktopConfig = {
@@ -37,7 +39,9 @@ const defaults: DesktopConfig = {
   followupHistoryVisible: 3,
   profileCacheOfflineBannerS: 5,
   editLogRetentionDays: 7,
-  newReminderFlashMs: 3000
+  newReminderFlashMs: 3000,
+  toastMaxCount: 3,
+  toastNewLeadDismissS: 15
 };
 
 export function loadDesktopConfig(): DesktopConfig {

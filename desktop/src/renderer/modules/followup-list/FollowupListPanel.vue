@@ -112,6 +112,11 @@ onMounted(() => {
   void loadTodayFollowups();
   disposers.push(eventBus.on<FollowupReminderPayload>('FOLLOWUP_REMIND', handleFollowupReminder));
   disposers.push(eventBus.on<NewLeadAlertPayload>('NEW_LEAD_ALERT', handleNewLeadAlert));
+  disposers.push(eventBus.on<{ tab?: FollowupTab }>('followup:switch-tab', (payload) => {
+    if (payload.tab === 'NEW_LEAD') {
+      setActiveFollowupTab('NEW_LEAD');
+    }
+  }));
 });
 
 onBeforeUnmount(() => {
