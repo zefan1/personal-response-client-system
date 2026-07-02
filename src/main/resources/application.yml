@@ -96,3 +96,12 @@ profile:
   suggestion-max-per-customer: 20
   dedup-window-s: 5
   fallback-summary-chars: 500
+
+table:
+  write-timeout-ms: 10000
+  retry-max-count: 5
+  retry-interval-s: 60
+  alert-failure-hours: 1
+  alert-notify-target: ADMIN
+  queue-warn-threshold: 100
+  queue-alert-threshold: 1000

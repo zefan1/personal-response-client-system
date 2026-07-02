@@ -16,6 +16,11 @@ import com.privateflow.modules.match.service.CustomerProfileService;
 import com.privateflow.modules.match.service.CustomerSearchService;
 import com.privateflow.modules.profile.service.ManualEditHandler;
 import com.privateflow.modules.profile.service.SuggestionQueueManager;
+import com.privateflow.modules.tablewrite.ManualSaveRequest;
+import com.privateflow.modules.tablewrite.ManualSaveResult;
+import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
+import com.privateflow.modules.tablewrite.TableWriteException;
+import com.privateflow.modules.tablewrite.service.ManualSaveHandler;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,16 +41,19 @@ public class CustomerController {
   private final CustomerProfileService customerProfileService;
   private final ManualEditHandler manualEditHandler;
   private final SuggestionQueueManager suggestionQueueManager;
+  private final ManualSaveHandler manualSaveHandler;
 
   public CustomerController(
       CustomerSearchService customerSearchService,
       CustomerProfileService customerProfileService,
       ManualEditHandler manualEditHandler,
-      SuggestionQueueManager suggestionQueueManager) {
+      SuggestionQueueManager suggestionQueueManager,
+      ManualSaveHandler manualSaveHandler) {
     this.customerSearchService = customerSearchService;
     this.customerProfileService = customerProfileService;
     this.manualEditHandler = manualEditHandler;
     this.suggestionQueueManager = suggestionQueueManager;
+    this.manualSaveHandler = manualSaveHandler;
   }
 
   @GetMapping("/search")
@@ -74,6 +82,13 @@ public class CustomerController {
     return ApiResponse.ok(suggestionQueueManager.batchResolve(phone, request));
   }
 
+  @PostMapping("/{phone}/save-to-table")
+  public ApiResponse<ManualSaveResult> saveToTable(
+      @PathVariable("phone") String phone,
+      @RequestBody ManualSaveRequest request) {
+    return ApiResponse.ok(manualSaveHandler.save(phone, request));
+  }
+
   @ExceptionHandler(CustomerMatchException.class)
   public ResponseEntity<ApiResponse<Void>> handleCustomerMatch(CustomerMatchException ex) {
     HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
@@ -92,6 +107,17 @@ public class CustomerController {
       status = HttpStatus.BAD_REQUEST;
     } else if (ProfileErrorCodes.VERSION_CONFLICT.equals(ex.getErrorCode())) {
       status = HttpStatus.CONFLICT;
+    }
+    return ResponseEntity.status(status).body(ApiResponse.error(ex.getErrorCode(), ex.getMessage()));
+  }
+
+  @ExceptionHandler(TableWriteException.class)
+  public ResponseEntity<ApiResponse<Void>> handleTableWrite(TableWriteException ex) {
+    HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
+    if (TableWriteErrorCodes.BAD_REQUEST.equals(ex.getErrorCode())) {
+      status = HttpStatus.BAD_REQUEST;
+    } else if (TableWriteErrorCodes.TABLE_WRITE_QUEUE_FULL.equals(ex.getErrorCode())) {
+      status = HttpStatus.TOO_MANY_REQUESTS;
     }
     return ResponseEntity.status(status).body(ApiResponse.error(ex.getErrorCode(), ex.getMessage()));
   }
