@@ -83,9 +83,10 @@ public class ConfigAdminService {
     if (key.startsWith("system.") || key.startsWith("cache.") || key.startsWith("skill.")
         || key.startsWith("image.") || key.startsWith("match.") || key.startsWith("profile.")
         || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.")
-        || key.startsWith("tag.") || key.startsWith("version.") || key.startsWith("notice.")) {
+        || key.startsWith("tag.") || key.startsWith("version.") || key.startsWith("notice.") || key.startsWith("audit.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
-          || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")) {
+          || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")
+          || key.endsWith("_chars") || key.endsWith("_rows") || key.endsWith("_seconds") || "audit.list_page_size_default".equals(key)) {
         int parsed;
         try {
           parsed = Integer.parseInt(value);
@@ -145,6 +146,12 @@ public class ConfigAdminService {
     if ("system.jwt_refresh_token_ttl_s".equals(key) && (value < 3600 || value > 2592000)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.jwt_refresh_token_ttl_s range is 3600-2592000");
     }
+    if ("system.audit_log_retention_days".equals(key) && (value < 30 || value > 365)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.audit_log_retention_days range is 30-365");
+    }
+    if ("system.audit_log_cleanup_batch_size".equals(key) && (value < 1000 || value > 10000)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.audit_log_cleanup_batch_size range is 1000-10000");
+    }
     if ("system.login_fail_window_s".equals(key) && (value < 60 || value > 3600)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.login_fail_window_s range is 60-3600");
     }
@@ -183,6 +190,21 @@ public class ConfigAdminService {
     }
     if ("notice.list_page_size".equals(key) && (value < 10 || value > 50)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "notice.list_page_size range is 10-50");
+    }
+    if ("audit.export_max_rows".equals(key) && (value < 1000 || value > 50000)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "audit.export_max_rows range is 1000-50000");
+    }
+    if ("audit.export_cos_retention_hours".equals(key) && (value < 24 || value > 720)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "audit.export_cos_retention_hours range is 24-720");
+    }
+    if ("audit.export_timeout_seconds".equals(key) && (value < 60 || value > 600)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "audit.export_timeout_seconds range is 60-600");
+    }
+    if ("audit.list_page_size_default".equals(key) && (value < 10 || value > 100)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "audit.list_page_size_default range is 10-100");
+    }
+    if ("audit.list_max_page_size".equals(key) && (value < 50 || value > 500)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "audit.list_max_page_size range is 50-500");
     }
   }
 
