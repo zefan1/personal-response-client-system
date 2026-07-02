@@ -42,6 +42,15 @@ cache:
 
 match:
   max-candidates: 5
+  tag-removal-rules:
+    - "L1-"
+    - "L2-"
+    - "A-"
+    - "VIP-"
+    - "V-"
+  fuzzy-search-timeout-ms: 2000
+  confidence-ratio-threshold: 0.5
+  confidence-min-length: 2
 
 followup:
   scan-batch-size: 5000

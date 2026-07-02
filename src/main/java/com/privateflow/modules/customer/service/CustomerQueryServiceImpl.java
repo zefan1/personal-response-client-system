@@ -72,10 +72,16 @@ public class CustomerQueryServiceImpl implements CustomerQueryService {
 
   @Override
   public List<Customer> searchByNickname(String nickname) {
+    return searchByNickname(nickname, matchMaxCandidates);
+  }
+
+  @Override
+  public List<Customer> searchByNickname(String nickname, int limit) {
     if (nickname == null || nickname.isBlank()) {
       return List.of();
     }
-    return customerRepository.searchByNickname(nickname.trim(), matchMaxCandidates);
+    int actualLimit = Math.max(1, Math.min(limit, 50));
+    return customerRepository.searchByNickname(nickname.trim(), actualLimit);
   }
 
   @Override
