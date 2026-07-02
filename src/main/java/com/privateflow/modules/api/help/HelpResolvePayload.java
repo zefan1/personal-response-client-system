@@ -8,4 +8,3 @@ public record HelpResolvePayload(Long requestId, Long helpId, String replyText, 
     return helpId == null ? requestId : helpId;
   }
 }
-}

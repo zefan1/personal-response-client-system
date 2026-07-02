@@ -21,18 +21,18 @@ public class MockSheetClient implements SheetClient {
           "来源渠道", "团购平台")));
     }
     if ("私域客资管理表".equals(sourceTable)) {
-      return List.of(new SheetRow("mock-private-1", Map.of(
-          "联系方式", "13800000001",
-          "备注称呼", "李女士",
-          "客资渠道", "私域",
-          "客资类型", "TUAN_GOU",
-          "管家", "小张",
-          "意向门店", "城南店",
-          "意向项目", "腹直肌修复",
-          "客户阶段", "已加微",
-          "客户关注点", "腹直肌分离",
-          "跟进记录", "已沟通团购体验券",
-          "下次跟进方向", "确认到店时间")));
+      return List.of(new SheetRow("mock-private-1", Map.ofEntries(
+          Map.entry("联系方式", "13800000001"),
+          Map.entry("备注称呼", "李女士"),
+          Map.entry("客资渠道", "私域"),
+          Map.entry("客资类型", "TUAN_GOU"),
+          Map.entry("管家", "小张"),
+          Map.entry("意向门店", "城南店"),
+          Map.entry("意向项目", "腹直肌修复"),
+          Map.entry("客户阶段", "已加微"),
+          Map.entry("客户关注点", "腹直肌分离"),
+          Map.entry("跟进记录", "已沟通团购体验券"),
+          Map.entry("下次跟进方向", "确认到店时间"))));
     }
     if ("新客管理衔接表".equals(sourceTable)) {
       return List.of(new SheetRow("mock-arrival-1", Map.of(
