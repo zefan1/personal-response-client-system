@@ -18,12 +18,20 @@ textarea {
 .shell {
   min-height: 100vh;
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.recognition {
+.recognition,
+.reply-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 14px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #fff;
 }
 
 .toolbar {
@@ -88,4 +96,155 @@ textarea {
   border-radius: 6px;
   color: #1f2937;
   background: #eaf2ff;
+}
+
+.panel-header,
+.card-head,
+.suggestion-head,
+.reply-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-header h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.panel-header p,
+.empty-panel,
+.reason,
+.hint {
+  margin: 0;
+  color: #667085;
+  font-size: 13px;
+}
+
+.status-pill,
+.direction {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0 9px;
+  background: #eef4ff;
+  color: #175cd3;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.alert-banner,
+.fallback-banner,
+.hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #dc6803;
+  background: #fff4e5;
+}
+
+.loading-skeleton,
+.reply-list,
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #475467;
+}
+
+.stage-icon {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #1677ff;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.skeleton-cards {
+  display: grid;
+  gap: 8px;
+}
+
+.skeleton-card {
+  height: 72px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #eef1f5 25%, #f8fafc 37%, #eef1f5 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+}
+
+.reply-card,
+.suggestion-item {
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+
+.reply-text {
+  margin: 10px 0 8px;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.small {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.profile-suggestions {
+  border-top: 1px solid #e4e7ec;
+  padding-top: 12px;
+}
+
+.link-button {
+  height: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #175cd3;
+}
+
+.suggestion-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.suggestion-item p {
+  margin: 6px 0 0;
+}
+
+.suggestion-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
 }

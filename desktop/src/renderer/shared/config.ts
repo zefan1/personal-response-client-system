@@ -7,6 +7,9 @@ export type DesktopConfig = {
   clipboardMinImageDimension: number;
   clipboardImageTextCoverMs: number;
   requestTotalTimeoutMs: number;
+  fallbackRetryIntervalMs: number;
+  fallbackMaxRetries: number;
+  helpTimeoutS: number;
 };
 
 const defaults: DesktopConfig = {
@@ -17,7 +20,10 @@ const defaults: DesktopConfig = {
   clipboardMd5CacheSize: 5,
   clipboardMinImageDimension: 200,
   clipboardImageTextCoverMs: 2000,
-  requestTotalTimeoutMs: 15000
+  requestTotalTimeoutMs: 15000,
+  fallbackRetryIntervalMs: 10000,
+  fallbackMaxRetries: 3,
+  helpTimeoutS: 30
 };
 
 export function loadDesktopConfig(): DesktopConfig {
