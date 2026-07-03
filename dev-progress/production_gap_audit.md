@@ -28,6 +28,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Real external readiness verifier exists:
   - `python scripts/verify_real_external_readiness.py`
   - Latest result: `mockExternalsFalseReady=true`, source/config blockers are cleared.
+- Database alignment verifier now checks required columns, every table declared by migrations, and config keys inserted by migrations:
+  - Latest result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys.
 
 ## Addressed Since Initial Audit
 
@@ -78,7 +80,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 - Flyway migrations apply successfully to MariaDB.
 - Added `scripts/verify_database_alignment.py`, which reads the live smoke database `information_schema`.
-- Latest result: 31 tables found, 14 key tables checked, 0 missing required columns.
+- Latest result: 31 tables found, 14 key table column sets checked, 30 migration-declared tables checked, 0 missing required columns, 0 missing migration tables, 0 missing config keys.
 - Remaining:
   - expand checks to every repository query
   - verify nullable/default assumptions

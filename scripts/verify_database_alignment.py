@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -69,6 +70,8 @@ REQUIRED_COLUMNS = {
     },
 }
 
+MIGRATION_DIR = ROOT / "src" / "main" / "resources" / "db" / "migration"
+
 
 def mysql_query(sql: str) -> str:
     cmd = [
@@ -105,6 +108,31 @@ def load_schema() -> dict[str, dict[str, dict[str, str]]]:
     return schema
 
 
+def migration_tables() -> set[str]:
+    tables: set[str] = set()
+    for path in MIGRATION_DIR.glob("*.sql"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in re.finditer(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?([a-zA-Z0-9_]+)`?", text, re.IGNORECASE):
+            tables.add(match.group(1))
+    return tables
+
+
+def migration_config_keys() -> set[str]:
+    keys: set[str] = set()
+    for path in MIGRATION_DIR.glob("*.sql"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in re.finditer(r"['\"]([a-zA-Z][a-zA-Z0-9_.-]+)['\"]\s*,", text):
+            key = match.group(1)
+            if "." in key and not key.startswith("http"):
+                keys.add(key)
+    return keys
+
+
+def live_config_keys() -> set[str]:
+    rows = mysql_query("SELECT config_key FROM system_configs")
+    return {line.strip() for line in rows.splitlines() if line.strip()}
+
+
 def main() -> int:
     schema = load_schema()
     missing: dict[str, list[str]] = {}
@@ -113,21 +141,38 @@ def main() -> int:
         absent = sorted(columns - actual)
         if absent:
             missing[table] = absent
+    expected_tables = migration_tables()
+    missing_tables = sorted(expected_tables - set(schema))
+    expected_configs = migration_config_keys()
+    actual_configs = live_config_keys()
+    missing_configs = sorted(expected_configs - actual_configs)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report = {
         "database": DB_NAME,
         "tables": len(schema),
         "requiredTables": len(REQUIRED_COLUMNS),
+        "migrationTables": len(expected_tables),
         "missing": missing,
+        "missingMigrationTables": missing_tables,
+        "migrationConfigKeys": len(expected_configs),
+        "missingConfigKeys": missing_configs,
         "schema": schema,
     }
     report_path = REPORT_DIR / "schema_alignment_report.json"
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"schema_alignment_report={report_path}")
-    print(f"tables={len(schema)} required={len(REQUIRED_COLUMNS)} missing_tables={len(missing)}")
-    if missing:
+    print(
+        f"tables={len(schema)} required={len(REQUIRED_COLUMNS)} migration_tables={len(expected_tables)} "
+        f"missing_required_tables={len(missing)} missing_migration_tables={len(missing_tables)} "
+        f"missing_config_keys={len(missing_configs)}"
+    )
+    if missing or missing_tables or missing_configs:
         for table, columns in missing.items():
             print(f"missing {table}: {', '.join(columns)}", file=sys.stderr)
+        for table in missing_tables:
+            print(f"missing migration table: {table}", file=sys.stderr)
+        for key in missing_configs:
+            print(f"missing config key: {key}", file=sys.stderr)
         return 1
     return 0
 
