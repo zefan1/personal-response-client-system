@@ -25,7 +25,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest rerun after renderer desktop smoke expansion: passed.
 - Desktop renderer unit tests pass:
   - `cd desktop && npm run test`
-  - Latest result: 9 test files, 64 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, chat-recognition dedupe/concurrency/status/error/event behavior, and copy-backfill clipboard/send-confirm/suggestion-toast behavior.
+  - Latest result: 10 test files, 73 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, chat-recognition dedupe/concurrency/status/error/event behavior, copy-backfill clipboard/send-confirm/suggestion-toast behavior, and help-mode request/resolve/reply event behavior.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
@@ -188,10 +188,11 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now also has Vitest/jsdom coverage for chat-recognition behavior: exact and multiple-match event routing, one-second duplicate recognition suppression, concurrent recognition guard with manual screenshot override, image-service DOWN text-mode fallback, clipboard-image ignore rules, image-failure fallback events, and network timeout events.
 - Fixed chat-recognition concurrency control so the pending guard is set before async content hashing; rapid duplicate user actions can no longer pass through the guard before the first request reaches the API client.
 - Desktop now also has Vitest/jsdom coverage for copy-backfill behavior: empty reply rejection, clipboard success/failure branches, silent send-confirm dispatch, fallback direction mapping, aborting stale send-confirm requests, suggestion toast show/reopen/close/auto-collapse, single and batch suggestion resolution, completion hiding, and resolve-failure recovery.
+- Desktop now also has Vitest/jsdom coverage for help-mode behavior: request dialog validation, help request submission with keeper-note truncation, pending and timeout events, permission/network failure UX, helper queue upsert/offline replay, draft reply limits and editing, helper resolve success/failure, received helper response state, reply-selected emission for helper replies, and response expand/close controls.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification
-  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, customer-profile, reply-suggestion, chat-recognition, and copy-backfill coverage
+  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, customer-profile, reply-suggestion, chat-recognition, copy-backfill, and help-mode coverage
 
 ## Recommended Repair Order
 
