@@ -163,9 +163,31 @@ SQL_TABLE_PATTERN = re.compile(
     r"\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?",
     re.IGNORECASE,
 )
+SQL_TEXT_BLOCK_PATTERN = re.compile(r'"""(.*?)"""', re.DOTALL)
+SQL_QUOTED_PATTERN = re.compile(r'"([^"\n]*(?:SELECT|INSERT|UPDATE|DELETE|FROM|JOIN|INTO)[^"\n]*)"', re.IGNORECASE)
+INSERT_COLUMNS_PATTERN = re.compile(
+    r"\bINSERT\s+INTO\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?\s*\((.*?)\)",
+    re.IGNORECASE | re.DOTALL,
+)
+UPDATE_SET_PATTERN = re.compile(
+    r"\bUPDATE\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?\s+SET\s+(.*?)(?:\bWHERE\b|\bON\b|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
+ALIAS_PATTERN = re.compile(
+    r"\b(?:FROM|JOIN)\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?(?:\s+(?:AS\s+)?([a-zA-Z][a-zA-Z0-9_]*))?",
+    re.IGNORECASE,
+)
+QUALIFIED_COLUMN_PATTERN = re.compile(r"\b([a-zA-Z][a-zA-Z0-9_]*)\.([a-zA-Z][a-zA-Z0-9_]*)\b")
 IGNORED_SQL_WORDS = {
     "SELECT", "WHERE", "SET", "VALUES", "DATABASE", "DUAL", "SKIP",
     "version", "nickname", "sent_at", "config",
+}
+IGNORED_SQL_ALIASES = {
+    "ON", "WHERE", "LEFT", "RIGHT", "INNER", "OUTER", "JOIN", "ORDER", "GROUP",
+    "LIMIT", "FOR", "SET", "VALUES", "DUPLICATE", "KEY", "UPDATE",
+}
+IGNORED_QUALIFIED_PREFIXES = {
+    "com", "privateflow", "modules", "java", "time", "util", "org", "springframework",
 }
 
 
@@ -245,6 +267,83 @@ def repository_table_references() -> dict[str, list[str]]:
     return {path: sorted(tables) for path, tables in sorted(refs.items())}
 
 
+def java_sql_fragments(text: str) -> list[str]:
+    fragments = SQL_TEXT_BLOCK_PATTERN.findall(text)
+    fragments.extend(match.group(1) for match in SQL_QUOTED_PATTERN.finditer(text))
+    return [fragment for fragment in fragments if re.search(r"\b(SELECT|INSERT|UPDATE|DELETE|FROM|JOIN|INTO)\b", fragment, re.IGNORECASE)]
+
+
+def split_sql_columns(raw: str) -> list[str]:
+    columns: list[str] = []
+    for item in raw.split(","):
+        column = item.strip()
+        column = re.sub(r"--.*$", "", column).strip()
+        column = column.strip("` ")
+        if column and re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", column):
+            columns.append(column)
+    return columns
+
+
+def repository_column_references(schema: dict[str, dict[str, dict[str, str]]]) -> list[dict[str, str]]:
+    violations: list[dict[str, str]] = []
+    for path in JAVA_DIR.rglob("*.java"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "JdbcTemplate" not in text and "jdbcTemplate" not in text:
+            continue
+        for fragment in java_sql_fragments(text):
+            sql = re.sub(r"\s+", " ", fragment).strip()
+            for table, raw_columns in INSERT_COLUMNS_PATTERN.findall(sql):
+                if table not in schema:
+                    continue
+                for column in split_sql_columns(raw_columns):
+                    if column not in schema[table]:
+                        violations.append({
+                            "file": str(path.relative_to(ROOT)),
+                            "table": table,
+                            "column": column,
+                            "context": "insert",
+                        })
+            for table, raw_set in UPDATE_SET_PATTERN.findall(sql):
+                if table not in schema:
+                    continue
+                for column in re.findall(r"`?([a-zA-Z][a-zA-Z0-9_]*)`?\s*=", raw_set):
+                    if column not in schema[table]:
+                        violations.append({
+                            "file": str(path.relative_to(ROOT)),
+                            "table": table,
+                            "column": column,
+                            "context": "update",
+                        })
+            alias_to_table: dict[str, str] = {}
+            for table, alias in ALIAS_PATTERN.findall(sql):
+                if table not in schema:
+                    continue
+                alias_to_table[table] = table
+                if alias and alias.upper() not in IGNORED_SQL_ALIASES:
+                    alias_to_table[alias] = table
+            for alias, column in QUALIFIED_COLUMN_PATTERN.findall(sql):
+                if alias in IGNORED_QUALIFIED_PREFIXES:
+                    continue
+                table = alias_to_table.get(alias)
+                if not table:
+                    continue
+                if column not in schema[table]:
+                    violations.append({
+                        "file": str(path.relative_to(ROOT)),
+                        "table": table,
+                        "column": column,
+                        "context": f"qualified:{alias}",
+                    })
+    unique: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for violation in violations:
+        key = (violation["file"], violation["table"], violation["column"], violation["context"])
+        if key not in seen:
+            unique.append(violation)
+            seen.add(key)
+    return unique
+
+
 def normalize_default(value: str) -> str:
     stripped = (value or "").strip()
     if len(stripped) >= 2 and stripped[0] == "'" and stripped[-1] == "'":
@@ -321,6 +420,7 @@ def main() -> int:
     missing_repository_tables = sorted(set(referenced_tables) - set(schema))
     column_property_violations = validate_column_properties(schema)
     enum_violations = invalid_enum_values(schema)
+    repository_column_violations = repository_column_references(schema)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report = {
         "database": DB_NAME,
@@ -334,6 +434,7 @@ def main() -> int:
         "repositoryReferencedTables": len(referenced_tables),
         "missingRepositoryTables": missing_repository_tables,
         "repositoryReferences": repository_refs,
+        "repositoryColumnViolations": repository_column_violations,
         "columnPropertyViolations": column_property_violations,
         "enumViolations": enum_violations,
         "schema": schema,
@@ -345,9 +446,10 @@ def main() -> int:
         f"tables={len(schema)} required={len(REQUIRED_COLUMNS)} migration_tables={len(expected_tables)} "
         f"missing_required_tables={len(missing)} missing_migration_tables={len(missing_tables)} "
         f"missing_config_keys={len(missing_configs)} missing_repository_tables={len(missing_repository_tables)} "
+        f"repository_column_violations={len(repository_column_violations)} "
         f"column_property_violations={len(column_property_violations)} enum_violations={len(enum_violations)}"
     )
-    if missing or missing_tables or missing_configs or missing_repository_tables or column_property_violations or enum_violations:
+    if missing or missing_tables or missing_configs or missing_repository_tables or repository_column_violations or column_property_violations or enum_violations:
         for table, columns in missing.items():
             print(f"missing {table}: {', '.join(columns)}", file=sys.stderr)
         for table in missing_tables:
@@ -356,6 +458,13 @@ def main() -> int:
             print(f"missing config key: {key}", file=sys.stderr)
         for table in missing_repository_tables:
             print(f"missing repository table: {table}", file=sys.stderr)
+        for violation in repository_column_violations:
+            print(
+                "repository column mismatch "
+                f"{violation['file']} {violation['table']}.{violation['column']} "
+                f"({violation['context']})",
+                file=sys.stderr,
+            )
         for violation in column_property_violations:
             print(
                 "column property mismatch "
