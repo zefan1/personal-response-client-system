@@ -2,7 +2,7 @@
 
 ## Audit Position
 
-This repository is not production-complete yet. The current evidence proves a runnable baseline plus partial backend API acceptance, not full production acceptance.
+This repository is not production-complete yet. The current evidence proves a runnable baseline, full mapped-route acceptance in the current harness, and controlled non-mock external HTTP acceptance. It still does not prove live third-party provider acceptance, exhaustive branch coverage, or signed installer readiness.
 
 ## Verified Evidence
 
@@ -29,12 +29,12 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `bash scripts/smoke_backend_wsl.sh`
 - Backend API acceptance harness exists:
   - `python3 scripts/acceptance_backend_api.py`
-- Latest passing evidence: 108 calls passed in mock external mode.
+- Latest passing evidence: 125 calls passed in mock external mode.
   - Latest rerun command: `python3 scripts/acceptance_backend_api.py --no-start`
-  - Latest rerun result: `passed=108 failed=0 total=108`.
+  - Latest rerun result: `passed=125 failed=0 total=125`.
 - API mapping coverage audit exists:
   - `python scripts/verify_api_mapping_coverage.py`
-  - Latest result: 113 mappings, 101 covered/matched, 12 classified remaining gaps, 0 unclassified gaps.
+  - Latest result: 113 mappings, 113 covered/matched, 0 remaining route gaps, 0 unclassified gaps.
 - Browser admin smoke passed against the Vite renderer and local backend:
   - URL: `http://127.0.0.1:5173/`
   - Login: `admin/admin123`
@@ -46,8 +46,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `python scripts/acceptance_real_external_local.py`
   - Latest result: `passed=true checks=30`.
   - Covered real HTTP client paths: Skill `/v1/chat/completions`, image `/v1/chat/completions`, WeCom table rows GET/PUT, admin environment create/activate, datasource create/mapping/columns, and customer save-to-table.
-- Database alignment verifier now checks required columns, every table declared by migrations, and config keys inserted by migrations:
-  - Latest result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys.
+- Database alignment verifier now checks required columns, every table declared by migrations, config keys inserted by migrations, and static repository SQL table references:
+  - Latest result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys, 0 missing repository tables.
 
 ## Addressed Since Initial Audit
 
@@ -61,6 +61,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 - WeCom smart table read/write no longer uses unavailable placeholder clients; `HttpWecomTableClient` implements both `SheetClient` and `WecomTableClient` behind `table.api_base_url` / `table.api_key`.
 - Skill and image real HTTP clients now unwrap OpenAI-compatible `choices[0].message.content` responses before handing business JSON to the existing parsers.
 - Added a local fake external provider plus repeatable `MOCK_EXTERNALS=false` acceptance runner for controlled non-mock verification.
+- Backend API acceptance now covers every mapped route in the current route inventory, including chat recognize/generate/regenerate, help request/resolve, prompt restore, audit export status/download, Skill/image test routes via controlled non-mock acceptance, and draft version delete.
+- Database alignment verifier now scans static repository SQL table references and fails if a referenced table is absent from the live smoke schema.
 
 ## Hard Production Gaps
 
@@ -92,22 +94,20 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 ### P1 - API Behavior Coverage Still Incomplete
 
-- The acceptance harness covers representative flows, not all 115 HTTP mappings and every invalid/permission/conflict branch.
-- Mapping coverage audit now classifies the remaining route gaps so future work is explicit rather than implicit.
+- The acceptance harness now covers all 113 mapped HTTP routes in the current route inventory.
+- Mapping coverage audit reports 0 route gaps.
 - Remaining work:
-  - live provider test endpoints for Skill/image flows
-  - prompt restore fixture coverage
-  - audit export status/download body assertions
-  - delete coverage for unpublished version fixture
   - broader invalid/permission/conflict branch matrix
+  - deeper response body assertions for every list/detail/create/edit/delete/statistics/export flow
+  - live-provider branch replay once real Skill/image/WeCom credentials are available
 
 ### P1 - Database / Repository Alignment Not Fully Audited
 
 - Flyway migrations apply successfully to MariaDB.
 - Added `scripts/verify_database_alignment.py`, which reads the live smoke database `information_schema`.
-- Latest result: 31 tables found, 14 key table column sets checked, 30 migration-declared tables checked, 0 missing required columns, 0 missing migration tables, 0 missing config keys.
+- Latest result: 31 tables found, 14 key table column sets checked, 30 migration-declared tables checked, 0 missing required columns, 0 missing migration tables, 0 missing config keys, 0 missing repository tables.
 - Remaining:
-  - expand checks to every repository query
+  - expand column-level checks to every repository query
   - verify nullable/default assumptions
   - verify all enum strings are accepted by service validation and UI option lists
 

@@ -33,6 +33,12 @@ class Result:
 
 
 @dataclass
+class RawResult:
+  status: int
+  body: str
+
+
+@dataclass
 class Context:
   token: str | None = None
   refresh_token: str | None = None
@@ -101,6 +107,41 @@ class ApiClient:
     if not ok:
       raise AssertionError(f"{name} failed: status={status} body={raw[:500]}")
     return payload
+
+  def request_raw(self, name, method, path, body=None, token=None, headers=None, allow_status=None):
+    allow_status = set(allow_status or range(200, 300))
+    headers = dict(headers or {})
+    if token:
+      headers["Authorization"] = f"Bearer {token}"
+    data = None
+    if body is not None:
+      data = json.dumps(body).encode("utf-8")
+      headers["Content-Type"] = "application/json"
+    start = time.time()
+    status = 0
+    raw = ""
+    try:
+      req = urllib.request.Request(self.base_url + path, data=data, headers=headers, method=method)
+      with urllib.request.urlopen(req, timeout=30) as resp:
+        status = resp.status
+        raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as ex:
+      status = ex.code
+      raw = ex.read().decode("utf-8", errors="replace")
+    except Exception as ex:
+      raw = str(ex)
+    ok = status in allow_status and bool(raw)
+    self.results.append(Result(
+        name=name,
+        method=method,
+        path=path,
+        status=status,
+        ok=ok,
+        duration_ms=int((time.time() - start) * 1000),
+        summary=raw[:240]))
+    if not ok:
+      raise AssertionError(f"{name} failed: status={status} body={raw[:500]}")
+    return RawResult(status, raw)
 
 
 def summarize(value):
@@ -244,9 +285,32 @@ def account_flow(api: ApiClient, ctx: Context):
   api.request("account reset password", "PUT", f"/admin/api/v1/accounts/{account_id}/reset-password", {"newPassword": "pass5678"}, ctx.token)
   api.request("account delete", "DELETE", f"/admin/api/v1/accounts/{account_id}", token=ctx.token)
 
+  leader_phone = "136%08d" % (int(ctx.ts[-8:]) % 100000000)
+  leader = api.request("account create help leader", "POST", "/admin/api/v1/accounts", {
+      "phone": leader_phone,
+      "password": "pass1234",
+      "displayName": "楠屾敹姹傚姪缁勯暱",
+      "role": "LEADER",
+      "leaderId": None
+  }, ctx.token)
+  leader_id = data(leader)["id"]
+  keeper_phone = "135%08d" % (int(ctx.ts[-8:]) % 100000000)
+  keeper = api.request("account create help keeper", "POST", "/admin/api/v1/accounts", {
+      "phone": keeper_phone,
+      "password": "pass1234",
+      "displayName": "楠屾敹姹傚姪绠″",
+      "role": "KEEPER",
+      "leaderId": leader_id
+  }, ctx.token)
+  ctx.created["help_leader_id"] = leader_id
+  ctx.created["help_keeper_id"] = data(keeper)["id"]
+  ctx.created["help_keeper_phone"] = keeper_phone
+  ctx.created["help_keeper_password"] = "pass1234"
+
 
 def customer_flow(api: ApiClient, ctx: Context):
   phone = "137%08d" % (int(ctx.ts[-8:]) % 100000000)
+  known_phone = "13900000001"
   api.request("customer profile not found", "GET", f"/api/v1/customers/{phone}", token=ctx.token, expect_success=False, allow_status={404})
   api.request("customer batch empty result", "POST", "/api/v1/customers/batch", {"phones": [phone]}, ctx.token)
   api.request("customer update not found", "PUT", f"/api/v1/customers/{phone}", {
@@ -274,6 +338,24 @@ def customer_flow(api: ApiClient, ctx: Context):
       "sentText": "acceptance sent",
       "selectedDirection": "ACCEPTANCE",
       "followupSuggest": None
+  }, ctx.token)
+  api.request("chat recognize text representative", "POST", "/api/v1/chat/recognize", {
+      "imageBase64": "",
+      "textMessage": "客户想了解产后恢复，想预约到店评估",
+      "customerIdentifier": "验收客户",
+      "leadType": "XIAN_SUO",
+      "sourceTable": "",
+      "rawMessages": [
+          {"role": "client", "text": "想了解产后恢复", "timestamp": None}
+      ]
+  }, ctx.token)
+  api.request("chat generate representative", "POST", "/api/v1/chat/generate", {
+      "phone": known_phone,
+      "scene": "ACTIVE_REPLY",
+      "clientMessage": "想了解产后恢复"
+  }, ctx.token)
+  api.request("chat regenerate representative", "POST", "/api/v1/chat/regenerate", {
+      "phone": known_phone
   }, ctx.token)
 
 
@@ -314,6 +396,20 @@ def ai_env_flow(api: ApiClient, ctx: Context):
         "apiKey": f"key-{suffix}-{kind}-updated"
     }, ctx.token)
     api.request(f"{kind} env activate", "PUT", f"/admin/api/v1/{kind}-environments/{env_id}/activate", token=ctx.token)
+
+
+def prompt_flow(api: ApiClient, ctx: Context):
+  value = "acceptance prompt " + ctx.ts
+  api.request("prompt config snapshot update", "PUT", "/admin/api/v1/configs/skill.system_prompt_format", {"value": value}, token=ctx.token)
+  versions = api.request("prompt versions after update", "GET", "/admin/api/v1/skill-prompt/format/versions", token=ctx.token)
+  items = data(versions).get("versions", [])
+  if not items:
+    raise AssertionError("prompt versions did not include updated snapshot")
+  version = items[0].get("version")
+  api.request("prompt restore format", "POST", "/admin/api/v1/skill-prompt/format/restore", {
+      "version": version,
+      "operator": "acceptance"
+  }, ctx.token)
 
 
 def datasource_flow(api: ApiClient, ctx: Context):
@@ -468,6 +564,35 @@ def tag_flow(api: ApiClient, ctx: Context):
   api.request("tag category delete", "DELETE", f"/admin/api/v1/tags/categories/{cat_id}", token=ctx.token)
 
 
+def help_flow(api: ApiClient, ctx: Context):
+  keeper_phone = ctx.created.get("help_keeper_phone")
+  keeper_password = ctx.created.get("help_keeper_password")
+  if not keeper_phone or not keeper_password:
+    raise AssertionError("help keeper fixture missing")
+  login = api.request("help keeper login", "POST", "/api/v1/auth/login", {
+      "username": keeper_phone,
+      "password": keeper_password
+  })
+  keeper_token = data(login).get("accessToken")
+  if not keeper_token:
+    raise AssertionError("help keeper login missing token")
+  requested = api.request("help request", "POST", "/api/v1/help/request", {
+      "phone": "13900000001",
+      "clientMessage": "客户需要更专业的产后修复解释",
+      "aiSuggestions": [{"text": "建议到店评估", "direction": "INVITE", "reason": "acceptance"}],
+      "keeperNote": "acceptance",
+      "context": {"source": "acceptance"}
+  }, keeper_token)
+  help_id = data(requested).get("helpId")
+  if not help_id:
+    raise AssertionError("help request missing helpId")
+  api.request("help resolve", "POST", "/api/v1/help/resolve", {
+      "helpId": help_id,
+      "replyText": "建议先安抚客户并预约到店评估",
+      "helperReplies": [{"text": "先询问产后时间，再预约评估", "reason": "acceptance", "direction": "GUIDE"}]
+  }, ctx.token)
+
+
 def notice_flow(api: ApiClient, ctx: Context):
   created = api.request("notice create immediate", "POST", "/admin/api/v1/notices", {
       "title": "验收公告" + ctx.ts[-6:],
@@ -499,6 +624,25 @@ def notice_flow(api: ApiClient, ctx: Context):
   }, ctx.token)
   api.request("notice stop scheduled", "PUT", f"/admin/api/v1/notices/{scheduled_id}/stop", token=ctx.token)
   api.request("notice delete scheduled", "DELETE", f"/admin/api/v1/notices/{scheduled_id}", token=ctx.token)
+
+
+def audit_export_flow(api: ApiClient, ctx: Context):
+  created = api.request("audit export create", "POST", "/admin/api/v1/audit-logs/export", {}, ctx.token)
+  export_id = data(created).get("exportId")
+  if not export_id:
+    raise AssertionError("audit export did not return exportId")
+  status_payload = None
+  for _ in range(20):
+    status_payload = api.request("audit export status", "GET", f"/admin/api/v1/audit-logs/export/{export_id}", token=ctx.token)
+    if data(status_payload).get("terminal"):
+      break
+    time.sleep(0.5)
+  status_data = data(status_payload)
+  if status_data.get("status") != "COMPLETED":
+    raise AssertionError(f"audit export did not complete: {status_data}")
+  raw = api.request_raw("audit export download", "GET", f"/admin/api/v1/audit-logs/export/{export_id}/download", token=ctx.token)
+  if raw.status != 200 or not raw.body.strip():
+    raise AssertionError("audit export download returned empty body")
 
 
 def version_flow(api: ApiClient, ctx: Context):
@@ -534,6 +678,18 @@ def version_flow(api: ApiClient, ctx: Context):
       "reason": "acceptance cleanup",
       "alternativeVersion": None
   }, ctx.token)
+  draft_version = f"8.{int(ctx.ts[-4:-2])}.{int(ctx.ts[-2:])}"
+  draft = api.request("version create draft for delete", "POST", "/admin/api/v1/versions", {
+      "version": draft_version,
+      "platform": "MAC",
+      "downloadUrl": "https://example.com/installer.dmg",
+      "changelog": "acceptance delete",
+      "updateStrategy": "OPTIONAL",
+      "gradualPercent": None,
+      "fileSize": 12345
+  }, ctx.token)
+  draft_id = data(draft)["id"]
+  api.request("version delete draft", "DELETE", f"/admin/api/v1/versions/{draft_id}", token=ctx.token)
 
 
 def run_suite(api: ApiClient):
@@ -545,11 +701,14 @@ def run_suite(api: ApiClient):
       customer_flow,
       skill_flow,
       ai_env_flow,
+      prompt_flow,
       datasource_flow,
       quick_search_flow,
       followup_flow,
       tag_flow,
+      help_flow,
       notice_flow,
+      audit_export_flow,
       version_flow,
   ]:
     flow(api, ctx)

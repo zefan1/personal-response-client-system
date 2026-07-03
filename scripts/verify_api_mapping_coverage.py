@@ -7,7 +7,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = ROOT / ".tools" / "acceptance"
 SRC_DIR = ROOT / "src" / "main" / "java"
-ACCEPTANCE = ROOT / "scripts" / "acceptance_backend_api.py"
+ACCEPTANCE_FILES = [
+    ROOT / "scripts" / "acceptance_backend_api.py",
+    ROOT / "scripts" / "acceptance_real_external_local.py",
+]
 
 METHODS = {
     "GetMapping": "GET",
@@ -17,18 +20,7 @@ METHODS = {
 }
 
 INTENTIONAL_GAPS = {
-    ("POST", "/api/v1/chat/recognize"): "Requires image payload and real/mock recognition scenario coverage.",
-    ("POST", "/api/v1/chat/generate"): "Covered indirectly by reply flows; full branch coverage remains P1.",
-    ("POST", "/api/v1/chat/regenerate"): "Needs multi-turn suggestion state setup.",
-    ("POST", "/api/v1/help/request"): "Needs leader/help-mode workflow setup.",
-    ("POST", "/api/v1/help/resolve"): "Needs leader/help-mode workflow setup.",
-    ("POST", "/admin/api/v1/audit-logs/export"): "Export creation exists in harness but status/download body assertions remain P1.",
-    ("GET", "/admin/api/v1/audit-logs/export/{exportId}"): "Requires export id created in prior request; harness polls export status by concrete id.",
-    ("GET", "/admin/api/v1/audit-logs/export/{exportId}/download"): "Requires export id and download body assertion.",
-    ("POST", "/admin/api/v1/image-environments/{id}/test"): "Requires a live image provider or controlled fake endpoint.",
-    ("POST", "/admin/api/v1/skill-prompt/{type}/restore"): "Requires prompt version fixture state.",
-    ("POST", "/admin/api/v1/skills/{id}/test"): "Requires live Skill provider or controlled fake endpoint.",
-    ("DELETE", "/admin/api/v1/versions/{id}"): "Version lifecycle harness revokes created versions; delete requires unpublished fixture.",
+    ("POST", "/admin/api/v1/skill-prompt/{type}/restore"): "Covered by concrete prompt type restore; path matcher does not generalize type placeholders.",
 }
 
 
@@ -63,7 +55,7 @@ def java_mappings() -> set[tuple[str, str]]:
 
 
 def acceptance_paths() -> set[tuple[str, str]]:
-    text = ACCEPTANCE.read_text(encoding="utf-8", errors="replace")
+    text = "\n".join(path.read_text(encoding="utf-8", errors="replace") for path in ACCEPTANCE_FILES if path.exists())
     paths: set[tuple[str, str]] = set()
     for match in re.finditer(r'api\.request\([^,]+,\s*"([A-Z]+)",\s*f?["\']([^"\']+)["\']', text):
         method, path = match.groups()

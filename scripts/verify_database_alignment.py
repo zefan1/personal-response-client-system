@@ -71,6 +71,16 @@ REQUIRED_COLUMNS = {
 }
 
 MIGRATION_DIR = ROOT / "src" / "main" / "resources" / "db" / "migration"
+JAVA_DIR = ROOT / "src" / "main" / "java"
+
+SQL_TABLE_PATTERN = re.compile(
+    r"\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?",
+    re.IGNORECASE,
+)
+IGNORED_SQL_WORDS = {
+    "SELECT", "WHERE", "SET", "VALUES", "DATABASE", "DUAL", "SKIP",
+    "version", "nickname", "sent_at", "config",
+}
 
 
 def mysql_query(sql: str) -> str:
@@ -133,6 +143,22 @@ def live_config_keys() -> set[str]:
     return {line.strip() for line in rows.splitlines() if line.strip()}
 
 
+def repository_table_references() -> dict[str, list[str]]:
+    refs: dict[str, set[str]] = {}
+    for path in JAVA_DIR.rglob("*.java"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "JdbcTemplate" not in text and "jdbcTemplate" not in text:
+            continue
+        found: set[str] = set()
+        for match in SQL_TABLE_PATTERN.finditer(text):
+            table = match.group(1)
+            if table.lower() not in {word.lower() for word in IGNORED_SQL_WORDS}:
+                found.add(table)
+        if found:
+            refs[str(path.relative_to(ROOT))] = found
+    return {path: sorted(tables) for path, tables in sorted(refs.items())}
+
+
 def main() -> int:
     schema = load_schema()
     missing: dict[str, list[str]] = {}
@@ -146,6 +172,9 @@ def main() -> int:
     expected_configs = migration_config_keys()
     actual_configs = live_config_keys()
     missing_configs = sorted(expected_configs - actual_configs)
+    repository_refs = repository_table_references()
+    referenced_tables = sorted({table for tables in repository_refs.values() for table in tables})
+    missing_repository_tables = sorted(set(referenced_tables) - set(schema))
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report = {
         "database": DB_NAME,
@@ -156,6 +185,9 @@ def main() -> int:
         "missingMigrationTables": missing_tables,
         "migrationConfigKeys": len(expected_configs),
         "missingConfigKeys": missing_configs,
+        "repositoryReferencedTables": len(referenced_tables),
+        "missingRepositoryTables": missing_repository_tables,
+        "repositoryReferences": repository_refs,
         "schema": schema,
     }
     report_path = REPORT_DIR / "schema_alignment_report.json"
@@ -164,15 +196,17 @@ def main() -> int:
     print(
         f"tables={len(schema)} required={len(REQUIRED_COLUMNS)} migration_tables={len(expected_tables)} "
         f"missing_required_tables={len(missing)} missing_migration_tables={len(missing_tables)} "
-        f"missing_config_keys={len(missing_configs)}"
+        f"missing_config_keys={len(missing_configs)} missing_repository_tables={len(missing_repository_tables)}"
     )
-    if missing or missing_tables or missing_configs:
+    if missing or missing_tables or missing_configs or missing_repository_tables:
         for table, columns in missing.items():
             print(f"missing {table}: {', '.join(columns)}", file=sys.stderr)
         for table in missing_tables:
             print(f"missing migration table: {table}", file=sys.stderr)
         for key in missing_configs:
             print(f"missing config key: {key}", file=sys.stderr)
+        for table in missing_repository_tables:
+            print(f"missing repository table: {table}", file=sys.stderr)
         return 1
     return 0
 
