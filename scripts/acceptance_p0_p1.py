@@ -95,6 +95,7 @@ def main() -> int:
     parser.add_argument("--include-local-external", action="store_true", help="run controlled MOCK_EXTERNALS=false local-provider acceptance")
     parser.add_argument("--include-live-external", action="store_true", help="run live third-party provider acceptance using PDA_LIVE_* env vars")
     parser.add_argument("--require-signed-package", action="store_true", help="require package signing gate to pass")
+    parser.add_argument("--require-production-ready", action="store_true", help="fail if production blocker audit reports any remaining blocker")
     args = parser.parse_args()
 
     results: list[dict[str, object]] = []
@@ -118,7 +119,11 @@ def main() -> int:
         run_step("real external source readiness", "python scripts\\verify_real_external_readiness.py", timeout=120),
         run_step("desktop typecheck", "npm run typecheck", cwd=ROOT / "desktop", timeout=180),
         run_step("manual test readiness", f"python scripts\\verify_manual_test_readiness.py --frontend-url http://127.0.0.1:5173/ --backend-url {args.backend_url}", timeout=120),
-        run_step("production blocker audit", "python scripts\\verify_production_blockers.py", timeout=120),
+        run_step(
+            "production blocker audit",
+            "python scripts\\verify_production_blockers.py" + (" --require-production-ready" if args.require_production_ready else ""),
+            timeout=120,
+        ),
     ])
 
     if args.include_slow:

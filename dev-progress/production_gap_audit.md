@@ -75,6 +75,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Production blocker audit exists:
   - `python scripts\verify_production_blockers.py`
   - Latest current-state result: `productionReady=false blockers=2`.
+  - Strong production gate now exists: `python scripts\verify_production_blockers.py --require-production-ready`; latest current-state result fails as expected with exit code 1 while the two external blockers remain.
   - Current blockers: `P0 LIVE_EXTERNAL_PROVIDER_ACCEPTANCE` because live Skill/image/WeCom provider acceptance has not passed, and `P1 SIGNED_RELEASE_PACKAGE` because the local package is unsigned and no signing certificate is configured.
 - Real external readiness verifier exists:
   - `python scripts/verify_real_external_readiness.py`
@@ -96,6 +97,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - P0/P1 aggregate acceptance runner exists:
   - `python scripts/acceptance_p0_p1.py --backend-url http://172.19.250.154:8080`
   - Latest default current-state result: `passed=true checks=12/12 skipped=3`.
+  - Latest strong production-ready current-state result: `python scripts\acceptance_p0_p1.py --backend-url http://172.19.250.154:8080 --require-production-ready`, expected failure with `passed=false checks=11/12 skipped=3`, failed gate `production blocker audit`.
   - Default checks cover backend API acceptance, backend API acceptance quality, route mapping coverage, controller coverage audit, desktop component coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, manual test readiness, production blocker audit report generation, and the unsigned-package fail-closed gate.
   - Latest local-external current-state result: `python scripts\acceptance_p0_p1.py --backend-url http://172.19.250.154:8080 --include-local-external`, `passed=true checks=13/13 skipped=2`.
   - Latest slow+local-external current-state result after fixing WSL Unicode path quoting: `python scripts\acceptance_p0_p1.py --backend-url http://172.19.250.154:8080 --include-slow --include-local-external`, `passed=true checks=17/17 skipped=1`.
@@ -143,6 +145,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop package directory creation now targets the current platform by default and supports `PDA_PACKAGE_PLATFORM` / `PDA_PACKAGE_ARCH` overrides for release CI instead of always hardcoding Windows.
 - Desktop package verification now has a first-class `npm run package:verify:signed` release gate, and macOS verification records `codesign` status plus `PDA_REQUIRE_NOTARIZED_PACKAGE=1` notarization-credential gating.
 - Production blocker status is now machine-readable in `.tools/acceptance/production_blockers.json`; latest result records `productionReady=false` with two blockers: live external provider acceptance and signed release package.
+- `scripts/verify_production_blockers.py --require-production-ready` and `scripts/acceptance_p0_p1.py --require-production-ready` now provide a hard failing final production gate instead of only generating an informational blocker report.
 - Java tests now include controller-layer MockMvc checks for version APIs plus H2-backed repository tests for desktop version persistence, publish/revoke, latest published lookup, and desktop client report upsert semantics.
 - Java tests now also include QuickSearch admin controller MockMvc coverage for list, create, invalid create error mapping, update, toggle, delete, and image upload response wrapping.
 - Java tests now also include Account admin controller MockMvc coverage for list filters, enum query binding errors, create/update/toggle/reset/delete, and service validation error mapping. Global API exception handling now maps request parameter type mismatches, including bad enum query values, to standard `80-10001` bad request responses instead of generic 500 responses.

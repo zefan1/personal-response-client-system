@@ -2,6 +2,7 @@
 import json
 import os
 import time
+import argparse
 from pathlib import Path
 
 
@@ -28,6 +29,10 @@ def read_json(path: Path) -> dict | None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--require-production-ready", action="store_true", help="return non-zero when production blockers remain")
+    args = parser.parse_args()
+
     blockers: list[dict[str, object]] = []
     live_env_present = {key: bool(os.environ.get(key, "").strip()) for key in LIVE_ENV_KEYS}
     missing_live_env = [key for key, present in live_env_present.items() if not present]
@@ -79,6 +84,8 @@ def main() -> int:
     print(f"productionReady={str(report['productionReady']).lower()} blockers={len(blockers)}")
     for blocker in blockers:
         print(f"blocker={blocker['severity']}:{blocker['id']} reason={blocker['reason']}")
+    if args.require_production_ready and blockers:
+        return 1
     return 0
 
 
