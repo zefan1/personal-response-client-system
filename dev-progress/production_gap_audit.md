@@ -21,14 +21,14 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, DatasourceAdminController all datasource CRUD/toggle/replace/mapping/version/restore/compare/columns/customer-fields/sync/import routes and error mapping, AnalyticsController overview/funnels/staff/sources/stages/health/lifecycle/risks/content-ranking binding and error mapping, AccountAdminController list/create/update/toggle/reset/delete/error mapping, AuditLogController list/actions/export/status/download/error mapping, AuthController desktop/admin login, refresh, and auth config, ConfigController list/get/update, HealthController, HelpController request/resolve, user QuickSearchController list, ChatController recognize/generate/regenerate/send-confirm binding and error mapping, CustomerController search/profile/batch/update/suggestion-resolve/save-to-table and local exception mappings, FollowupController today/rules CRUD/toggle/search/error mapping, NoticeController list/create/update/stop/delete/active/error mapping, QuickSearchAdminController list/create/update/toggle/delete/upload/error mapping, SkillAdminController list/create/update/toggle/delete/available/test/analytics/error mapping, AiConfigController Skill/Image environment CRUD/activate/delete/test and prompt version restore/error mapping, TagAdminController category/value CRUD/toggle and tag business error mapping, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
-  - Latest rerun after offline Vitest coverage: passed.
+  - Latest rerun after controller coverage expansion: passed.
 - Desktop renderer unit tests pass:
   - `cd desktop && npm run test`
   - Latest result: 1 test file, 5 tests passed for offline manager failure/recovery branches.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
-  - Latest rerun after Electron/Vite security upgrades: passed.
+  - Latest rerun after controller coverage expansion: passed.
 - Desktop dependency audit passes:
   - `cd desktop && npm audit --json`
   - Latest result: 0 vulnerabilities after upgrading Vite and Electron.
@@ -49,7 +49,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `python3 scripts/acceptance_backend_api.py`
 - Latest passing evidence: 125 calls passed in mock external mode.
   - Latest rerun command: `python3 scripts/acceptance_backend_api.py --no-start`
-  - Latest rerun result after response assertion expansion: `passed=158 failed=0 total=158`.
+  - Latest rerun result after Java controller coverage expansion: `passed=158 failed=0 total=158`.
   - Coverage categories reported by the harness: `conflict:8`, `create:4`, `download:1`, `invalid:13`, `permission:6`, `read:34`, `representative:90`, `update:2`.
 - API mapping coverage audit exists:
   - `python scripts/verify_api_mapping_coverage.py`
