@@ -236,6 +236,10 @@ SIMPLE_SELECT_PATTERN = re.compile(
     r"\bSELECT\s+(.*?)\s+FROM\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?(?:\s+(?:AS\s+)?([a-zA-Z][a-zA-Z0-9_]*))?",
     re.IGNORECASE | re.DOTALL,
 )
+SINGLE_TABLE_FROM_PATTERN = re.compile(
+    r"\b(?:FROM|UPDATE|DELETE\s+FROM)\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?(?:\s+(?:AS\s+)?([a-zA-Z][a-zA-Z0-9_]*))?",
+    re.IGNORECASE,
+)
 ALIAS_PATTERN = re.compile(
     r"\b(?:FROM|JOIN)\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?(?:\s+(?:AS\s+)?([a-zA-Z][a-zA-Z0-9_]*))?",
     re.IGNORECASE,
@@ -412,9 +416,34 @@ def bare_select_column(item: str) -> str | None:
     return None
 
 
+def where_clause(sql: str) -> str | None:
+    match = re.search(r"\bWHERE\b\s+(.*?)(?:\bORDER\s+BY\b|\bGROUP\s+BY\b|\bHAVING\b|\bLIMIT\b|\bOFFSET\b|\Z)", sql, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def bare_where_columns(sql: str, table: str, alias: str) -> list[str]:
+    if not is_single_table_select(sql, table, alias):
+        return []
+    clause = where_clause(sql)
+    if not clause:
+        return []
+    columns: list[str] = []
+    for match in re.finditer(
+        r"(?:^|\bAND\b|\bOR\b)\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?\s*(?:=|<>|!=|<|>|<=|>=|\bLIKE\b|\bIN\b|\bIS\b)",
+        clause,
+        re.IGNORECASE,
+    ):
+        column = match.group(1)
+        if column.upper() not in SQL_CLAUSE_WORDS and column not in {"AND", "OR", "NOT", "NULL"}:
+            columns.append(column)
+    return columns
+
+
 def repository_column_references(schema: dict[str, dict[str, dict[str, str]]]) -> tuple[list[dict[str, str]], dict[str, int]]:
     violations: list[dict[str, str]] = []
-    checked_counts = {"insert": 0, "update": 0, "qualified": 0, "select": 0}
+    checked_counts = {"insert": 0, "update": 0, "qualified": 0, "select": 0, "where": 0}
     for path in JAVA_DIR.rglob("*.java"):
         text = path.read_text(encoding="utf-8", errors="replace")
         if "JdbcTemplate" not in text and "jdbcTemplate" not in text:
@@ -461,6 +490,18 @@ def repository_column_references(schema: dict[str, dict[str, dict[str, str]]]) -
                             "table": table,
                             "column": column,
                             "context": "select",
+                        })
+            for table, alias in SINGLE_TABLE_FROM_PATTERN.findall(sql):
+                if table not in schema:
+                    continue
+                for column in bare_where_columns(sql, table, alias):
+                    checked_counts["where"] += 1
+                    if column not in schema[table]:
+                        violations.append({
+                            "file": str(path.relative_to(ROOT)),
+                            "table": table,
+                            "column": column,
+                            "context": "where",
                         })
             alias_to_table: dict[str, str] = {}
             for table, alias in ALIAS_PATTERN.findall(sql):
