@@ -1404,6 +1404,40 @@ textarea {
   white-space: normal;
 }
 
+.admin-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.admin-field-grid label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #475467;
+  font-size: 12px;
+}
+
+.admin-field-grid input,
+.admin-field-grid select {
+  min-height: 36px;
+  padding: 7px 9px;
+  color: #1f2937;
+  font-size: 13px;
+  background: #fff;
+}
+
+.admin-field-grid input[type="checkbox"] {
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
+}
+
 .admin-read-panel pre,
 .admin-action-panel pre {
   max-height: 300px;
@@ -1452,7 +1486,8 @@ textarea {
   }
 
   .admin-read-grid,
-  .admin-action-grid {
+  .admin-action-grid,
+  .admin-field-grid {
     grid-template-columns: 1fr;
   }
 

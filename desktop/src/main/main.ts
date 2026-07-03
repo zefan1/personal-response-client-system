@@ -202,6 +202,61 @@ async function runRendererSmoke(window: BrowserWindow) {
             if (simpleBody && !panel.querySelector('.admin-field-grid')) {
               throw new Error('action panel missing structured fields: ' + section);
             }
+            if (simpleBody) {
+              const textarea = panel.querySelector('textarea');
+              const fieldGrid = panel.querySelector('.admin-field-grid');
+              const parseBody = () => JSON.parse(textarea.value);
+              const enumSelect = fieldGrid.querySelector('select');
+              if (enumSelect) {
+                const original = enumSelect.value;
+                const nextOption = [...enumSelect.options].map((option) => option.value).find((value) => value !== original);
+                if (nextOption) {
+                  const fieldLabel = enumSelect.closest('label').textContent.trim().split('\\n')[0].trim();
+                  const before = JSON.stringify(parseBody());
+                  setValue(enumSelect, nextOption);
+                  await delay(50);
+                  const after = JSON.stringify(parseBody());
+                  if (before === after || !after.includes(nextOption)) {
+                    throw new Error('structured enum field did not sync JSON: ' + section + ' ' + fieldLabel);
+                  }
+                  setValue(enumSelect, original);
+                  await delay(50);
+                }
+              }
+              const numberInput = fieldGrid.querySelector('input[type="number"]');
+              if (numberInput) {
+                const original = numberInput.value;
+                setValue(numberInput, '77');
+                await delay(50);
+                if (!Object.values(parseBody()).includes(77)) {
+                  throw new Error('structured number field did not sync JSON: ' + section);
+                }
+                setValue(numberInput, original);
+                await delay(50);
+              }
+              const checkbox = fieldGrid.querySelector('input[type="checkbox"]');
+              if (checkbox) {
+                const before = JSON.stringify(parseBody());
+                checkbox.click();
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                await delay(50);
+                const after = JSON.stringify(parseBody());
+                if (before === after) {
+                  throw new Error('structured boolean field did not sync JSON: ' + section);
+                }
+              }
+              const textInput = fieldGrid.querySelector('input:not([type]), input[type="text"]');
+              if (textInput) {
+                const original = textInput.value;
+                setValue(textInput, 'smoke-sync-value');
+                await delay(50);
+                if (!Object.values(parseBody()).includes('smoke-sync-value')) {
+                  throw new Error('structured text field did not sync JSON: ' + section);
+                }
+                setValue(textInput, original);
+                await delay(50);
+              }
+            }
           }
           await waitForText('数据读取');
           await waitForText('操作入口');

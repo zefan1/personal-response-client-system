@@ -38,8 +38,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest current-state result after abnormal-alert coverage expansion: Windows x64 directory artifact created under `desktop/release/Private Domain Assistant-win32-x64`, `app.asar` present with SHA-256 report, `asarBytes=28334580`, `signed=false` because no production code-signing certificate is configured locally.
 - Renderer click smoke passes:
   - `PDA_SMOKE_API_BASE_URL=http://<WSL-IP>:8080 cd desktop && npm run renderer:smoke`
-  - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, structured action controls for simple JSON bodies, desktop workbench switch, desktop panel presence, workbench/followup refresh buttons, all followup tabs, recognition text-mode form, customer search input/button, quick-search overlay, and quick-search lead-type filters.
-  - Latest rerun after renderer desktop smoke expansion used `http://172.19.250.154:8080` because Windows localhost forwarding to WSL was unavailable; result: passed.
+  - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, structured action controls for simple JSON bodies, structured field-to-JSON sync for enum/number/boolean/text controls, desktop workbench switch, desktop panel presence, workbench/followup refresh buttons, all followup tabs, recognition text-mode form, customer search input/button, quick-search overlay, and quick-search lead-type filters.
+  - Latest rerun after structured admin field sync smoke expansion used `http://172.19.250.154:8080` because Windows localhost forwarding to WSL was unavailable; result: `renderer_smoke=passed`.
 - Static module verifiers pass:
   - `verify_module_a.py` through `verify_module_h.py`
   - `verify_module_20.py` through `verify_module_33.py`
@@ -50,7 +50,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `python3 scripts/acceptance_backend_api.py`
 - Latest passing evidence: 125 calls passed in mock external mode.
   - Latest rerun command: `python3 scripts/acceptance_backend_api.py --no-start`
-  - Latest rerun result after renderer desktop smoke expansion against `http://172.19.250.154:8080`: `passed=158 failed=0 total=158`.
+  - Latest rerun result after read-response field assertion expansion against `http://172.19.250.154:8080`: `passed=158 failed=0 total=158`.
   - Coverage categories reported by the harness: `conflict:8`, `create:4`, `download:1`, `invalid:13`, `permission:6`, `read:34`, `representative:90`, `update:2`.
 - API mapping coverage audit exists:
   - `python scripts/verify_api_mapping_coverage.py`
@@ -70,7 +70,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest current-state result: `passed=true checks=30`.
   - Covered real HTTP client paths: Skill `/v1/chat/completions`, image `/v1/chat/completions`, WeCom table rows GET/PUT, admin environment create/activate, datasource create/mapping/columns, and customer save-to-table.
 - Database alignment verifier now checks required columns, every table declared by migrations, config keys inserted by migrations, and static repository SQL table references:
-  - It now also verifies selected production-critical nullable/default assumptions, live enum values for accounts, customers, skill bindings, quick search, desktop versions, notices, and audit exports, and scanned repository SQL column references for INSERT/UPDATE/table-alias qualified columns.
+  - It now also verifies selected production-critical nullable/default assumptions, live enum values for accounts, customers, skill bindings, quick search, desktop versions, notices, audit exports, followup rules/tag suggestions, AI/image environments, prompt versions, pending table writes, and desktop client version reports, plus scanned repository SQL column references for INSERT/UPDATE/table-alias qualified columns.
   - Latest current-state result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys, 0 missing repository tables, 0 repository column violations, 0 column property violations, 0 enum violations.
 - Enum contract alignment verifier now checks production-critical enum strings across backend Java enums/constants, service validation allowlists, database enum allowlists, and frontend visible/manual-acceptance option paths:
   - `python scripts\verify_enum_contract_alignment.py`
@@ -84,6 +84,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop renderer now has a login flow that persists the backend token into `desktop_config`.
 - Admin console pages now exist in the desktop/Vite renderer and are backed by real `/admin/api/v1/*` calls rather than static mock data.
 - Admin action panels now expose structured controls for simple JSON body fields: enums render as select boxes, booleans as checkboxes, numbers as numeric inputs, and text fields as inputs while preserving the raw JSON editor for complex payloads.
+- Admin action panels now have dedicated responsive styling for structured controls, and renderer smoke verifies editing enum/number/boolean/text controls mutates the backing JSON body instead of only checking that controls exist.
 - Browser/Vite runtime no longer requires the Electron preload bridge for login/admin smoke testing; desktop bridge calls have web fallbacks where possible.
 - Backend CORS now permits local Vite origins and the auth filter bypasses OPTIONS preflight.
 - WeCom smart table read/write no longer uses unavailable placeholder clients; `HttpWecomTableClient` implements both `SheetClient` and `WecomTableClient` behind `table.api_base_url` / `table.api_key`.
@@ -92,12 +93,15 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Backend API acceptance now covers every mapped route in the current route inventory, including chat recognize/generate/regenerate, help request/resolve, prompt restore, audit export status/download, Skill/image test routes via controlled non-mock acceptance, and draft version delete.
 - Backend API acceptance now also includes a repeatable invalid/permission/conflict matrix covering unauthenticated requests, malformed bearer token, keeper admin denial, bad login, invalid account/customer/chat/config/datasource/analytics/quick-search/notice/audit/version inputs, duplicate skill/quick-search/version guards, disabled datasource sync conflict, and published-version edit/delete conflicts.
 - Backend API acceptance response assertions now validate more returned state after high-risk create/update/toggle/publish/revoke flows, including accounts, skill bindings, datasource mapping/replace/toggle, quick search item update/list, followup rules, notices, audit export completion/download, desktop version publish/report/revoke, and Mac draft creation.
+- Backend API acceptance read assertions now validate key list/detail/stat response shapes and enum ranges for configs, datasources, quick search, rules, tags, notices, audit logs/actions, versions, desktop version checks, analytics overview/funnels/health/risks/skill calls, and other high-traffic read endpoints.
 - Database alignment verifier now scans static repository SQL table references and fails if a referenced table is absent from the live smoke schema.
 - Database alignment verifier now also scans repository SQL INSERT columns, UPDATE assignments, and alias-qualified `table.column` references and fails if any scanned column is absent from the live smoke schema.
+- Database alignment verifier now expands nullable/default and live enum checks to followup rules/tag suggestions, Skill/image environment tables, prompt version history, pending table writes, and desktop client version reports.
 - Customer `lead_type` writes now normalize unknown values to `PENDING` at the repository boundary, and migration `V53__normalize_customer_lead_types.sql` repairs existing out-of-contract customer enum values. This prevents quick-search `GENERAL` from leaking into the customer table.
 - Added `scripts/verify_enum_contract_alignment.py` and frontend/manual acceptance coverage for missing enum paths: quick search `MINI_PROGRAM`, scheduled notice creation, and Mac desktop version creation.
 - Renderer smoke now discovers all admin nav sections at runtime instead of checking a fixed representative subset.
 - Renderer smoke now also verifies every admin section has API-backed read panels that refresh into rendered JSON and that action panels expose editable JSON request bodies.
+- Renderer smoke now also edits structured admin action controls and asserts the underlying JSON request body changes for enum, numeric, boolean, and text inputs.
 - Renderer smoke now also verifies desktop-mode primary panels and non-destructive clickable paths: workbench/followup refresh controls, followup tab switching, chat recognition text mode, customer search, quick-search overlay, and quick-search filters.
 - Desktop toolchain moved off vulnerable Electron/Vite versions; `npm audit --json` currently reports 0 vulnerabilities.
 - Added repeatable desktop package verification for Windows x64 unpacked artifacts. It proves build structure and ASAR integrity metadata, while explicitly recording that this local artifact is not signed.

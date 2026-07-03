@@ -218,6 +218,16 @@ def require_data_keys(*keys):
   return check
 
 
+def require_data_object(min_keys=0):
+  def check(payload):
+    body = data(payload)
+    if not isinstance(body, dict):
+      raise AssertionError("data is not an object")
+    if len(body) < min_keys:
+      raise AssertionError(f"data object has too few keys: {len(body)} < {min_keys}")
+  return check
+
+
 def require_list_container(*possible_keys):
   def check(payload):
     body = data(payload)
@@ -288,6 +298,52 @@ def require_non_empty_list(*possible_keys):
   return check
 
 
+def list_items_from_payload(payload, *possible_keys):
+  body = data(payload)
+  if isinstance(body, list):
+    return body
+  if isinstance(body, dict):
+    for key in possible_keys or ("list", "items", "datasources", "categories", "values", "logs", "versions", "records"):
+      if isinstance(body.get(key), list):
+        return body.get(key)
+  return None
+
+
+def require_optional_list_item_keys(keys, *possible_keys):
+  def check(payload):
+    items = list_items_from_payload(payload, *possible_keys)
+    if items is None:
+      raise AssertionError("response does not contain a list")
+    for index, item in enumerate(items):
+      if not isinstance(item, dict):
+        raise AssertionError(f"list item {index} is not an object")
+      missing = [key for key in keys if key not in item]
+      if missing:
+        raise AssertionError(f"list item {index} missing keys: " + ",".join(missing))
+  return check
+
+
+def require_optional_list_enum(field, allowed, *possible_keys):
+  def check(payload):
+    items = list_items_from_payload(payload, *possible_keys)
+    if items is None:
+      raise AssertionError("response does not contain a list")
+    invalid = []
+    for index, item in enumerate(items):
+      if isinstance(item, dict) and item.get(field) is not None and item.get(field) not in allowed:
+        invalid.append(f"{index}:{item.get(field)}")
+    if invalid:
+      raise AssertionError(f"{field} has invalid values: " + ",".join(invalid))
+  return check
+
+
+def combine_assertions(*checks):
+  def check(payload):
+    for assertion in checks:
+      assertion(payload)
+  return check
+
+
 def require_error(code):
   return {"expect_success": False, "expect_error_code": code}
 
@@ -321,43 +377,52 @@ def auth_flow(api: ApiClient, ctx: Context):
 
 def read_flows(api: ApiClient, ctx: Context):
   token = ctx.token
-  for name, path in [
-      ("health", "/admin/api/v1/health"),
-      ("configs list", "/admin/api/v1/configs"),
-      ("configs prefix", "/admin/api/v1/configs?prefix=skill."),
-      ("config get table api url", "/admin/api/v1/configs/table.api_base_url"),
-      ("skill env list", "/admin/api/v1/skill-environments"),
-      ("image env list", "/admin/api/v1/image-environments"),
-      ("prompt versions format", "/admin/api/v1/skill-prompt/format/versions"),
-      ("datasource list", "/admin/api/v1/datasources"),
-      ("customer fields", "/admin/api/v1/customer-fields"),
-      ("datasource sync status", "/admin/api/v1/datasources/sync-status"),
-      ("datasource import logs", "/admin/api/v1/datasources/import-logs"),
-      ("quick search admin list", "/admin/api/v1/quick-search/items"),
-      ("quick search desktop list", "/api/v1/quick-search/items"),
-      ("rules list", "/admin/api/v1/rules"),
-      ("tags list", "/admin/api/v1/tags/categories"),
-      ("notices list", "/admin/api/v1/notices"),
-      ("notices active", "/api/v1/notices/active"),
-      ("audit logs list", "/admin/api/v1/audit-logs"),
-      ("audit actions", "/admin/api/v1/audit-logs/actions"),
-      ("versions list", "/admin/api/v1/versions"),
-      ("desktop version check", "/api/v1/desktop/version-check?platform=WINDOWS&currentVersion=1.0.0&clientId=acceptance"),
-      ("analytics overview", "/admin/api/v1/analytics/overview"),
-      ("analytics funnels", "/admin/api/v1/analytics/funnels"),
-      ("analytics staff", "/admin/api/v1/analytics/staff"),
-      ("analytics sources", "/admin/api/v1/analytics/sources"),
-      ("analytics stages", "/admin/api/v1/analytics/stages"),
-      ("analytics health", "/admin/api/v1/analytics/health"),
-      ("analytics lifecycle", "/admin/api/v1/analytics/lifecycle"),
-      ("analytics risks", "/admin/api/v1/analytics/risks"),
-      ("analytics content ranking", "/admin/api/v1/analytics/content-ranking"),
-      ("skill calls analytics", "/admin/api/v1/analytics/skill-calls"),
-      ("available skills", "/admin/api/v1/skills/available"),
-      ("followups today", "/api/v1/followups/today"),
-      ("customer search empty", "/api/v1/customers/search?q=13900000000"),
+  for name, path, assert_fn in [
+      ("health", "/admin/api/v1/health", require_data_keys("status")),
+      ("configs list", "/admin/api/v1/configs", require_data_object(10)),
+      ("configs prefix", "/admin/api/v1/configs?prefix=skill.", require_data_object(1)),
+      ("config get table api url", "/admin/api/v1/configs/table.api_base_url", require_data_keys("configKey", "value")),
+      ("skill env list", "/admin/api/v1/skill-environments", require_list_container("items", "list")),
+      ("image env list", "/admin/api/v1/image-environments", require_list_container("items", "list")),
+      ("prompt versions format", "/admin/api/v1/skill-prompt/format/versions", require_list_container("versions", "list", "items")),
+      ("datasource list", "/admin/api/v1/datasources", require_optional_list_item_keys({"id", "name", "sheetId", "sourceTable", "enabled"}, "datasources", "list", "items")),
+      ("customer fields", "/admin/api/v1/customer-fields", require_non_empty_list("fields", "list", "items")),
+      ("datasource sync status", "/admin/api/v1/datasources/sync-status", require_optional_list_item_keys({"datasourceId", "sourceTable", "syncStatus", "mappingCount"}, "items", "list")),
+      ("datasource import logs", "/admin/api/v1/datasources/import-logs", require_list_container("logs", "list", "items")),
+      ("quick search admin list", "/admin/api/v1/quick-search/items", combine_assertions(
+          require_optional_list_item_keys({"id", "contentType", "leadType", "title", "shortcutCode", "enabled"}, "items", "list"),
+          require_optional_list_enum("contentType", {"TEMPLATE", "KNOWLEDGE", "LOCATION", "IMAGE", "MINI_PROGRAM"}, "items", "list"),
+          require_optional_list_enum("leadType", {"GENERAL", "TUAN_GOU", "XIAN_SUO"}, "items", "list"))),
+      ("quick search desktop list", "/api/v1/quick-search/items", require_list_container("items", "list")),
+      ("rules list", "/admin/api/v1/rules", require_optional_list_item_keys({"id", "name", "actionType", "enabled"}, "rules", "items", "list")),
+      ("tags list", "/admin/api/v1/tags/categories", require_optional_list_item_keys({"id", "categoryKey", "categoryName", "boundField", "values"}, "categories", "list")),
+      ("notices list", "/admin/api/v1/notices", combine_assertions(
+          require_optional_list_item_keys({"id", "title", "level", "status", "isStopped"}, "notices", "items", "list"),
+          require_optional_list_enum("level", {"INFO", "WARN", "ERROR"}, "notices", "items", "list"),
+          require_optional_list_enum("status", {"PUBLISHED", "SCHEDULED"}, "notices", "items", "list"))),
+      ("notices active", "/api/v1/notices/active", require_list_container("notices", "items", "list")),
+      ("audit logs list", "/admin/api/v1/audit-logs", require_optional_list_item_keys({"id", "action", "operator", "createdAt"}, "logs", "records", "items", "list")),
+      ("audit actions", "/admin/api/v1/audit-logs/actions", require_list_container("actions", "items", "list")),
+      ("versions list", "/admin/api/v1/versions", combine_assertions(
+          require_optional_list_item_keys({"id", "version", "platform", "status", "updateStrategy"}, "versions", "items", "list"),
+          require_optional_list_enum("platform", {"WINDOWS", "MAC"}, "versions", "items", "list"),
+          require_optional_list_enum("status", {"DRAFT", "PUBLISHED", "REVOKED"}, "versions", "items", "list"))),
+      ("desktop version check", "/api/v1/desktop/version-check?platform=WINDOWS&currentVersion=1.0.0&clientId=acceptance", require_data_keys("hasUpdate")),
+      ("analytics overview", "/admin/api/v1/analytics/overview", require_data_keys("summary", "dailyTrend", "sceneBreakdown")),
+      ("analytics funnels", "/admin/api/v1/analytics/funnels", require_data_keys("tuanGou", "xianSuo")),
+      ("analytics staff", "/admin/api/v1/analytics/staff", require_list_container("staff", "items", "list")),
+      ("analytics sources", "/admin/api/v1/analytics/sources", require_list_container("sources", "items", "list")),
+      ("analytics stages", "/admin/api/v1/analytics/stages", require_list_container("stages", "items", "list")),
+      ("analytics health", "/admin/api/v1/analytics/health", require_data_keys("summary", "systemAlerts")),
+      ("analytics lifecycle", "/admin/api/v1/analytics/lifecycle", require_list_container("items", "list", "lifecycle")),
+      ("analytics risks", "/admin/api/v1/analytics/risks", require_data_keys("customers", "alerts")),
+      ("analytics content ranking", "/admin/api/v1/analytics/content-ranking", require_list_container("items", "list", "ranking")),
+      ("skill calls analytics", "/admin/api/v1/analytics/skill-calls", require_data_keys("summary", "details")),
+      ("available skills", "/admin/api/v1/skills/available", require_list_container("items", "list", "skills")),
+      ("followups today", "/api/v1/followups/today", require_list_container("items", "list", "followups")),
+      ("customer search empty", "/api/v1/customers/search?q=13900000000", require_list_container("items", "list", "customers")),
   ]:
-    api.request(name, "GET", path, token=token, coverage="read")
+    api.request(name, "GET", path, token=token, assert_fn=assert_fn, coverage="read")
 
   api.request("config update table api url", "PUT", "/admin/api/v1/configs/table.api_base_url", {"value": ""}, token=token,
       assert_fn=require_data_keys("configKey", "updated"), coverage="update")

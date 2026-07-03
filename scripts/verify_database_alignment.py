@@ -138,6 +138,60 @@ EXPECTED_COLUMN_PROPERTIES = {
         "expire_at": {"nullable": "NO"},
         "created_by": {"nullable": "NO"},
     },
+    "followup_rules": {
+        "name": {"nullable": "NO"},
+        "condition_json": {"nullable": "NO"},
+        "action_type": {"nullable": "NO"},
+        "action_config": {"nullable": "NO"},
+        "priority": {"nullable": "NO", "default": "0"},
+        "enabled": {"nullable": "NO", "default": "1"},
+        "is_builtin": {"nullable": "NO", "default": "0"},
+    },
+    "system_tag_suggestions": {
+        "phone": {"nullable": "NO"},
+        "tag_name": {"nullable": "NO"},
+        "rule_id": {"nullable": "NO"},
+        "status": {"nullable": "NO", "default": "PENDING"},
+    },
+    "skill_environments": {
+        "env_name": {"nullable": "NO"},
+        "provider": {"nullable": "NO", "default": "skill"},
+        "base_url": {"nullable": "NO"},
+        "api_key": {"nullable": "NO"},
+        "api_key_last4": {"nullable": "NO"},
+        "is_active": {"nullable": "NO", "default": "0"},
+    },
+    "image_environments": {
+        "env_name": {"nullable": "NO"},
+        "provider": {"nullable": "NO", "default": "image"},
+        "base_url": {"nullable": "NO"},
+        "api_key": {"nullable": "NO"},
+        "api_key_last4": {"nullable": "NO"},
+        "is_active": {"nullable": "NO", "default": "0"},
+        "last_test_at": {"nullable": "YES"},
+        "last_test_ok": {"nullable": "YES"},
+    },
+    "skill_prompt_versions": {
+        "config_key": {"nullable": "NO"},
+        "version": {"nullable": "NO"},
+        "content": {"nullable": "NO"},
+        "is_stable": {"nullable": "NO", "default": "0"},
+        "operator": {"nullable": "NO"},
+    },
+    "pending_table_writes": {
+        "phone": {"nullable": "NO"},
+        "action_type": {"nullable": "NO"},
+        "payload": {"nullable": "NO"},
+        "retry_count": {"nullable": "NO", "default": "0"},
+        "status": {"nullable": "NO", "default": "PENDING"},
+        "next_retry_at": {"nullable": "NO"},
+    },
+    "desktop_client_versions": {
+        "client_id": {"nullable": "NO"},
+        "version": {"nullable": "NO"},
+        "platform": {"nullable": "NO"},
+        "last_reported_at": {"nullable": "NO"},
+    },
 }
 
 ENUM_COLUMNS = {
@@ -154,6 +208,11 @@ ENUM_COLUMNS = {
     ("system_notices", "source"): {"MANUAL", "AUTO"},
     ("system_notices", "status"): {"PUBLISHED", "SCHEDULED"},
     ("audit_log_exports", "status"): {"PROCESSING", "COMPLETED", "FAILED"},
+    ("followup_rules", "action_type"): {"ALERT", "TAG_CHANGE", "TAG_SUGGESTION", "NOTIFY_LEADER", "STATUS_CHANGE"},
+    ("system_tag_suggestions", "status"): {"PENDING", "CONFIRMED", "IGNORED"},
+    ("pending_table_writes", "action_type"): {"INSERT", "UPDATE"},
+    ("pending_table_writes", "status"): {"PENDING", "RESOLVED", "FAILED"},
+    ("desktop_client_versions", "platform"): {"WINDOWS", "MAC"},
 }
 
 MIGRATION_DIR = ROOT / "src" / "main" / "resources" / "db" / "migration"
