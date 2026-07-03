@@ -54,6 +54,9 @@ This repository is not production-complete yet. The current evidence proves a ru
 - API mapping coverage audit exists:
   - `python scripts/verify_api_mapping_coverage.py`
   - Latest result: 113 mappings, 113 covered/matched, 0 remaining route gaps, 0 unclassified gaps.
+- Controller Java test coverage audit exists:
+  - `python scripts\verify_controller_test_coverage.py`
+  - Latest result: 18 controller classes, 18 covered by direct or documented aggregate controller tests, 0 missing, 14 controller test classes.
 - Browser admin smoke passed against the Vite renderer and local backend:
   - URL: `http://127.0.0.1:5173/`
   - Login: `admin/admin123`
@@ -108,14 +111,15 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Java tests now also include Customer controller MockMvc coverage for search, profile, batch dedupe and not-found skipping, manual update, suggestion batch resolve, save-to-table, empty batch validation, customer not found 404, profile version conflict 409, and table-write queue full 429 mappings.
 - Java tests now also include Chat controller MockMvc coverage for recognize, generate, regenerate, send-confirm request binding, Skill payload wrapping, warning propagation, accepted send-confirm payloads, and standard bad-request error mapping.
 - Java tests now also include Web core controller MockMvc coverage for desktop/admin auth login IP binding, token refresh, auth config, admin config list/get/update, health, help request/resolve, and user quick-search enabled item listing.
+- Added `scripts/verify_controller_test_coverage.py` so the controller-layer coverage claim is now machine-checked: all 18 `@RestController` classes are covered by direct or documented aggregate MockMvc controller tests.
 
 ## Hard Production Gaps
 
 ### P0 - No Real Java Test Coverage
 
 - Maven now runs 107 Java tests covering AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, DatasourceAdminController, AnalyticsController, AccountAdminController, AuditLogController, AuthController, ConfigController, HealthController, HelpController, user QuickSearchController, ChatController, CustomerController, FollowupController, NoticeController, QuickSearchAdminController, SkillAdminController, AiConfigController, TagAdminController, DesktopVersionController, and DesktopVersionRepository.
+- Controller test coverage verifier reports all 18 controller classes covered by direct or documented aggregate controller tests.
 - Remaining before production:
-  - controller integration tests for every remaining API group beyond the current high-risk version API coverage
   - broader service tests for failure branches
   - repository tests against real MySQL-compatible database beyond the live acceptance/database verifier coverage
   - desktop store/component tests or scripted browser checks for all clickable paths
