@@ -13,7 +13,10 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
-  - Latest rerun after non-mock client changes: passed.
+  - Latest rerun after offline Vitest coverage: passed.
+- Desktop renderer unit tests pass:
+  - `cd desktop && npm run test`
+  - Latest result: 1 test file, 5 tests passed for offline manager failure/recovery branches.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
@@ -135,10 +138,11 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop renderer now has a login flow and no longer requires manually editing `localStorage.desktop_config.accessToken`.
 - Desktop package now has Vite dev, Electron dev/preview, and Electron smoke scripts.
 - Desktop package now has a repeatable Windows x64 directory packaging verifier and package report.
+- Desktop now has Vitest/jsdom coverage for offline manager branches: consecutive API network failures, non-network business errors, WS degraded/reconnected handling, debounced OS offline/recovery bridge events, and duplicate offline capability registration.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification
-  - component/store tests for failure and offline branches
+  - expand component/store tests beyond the current offline manager coverage
 
 ## Recommended Repair Order
 
