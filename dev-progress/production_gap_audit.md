@@ -12,8 +12,9 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest focused rerun: `mvn -Dstyle.color=never -Dtest=AiConfigControllerTest test`, `BUILD SUCCESS`, `Tests run: 10, Failures: 0, Errors: 0, Skipped: 0`.
   - Latest focused analytics rerun: `mvn -Dstyle.color=never -Dtest=AnalyticsControllerTest test`, `BUILD SUCCESS`, `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`.
   - Latest focused tags rerun: `mvn -Dstyle.color=never -Dtest=TagAdminControllerTest test`, `BUILD SUCCESS`, `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`.
-  - Latest full-suite result after tags tests: `mvn -Dstyle.color=never test`, `BUILD SUCCESS`, `Tests run: 80, Failures: 0, Errors: 0, Skipped: 0`.
-  - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AnalyticsController overview/funnels/staff/sources/stages/health/lifecycle/risks/content-ranking binding and error mapping, AccountAdminController list/create/update/toggle/reset/delete/error mapping, AuditLogController list/actions/export/status/download/error mapping, NoticeController list/create/update/stop/delete/active/error mapping, QuickSearchAdminController list/create/update/toggle/delete/upload/error mapping, SkillAdminController list/create/update/toggle/delete/available/test/analytics/error mapping, AiConfigController Skill/Image environment CRUD/activate/delete/test and prompt version restore/error mapping, TagAdminController category/value CRUD/toggle and tag business error mapping, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
+  - Latest focused followup rerun: `mvn -Dstyle.color=never -Dtest=FollowupControllerTest test`, `BUILD SUCCESS`, `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`.
+  - Latest full-suite result after followup tests: `mvn -Dstyle.color=never test`, `BUILD SUCCESS`, `Tests run: 86, Failures: 0, Errors: 0, Skipped: 0`.
+  - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AnalyticsController overview/funnels/staff/sources/stages/health/lifecycle/risks/content-ranking binding and error mapping, AccountAdminController list/create/update/toggle/reset/delete/error mapping, AuditLogController list/actions/export/status/download/error mapping, FollowupController today/rules CRUD/toggle/search/error mapping, NoticeController list/create/update/stop/delete/active/error mapping, QuickSearchAdminController list/create/update/toggle/delete/upload/error mapping, SkillAdminController list/create/update/toggle/delete/available/test/analytics/error mapping, AiConfigController Skill/Image environment CRUD/activate/delete/test and prompt version restore/error mapping, TagAdminController category/value CRUD/toggle and tag business error mapping, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
   - Latest rerun after offline Vitest coverage: passed.
@@ -98,12 +99,13 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Java tests now also include AI config controller MockMvc coverage for Skill/Image environment list/create/update/activate/delete/test paths, validation/service error mapping, prompt version listing, prompt restore, and unsupported prompt type handling.
 - Java tests now also include Analytics controller MockMvc coverage for all nine admin report endpoints, days/leadType/caller query binding, returned payload wrapping, invalid `days` bad request handling, and service permission failure mapping to 403.
 - Java tests now also include Tag admin controller MockMvc coverage for category list/create/update/delete, value create/update/toggle/delete, builtin-category deletion 403 mapping, and duplicate value bad-request mapping.
+- Java tests now also include Followup controller MockMvc coverage for today's followups, rule search criteria binding, rule create/update/delete/toggle, invalid action type standard bad-request body, condition parse failures, and forbidden failures.
 
 ## Hard Production Gaps
 
 ### P0 - No Real Java Test Coverage
 
-- Maven now runs 80 Java tests covering AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AnalyticsController, AccountAdminController, AuditLogController, NoticeController, QuickSearchAdminController, SkillAdminController, AiConfigController, TagAdminController, DesktopVersionController, and DesktopVersionRepository.
+- Maven now runs 86 Java tests covering AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AnalyticsController, AccountAdminController, AuditLogController, FollowupController, NoticeController, QuickSearchAdminController, SkillAdminController, AiConfigController, TagAdminController, DesktopVersionController, and DesktopVersionRepository.
 - Remaining before production:
   - controller integration tests for every remaining API group beyond the current high-risk version API coverage
   - broader service tests for failure branches
