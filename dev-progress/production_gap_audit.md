@@ -25,7 +25,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest rerun after renderer desktop smoke expansion: passed.
 - Desktop renderer unit tests pass:
   - `cd desktop && npm run test`
-  - Latest result: 14 test files, 103 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, chat-recognition dedupe/concurrency/status/error/event behavior, copy-backfill clipboard/send-confirm/suggestion-toast behavior, help-mode request/resolve/reply event behavior, batch-template customer/template/copy/confirm behavior, stage-suggestion event/confirm/ignore behavior, new-lead-toast queue/copy/event behavior, and abnormal-alert validation/history/ack/router behavior.
+  - Latest result: 15 test files, 106 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, chat-recognition dedupe/concurrency/status/error/event behavior, copy-backfill clipboard/send-confirm/suggestion-toast behavior, help-mode request/resolve/reply event behavior, batch-template customer/template/copy/confirm behavior, stage-suggestion event/confirm/ignore behavior, new-lead-toast queue/copy/event behavior, abnormal-alert validation/history/ack/router behavior, and AdminConsole component rendering plus structured action field JSON sync behavior.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
@@ -85,6 +85,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Admin console pages now exist in the desktop/Vite renderer and are backed by real `/admin/api/v1/*` calls rather than static mock data.
 - Admin action panels now expose structured controls for simple JSON body fields: enums render as select boxes, booleans as checkboxes, numbers as numeric inputs, and text fields as inputs while preserving the raw JSON editor for complex payloads.
 - Admin action panels now have dedicated responsive styling for structured controls, and renderer smoke verifies editing enum/number/boolean/text controls mutates the backing JSON body instead of only checking that controls exist.
+- AdminConsole now has a Vue component-level Vitest mount suite that verifies section rendering, initial API-backed read loading, and structured text/enum/number/boolean field synchronization with JSON request bodies.
 - Browser/Vite runtime no longer requires the Electron preload bridge for login/admin smoke testing; desktop bridge calls have web fallbacks where possible.
 - Backend CORS now permits local Vite origins and the auth filter bypasses OPTIONS preflight.
 - WeCom smart table read/write no longer uses unavailable placeholder clients; `HttpWecomTableClient` implements both `SheetClient` and `WecomTableClient` behind `table.api_base_url` / `table.api_key`.
@@ -102,6 +103,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Renderer smoke now discovers all admin nav sections at runtime instead of checking a fixed representative subset.
 - Renderer smoke now also verifies every admin section has API-backed read panels that refresh into rendered JSON and that action panels expose editable JSON request bodies.
 - Renderer smoke now also edits structured admin action controls and asserts the underlying JSON request body changes for enum, numeric, boolean, and text inputs.
+- Desktop Vitest now includes component-level AdminConsole coverage in addition to store/service coverage.
 - Renderer smoke now also verifies desktop-mode primary panels and non-destructive clickable paths: workbench/followup refresh controls, followup tab switching, chat recognition text mode, customer search, quick-search overlay, and quick-search filters.
 - Desktop toolchain moved off vulnerable Electron/Vite versions; `npm audit --json` currently reports 0 vulnerabilities.
 - Added repeatable desktop package verification for Windows x64 unpacked artifacts. It proves build structure and ASAR integrity metadata, while explicitly recording that this local artifact is not signed.
@@ -198,6 +200,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now also has Vitest/jsdom coverage for stage-suggestion behavior: current-profile stage suggestion emission and dedupe, non-current customer pending/flush behavior, pending TTL expiry, confirm-stage success event emission, conflict refresh handling, transient retry exhaustion, and ignore-stage batch resolve with non-blocking backend failure.
 - Desktop now also has Vitest/jsdom coverage for new-lead-toast behavior: invalid/reconnect payload suppression, visible and pending queue limits, auto-dismiss and pending promotion, normalized phone copy success/failure, opening-generation customer selection event, followup tab switch event, pending clear, and cleanup timer cancellation.
 - Desktop now also has Vitest/jsdom coverage for abnormal-alert behavior: inbound payload validation, alert id/message normalization, memory sorting and acknowledged filtering, persisted alert/history load success and failure paths, acknowledgement persistence and events, panel/history controls, router initialization idempotency, periodic cleanup, event-bus ingestion, and database cleanup.
+- Desktop now also has Vitest/jsdom component coverage for AdminConsole rendering, initial read-panel API loading, and structured action control synchronization for text, enum, number, and boolean fields.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification
