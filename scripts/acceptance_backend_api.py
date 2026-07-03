@@ -26,6 +26,7 @@ class Result:
   status: int
   ok: bool
   duration_ms: int
+  coverage: str = "representative"
   success: bool | None = None
   error_code: str | None = None
   message: str | None = None
@@ -51,7 +52,7 @@ class ApiClient:
     self.base_url = base_url.rstrip("/")
     self.results: list[Result] = []
 
-  def request(self, name, method, path, body=None, token=None, headers=None, files=None, expect_success=True, allow_status=None):
+  def request(self, name, method, path, body=None, token=None, headers=None, files=None, expect_success=True, allow_status=None, expect_error_code=None, assert_fn=None, coverage="representative"):
     allow_status = set(allow_status or range(200, 300))
     headers = dict(headers or {})
     if token:
@@ -92,6 +93,15 @@ class ApiClient:
       ok = ok and response_success is True
     else:
       ok = ok and response_success is False
+      if expect_error_code:
+        ok = ok and error_code == expect_error_code
+    assertion_error = None
+    if ok and assert_fn is not None:
+      try:
+        assert_fn(payload)
+      except AssertionError as ex:
+        assertion_error = str(ex)
+        ok = False
     result = Result(
         name=name,
         method=method,
@@ -99,13 +109,15 @@ class ApiClient:
         status=status,
         ok=ok,
         duration_ms=duration_ms,
+        coverage=coverage,
         success=response_success,
         error_code=error_code,
         message=message,
         summary=summarize(payload if payload is not None else raw))
     self.results.append(result)
     if not ok:
-      raise AssertionError(f"{name} failed: status={status} body={raw[:500]}")
+      suffix = f" assertion={assertion_error}" if assertion_error else ""
+      raise AssertionError(f"{name} failed: status={status} body={raw[:500]}{suffix}")
     return payload
 
   def request_raw(self, name, method, path, body=None, token=None, headers=None, allow_status=None):
@@ -138,6 +150,7 @@ class ApiClient:
         status=status,
         ok=ok,
         duration_ms=int((time.time() - start) * 1000),
+        coverage="download",
         summary=raw[:240]))
     if not ok:
       raise AssertionError(f"{name} failed: status={status} body={raw[:500]}")
@@ -194,6 +207,37 @@ def data(payload):
   return payload.get("data") if isinstance(payload, dict) else None
 
 
+def require_data_keys(*keys):
+  def check(payload):
+    body = data(payload)
+    if not isinstance(body, dict):
+      raise AssertionError("data is not an object")
+    missing = [key for key in keys if key not in body]
+    if missing:
+      raise AssertionError("missing data keys: " + ",".join(missing))
+  return check
+
+
+def require_list_container(*possible_keys):
+  def check(payload):
+    body = data(payload)
+    if isinstance(body, list):
+      return
+    if not isinstance(body, dict):
+      raise AssertionError("data is not list/object")
+    if possible_keys:
+      found = [key for key in possible_keys if isinstance(body.get(key), list)]
+      if not found:
+        raise AssertionError("missing list container: " + ",".join(possible_keys))
+    elif not any(isinstance(value, list) for value in body.values()):
+      raise AssertionError("data object has no list value")
+  return check
+
+
+def require_error(code):
+  return {"expect_success": False, "expect_error_code": code}
+
+
 def first_id_from_list(payload, list_key="list"):
   body = data(payload)
   if isinstance(body, dict):
@@ -206,18 +250,19 @@ def first_id_from_list(payload, list_key="list"):
 
 
 def auth_flow(api: ApiClient, ctx: Context):
-  api.request("auth public config", "GET", "/api/v1/auth/config")
+  api.request("auth public config", "GET", "/api/v1/auth/config", assert_fn=require_data_keys("captchaEnabled"))
   login = api.request("admin login", "POST", "/admin/api/v1/auth/login",
-      {"username": "admin", "password": "admin123"})
+      {"username": "admin", "password": "admin123"}, assert_fn=require_data_keys("accessToken"))
   body = data(login)
   ctx.token = body.get("accessToken") or body.get("token")
   ctx.refresh_token = body.get("refreshToken")
   if not ctx.token:
     raise AssertionError("login response missing accessToken/token")
   if ctx.refresh_token:
-    api.request("auth refresh", "POST", "/api/v1/auth/refresh", {"refreshToken": ctx.refresh_token}, ctx.token)
+    api.request("auth refresh", "POST", "/api/v1/auth/refresh", {"refreshToken": ctx.refresh_token}, ctx.token,
+        assert_fn=require_data_keys("accessToken"))
   api.request("desktop login", "POST", "/api/v1/auth/login",
-      {"username": "admin", "password": "admin123"})
+      {"username": "admin", "password": "admin123"}, assert_fn=require_data_keys("accessToken"))
 
 
 def read_flows(api: ApiClient, ctx: Context):
@@ -258,9 +303,10 @@ def read_flows(api: ApiClient, ctx: Context):
       ("followups today", "/api/v1/followups/today"),
       ("customer search empty", "/api/v1/customers/search?q=13900000000"),
   ]:
-    api.request(name, "GET", path, token=token)
+    api.request(name, "GET", path, token=token, coverage="read")
 
-  api.request("config update table api url", "PUT", "/admin/api/v1/configs/table.api_base_url", {"value": ""}, token=token)
+  api.request("config update table api url", "PUT", "/admin/api/v1/configs/table.api_base_url", {"value": ""}, token=token,
+      assert_fn=require_data_keys("configKey", "updated"), coverage="update")
 
 
 def account_flow(api: ApiClient, ctx: Context):
@@ -692,6 +738,203 @@ def version_flow(api: ApiClient, ctx: Context):
   api.request("version delete draft", "DELETE", f"/admin/api/v1/versions/{draft_id}", token=ctx.token)
 
 
+def negative_matrix_flow(api: ApiClient, ctx: Context):
+  bad = require_error("80-10001")
+  auth_failed = require_error("80-10002")
+  forbidden = require_error("80-10003")
+  conflict = require_error("80-10006")
+  version_exists = require_error("80-10010")
+  version_status_invalid = require_error("80-10011")
+  version_package_missing = require_error("80-10012")
+
+  api.request("negative unauthenticated admin health", "GET", "/admin/api/v1/health",
+      expect_success=False, allow_status={401}, expect_error_code="80-10002", coverage="permission")
+  api.request("negative malformed bearer token", "GET", "/admin/api/v1/health", token="not-a-real-token",
+      expect_success=False, allow_status={401}, expect_error_code="80-10002", coverage="permission")
+  api.request("negative bad admin login", "POST", "/admin/api/v1/auth/login",
+      {"username": "admin", "password": "wrong-password"}, expect_success=False, allow_status={401},
+      expect_error_code="80-10002", coverage="permission")
+
+  keeper_phone = ctx.created.get("help_keeper_phone")
+  keeper_password = ctx.created.get("help_keeper_password")
+  keeper_login = api.request("negative keeper login fixture", "POST", "/api/v1/auth/login", {
+      "username": keeper_phone,
+      "password": keeper_password
+  }, assert_fn=require_data_keys("accessToken"), coverage="permission")
+  keeper_token = data(keeper_login).get("accessToken")
+  api.request("negative keeper forbidden admin accounts", "GET", "/admin/api/v1/accounts", token=keeper_token,
+      allow_status={403}, coverage="permission", **forbidden)
+  api.request("negative keeper forbidden health", "GET", "/admin/api/v1/health", token=keeper_token,
+      allow_status={403}, coverage="permission", **forbidden)
+
+  api.request("negative account invalid phone", "POST", "/admin/api/v1/accounts", {
+      "phone": "123",
+      "password": "pass1234",
+      "displayName": "bad phone",
+      "role": "LEADER",
+      "leaderId": None
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative account duplicate phone", "POST", "/admin/api/v1/accounts", {
+      "phone": keeper_phone,
+      "password": "pass1234",
+      "displayName": "duplicate",
+      "role": "KEEPER",
+      "leaderId": ctx.created.get("help_leader_id")
+  }, ctx.token, allow_status={400}, coverage="conflict", **bad)
+  api.request("negative account weak password", "PUT", f"/admin/api/v1/accounts/{ctx.created.get('help_keeper_id')}/reset-password", {
+      "newPassword": "123"
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative account delete leader with keepers", "DELETE", f"/admin/api/v1/accounts/{ctx.created.get('help_leader_id')}",
+      token=ctx.token, allow_status={400}, coverage="conflict", **bad)
+
+  api.request("negative analytics invalid lead type", "GET", "/admin/api/v1/analytics/overview?leadType=GENERAL",
+      token=ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative chat recognize missing input", "POST", "/api/v1/chat/recognize", {
+      "imageBase64": "",
+      "textMessage": "",
+      "customerIdentifier": "",
+      "leadType": "PENDING",
+      "sourceTable": "",
+      "rawMessages": []
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative customer batch empty phones", "POST", "/api/v1/customers/batch", {
+      "phones": []
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+
+  dup_skill = "dup-" + ctx.ts[-6:]
+  api.request("negative skill duplicate fixture", "POST", "/admin/api/v1/skills", {
+      "skillId": dup_skill,
+      "skillName": "duplicate fixture",
+      "scene": "OPENING",
+      "leadType": "PENDING",
+      "priority": 7
+  }, ctx.token, assert_fn=require_data_keys("id"), coverage="create")
+  api.request("negative skill duplicate", "POST", "/admin/api/v1/skills", {
+      "skillId": dup_skill,
+      "skillName": "duplicate fixture",
+      "scene": "OPENING",
+      "leadType": "PENDING",
+      "priority": 6
+  }, ctx.token, allow_status={400}, coverage="conflict", **bad)
+  api.request("negative skill invalid lead type", "POST", "/admin/api/v1/skills", {
+      "skillId": "bad-" + ctx.ts[-6:],
+      "skillName": "bad lead type",
+      "scene": "OPENING",
+      "leadType": "GENERAL",
+      "priority": 1
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+
+  api.request("negative config unknown key", "PUT", "/admin/api/v1/configs/not.a.real.key", {
+      "value": "x"
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative datasource create missing name", "POST", "/admin/api/v1/datasources", {
+      "name": "",
+      "sheetId": "sheet-" + ctx.ts,
+      "sourceTable": "bad_source",
+      "description": ""
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  ds = api.request("negative datasource mapping fixture", "POST", "/admin/api/v1/datasources", {
+      "name": "negative datasource " + ctx.ts,
+      "sheetId": "sheet-neg-" + ctx.ts,
+      "sourceTable": "negative_" + ctx.ts,
+      "description": "negative"
+  }, ctx.token, assert_fn=require_data_keys("id"), coverage="create")
+  ds_id = data(ds)["id"]
+  api.request("negative datasource duplicate mapping target", "PUT", f"/admin/api/v1/datasources/{ds_id}/mappings", {
+      "mappings": [
+          {"sourceField": "phone1", "targetField": "phone", "enabled": True},
+          {"sourceField": "phone2", "targetField": "phone", "enabled": True}
+      ]
+  }, ctx.token, allow_status={409}, coverage="conflict", **conflict)
+
+  shortcut = "NEG" + ctx.ts[-6:]
+  api.request("negative quick search fixture", "POST", "/admin/api/v1/quick-search/items", {
+      "contentType": "TEMPLATE",
+      "leadType": "GENERAL",
+      "title": "negative fixture",
+      "shortcutCode": shortcut,
+      "content": "negative",
+      "imageUrl": None,
+      "sortOrder": 1,
+      "enabled": True
+  }, ctx.token, assert_fn=require_data_keys("id"), coverage="create")
+  api.request("negative quick search duplicate shortcut", "POST", "/admin/api/v1/quick-search/items", {
+      "contentType": "TEMPLATE",
+      "leadType": "GENERAL",
+      "title": "negative duplicate",
+      "shortcutCode": shortcut,
+      "content": "negative",
+      "imageUrl": None,
+      "sortOrder": 1,
+      "enabled": True
+  }, ctx.token, allow_status={400}, coverage="conflict", expect_success=False, expect_error_code="80-10007")
+  api.request("negative quick search invalid lead type", "POST", "/admin/api/v1/quick-search/items", {
+      "contentType": "TEMPLATE",
+      "leadType": "PENDING",
+      "title": "bad lead",
+      "shortcutCode": "BAD" + ctx.ts[-6:],
+      "content": "bad",
+      "imageUrl": None,
+      "sortOrder": 1,
+      "enabled": True
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+
+  no_package_version = f"7.{int(ctx.ts[-4:-2])}.{int(ctx.ts[-2:])}"
+  api.request("negative version missing package", "POST", "/admin/api/v1/versions", {
+      "version": no_package_version,
+      "platform": "WINDOWS",
+      "downloadUrl": "",
+      "changelog": "negative",
+      "updateStrategy": "OPTIONAL",
+      "gradualPercent": None,
+      "fileSize": None
+  }, ctx.token, allow_status={400}, coverage="invalid", **version_package_missing)
+  dup_version = f"6.{int(ctx.ts[-4:-2])}.{int(ctx.ts[-2:])}"
+  created = api.request("negative version duplicate fixture", "POST", "/admin/api/v1/versions", {
+      "version": dup_version,
+      "platform": "WINDOWS",
+      "downloadUrl": "https://example.com/negative.exe",
+      "changelog": "negative",
+      "updateStrategy": "OPTIONAL",
+      "gradualPercent": None,
+      "fileSize": 100
+  }, ctx.token, assert_fn=require_data_keys("id"), coverage="create")
+  version_id = data(created)["id"]
+  api.request("negative version duplicate", "POST", "/admin/api/v1/versions", {
+      "version": dup_version,
+      "platform": "WINDOWS",
+      "downloadUrl": "https://example.com/negative.exe",
+      "changelog": "negative",
+      "updateStrategy": "OPTIONAL",
+      "gradualPercent": None,
+      "fileSize": 100
+  }, ctx.token, allow_status={400}, coverage="conflict", **version_exists)
+  api.request("negative version publish fixture", "PUT", f"/admin/api/v1/versions/{version_id}/publish",
+      token=ctx.token, assert_fn=require_data_keys("id", "status"), coverage="update")
+  api.request("negative version edit published", "PUT", f"/admin/api/v1/versions/{version_id}", {
+      "downloadUrl": "https://example.com/negative-updated.exe",
+      "changelog": "should fail",
+      "updateStrategy": "OPTIONAL",
+      "gradualPercent": None,
+      "fileSize": 200
+  }, ctx.token, allow_status={409}, coverage="conflict", **version_status_invalid)
+  api.request("negative version delete published", "DELETE", f"/admin/api/v1/versions/{version_id}",
+      token=ctx.token, allow_status={409}, coverage="conflict", **version_status_invalid)
+
+  api.request("negative notice schedule missing publishAt", "POST", "/admin/api/v1/notices", {
+      "title": "negative notice",
+      "content": "negative",
+      "level": "INFO",
+      "publishType": "SCHEDULED",
+      "publishAt": None,
+      "expireDays": 1
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative audit invalid date range", "GET", "/admin/api/v1/audit-logs?startDate=2099-01-02&endDate=2099-01-01",
+      token=ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative audit missing export", "GET", "/admin/api/v1/audit-logs/export/not-real-export",
+      token=ctx.token, allow_status={400}, coverage="invalid", **bad)
+
+
 def run_suite(api: ApiClient):
   ctx = Context()
   auth_flow(api, ctx)
@@ -710,6 +953,7 @@ def run_suite(api: ApiClient):
       notice_flow,
       audit_export_flow,
       version_flow,
+      negative_matrix_flow,
   ]:
     flow(api, ctx)
   return ctx
@@ -717,11 +961,15 @@ def run_suite(api: ApiClient):
 
 def write_report(api: ApiClient, failed=None):
   REPORT_DIR.mkdir(parents=True, exist_ok=True)
+  coverage_counts: dict[str, int] = {}
+  for item in api.results:
+    coverage_counts[item.coverage] = coverage_counts.get(item.coverage, 0) + 1
   report = {
       "baseUrl": BASE_URL,
       "generatedAt": datetime.now().isoformat(),
       "passed": sum(1 for item in api.results if item.ok),
       "failed": sum(1 for item in api.results if not item.ok),
+      "coverageCounts": coverage_counts,
       "fatal": str(failed) if failed else None,
       "results": [item.__dict__ for item in api.results],
   }
@@ -745,6 +993,7 @@ def main():
   path, report = write_report(api, failed)
   print(f"backend_api_acceptance_report={path}")
   print(f"passed={report['passed']} failed={report['failed']} total={len(api.results)}")
+  print("coverage=" + ",".join(f"{key}:{value}" for key, value in sorted(report["coverageCounts"].items())))
   if failed:
     print(f"fatal={failed}", file=sys.stderr)
     return 1

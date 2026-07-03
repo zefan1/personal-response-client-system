@@ -37,7 +37,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `python3 scripts/acceptance_backend_api.py`
 - Latest passing evidence: 125 calls passed in mock external mode.
   - Latest rerun command: `python3 scripts/acceptance_backend_api.py --no-start`
-  - Latest rerun result: `passed=125 failed=0 total=125`.
+  - Latest rerun result after negative matrix expansion: `passed=157 failed=0 total=157`.
+  - Coverage categories reported by the harness: `conflict:8`, `create:4`, `download:1`, `invalid:13`, `permission:6`, `read:34`, `representative:89`, `update:2`.
 - API mapping coverage audit exists:
   - `python scripts/verify_api_mapping_coverage.py`
   - Latest result: 113 mappings, 113 covered/matched, 0 remaining route gaps, 0 unclassified gaps.
@@ -69,6 +70,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Skill and image real HTTP clients now unwrap OpenAI-compatible `choices[0].message.content` responses before handing business JSON to the existing parsers.
 - Added a local fake external provider plus repeatable `MOCK_EXTERNALS=false` acceptance runner for controlled non-mock verification.
 - Backend API acceptance now covers every mapped route in the current route inventory, including chat recognize/generate/regenerate, help request/resolve, prompt restore, audit export status/download, Skill/image test routes via controlled non-mock acceptance, and draft version delete.
+- Backend API acceptance now also includes a repeatable invalid/permission/conflict matrix covering unauthenticated requests, malformed bearer token, keeper admin denial, bad login, invalid account/customer/chat/config/datasource/analytics/quick-search/notice/audit/version inputs, duplicate skill/quick-search/version guards, disabled datasource sync conflict, and published-version edit/delete conflicts.
 - Database alignment verifier now scans static repository SQL table references and fails if a referenced table is absent from the live smoke schema.
 - Customer `lead_type` writes now normalize unknown values to `PENDING` at the repository boundary, and migration `V53__normalize_customer_lead_types.sql` repairs existing out-of-contract customer enum values. This prevents quick-search `GENERAL` from leaking into the customer table.
 - Renderer smoke now discovers all admin nav sections at runtime instead of checking a fixed representative subset.
@@ -107,8 +109,9 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 - The acceptance harness now covers all 113 mapped HTTP routes in the current route inventory.
 - Mapping coverage audit reports 0 route gaps.
+- Expanded negative branch matrix now passes with 157 total calls and explicit coverage counts for invalid, permission, and conflict branches.
 - Remaining work:
-  - broader invalid/permission/conflict branch matrix
+  - continue extending the invalid/permission/conflict matrix beyond the current production-critical branch set
   - deeper response body assertions for every list/detail/create/edit/delete/statistics/export flow
   - live-provider branch replay once real Skill/image/WeCom credentials are available
 

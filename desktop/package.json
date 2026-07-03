@@ -12,7 +12,7 @@
     "electron:preview": "npm run build && electron .",
     "electron:smoke": "npm run build && node scripts/electron-smoke.mjs",
     "renderer:smoke": "npm run build && node scripts/renderer-smoke.mjs",
-    "package:dir": "npm run build && electron-packager . \"Private Domain Assistant\" --platform=win32 --arch=x64 --out=release --overwrite --asar --ignore=\"(^/src|^/node_modules/\\.cache|^/release|^/scripts|^/electron-builder\\.yml|^/tsconfig.*|^/vite\\.config\\.ts|^/index\\.html)\"",
+    "package:dir": "npm run build && node scripts/package-dir.mjs",
     "package:verify": "npm run package:dir && node scripts/package-verify.mjs"
   },
   "build": {
