@@ -25,7 +25,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest rerun after renderer desktop smoke expansion: passed.
 - Desktop renderer unit tests pass:
   - `cd desktop && npm run test`
-  - Latest result: 12 test files, 89 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, chat-recognition dedupe/concurrency/status/error/event behavior, copy-backfill clipboard/send-confirm/suggestion-toast behavior, help-mode request/resolve/reply event behavior, batch-template customer/template/copy/confirm behavior, and stage-suggestion event/confirm/ignore behavior.
+  - Latest result: 13 test files, 96 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, chat-recognition dedupe/concurrency/status/error/event behavior, copy-backfill clipboard/send-confirm/suggestion-toast behavior, help-mode request/resolve/reply event behavior, batch-template customer/template/copy/confirm behavior, stage-suggestion event/confirm/ignore behavior, and new-lead-toast queue/copy/event behavior.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
@@ -191,10 +191,11 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now also has Vitest/jsdom coverage for help-mode behavior: request dialog validation, help request submission with keeper-note truncation, pending and timeout events, permission/network failure UX, helper queue upsert/offline replay, draft reply limits and editing, helper resolve success/failure, received helper response state, reply-selected emission for helper replies, and response expand/close controls.
 - Desktop now also has Vitest/jsdom coverage for batch-template behavior: unique phone handling and max-size guard, template API loading and cache fallback, bulk customer loading and one-by-one fallback, visible template filters, auto-selection, unavailable-customer skipping, template variable filling, clipboard copy success/failure, local logs, send-confirm dispatch, navigation, pause/resume, completion, and exit reset.
 - Desktop now also has Vitest/jsdom coverage for stage-suggestion behavior: current-profile stage suggestion emission and dedupe, non-current customer pending/flush behavior, pending TTL expiry, confirm-stage success event emission, conflict refresh handling, transient retry exhaustion, and ignore-stage batch resolve with non-blocking backend failure.
+- Desktop now also has Vitest/jsdom coverage for new-lead-toast behavior: invalid/reconnect payload suppression, visible and pending queue limits, auto-dismiss and pending promotion, normalized phone copy success/failure, opening-generation customer selection event, followup tab switch event, pending clear, and cleanup timer cancellation.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification
-  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, customer-profile, reply-suggestion, chat-recognition, copy-backfill, help-mode, batch-template, and stage-suggestion coverage
+  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, customer-profile, reply-suggestion, chat-recognition, copy-backfill, help-mode, batch-template, stage-suggestion, and new-lead-toast coverage
 
 ## Recommended Repair Order
 
