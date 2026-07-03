@@ -15,6 +15,9 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
+- Renderer click smoke passes:
+  - `cd desktop && npm run renderer:smoke`
+  - Covers login, admin section switching, API-backed read/action panels, and desktop workbench switch.
 - Static module verifiers pass:
   - `verify_module_a.py` through `verify_module_h.py`
   - `verify_module_20.py` through `verify_module_33.py`
@@ -100,7 +103,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop renderer now has a login flow and no longer requires manually editing `localStorage.desktop_config.accessToken`.
 - Desktop package now has Vite dev, Electron dev/preview, and Electron smoke scripts.
 - Remaining:
-  - full browser click coverage for every desktop/admin workflow
+  - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - signed/packaged installer verification
   - component/store tests for failure and offline branches
 

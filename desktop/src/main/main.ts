@@ -18,6 +18,8 @@ type OnlineStatusPayload = {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
 const isSmoke = process.env.PDA_ELECTRON_SMOKE === '1';
+const smokeAutoQuit = process.env.PDA_ELECTRON_SMOKE_AUTO_QUIT !== '0';
+const rendererSmoke = process.env.PDA_RENDERER_SMOKE === '1';
 const clipboardImageHistory: ClipboardHistoryItem[] = [];
 let clipboardPollTimer: NodeJS.Timeout | null = null;
 let onlineStatusPollTimer: NodeJS.Timeout | null = null;
@@ -54,8 +56,64 @@ function createWindow() {
   }
   if (isSmoke) {
     mainWindow.webContents.once('did-finish-load', () => {
-      app.quit();
+      if (rendererSmoke && mainWindow) {
+        void runRendererSmoke(mainWindow);
+        return;
+      }
+      if (smokeAutoQuit) {
+        setTimeout(() => app.quit(), 50);
+      }
     });
+  }
+}
+
+async function runRendererSmoke(window: BrowserWindow) {
+  try {
+    await window.webContents.executeJavaScript(`
+      (async () => {
+        const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const findButton = (text) => [...document.querySelectorAll('button')].find((item) => item.textContent.includes(text));
+        const inputByLabel = (text) => {
+          const label = [...document.querySelectorAll('label')].find((item) => item.textContent.includes(text));
+          return label ? label.querySelector('input,select,textarea') : null;
+        };
+        const setValue = (element, value) => {
+          element.value = value;
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        const waitForText = async (text, timeout = 15000) => {
+          const started = Date.now();
+          while (Date.now() - started < timeout) {
+            if (document.body.innerText.includes(text)) return;
+            await delay(100);
+          }
+          throw new Error('missing text: ' + text);
+        };
+        await waitForText('私域辅助系统');
+        setValue(inputByLabel('API 地址'), 'http://localhost:8080');
+        setValue(inputByLabel('账号'), 'admin');
+        setValue(inputByLabel('密码'), 'admin123');
+        const mode = inputByLabel('入口');
+        if (mode) setValue(mode, 'admin');
+        findButton('登录').click();
+        await waitForText('健康与系统配置');
+        for (const section of ['技能场景绑定', 'AI 与外部环境', '数据源与字段映射', '账号权限', '公告、版本、审计']) {
+          findButton(section).click();
+          await waitForText(section);
+          await waitForText('数据读取');
+          await waitForText('操作入口');
+        }
+        findButton('工作台').click();
+        await waitForText('桌面工作台');
+        return true;
+      })();
+    `);
+    console.log('renderer_smoke=passed');
+    app.quit();
+  } catch (error) {
+    console.error('renderer_smoke=failed', error);
+    app.exit(1);
   }
 }
 

@@ -10,7 +10,8 @@
     "dev": "vite --host 127.0.0.1",
     "electron:dev": "npm run build && set VITE_DEV_SERVER_URL=http://127.0.0.1:5173&& electron .",
     "electron:preview": "npm run build && electron .",
-    "electron:smoke": "npm run build && node scripts/electron-smoke.mjs"
+    "electron:smoke": "npm run build && node scripts/electron-smoke.mjs",
+    "renderer:smoke": "npm run build && node scripts/renderer-smoke.mjs"
   },
   "dependencies": {
     "electron": "^31.7.7",
