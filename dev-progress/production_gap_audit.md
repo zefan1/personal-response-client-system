@@ -12,6 +12,9 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest result: `BUILD SUCCESS`, `Tests run: 11, Failures: 0, Errors: 0, Skipped: 0`.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
+- Desktop build and Electron smoke pass:
+  - `cd desktop && npm run build`
+  - `cd desktop && npm run electron:smoke`
 - Static module verifiers pass:
   - `verify_module_a.py` through `verify_module_h.py`
   - `verify_module_20.py` through `verify_module_33.py`
@@ -95,10 +98,10 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop modules exist under `desktop/src/renderer/modules`.
 - Vite page can be served and browser smoke has covered login plus representative admin sections.
 - Desktop renderer now has a login flow and no longer requires manually editing `localStorage.desktop_config.accessToken`.
-- Desktop package has Vite dev preview, but no packaged Electron launch script in `package.json`.
+- Desktop package now has Vite dev, Electron dev/preview, and Electron smoke scripts.
 - Remaining:
   - full browser click coverage for every desktop/admin workflow
-  - packaged Electron launch/build verification
+  - signed/packaged installer verification
   - component/store tests for failure and offline branches
 
 ## Recommended Repair Order

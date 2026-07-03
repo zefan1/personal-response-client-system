@@ -17,6 +17,7 @@ type OnlineStatusPayload = {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
+const isSmoke = process.env.PDA_ELECTRON_SMOKE === '1';
 const clipboardImageHistory: ClipboardHistoryItem[] = [];
 let clipboardPollTimer: NodeJS.Timeout | null = null;
 let onlineStatusPollTimer: NodeJS.Timeout | null = null;
@@ -50,6 +51,11 @@ function createWindow() {
     void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL as string);
   } else {
     void mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  }
+  if (isSmoke) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      app.quit();
+    });
   }
 }
 
