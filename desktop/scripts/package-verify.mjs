@@ -111,6 +111,25 @@ function windowsAuthenticodeStatus(path) {
   }
 }
 
+function macCodeSignStatus(path) {
+  if (process.platform !== 'darwin' || !existsSync(path)) {
+    return null;
+  }
+  const verify = spawnSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', path], { encoding: 'utf8' });
+  const display = spawnSync('codesign', ['--display', '--verbose=4', path], { encoding: 'utf8' });
+  const output = `${display.stdout || ''}${display.stderr || ''}`;
+  const authority = output
+    .split(/\r?\n/)
+    .filter((line) => line.trim().startsWith('Authority='))
+    .map((line) => line.trim().replace(/^Authority=/, ''));
+  return {
+    status: verify.status === 0 ? 'Valid' : 'Invalid',
+    statusMessage: (verify.stderr || verify.stdout || '').trim(),
+    signed: verify.status === 0,
+    authority
+  };
+}
+
 const failures = [];
 for (const [label, path] of [['release directory', platformDir], ['application executable', executablePath], ['application asar', asarPath]]) {
   if (!existsSync(path)) {
@@ -121,12 +140,19 @@ for (const [label, path] of [['release directory', platformDir], ['application e
 const files = existsSync(platformDir) ? readdirSync(platformDir) : [];
 const signConfig = signingConfiguration();
 const signature = windowsAuthenticodeStatus(executablePath);
+const macSignature = macCodeSignStatus(executablePath);
 const signed = process.platform === 'win32'
   ? Boolean(signature?.signed)
-  : false;
+  : process.platform === 'darwin'
+    ? Boolean(macSignature?.signed)
+    : false;
 const requireSigned = process.env.PDA_REQUIRE_SIGNED_PACKAGE === '1';
 if (requireSigned && !signed) {
   failures.push(`signed package required but executable is not signed: ${executablePath}`);
+}
+const requireNotarized = process.env.PDA_REQUIRE_NOTARIZED_PACKAGE === '1';
+if (process.platform === 'darwin' && requireNotarized && !signConfig.notarizationConfigured) {
+  failures.push('notarized package required but Apple notarization credentials are not configured');
 }
 
 const report = {
@@ -139,8 +165,10 @@ const report = {
   asarBytes: existsSync(asarPath) ? statSync(asarPath).size : 0,
   signed,
   signature,
+  macSignature,
   signingConfiguration: signConfig,
   requireSigned,
+  requireNotarized,
   signingNote: signed
     ? 'Executable signature is valid according to local platform verification.'
     : 'No valid production signature was detected on this local package. Set PDA_REQUIRE_SIGNED_PACKAGE=1 in release CI to fail unsigned artifacts.'

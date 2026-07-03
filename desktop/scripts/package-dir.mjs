@@ -6,6 +6,8 @@ import { join } from 'node:path';
 const root = process.cwd();
 const electronVersion = '40.10.2';
 const cacheRoot = join(process.env.LOCALAPPDATA ?? '', 'electron', 'Cache');
+const targetPlatform = process.env.PDA_PACKAGE_PLATFORM ?? process.platform;
+const targetArch = process.env.PDA_PACKAGE_ARCH ?? 'x64';
 
 function findElectronZipDir() {
   if (!existsSync(cacheRoot)) {
@@ -29,8 +31,8 @@ const packagerBin = join(root, 'node_modules', '@electron', 'packager', 'bin', '
 const args = [
   '.',
   'Private Domain Assistant',
-  '--platform=win32',
-  '--arch=x64',
+  `--platform=${targetPlatform}`,
+  `--arch=${targetArch}`,
   '--out=release',
   '--overwrite',
   '--asar',
