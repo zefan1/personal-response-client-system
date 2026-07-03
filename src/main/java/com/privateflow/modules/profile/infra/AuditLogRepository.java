@@ -4,7 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Repository;
 
-@Repository
+@Repository("profileAuditLogRepository")
 public class AuditLogRepository {
 
   private final JdbcTemplate jdbcTemplate;

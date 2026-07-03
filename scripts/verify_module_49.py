@@ -12,6 +12,7 @@ errors = []
 required_files = [
     "src/main/java/com/privateflow/modules/notices/NoticeController.java",
     "src/main/java/com/privateflow/modules/notices/NoticeService.java",
+    "src/main/java/com/privateflow/modules/notices/NoticeScheduleProperties.java",
     "src/main/java/com/privateflow/modules/notices/NoticeRepository.java",
     "src/main/java/com/privateflow/modules/notices/SystemNotice.java",
     "src/main/java/com/privateflow/modules/notices/NoticeCreateRequest.java",
@@ -55,7 +56,6 @@ for token in [
     "createAutoNotice(String title, String content, String level, Duration ttl)",
     "stopAutoNotice(String contentKeyword)",
     "repository.activeAutoContentExists",
-    "notice.scan_interval_s",
     "notice.max_title_chars",
     "notice.max_content_chars",
     "notice.default_expire_days",
@@ -73,6 +73,17 @@ for token in [
 ]:
     if token not in service:
         errors.append(f"NoticeService missing {token}")
+
+schedule_properties = read("src/main/java/com/privateflow/modules/notices/NoticeScheduleProperties.java")
+for token in [
+    "NoticeScheduleProperties",
+    "SystemConfigRepository",
+    "notice.scan_interval_s",
+    "scanIntervalMs()",
+    "return 30",
+]:
+    if token not in schedule_properties:
+        errors.append(f"NoticeScheduleProperties missing {token}")
 
 repository = read("src/main/java/com/privateflow/modules/notices/NoticeRepository.java")
 for token in [

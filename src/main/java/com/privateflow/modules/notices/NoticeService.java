@@ -163,7 +163,7 @@ public class NoticeService {
     });
   }
 
-  @Scheduled(fixedDelayString = "#{@noticeService.scanIntervalMs()}")
+  @Scheduled(fixedDelayString = "#{@noticeScheduleProperties.scanIntervalMs()}")
   @Transactional
   public void scheduledPublishScan() {
     publishDueNotices();
@@ -208,10 +208,6 @@ public class NoticeService {
       return;
     }
     repository.stopAutoByContentKeyword(contentKeyword.trim());
-  }
-
-  public long scanIntervalMs() {
-    return intConfig("notice.scan_interval_s", 30) * 1000L;
   }
 
   private NoticeCreateRequest validateCreate(NoticeCreateRequest request) {
