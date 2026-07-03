@@ -234,6 +234,60 @@ def require_list_container(*possible_keys):
   return check
 
 
+def require_data_contains(**expected):
+  def check(payload):
+    body = data(payload)
+    if not isinstance(body, dict):
+      raise AssertionError("data is not an object")
+    mismatches = []
+    for key, value in expected.items():
+      if body.get(key) != value:
+        mismatches.append(f"{key} expected {value!r} actual {body.get(key)!r}")
+    if mismatches:
+      raise AssertionError("; ".join(mismatches))
+  return check
+
+
+def require_list_item(match: dict, *possible_keys):
+  def check(payload):
+    body = data(payload)
+    if isinstance(body, list):
+      items = body
+    elif isinstance(body, dict):
+      items = None
+      for key in possible_keys or ("list", "items", "datasources", "categories", "values", "logs", "versions", "records"):
+        if isinstance(body.get(key), list):
+          items = body.get(key)
+          break
+    else:
+      items = None
+    if not isinstance(items, list):
+      raise AssertionError("response does not contain a list")
+    for item in items:
+      if isinstance(item, dict) and all(item.get(key) == value for key, value in match.items()):
+        return
+    raise AssertionError("list missing item: " + json.dumps(match, ensure_ascii=False))
+  return check
+
+
+def require_non_empty_list(*possible_keys):
+  def check(payload):
+    body = data(payload)
+    if isinstance(body, list):
+      items = body
+    elif isinstance(body, dict):
+      items = None
+      for key in possible_keys or ("list", "items", "datasources", "categories", "logs", "versions"):
+        if isinstance(body.get(key), list):
+          items = body.get(key)
+          break
+    else:
+      items = None
+    if not isinstance(items, list) or not items:
+      raise AssertionError("expected non-empty list")
+  return check
+
+
 def require_error(code):
   return {"expect_success": False, "expect_error_code": code}
 
@@ -317,17 +371,19 @@ def account_flow(api: ApiClient, ctx: Context):
       "displayName": "验收组长",
       "role": "LEADER",
       "leaderId": None
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_keys("id"))
   account_id = data(created)["id"]
   ctx.created["account_id"] = account_id
-  api.request("account list filter", "GET", f"/admin/api/v1/accounts?keyword={phone}", token=ctx.token)
+  api.request("account list filter", "GET", f"/admin/api/v1/accounts?keyword={phone}", token=ctx.token,
+      assert_fn=require_list_item({"id": account_id, "phone": phone}))
   api.request("account update", "PUT", f"/admin/api/v1/accounts/{account_id}", {
       "displayName": "验收组长改",
       "role": "LEADER",
       "leaderId": None,
       "isEnabled": True
-  }, ctx.token)
-  api.request("account toggle disabled", "PUT", f"/admin/api/v1/accounts/{account_id}/toggle", {"isEnabled": False}, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(id=account_id, role="LEADER", isEnabled=True))
+  api.request("account toggle disabled", "PUT", f"/admin/api/v1/accounts/{account_id}/toggle", {"isEnabled": False}, ctx.token,
+      assert_fn=require_data_contains(id=account_id, isEnabled=False))
   api.request("account reset password", "PUT", f"/admin/api/v1/accounts/{account_id}/reset-password", {"newPassword": "pass5678"}, ctx.token)
   api.request("account delete", "DELETE", f"/admin/api/v1/accounts/{account_id}", token=ctx.token)
 
@@ -338,7 +394,7 @@ def account_flow(api: ApiClient, ctx: Context):
       "displayName": "楠屾敹姹傚姪缁勯暱",
       "role": "LEADER",
       "leaderId": None
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_keys("id"))
   leader_id = data(leader)["id"]
   keeper_phone = "135%08d" % (int(ctx.ts[-8:]) % 100000000)
   keeper = api.request("account create help keeper", "POST", "/admin/api/v1/accounts", {
@@ -347,7 +403,7 @@ def account_flow(api: ApiClient, ctx: Context):
       "displayName": "楠屾敹姹傚姪绠″",
       "role": "KEEPER",
       "leaderId": leader_id
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(role="KEEPER", leaderId=leader_id))
   ctx.created["help_leader_id"] = leader_id
   ctx.created["help_keeper_id"] = data(keeper)["id"]
   ctx.created["help_keeper_phone"] = keeper_phone
@@ -413,17 +469,19 @@ def skill_flow(api: ApiClient, ctx: Context):
       "scene": "OPENING",
       "leadType": "PENDING",
       "priority": 99
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(skillId=code, scene="OPENING", leadType="PENDING", priority=99))
   skill_id = data(created)["id"]
-  api.request("skill binding list filtered", "GET", "/admin/api/v1/skills?scene=OPENING&leadType=PENDING", token=ctx.token)
+  api.request("skill binding list filtered", "GET", "/admin/api/v1/skills?scene=OPENING&leadType=PENDING", token=ctx.token,
+      assert_fn=require_list_item({"id": skill_id, "skillId": code}))
   api.request("skill binding update", "PUT", f"/admin/api/v1/skills/{skill_id}", {
       "skillId": code,
       "skillName": "验收技能改",
       "scene": "OPENING",
       "leadType": "PENDING",
       "priority": 98
-  }, ctx.token)
-  api.request("skill binding toggle", "PUT", f"/admin/api/v1/skills/{skill_id}/toggle", {"enabled": False}, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(id=skill_id, skillId=code, priority=98))
+  api.request("skill binding toggle", "PUT", f"/admin/api/v1/skills/{skill_id}/toggle", {"enabled": False}, ctx.token,
+      assert_fn=require_data_contains(id=skill_id, enabled=False))
   api.request("skill binding delete", "DELETE", f"/admin/api/v1/skills/{skill_id}", token=ctx.token)
 
 
@@ -466,22 +524,24 @@ def datasource_flow(api: ApiClient, ctx: Context):
       "sheetId": "sheet-" + ctx.ts,
       "sourceTable": source_table,
       "description": "acceptance"
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_keys("id"))
   ds_id = data(created)["id"]
   api.request("datasource update", "PUT", f"/admin/api/v1/datasources/{ds_id}", {
       "name": name + "-updated",
       "sheetId": "sheet-" + ctx.ts,
       "sourceTable": source_table,
       "description": "acceptance updated"
-  }, ctx.token)
-  api.request("datasource mappings get", "GET", f"/admin/api/v1/datasources/{ds_id}/mappings", token=ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(id=ds_id, name=name + "-updated", sourceTable=source_table))
+  api.request("datasource mappings get", "GET", f"/admin/api/v1/datasources/{ds_id}/mappings", token=ctx.token,
+      assert_fn=require_list_container("mappings"))
   api.request("datasource mappings save", "PUT", f"/admin/api/v1/datasources/{ds_id}/mappings", {
       "mappings": [
           {"id": None, "sourceField": "phone", "targetField": "phone", "enabled": True},
           {"id": None, "sourceField": "nickname", "targetField": "nickname", "enabled": True}
       ]
-  }, ctx.token)
-  api.request("datasource mapping versions", "GET", f"/admin/api/v1/datasources/{ds_id}/mappings/versions", token=ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(mappingCount=2, version=1))
+  api.request("datasource mapping versions", "GET", f"/admin/api/v1/datasources/{ds_id}/mappings/versions", token=ctx.token,
+      assert_fn=require_non_empty_list("versions"))
   api.request("datasource mapping restore", "POST", f"/admin/api/v1/datasources/{ds_id}/mappings/restore", {"version": 1}, ctx.token)
   compare_payload = api.request("datasource mapping compare", "GET", f"/admin/api/v1/datasources/{ds_id}/mappings/compare", token=ctx.token)
   compare_data = data(compare_payload)
@@ -491,8 +551,10 @@ def datasource_flow(api: ApiClient, ctx: Context):
   columns_data = data(columns_payload)
   if not columns_data.get("columns"):
     raise AssertionError("datasource columns did not include mapped/source columns")
-  api.request("datasource replace", "PUT", f"/admin/api/v1/datasources/{ds_id}/replace", {"sheetId": "sheet-replaced-" + ctx.ts}, ctx.token)
-  api.request("datasource toggle off", "PUT", f"/admin/api/v1/datasources/{ds_id}/toggle", {"enabled": False}, ctx.token)
+  api.request("datasource replace", "PUT", f"/admin/api/v1/datasources/{ds_id}/replace", {"sheetId": "sheet-replaced-" + ctx.ts}, ctx.token,
+      assert_fn=require_data_contains(mappingPreserved=True, newSheetId="sheet-replaced-" + ctx.ts, oldSheetId="sheet-" + ctx.ts))
+  api.request("datasource toggle off", "PUT", f"/admin/api/v1/datasources/{ds_id}/toggle", {"enabled": False}, ctx.token,
+      assert_fn=require_data_contains(id=ds_id, enabled=False))
   api.request("datasource sync disabled fails", "POST", f"/admin/api/v1/datasources/{ds_id}/sync", token=ctx.token, expect_success=False, allow_status={409})
   api.request("datasource delete", "DELETE", f"/admin/api/v1/datasources/{ds_id}", token=ctx.token)
   csv = b"phone,nickname\n13900000001,acceptance\n"
@@ -515,7 +577,7 @@ def quick_search_flow(api: ApiClient, ctx: Context):
       "imageUrl": None,
       "sortOrder": 999,
       "enabled": True
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_keys("id"))
   item_id = data(created)["id"]
   api.request("quick search update", "PUT", f"/admin/api/v1/quick-search/items/{item_id}", {
       "title": "验收快捷改",
@@ -523,11 +585,14 @@ def quick_search_flow(api: ApiClient, ctx: Context):
       "content": "验收话术改",
       "sortOrder": 998,
       "enabled": True
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(id=item_id, shortcutCode=shortcut, sortOrder=998, enabled=True))
+  api.request("quick search admin list after update", "GET", "/admin/api/v1/quick-search/items", token=ctx.token,
+      assert_fn=require_list_item({"id": item_id, "shortcutCode": shortcut}))
   png = bytes.fromhex("89504e470d0a1a0a0000000d49484452")
   api.request("quick search image upload", "POST", "/admin/api/v1/upload/image", token=ctx.token,
       files={"file": ("acceptance.png", "image/png", png)})
-  api.request("quick search toggle", "PUT", f"/admin/api/v1/quick-search/items/{item_id}/toggle", token=ctx.token)
+  api.request("quick search toggle", "PUT", f"/admin/api/v1/quick-search/items/{item_id}/toggle", token=ctx.token,
+      assert_fn=require_data_keys("isEnabled"))
   api.request("quick search delete", "DELETE", f"/admin/api/v1/quick-search/items/{item_id}", token=ctx.token)
 
 
@@ -544,7 +609,7 @@ def followup_flow(api: ApiClient, ctx: Context):
       "actionConfig": "{\"level\":\"WARN\"}",
       "priority": 90,
       "enabled": True
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_keys("id"))
   rule_id = data(created)["id"]
   api.request("rule update", "PUT", f"/admin/api/v1/rules/{rule_id}", {
       "name": "验收规则改" + ctx.ts[-6:],
@@ -553,8 +618,9 @@ def followup_flow(api: ApiClient, ctx: Context):
       "actionConfig": "{\"level\":\"WARN\"}",
       "priority": 91,
       "enabled": True
-  }, ctx.token)
-  api.request("rule toggle", "PUT", f"/admin/api/v1/rules/{rule_id}/toggle", {"enabled": False}, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(id=rule_id, priority=91, enabled=True))
+  api.request("rule toggle", "PUT", f"/admin/api/v1/rules/{rule_id}/toggle", {"enabled": False}, ctx.token,
+      assert_fn=require_data_contains(id=rule_id, enabled=False))
   api.request("rule delete", "DELETE", f"/admin/api/v1/rules/{rule_id}", token=ctx.token)
 
 
@@ -647,9 +713,10 @@ def notice_flow(api: ApiClient, ctx: Context):
       "publishType": "IMMEDIATE",
       "publishAt": None,
       "expireDays": 1
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(level="INFO", status="PUBLISHED"))
   notice_id = data(created)["id"]
-  api.request("notice stop", "PUT", f"/admin/api/v1/notices/{notice_id}/stop", token=ctx.token)
+  api.request("notice stop", "PUT", f"/admin/api/v1/notices/{notice_id}/stop", token=ctx.token,
+      assert_fn=require_data_contains(id=notice_id, isStopped=True))
   api.request("notice delete", "DELETE", f"/admin/api/v1/notices/{notice_id}", token=ctx.token)
   publish_at = (datetime.now() + timedelta(minutes=5)).replace(microsecond=0).isoformat()
   scheduled = api.request("notice create scheduled", "POST", "/admin/api/v1/notices", {
@@ -659,7 +726,7 @@ def notice_flow(api: ApiClient, ctx: Context):
       "publishType": "SCHEDULED",
       "publishAt": publish_at,
       "expireDays": 1
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(level="WARN", status="SCHEDULED"))
   scheduled_id = data(scheduled)["id"]
   api.request("notice update scheduled", "PUT", f"/admin/api/v1/notices/{scheduled_id}", {
       "title": "验收定时公告改" + ctx.ts[-6:],
@@ -667,8 +734,9 @@ def notice_flow(api: ApiClient, ctx: Context):
       "level": "WARN",
       "publishAt": publish_at,
       "expireDays": 2
-  }, ctx.token)
-  api.request("notice stop scheduled", "PUT", f"/admin/api/v1/notices/{scheduled_id}/stop", token=ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(id=scheduled_id, level="WARN", status="SCHEDULED"))
+  api.request("notice stop scheduled", "PUT", f"/admin/api/v1/notices/{scheduled_id}/stop", token=ctx.token,
+      assert_fn=require_data_contains(id=scheduled_id, isStopped=True))
   api.request("notice delete scheduled", "DELETE", f"/admin/api/v1/notices/{scheduled_id}", token=ctx.token)
 
 
@@ -701,7 +769,7 @@ def version_flow(api: ApiClient, ctx: Context):
       "updateStrategy": "OPTIONAL",
       "gradualPercent": None,
       "fileSize": 12345
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(version=version, platform="WINDOWS", status="DRAFT"))
   version_id = data(created)["id"]
   api.request("version update", "PUT", f"/admin/api/v1/versions/{version_id}", {
       "downloadUrl": "https://example.com/installer-updated.exe",
@@ -709,21 +777,22 @@ def version_flow(api: ApiClient, ctx: Context):
       "updateStrategy": "OPTIONAL",
       "gradualPercent": None,
       "fileSize": 23456
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(id=version_id, downloadUrl="https://example.com/installer-updated.exe", updateStrategy="OPTIONAL"))
   exe = b"MZacceptance"
   api.request("version upload", "POST", "/admin/api/v1/versions/upload?platform=WINDOWS", token=ctx.token,
       files={"file": ("acceptance.exe", "application/octet-stream", exe)})
-  api.request("version publish", "PUT", f"/admin/api/v1/versions/{version_id}/publish", token=ctx.token)
+  api.request("version publish", "PUT", f"/admin/api/v1/versions/{version_id}/publish", token=ctx.token,
+      assert_fn=require_data_contains(id=version_id, status="PUBLISHED"))
   api.request("desktop version report", "POST", "/api/v1/desktop/version-report", {
       "clientId": "acceptance-" + ctx.ts,
       "version": version,
       "platform": "WINDOWS",
       "osVersion": "Windows acceptance"
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(ok=True))
   api.request("version revoke", "PUT", f"/admin/api/v1/versions/{version_id}/revoke", {
       "reason": "acceptance cleanup",
       "alternativeVersion": None
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(id=version_id, status="REVOKED"))
   draft_version = f"8.{int(ctx.ts[-4:-2])}.{int(ctx.ts[-2:])}"
   draft = api.request("version create draft for delete", "POST", "/admin/api/v1/versions", {
       "version": draft_version,
@@ -733,7 +802,7 @@ def version_flow(api: ApiClient, ctx: Context):
       "updateStrategy": "OPTIONAL",
       "gradualPercent": None,
       "fileSize": 12345
-  }, ctx.token)
+  }, ctx.token, assert_fn=require_data_contains(version=draft_version, platform="MAC", status="DRAFT"))
   draft_id = data(draft)["id"]
   api.request("version delete draft", "DELETE", f"/admin/api/v1/versions/{draft_id}", token=ctx.token)
 
