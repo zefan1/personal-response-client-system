@@ -25,7 +25,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest rerun after renderer desktop smoke expansion: passed.
 - Desktop renderer unit tests pass:
   - `cd desktop && npm run test`
-  - Latest result: 7 test files, 49 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, and reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior.
+  - Latest result: 8 test files, 56 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, and chat-recognition dedupe/concurrency/status/error/event behavior.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
@@ -185,10 +185,12 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now also has Vitest/jsdom coverage for followup-list behavior: API grouping into tabs, loaded-data stale handling, primary reminder selection and cross-tab row movement, reminder flash cleanup, new-lead upsert behavior, cross-tab selection, batch template event emission, customer navigation, and new-reminder banner tab switching.
 - Desktop now also has Vitest/jsdom coverage for customer-profile behavior: search truncation and single-result open, cached profile fallback, alert refresh, online profile caching, candidate selection/dismissal, generate-reply event flow, edit-save table sync prompts, conflict and pending-save UX, field/stage suggestion resolution, websocket suggestion merging, abnormal alert updates, stage updates, and send-confirm refresh.
 - Desktop now also has Vitest/jsdom coverage for reply-suggestion behavior: recognize skeleton stages, multiple-match pause, timeout/image-failure stops, recognize result rendering, abnormal alert refresh, reply-selected masking, fallback-mode automatic recovery and retry exhaustion, manual regenerate history/help hints, missing-customer/login-expired failure UX, leader-help request lifecycle, profile suggestion batch resolution, and abnormal alert acknowledgement handling.
+- Desktop now also has Vitest/jsdom coverage for chat-recognition behavior: exact and multiple-match event routing, one-second duplicate recognition suppression, concurrent recognition guard with manual screenshot override, image-service DOWN text-mode fallback, clipboard-image ignore rules, image-failure fallback events, and network timeout events.
+- Fixed chat-recognition concurrency control so the pending guard is set before async content hashing; rapid duplicate user actions can no longer pass through the guard before the first request reaches the API client.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification
-  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, customer-profile, and reply-suggestion coverage
+  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, customer-profile, reply-suggestion, and chat-recognition coverage
 
 ## Recommended Repair Order
 

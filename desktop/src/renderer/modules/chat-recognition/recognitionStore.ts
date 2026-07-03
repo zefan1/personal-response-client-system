@@ -31,12 +31,14 @@ export async function triggerRecognize(source: RecognizeSource, content: Recogni
     recognitionState.toast = '上一条请求正在处理中';
     return;
   }
-  const contentMd5 = await digest(JSON.stringify(content));
-  if (contentMd5 === recognitionState.lastRequestContentMd5 && Date.now() - recognitionState.lastRequestTime < 1000) {
-    return;
-  }
   recognitionState.isRecognizePending = true;
   recognitionState.lastRequestSource = source;
+  const contentMd5 = await digest(JSON.stringify(content));
+  if (contentMd5 === recognitionState.lastRequestContentMd5 && Date.now() - recognitionState.lastRequestTime < 1000) {
+    recognitionState.isRecognizePending = false;
+    recognitionState.lastRequestSource = null;
+    return;
+  }
   recognitionState.lastRequestContentMd5 = contentMd5;
   recognitionState.lastRequestTime = Date.now();
   eventBus.emit('recognize:start', { source });
