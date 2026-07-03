@@ -25,7 +25,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest rerun after renderer desktop smoke expansion: passed.
 - Desktop renderer unit tests pass:
   - `cd desktop && npm run test`
-  - Latest result: 8 test files, 56 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, and chat-recognition dedupe/concurrency/status/error/event behavior.
+  - Latest result: 9 test files, 64 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, chat-recognition dedupe/concurrency/status/error/event behavior, and copy-backfill clipboard/send-confirm/suggestion-toast behavior.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
@@ -187,10 +187,11 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now also has Vitest/jsdom coverage for reply-suggestion behavior: recognize skeleton stages, multiple-match pause, timeout/image-failure stops, recognize result rendering, abnormal alert refresh, reply-selected masking, fallback-mode automatic recovery and retry exhaustion, manual regenerate history/help hints, missing-customer/login-expired failure UX, leader-help request lifecycle, profile suggestion batch resolution, and abnormal alert acknowledgement handling.
 - Desktop now also has Vitest/jsdom coverage for chat-recognition behavior: exact and multiple-match event routing, one-second duplicate recognition suppression, concurrent recognition guard with manual screenshot override, image-service DOWN text-mode fallback, clipboard-image ignore rules, image-failure fallback events, and network timeout events.
 - Fixed chat-recognition concurrency control so the pending guard is set before async content hashing; rapid duplicate user actions can no longer pass through the guard before the first request reaches the API client.
+- Desktop now also has Vitest/jsdom coverage for copy-backfill behavior: empty reply rejection, clipboard success/failure branches, silent send-confirm dispatch, fallback direction mapping, aborting stale send-confirm requests, suggestion toast show/reopen/close/auto-collapse, single and batch suggestion resolution, completion hiding, and resolve-failure recovery.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification
-  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, customer-profile, reply-suggestion, and chat-recognition coverage
+  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, customer-profile, reply-suggestion, chat-recognition, and copy-backfill coverage
 
 ## Recommended Repair Order
 
