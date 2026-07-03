@@ -89,7 +89,7 @@ async function saveWithRetries(input: SaveProfileInput): Promise<SaveResult> {
   const config = loadDesktopConfig();
   for (let attempt = 0; attempt <= config.saveMaxRetries; attempt += 1) {
     const result = await tryPutProfile(input);
-    if (result.status === 'OK' || result.status === 'CONFLICT') {
+    if (result.status === 'OK' || result.status === 'CONFLICT' || result.status === 'GIVE_UP') {
       return result;
     }
     if (attempt === 1) {
