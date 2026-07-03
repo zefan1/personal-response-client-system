@@ -10,8 +10,9 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Backend compiles and runs Java tests with Java 17:
   - `mvn -Dstyle.color=never clean test`
   - Latest focused rerun: `mvn -Dstyle.color=never -Dtest=AiConfigControllerTest test`, `BUILD SUCCESS`, `Tests run: 10, Failures: 0, Errors: 0, Skipped: 0`.
-  - Latest full-suite result after AI config tests: `mvn -Dstyle.color=never test`, `BUILD SUCCESS`, `Tests run: 70, Failures: 0, Errors: 0, Skipped: 0`.
-  - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AccountAdminController list/create/update/toggle/reset/delete/error mapping, AuditLogController list/actions/export/status/download/error mapping, NoticeController list/create/update/stop/delete/active/error mapping, QuickSearchAdminController list/create/update/toggle/delete/upload/error mapping, SkillAdminController list/create/update/toggle/delete/available/test/analytics/error mapping, AiConfigController Skill/Image environment CRUD/activate/delete/test and prompt version restore/error mapping, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
+  - Latest focused analytics rerun: `mvn -Dstyle.color=never -Dtest=AnalyticsControllerTest test`, `BUILD SUCCESS`, `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`.
+  - Latest full-suite result after analytics tests: `mvn -Dstyle.color=never test`, `BUILD SUCCESS`, `Tests run: 75, Failures: 0, Errors: 0, Skipped: 0`.
+  - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AnalyticsController overview/funnels/staff/sources/stages/health/lifecycle/risks/content-ranking binding and error mapping, AccountAdminController list/create/update/toggle/reset/delete/error mapping, AuditLogController list/actions/export/status/download/error mapping, NoticeController list/create/update/stop/delete/active/error mapping, QuickSearchAdminController list/create/update/toggle/delete/upload/error mapping, SkillAdminController list/create/update/toggle/delete/available/test/analytics/error mapping, AiConfigController Skill/Image environment CRUD/activate/delete/test and prompt version restore/error mapping, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
   - Latest rerun after offline Vitest coverage: passed.
@@ -94,12 +95,13 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Java tests now also include Skill admin controller MockMvc coverage for scene/leadType filters, invalid enum query handling, create/update/toggle/delete, available skills, Skill test responses, analytics filters, and SkillAdminException bad request mapping.
 - Java tests now also include Audit log controller MockMvc coverage for list query construction, invalid date handling, action metadata, export request construction, export status, CSV download headers/body, and export error mapping.
 - Java tests now also include AI config controller MockMvc coverage for Skill/Image environment list/create/update/activate/delete/test paths, validation/service error mapping, prompt version listing, prompt restore, and unsupported prompt type handling.
+- Java tests now also include Analytics controller MockMvc coverage for all nine admin report endpoints, days/leadType/caller query binding, returned payload wrapping, invalid `days` bad request handling, and service permission failure mapping to 403.
 
 ## Hard Production Gaps
 
 ### P0 - No Real Java Test Coverage
 
-- Maven now runs 70 Java tests covering AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AccountAdminController, AuditLogController, NoticeController, QuickSearchAdminController, SkillAdminController, AiConfigController, DesktopVersionController, and DesktopVersionRepository.
+- Maven now runs 75 Java tests covering AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AnalyticsController, AccountAdminController, AuditLogController, NoticeController, QuickSearchAdminController, SkillAdminController, AiConfigController, DesktopVersionController, and DesktopVersionRepository.
 - Remaining before production:
   - controller integration tests for every remaining API group beyond the current high-risk version API coverage
   - broader service tests for failure branches
