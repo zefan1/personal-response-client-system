@@ -41,8 +41,9 @@ This progress card tracks backend API acceptance work. It does not certify the S
 wsl -d Ubuntu -- bash -lc 'cd /mnt/c/Users/85314/Desktop/私域工具/私域辅助系统 && python3 scripts/acceptance_backend_api.py'
 ```
 
-- Result after admin frontend/CORS work: 99 passed, 0 failed.
-- Report: `.tools/acceptance/backend_api_acceptance_20260703121721.json`.
+- Result after API coverage expansion: 108 passed, 0 failed.
+- Report: `.tools/acceptance/backend_api_acceptance_20260703125646.json`.
+- API mapping coverage audit: `python scripts/verify_api_mapping_coverage.py` reports 113 mappings, 101 covered/matched, 12 classified remaining gaps, 0 unclassified gaps.
 - Browser smoke: login at `http://127.0.0.1:5173/` using `admin/admin123`, then checked health/config, skill bindings, AI/external environments, datasource mappings, accounts, notices/versions/audit sections.
 
 ## Validation Command

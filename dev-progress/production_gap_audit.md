@@ -20,7 +20,10 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `bash scripts/smoke_backend_wsl.sh`
 - Backend API acceptance harness exists:
   - `python3 scripts/acceptance_backend_api.py`
-- Latest passing evidence: 99 calls passed in mock external mode.
+- Latest passing evidence: 108 calls passed in mock external mode.
+- API mapping coverage audit exists:
+  - `python scripts/verify_api_mapping_coverage.py`
+  - Latest result: 113 mappings, 101 covered/matched, 12 classified remaining gaps, 0 unclassified gaps.
 - Browser admin smoke passed against the Vite renderer and local backend:
   - URL: `http://127.0.0.1:5173/`
   - Login: `admin/admin123`
@@ -69,12 +72,13 @@ This repository is not production-complete yet. The current evidence proves a ru
 ### P1 - API Behavior Coverage Still Incomplete
 
 - The acceptance harness covers representative flows, not all 115 HTTP mappings and every invalid/permission/conflict branch.
+- Mapping coverage audit now classifies the remaining route gaps so future work is explicit rather than implicit.
 - Remaining work:
-  - list/detail/create/update/delete for every module where applicable
-  - toggle/restore/publish/revoke/stop branches
-  - filters/pagination/sorting edge cases
-  - upload/download/export
-  - empty data, invalid input, permission denied, conflict, dependency failure
+  - live provider test endpoints for Skill/image flows
+  - prompt restore fixture coverage
+  - audit export status/download body assertions
+  - delete coverage for unpublished version fixture
+  - broader invalid/permission/conflict branch matrix
 
 ### P1 - Database / Repository Alignment Not Fully Audited
 

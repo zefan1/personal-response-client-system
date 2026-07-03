@@ -175,6 +175,8 @@ def auth_flow(api: ApiClient, ctx: Context):
     raise AssertionError("login response missing accessToken/token")
   if ctx.refresh_token:
     api.request("auth refresh", "POST", "/api/v1/auth/refresh", {"refreshToken": ctx.refresh_token}, ctx.token)
+  api.request("desktop login", "POST", "/api/v1/auth/login",
+      {"username": "admin", "password": "admin123"})
 
 
 def read_flows(api: ApiClient, ctx: Context):
@@ -183,6 +185,7 @@ def read_flows(api: ApiClient, ctx: Context):
       ("health", "/admin/api/v1/health"),
       ("configs list", "/admin/api/v1/configs"),
       ("configs prefix", "/admin/api/v1/configs?prefix=skill."),
+      ("config get table api url", "/admin/api/v1/configs/table.api_base_url"),
       ("skill env list", "/admin/api/v1/skill-environments"),
       ("image env list", "/admin/api/v1/image-environments"),
       ("prompt versions format", "/admin/api/v1/skill-prompt/format/versions"),
@@ -216,6 +219,8 @@ def read_flows(api: ApiClient, ctx: Context):
   ]:
     api.request(name, "GET", path, token=token)
 
+  api.request("config update table api url", "PUT", "/admin/api/v1/configs/table.api_base_url", {"value": ""}, token=token)
+
 
 def account_flow(api: ApiClient, ctx: Context):
   phone = "139%08d" % (int(ctx.ts[-8:]) % 100000000)
@@ -238,6 +243,38 @@ def account_flow(api: ApiClient, ctx: Context):
   api.request("account toggle disabled", "PUT", f"/admin/api/v1/accounts/{account_id}/toggle", {"isEnabled": False}, ctx.token)
   api.request("account reset password", "PUT", f"/admin/api/v1/accounts/{account_id}/reset-password", {"newPassword": "pass5678"}, ctx.token)
   api.request("account delete", "DELETE", f"/admin/api/v1/accounts/{account_id}", token=ctx.token)
+
+
+def customer_flow(api: ApiClient, ctx: Context):
+  phone = "137%08d" % (int(ctx.ts[-8:]) % 100000000)
+  api.request("customer profile not found", "GET", f"/api/v1/customers/{phone}", token=ctx.token, expect_success=False, allow_status={404})
+  api.request("customer batch empty result", "POST", "/api/v1/customers/batch", {"phones": [phone]}, ctx.token)
+  api.request("customer update not found", "PUT", f"/api/v1/customers/{phone}", {
+      "version": 1,
+      "fields": {"nickname": "acceptance"}
+  }, ctx.token, expect_success=False, allow_status={400})
+  api.request("customer suggestions empty resolve", "POST", f"/api/v1/customers/{phone}/suggestions/batch-resolve", {
+      "action": "CONFIRM",
+      "suggestionIds": [],
+      "operator": "acceptance"
+  }, ctx.token)
+  api.request("customer save to table bad request", "POST", f"/api/v1/customers/{phone}/save-to-table", {
+      "sourceTable": "",
+      "sourceRowId": "",
+      "fields": {}
+  }, ctx.token, expect_success=False, allow_status={400})
+  api.request("chat send confirm representative", "POST", "/api/v1/chat/send-confirm", {
+      "phone": phone,
+      "nickname": "acceptance",
+      "isNewCustomer": False,
+      "sourceTable": "",
+      "leadType": "GENERAL",
+      "conversationSummary": "acceptance",
+      "rawMessages": [],
+      "sentText": "acceptance sent",
+      "selectedDirection": "ACCEPTANCE",
+      "followupSuggest": None
+  }, ctx.token)
 
 
 def skill_flow(api: ApiClient, ctx: Context):
@@ -505,6 +542,7 @@ def run_suite(api: ApiClient):
   read_flows(api, ctx)
   for flow in [
       account_flow,
+      customer_flow,
       skill_flow,
       ai_env_flow,
       datasource_flow,
