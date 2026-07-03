@@ -53,6 +53,9 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest rerun command: `python3 scripts/acceptance_backend_api.py --no-start`
   - Latest rerun result after audit-export CSV content assertion expansion against `http://172.19.250.154:8080`: `passed=167 failed=0 total=167`.
   - Coverage categories reported by the harness: `conflict:8`, `create:4`, `download:1`, `invalid:22`, `permission:6`, `read:34`, `representative:90`, `update:2`.
+- Backend API acceptance quality verifier exists:
+  - `python scripts\verify_backend_api_acceptance_quality.py`
+  - Latest current-state result: `passed=true`, total calls `167`, failed calls `0`, and every coverage category meets the current minimum baseline (`representative>=90`, `read>=34`, `update>=2`, `download>=1`, `permission>=6`, `invalid>=22`, `conflict>=8`, `create>=4`).
 - API mapping coverage audit exists:
   - `python scripts/verify_api_mapping_coverage.py`
   - Latest current-state result: 113 mappings, 113 covered/matched, 0 remaining route gaps, 0 unclassified gaps.
@@ -85,8 +88,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest current-state result: 40 contract checks, 0 mismatches, 4 documented frontend exposure exceptions for JSON-form/admin-default-only controls.
 - P0/P1 aggregate acceptance runner exists:
   - `python scripts/acceptance_p0_p1.py --backend-url http://172.19.250.154:8080`
-  - Latest default current-state result: `passed=true checks=9/9 skipped=3`.
-  - Default checks cover backend API acceptance, route mapping coverage, controller coverage audit, desktop component coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, and the unsigned-package fail-closed gate.
+  - Latest default current-state result: `passed=true checks=10/10 skipped=3`.
+  - Default checks cover backend API acceptance, backend API acceptance quality, route mapping coverage, controller coverage audit, desktop component coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, and the unsigned-package fail-closed gate.
   - Skipped by default but available as explicit flags: `--include-slow`, `--include-local-external`, `--include-live-external`, and `--require-signed-package`.
 
 ## Addressed Since Initial Audit
@@ -109,6 +112,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Backend API acceptance response assertions now validate more returned state after high-risk create/update/toggle/publish/revoke flows, including accounts, skill bindings, datasource mapping/replace/toggle, quick search item update/list, followup rules, notices, audit export completion/download, desktop version publish/report/revoke, and Mac draft creation.
 - Backend API acceptance read assertions now validate key list/detail/stat response shapes and enum ranges for configs, datasources, quick search, rules, tags, notices, audit logs/actions, versions, desktop version checks, analytics overview/funnels/health/risks/skill calls, and other high-traffic read endpoints.
 - Backend API acceptance negative coverage now also covers invalid Skill/image environment creation, unsupported prompt type, bad quick-search image upload, missing desktop version check/report fields, notice expiry/schedule validation, and empty help requests.
+- Backend API acceptance quality is now machine-checked by `scripts/verify_backend_api_acceptance_quality.py`, which fails if the latest backend acceptance report has failed calls, fewer than 167 calls, or regresses below the current coverage-category baselines.
 - Quick-search image upload now maps unsupported image bytes to the standard bad-request response instead of leaking a 500 for user input errors.
 - Database alignment verifier now scans static repository SQL table references and fails if a referenced table is absent from the live smoke schema.
 - Database alignment verifier now also scans repository SQL INSERT columns, UPDATE assignments, and alias-qualified `table.column` references and fails if any scanned column is absent from the live smoke schema.
@@ -258,5 +262,5 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 - Runnable baseline: passed.
 - Backend mock-runtime representative API acceptance: passed for the current harness.
-- P0/P1 aggregate default acceptance: passed for currently runnable gates (`9/9`) with slow/local-external/live-external gates available behind explicit flags.
+- P0/P1 aggregate default acceptance: passed for currently runnable gates (`10/10`) with slow/local-external/live-external gates available behind explicit flags.
 - Production-ready SaaS: not passed.

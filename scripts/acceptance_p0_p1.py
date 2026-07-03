@@ -107,6 +107,7 @@ def main() -> int:
     env = {"PDA_BASE_URL": args.backend_url}
     results.extend([
         run_step("api acceptance", "python scripts\\acceptance_backend_api.py --no-start", env=env, timeout=240),
+        run_step("api acceptance quality", "python scripts\\verify_backend_api_acceptance_quality.py", timeout=120),
         run_step("api mapping coverage", "python scripts\\verify_api_mapping_coverage.py", timeout=120),
         run_step("controller coverage audit", "python scripts\\verify_controller_test_coverage.py", timeout=120),
         run_step("desktop component coverage audit", "python scripts\\verify_desktop_component_test_coverage.py", timeout=120),
