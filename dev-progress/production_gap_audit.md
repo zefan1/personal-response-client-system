@@ -9,8 +9,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Module inventory exists for 34 actual modules: `01A-01H`, `20-33`, `40-51`.
 - Backend compiles and runs Java tests with Java 17:
   - `mvn -Dstyle.color=never clean test`
-  - Latest result: `BUILD SUCCESS`, `Tests run: 17, Failures: 0, Errors: 0, Skipped: 0`.
-  - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
+  - Latest result: `BUILD SUCCESS`, `Tests run: 24, Failures: 0, Errors: 0, Skipped: 0`.
+  - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, QuickSearchAdminController list/create/update/toggle/delete/upload/error mapping, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
   - Latest rerun after offline Vitest coverage: passed.
@@ -86,12 +86,13 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop toolchain moved off vulnerable Electron/Vite versions; `npm audit --json` currently reports 0 vulnerabilities.
 - Added repeatable desktop package verification for Windows x64 unpacked artifacts. It proves build structure and ASAR integrity metadata, while explicitly recording that this local artifact is not signed.
 - Java tests now include controller-layer MockMvc checks for version APIs plus H2-backed repository tests for desktop version persistence, publish/revoke, latest published lookup, and desktop client report upsert semantics.
+- Java tests now also include QuickSearch admin controller MockMvc coverage for list, create, invalid create error mapping, update, toggle, delete, and image upload response wrapping.
 
 ## Hard Production Gaps
 
 ### P0 - No Real Java Test Coverage
 
-- Maven now runs 17 Java tests covering AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, DesktopVersionController, and DesktopVersionRepository.
+- Maven now runs 24 Java tests covering AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, QuickSearchAdminController, DesktopVersionController, and DesktopVersionRepository.
 - Remaining before production:
   - controller integration tests for every remaining API group beyond the current high-risk version API coverage
   - broader service tests for failure branches
