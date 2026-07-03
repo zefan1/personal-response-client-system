@@ -323,6 +323,12 @@ const sections: AdminSection[] = [
         pathTemplate: '/admin/api/v1/notices',
         body: { title: `人工验收公告${nowSuffix()}`, content: '人工验收公告内容', level: 'INFO', publishType: 'IMMEDIATE', publishAt: null, expireDays: 1 }
       },
+      {
+        name: '创建定时公告',
+        method: 'POST',
+        pathTemplate: '/admin/api/v1/notices',
+        body: { title: `人工验收定时公告${nowSuffix()}`, content: '人工验收定时公告内容', level: 'WARN', publishType: 'SCHEDULED', publishAt: new Date(Date.now() + 3600000).toISOString(), expireDays: 2 }
+      },
       { name: '停止公告', method: 'PUT', pathTemplate: '/admin/api/v1/notices/{id}/stop', needsId: true },
       { name: '删除公告', method: 'DELETE', pathTemplate: '/admin/api/v1/notices/{id}', needsId: true },
       {
@@ -330,6 +336,12 @@ const sections: AdminSection[] = [
         method: 'POST',
         pathTemplate: '/admin/api/v1/versions',
         body: { version: `9.9.${nowSuffix()}`, platform: 'WINDOWS', downloadUrl: 'https://example.com/installer.exe', changelog: 'manual acceptance', updateStrategy: 'OPTIONAL', gradualPercent: null, fileSize: 12345 }
+      },
+      {
+        name: '创建 Mac 版本',
+        method: 'POST',
+        pathTemplate: '/admin/api/v1/versions',
+        body: { version: `9.8.${nowSuffix()}`, platform: 'MAC', downloadUrl: 'https://example.com/installer.dmg', changelog: 'manual acceptance mac', updateStrategy: 'OPTIONAL', gradualPercent: null, fileSize: 12345 }
       },
       { name: '发布版本', method: 'PUT', pathTemplate: '/admin/api/v1/versions/{id}/publish', needsId: true },
       { name: '撤销版本', method: 'PUT', pathTemplate: '/admin/api/v1/versions/{id}/revoke', needsId: true, body: { reason: 'manual acceptance cleanup', alternativeVersion: null } },

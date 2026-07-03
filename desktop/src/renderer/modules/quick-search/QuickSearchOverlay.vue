@@ -105,6 +105,7 @@ function contentTypeLabel(type: QuickSearchContentType): string {
   if (type === 'KNOWLEDGE') return '知识片段';
   if (type === 'LOCATION') return '门店定位';
   if (type === 'IMAGE') return '图片素材';
+  if (type === 'MINI_PROGRAM') return '小程序引导';
   return '小程序引导';
 }
 
