@@ -19,7 +19,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest rerun after non-mock client changes: passed.
 - Renderer click smoke passes:
   - `PDA_SMOKE_API_BASE_URL=http://<WSL-IP>:8080 cd desktop && npm run renderer:smoke`
-  - Covers login, admin section switching, API-backed read/action panels, and desktop workbench switch.
+  - Covers login, dynamic traversal of all admin navigation sections, API-backed read/action panels, and desktop workbench switch.
   - Latest rerun used `http://172.19.250.154:8080` because Windows localhost forwarding to WSL was unavailable; result: passed.
 - Static module verifiers pass:
   - `verify_module_a.py` through `verify_module_h.py`
@@ -47,7 +47,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest result: `passed=true checks=30`.
   - Covered real HTTP client paths: Skill `/v1/chat/completions`, image `/v1/chat/completions`, WeCom table rows GET/PUT, admin environment create/activate, datasource create/mapping/columns, and customer save-to-table.
 - Database alignment verifier now checks required columns, every table declared by migrations, config keys inserted by migrations, and static repository SQL table references:
-  - Latest result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys, 0 missing repository tables.
+  - It now also verifies selected production-critical nullable/default assumptions and live enum values for accounts, customers, skill bindings, quick search, desktop versions, notices, and audit exports.
+  - Latest result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys, 0 missing repository tables, 0 column property violations, 0 enum violations.
 
 ## Addressed Since Initial Audit
 
@@ -63,6 +64,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Added a local fake external provider plus repeatable `MOCK_EXTERNALS=false` acceptance runner for controlled non-mock verification.
 - Backend API acceptance now covers every mapped route in the current route inventory, including chat recognize/generate/regenerate, help request/resolve, prompt restore, audit export status/download, Skill/image test routes via controlled non-mock acceptance, and draft version delete.
 - Database alignment verifier now scans static repository SQL table references and fails if a referenced table is absent from the live smoke schema.
+- Customer `lead_type` writes now normalize unknown values to `PENDING` at the repository boundary, and migration `V53__normalize_customer_lead_types.sql` repairs existing out-of-contract customer enum values. This prevents quick-search `GENERAL` from leaking into the customer table.
+- Renderer smoke now discovers all admin nav sections at runtime instead of checking a fixed representative subset.
 
 ## Hard Production Gaps
 
@@ -105,16 +108,17 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 - Flyway migrations apply successfully to MariaDB.
 - Added `scripts/verify_database_alignment.py`, which reads the live smoke database `information_schema`.
-- Latest result: 31 tables found, 14 key table column sets checked, 30 migration-declared tables checked, 0 missing required columns, 0 missing migration tables, 0 missing config keys, 0 missing repository tables.
+- Latest result: 31 tables found, 14 key table column sets checked, 30 migration-declared tables checked, 0 missing required columns, 0 missing migration tables, 0 missing config keys, 0 missing repository tables, 0 nullable/default violations, 0 enum violations.
 - Remaining:
   - expand column-level checks to every repository query
-  - verify nullable/default assumptions
-  - verify all enum strings are accepted by service validation and UI option lists
+  - expand nullable/default checks beyond the current production-critical subset
+  - verify every enum string against all service validation and UI option lists
 
 ### P1 - Frontend Runtime Coverage Is Incomplete
 
 - Desktop modules exist under `desktop/src/renderer/modules`.
 - Vite page can be served and browser smoke has covered login plus representative admin sections.
+- Renderer smoke now dynamically traverses every admin navigation section that exists in the DOM.
 - Desktop renderer now has a login flow and no longer requires manually editing `localStorage.desktop_config.accessToken`.
 - Desktop package now has Vite dev, Electron dev/preview, and Electron smoke scripts.
 - Remaining:

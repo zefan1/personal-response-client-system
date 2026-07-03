@@ -17,7 +17,7 @@ public final class LeadTypes {
       case "团购客资", "团购", "体验券" -> TUAN_GOU;
       case "线索客资", "线索" -> XIAN_SUO;
       case "待确认" -> PENDING;
-      default -> raw.trim();
+      default -> PENDING;
     };
   }
 }

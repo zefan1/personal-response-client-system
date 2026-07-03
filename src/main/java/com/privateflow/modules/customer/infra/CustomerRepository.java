@@ -1,6 +1,7 @@
 package com.privateflow.modules.customer.infra;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.LeadTypes;
 import com.privateflow.modules.customer.ScanFilter;
 import java.sql.Date;
 import java.sql.Timestamp;
@@ -58,6 +59,7 @@ public class CustomerRepository {
   }
 
   public boolean upsert(Customer customer) {
+    String leadType = LeadTypes.normalize(customer.getLeadType());
     int updated = jdbcTemplate.update("""
         INSERT INTO customers (
           phone, nickname, source_channel, lead_type, personality_type, assigned_keeper,
@@ -90,7 +92,7 @@ public class CustomerRepository {
         customer.getPhone(),
         customer.getNickname(),
         customer.getSourceChannel(),
-        customer.getLeadType(),
+        leadType,
         customer.getPersonalityType(),
         customer.getAssignedKeeper(),
         customer.getIntendedStore(),

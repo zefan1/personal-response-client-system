@@ -70,6 +70,92 @@ REQUIRED_COLUMNS = {
     },
 }
 
+EXPECTED_COLUMN_PROPERTIES = {
+    "accounts": {
+        "username": {"nullable": "NO"},
+        "password_hash": {"nullable": "NO"},
+        "display_name": {"nullable": "NO"},
+        "role": {"nullable": "NO"},
+        "is_enabled": {"nullable": "NO", "default": "1"},
+    },
+    "customers": {
+        "phone": {"nullable": "NO"},
+        "lead_type": {"nullable": "YES"},
+        "version": {"nullable": "NO", "default": "0"},
+    },
+    "datasources": {
+        "name": {"nullable": "NO"},
+        "sheet_id": {"nullable": "NO"},
+        "source_table": {"nullable": "NO"},
+        "is_enabled": {"nullable": "NO", "default": "1"},
+    },
+    "datasource_field_mappings": {
+        "source_table": {"nullable": "NO"},
+        "source_field": {"nullable": "NO"},
+        "target_field": {"nullable": "NO"},
+        "is_enabled": {"nullable": "NO", "default": "1"},
+    },
+    "skill_scene_bindings": {
+        "skill_id": {"nullable": "NO"},
+        "scene": {"nullable": "NO"},
+        "lead_type": {"nullable": "NO"},
+        "priority": {"nullable": "NO", "default": "0"},
+        "enabled": {"nullable": "NO", "default": "1"},
+    },
+    "quick_search_items": {
+        "content_type": {"nullable": "NO"},
+        "lead_type": {"nullable": "NO", "default": "GENERAL"},
+        "title": {"nullable": "NO"},
+        "shortcut_code": {"nullable": "NO"},
+        "content": {"nullable": "NO"},
+        "sort_order": {"nullable": "NO", "default": "0"},
+        "is_enabled": {"nullable": "NO", "default": "1"},
+    },
+    "desktop_versions": {
+        "version": {"nullable": "NO"},
+        "platform": {"nullable": "NO"},
+        "status": {"nullable": "NO", "default": "DRAFT"},
+        "update_strategy": {"nullable": "NO", "default": "OPTIONAL"},
+        "gradual_percent": {"nullable": "YES"},
+    },
+    "system_notices": {
+        "notice_id": {"nullable": "NO"},
+        "title": {"nullable": "NO"},
+        "content": {"nullable": "NO"},
+        "level": {"nullable": "NO", "default": "INFO"},
+        "source": {"nullable": "NO", "default": "MANUAL"},
+        "status": {"nullable": "NO", "default": "PUBLISHED"},
+        "is_stopped": {"nullable": "NO", "default": "0"},
+        "publish_at": {"nullable": "NO"},
+        "expire_at": {"nullable": "NO"},
+        "created_by": {"nullable": "NO"},
+    },
+    "audit_log_exports": {
+        "export_id": {"nullable": "NO"},
+        "status": {"nullable": "NO", "default": "PROCESSING"},
+        "filters_json": {"nullable": "NO"},
+        "total_count": {"nullable": "NO", "default": "0"},
+        "expire_at": {"nullable": "NO"},
+        "created_by": {"nullable": "NO"},
+    },
+}
+
+ENUM_COLUMNS = {
+    ("accounts", "role"): {"ADMIN", "LEADER", "KEEPER"},
+    ("customers", "lead_type"): {"TUAN_GOU", "XIAN_SUO", "PENDING"},
+    ("skill_scene_bindings", "scene"): {"CHAT_RECOGNIZE", "ACTIVE_REPLY", "REGENERATE", "PROFILE_EXTRACT", "OPENING"},
+    ("skill_scene_bindings", "lead_type"): {"TUAN_GOU", "XIAN_SUO", "PENDING"},
+    ("quick_search_items", "content_type"): {"TEMPLATE", "KNOWLEDGE", "LOCATION", "IMAGE", "MINI_PROGRAM"},
+    ("quick_search_items", "lead_type"): {"TUAN_GOU", "XIAN_SUO", "GENERAL"},
+    ("desktop_versions", "platform"): {"WINDOWS", "MAC"},
+    ("desktop_versions", "status"): {"DRAFT", "PUBLISHED", "REVOKED"},
+    ("desktop_versions", "update_strategy"): {"FORCED", "OPTIONAL", "GRADUAL"},
+    ("system_notices", "level"): {"INFO", "WARN", "ERROR"},
+    ("system_notices", "source"): {"MANUAL", "AUTO"},
+    ("system_notices", "status"): {"PUBLISHED", "SCHEDULED"},
+    ("audit_log_exports", "status"): {"PROCESSING", "COMPLETED", "FAILED"},
+}
+
 MIGRATION_DIR = ROOT / "src" / "main" / "resources" / "db" / "migration"
 JAVA_DIR = ROOT / "src" / "main" / "java"
 
@@ -159,6 +245,64 @@ def repository_table_references() -> dict[str, list[str]]:
     return {path: sorted(tables) for path, tables in sorted(refs.items())}
 
 
+def normalize_default(value: str) -> str:
+    stripped = (value or "").strip()
+    if len(stripped) >= 2 and stripped[0] == "'" and stripped[-1] == "'":
+        return stripped[1:-1]
+    return stripped
+
+
+def validate_column_properties(schema: dict[str, dict[str, dict[str, str]]]) -> list[dict[str, str]]:
+    violations: list[dict[str, str]] = []
+    for table, columns in EXPECTED_COLUMN_PROPERTIES.items():
+        for column, expected in columns.items():
+            actual = schema.get(table, {}).get(column)
+            if not actual:
+                continue
+            expected_nullable = expected.get("nullable")
+            if expected_nullable and actual["nullable"] != expected_nullable:
+                violations.append({
+                    "table": table,
+                    "column": column,
+                    "property": "nullable",
+                    "expected": expected_nullable,
+                    "actual": actual["nullable"],
+                })
+            if "default" in expected:
+                actual_default = normalize_default(actual["default"])
+                expected_default = expected["default"]
+                if actual_default != expected_default:
+                    violations.append({
+                        "table": table,
+                        "column": column,
+                        "property": "default",
+                        "expected": expected_default,
+                        "actual": actual_default,
+                    })
+    return violations
+
+
+def invalid_enum_values(schema: dict[str, dict[str, dict[str, str]]]) -> list[dict[str, object]]:
+    invalid: list[dict[str, object]] = []
+    for (table, column), allowed in ENUM_COLUMNS.items():
+        if column not in schema.get(table, {}):
+            continue
+        quoted = ", ".join("'" + value.replace("'", "''") + "'" for value in sorted(allowed))
+        rows = mysql_query(
+            f"SELECT DISTINCT {column} FROM {table} "
+            f"WHERE {column} IS NOT NULL AND {column} NOT IN ({quoted})"
+        )
+        values = sorted(line.strip() for line in rows.splitlines() if line.strip())
+        if values:
+            invalid.append({
+                "table": table,
+                "column": column,
+                "allowed": sorted(allowed),
+                "invalidValues": values,
+            })
+    return invalid
+
+
 def main() -> int:
     schema = load_schema()
     missing: dict[str, list[str]] = {}
@@ -175,6 +319,8 @@ def main() -> int:
     repository_refs = repository_table_references()
     referenced_tables = sorted({table for tables in repository_refs.values() for table in tables})
     missing_repository_tables = sorted(set(referenced_tables) - set(schema))
+    column_property_violations = validate_column_properties(schema)
+    enum_violations = invalid_enum_values(schema)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report = {
         "database": DB_NAME,
@@ -188,6 +334,8 @@ def main() -> int:
         "repositoryReferencedTables": len(referenced_tables),
         "missingRepositoryTables": missing_repository_tables,
         "repositoryReferences": repository_refs,
+        "columnPropertyViolations": column_property_violations,
+        "enumViolations": enum_violations,
         "schema": schema,
     }
     report_path = REPORT_DIR / "schema_alignment_report.json"
@@ -196,9 +344,10 @@ def main() -> int:
     print(
         f"tables={len(schema)} required={len(REQUIRED_COLUMNS)} migration_tables={len(expected_tables)} "
         f"missing_required_tables={len(missing)} missing_migration_tables={len(missing_tables)} "
-        f"missing_config_keys={len(missing_configs)} missing_repository_tables={len(missing_repository_tables)}"
+        f"missing_config_keys={len(missing_configs)} missing_repository_tables={len(missing_repository_tables)} "
+        f"column_property_violations={len(column_property_violations)} enum_violations={len(enum_violations)}"
     )
-    if missing or missing_tables or missing_configs or missing_repository_tables:
+    if missing or missing_tables or missing_configs or missing_repository_tables or column_property_violations or enum_violations:
         for table, columns in missing.items():
             print(f"missing {table}: {', '.join(columns)}", file=sys.stderr)
         for table in missing_tables:
@@ -207,6 +356,19 @@ def main() -> int:
             print(f"missing config key: {key}", file=sys.stderr)
         for table in missing_repository_tables:
             print(f"missing repository table: {table}", file=sys.stderr)
+        for violation in column_property_violations:
+            print(
+                "column property mismatch "
+                f"{violation['table']}.{violation['column']} {violation['property']}: "
+                f"expected {violation['expected']} actual {violation['actual']}",
+                file=sys.stderr,
+            )
+        for violation in enum_violations:
+            print(
+                f"invalid enum values {violation['table']}.{violation['column']}: "
+                f"{', '.join(violation['invalidValues'])}",
+                file=sys.stderr,
+            )
         return 1
     return 0
 

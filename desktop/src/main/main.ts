@@ -105,7 +105,13 @@ async function runRendererSmoke(window: BrowserWindow) {
           findButton('登录').click();
         }
         await waitForText('健康与系统配置');
-        for (const section of ['技能场景绑定', 'AI 与外部环境', '数据源与字段映射', '账号权限', '公告、版本、审计']) {
+        const navLabels = [...document.querySelectorAll('.admin-nav-button span')]
+          .map((item) => item.textContent.trim())
+          .filter(Boolean);
+        if (navLabels.length < 9) {
+          throw new Error('admin section count too small: ' + navLabels.length);
+        }
+        for (const section of navLabels) {
           findButton(section).click();
           await waitForText(section);
           await waitForText('数据读取');

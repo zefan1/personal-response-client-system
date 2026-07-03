@@ -332,7 +332,7 @@ def customer_flow(api: ApiClient, ctx: Context):
       "nickname": "acceptance",
       "isNewCustomer": False,
       "sourceTable": "",
-      "leadType": "GENERAL",
+      "leadType": "PENDING",
       "conversationSummary": "acceptance",
       "rawMessages": [],
       "sentText": "acceptance sent",
