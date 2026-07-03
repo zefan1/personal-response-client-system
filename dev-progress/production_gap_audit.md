@@ -72,6 +72,10 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Manual test readiness verifier exists:
   - `python scripts\verify_manual_test_readiness.py --frontend-url http://127.0.0.1:5173/ --backend-url http://172.19.250.154:8080`
   - Latest current-state result: `passed=true checks=3/3`, covering Vite frontend HTML/app mount, backend auth config, and `admin/admin123` admin login returning an access token.
+- Production blocker audit exists:
+  - `python scripts\verify_production_blockers.py`
+  - Latest current-state result: `productionReady=false blockers=2`.
+  - Current blockers: `P0 LIVE_EXTERNAL_PROVIDER_ACCEPTANCE` because live Skill/image/WeCom provider acceptance has not passed, and `P1 SIGNED_RELEASE_PACKAGE` because the local package is unsigned and no signing certificate is configured.
 - Real external readiness verifier exists:
   - `python scripts/verify_real_external_readiness.py`
   - Latest result: `mockExternalsFalseReady=true`, source/config blockers are cleared.
@@ -91,8 +95,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest current-state result: 40 contract checks, 0 mismatches, 4 documented frontend exposure exceptions for JSON-form/admin-default-only controls.
 - P0/P1 aggregate acceptance runner exists:
   - `python scripts/acceptance_p0_p1.py --backend-url http://172.19.250.154:8080`
-  - Latest default current-state result: `passed=true checks=11/11 skipped=3`.
-  - Default checks cover backend API acceptance, backend API acceptance quality, route mapping coverage, controller coverage audit, desktop component coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, manual test readiness, and the unsigned-package fail-closed gate.
+  - Latest default current-state result: `passed=true checks=12/12 skipped=3`.
+  - Default checks cover backend API acceptance, backend API acceptance quality, route mapping coverage, controller coverage audit, desktop component coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, manual test readiness, production blocker audit report generation, and the unsigned-package fail-closed gate.
   - Skipped by default but available as explicit flags: `--include-slow`, `--include-local-external`, `--include-live-external`, and `--require-signed-package`.
 
 ## Addressed Since Initial Audit
@@ -136,6 +140,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop package verification now records signing configuration, Windows Authenticode status, signer/timestamp certificate metadata when present, and supports `PDA_REQUIRE_SIGNED_PACKAGE=1` to fail unsigned release artifacts.
 - Desktop package directory creation now targets the current platform by default and supports `PDA_PACKAGE_PLATFORM` / `PDA_PACKAGE_ARCH` overrides for release CI instead of always hardcoding Windows.
 - Desktop package verification now has a first-class `npm run package:verify:signed` release gate, and macOS verification records `codesign` status plus `PDA_REQUIRE_NOTARIZED_PACKAGE=1` notarization-credential gating.
+- Production blocker status is now machine-readable in `.tools/acceptance/production_blockers.json`; latest result records `productionReady=false` with two blockers: live external provider acceptance and signed release package.
 - Java tests now include controller-layer MockMvc checks for version APIs plus H2-backed repository tests for desktop version persistence, publish/revoke, latest published lookup, and desktop client report upsert semantics.
 - Java tests now also include QuickSearch admin controller MockMvc coverage for list, create, invalid create error mapping, update, toggle, delete, and image upload response wrapping.
 - Java tests now also include Account admin controller MockMvc coverage for list filters, enum query binding errors, create/update/toggle/reset/delete, and service validation error mapping. Global API exception handling now maps request parameter type mismatches, including bad enum query values, to standard `80-10001` bad request responses instead of generic 500 responses.
@@ -266,5 +271,6 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 - Runnable baseline: passed.
 - Backend mock-runtime representative API acceptance: passed for the current harness.
-- P0/P1 aggregate default acceptance: passed for currently runnable gates (`11/11`) with slow/local-external/live-external gates available behind explicit flags.
+- P0/P1 aggregate default acceptance: passed for currently runnable gates (`12/12`) with slow/local-external/live-external gates available behind explicit flags.
+- Production blocker audit: not passed (`productionReady=false`, blockers: live external provider acceptance and signed release package).
 - Production-ready SaaS: not passed.
