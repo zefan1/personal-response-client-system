@@ -106,6 +106,12 @@ async function runRendererSmoke(window: BrowserWindow) {
           await delay(150);
           return element;
         };
+        const assertActiveFollowupTab = (index) => {
+          const tabs = [...document.querySelectorAll('.followup-panel .tab-button')];
+          if (!tabs[index]?.classList.contains('active')) {
+            throw new Error('followup active tab mismatch: ' + index);
+          }
+        };
         const assertDesktopSmoke = async () => {
           await waitForSelector('.workbench-panel');
           await waitForSelector('.recognition');
@@ -124,7 +130,11 @@ async function runRendererSmoke(window: BrowserWindow) {
           if (followupTabs.length !== 4) {
             throw new Error('followup tab count mismatch: ' + followupTabs.length);
           }
-          followupTabs.forEach((tab) => tab.click());
+          for (const [index, tab] of followupTabs.entries()) {
+            tab.click();
+            await delay(50);
+            assertActiveFollowupTab(index);
+          }
           await clickFirst('.recognition .toolbar .secondary');
           const textForm = await waitForSelector('.recognition .two-box');
           if (!textForm.querySelector('input') || !textForm.querySelector('textarea')) {
@@ -138,13 +148,43 @@ async function runRendererSmoke(window: BrowserWindow) {
           if (quickActionButtons.length < 3) {
             throw new Error('workbench quick action count mismatch: ' + quickActionButtons.length);
           }
+          const linkButtons = [...document.querySelectorAll('.workbench-panel .section-inline-head .link-button')];
+          if (linkButtons.length < 2) {
+            throw new Error('workbench view-all links missing');
+          }
+          linkButtons[0].click();
+          await delay(150);
+          if (![0, 1].some((index) => [...document.querySelectorAll('.followup-panel .tab-button')][index]?.classList.contains('active'))) {
+            throw new Error('workbench followup view-all did not select a due tab');
+          }
+          linkButtons[1].click();
+          await delay(150);
+          assertActiveFollowupTab(3);
+          quickActionButtons[0].click();
+          await delay(150);
+          await waitForSelector('.recognition .loading-skeleton, .recognition .two-box');
+          quickActionButtons[2].click();
+          await delay(150);
+          const workbenchToast = document.querySelector('.workbench-panel .banner')?.textContent ?? '';
+          if (!workbenchToast.trim()) {
+            throw new Error('batch template quick action did not show guidance');
+          }
           quickActionButtons[1].click();
-          await waitForSelector('.quick-search-overlay .quick-search-input');
+          const quickInput = await waitForSelector('.quick-search-overlay .quick-search-input');
+          setValue(quickInput, 'smoke');
+          await delay(350);
           const quickFilters = [...document.querySelectorAll('.quick-search-overlay .quick-filter button')];
           if (quickFilters.length < 4) {
             throw new Error('quick-search filter count mismatch: ' + quickFilters.length);
           }
-          quickFilters.forEach((filter) => filter.click());
+          for (const [index, filter] of quickFilters.entries()) {
+            filter.click();
+            await delay(50);
+            const currentFilters = [...document.querySelectorAll('.quick-search-overlay .quick-filter button')];
+            if (!currentFilters[index]?.classList.contains('active')) {
+              throw new Error('quick-search filter did not become active');
+            }
+          }
           return true;
         };
         const hasLoginForm = () => Boolean(inputByLabel('API 地址') && inputByLabel('账号') && inputByLabel('密码'));
@@ -264,6 +304,16 @@ async function runRendererSmoke(window: BrowserWindow) {
         findButton('工作台').click();
         await waitForText('桌面工作台');
         await assertDesktopSmoke();
+        document.querySelector('.desktop-mode-bar button.secondary')?.click();
+        await waitForSelector('.admin-console');
+        document.querySelector('.admin-toolbar-actions button.secondary')?.click();
+        await waitForSelector('.workbench-panel');
+        const logoutButtons = [...document.querySelectorAll('.desktop-mode-bar button.secondary')];
+        if (logoutButtons.length < 2) {
+          throw new Error('desktop logout button missing');
+        }
+        logoutButtons[1].click();
+        await waitForSelector('.login-panel');
         return true;
       })();
     `);

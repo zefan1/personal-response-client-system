@@ -39,8 +39,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `PDA_REQUIRE_SIGNED_PACKAGE=1 node scripts/package-verify.mjs` fails unsigned artifacts as expected, so release CI can make signing a hard gate once production certificates are supplied.
 - Renderer click smoke passes:
   - `PDA_SMOKE_API_BASE_URL=http://<WSL-IP>:8080 cd desktop && npm run renderer:smoke`
-  - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, structured action controls for simple JSON bodies, structured field-to-JSON sync for enum/number/boolean/text controls, desktop workbench switch, desktop panel presence, workbench/followup refresh buttons, all followup tabs, recognition text-mode form, customer search input/button, quick-search overlay, and quick-search lead-type filters.
-  - Latest rerun after structured admin field sync smoke expansion used `http://172.19.250.154:8080` because Windows localhost forwarding to WSL was unavailable; result: `renderer_smoke=passed`.
+  - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, structured action controls for simple JSON bodies, structured field-to-JSON sync for enum/number/boolean/text controls, desktop workbench switch, desktop panel presence, workbench/followup refresh buttons, all followup tabs with active-state assertions, workbench view-all links, recognition capture/text-mode path, customer search input/button, batch-template guidance path, quick-search overlay input/filter active-state assertions, admin/desktop roundtrip, and logout back to login.
+  - Latest rerun after desktop click-state expansion used `http://172.19.250.154:8080` because Windows localhost forwarding to WSL was unavailable; result: `renderer_smoke=passed`.
 - Static module verifiers pass:
   - `verify_module_a.py` through `verify_module_h.py`
   - `verify_module_20.py` through `verify_module_33.py`
@@ -109,6 +109,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Renderer smoke now also edits structured admin action controls and asserts the underlying JSON request body changes for enum, numeric, boolean, and text inputs.
 - Desktop Vitest now includes component-level AdminConsole coverage in addition to store/service coverage.
 - Renderer smoke now also verifies desktop-mode primary panels and non-destructive clickable paths: workbench/followup refresh controls, followup tab switching, chat recognition text mode, customer search, quick-search overlay, and quick-search filters.
+- Renderer smoke now asserts workbench view-all links select the expected followup tabs, quick-search filter buttons become active, batch-template quick action shows operator guidance, admin/desktop switching works both directions, and logout returns to the login panel.
+- Followup list now honors all valid `followup:switch-tab` event payloads, fixing the workbench "view all followups" path that previously only handled the new-lead tab.
 - Desktop toolchain moved off vulnerable Electron/Vite versions; `npm audit --json` currently reports 0 vulnerabilities.
 - Added repeatable desktop package verification for Windows x64 unpacked artifacts. It proves build structure and ASAR integrity metadata, while explicitly recording that this local artifact is not signed.
 - Desktop package verification now records signing configuration, Windows Authenticode status, signer/timestamp certificate metadata when present, and supports `PDA_REQUIRE_SIGNED_PACKAGE=1` to fail unsigned release artifacts.
@@ -206,6 +208,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now also has Vitest/jsdom coverage for new-lead-toast behavior: invalid/reconnect payload suppression, visible and pending queue limits, auto-dismiss and pending promotion, normalized phone copy success/failure, opening-generation customer selection event, followup tab switch event, pending clear, and cleanup timer cancellation.
 - Desktop now also has Vitest/jsdom coverage for abnormal-alert behavior: inbound payload validation, alert id/message normalization, memory sorting and acknowledged filtering, persisted alert/history load success and failure paths, acknowledgement persistence and events, panel/history controls, router initialization idempotency, periodic cleanup, event-bus ingestion, and database cleanup.
 - Desktop now also has Vitest/jsdom component coverage for AdminConsole rendering, initial read-panel API loading, and structured action control synchronization for text, enum, number, and boolean fields.
+- Renderer smoke now also covers additional stateful desktop click paths: workbench followup/new-lead view-all tab selection, recognition quick action, batch-template guidance, quick-search query/filter active states, admin/desktop roundtrip, and logout.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification with `PDA_REQUIRE_SIGNED_PACKAGE=1` enabled in release CI
