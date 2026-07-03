@@ -47,9 +47,9 @@ export type DesktopConfig = {
 };
 
 const defaults: DesktopConfig = {
-  apiBaseUrl: 'http://127.0.0.1:8080',
+  apiBaseUrl: 'http://localhost:8080',
   accessToken: '',
-  wsUrl: 'ws://127.0.0.1:8080/ws/v1/desktop',
+  wsUrl: 'ws://localhost:8080/ws/v1/desktop',
   clipboardPollIntervalMs: 500,
   clipboardMd5CacheSize: 5,
   clipboardMinImageDimension: 200,
@@ -101,4 +101,10 @@ export function loadDesktopConfig(): DesktopConfig {
   } catch {
     return defaults;
   }
+}
+
+export function saveDesktopConfig(patch: Partial<DesktopConfig>): DesktopConfig {
+  const next = { ...loadDesktopConfig(), ...patch };
+  localStorage.setItem('desktop_config', JSON.stringify(next));
+  return next;
 }

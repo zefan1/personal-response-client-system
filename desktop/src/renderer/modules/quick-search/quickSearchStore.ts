@@ -1,6 +1,7 @@
 import { computed, reactive } from 'vue';
 import { getJson } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
+import { writeClipboardImage, writeClipboardText } from '../../shared/desktopBridge';
 import type { QuickSearchContentType, QuickSearchFilter, QuickSearchItem } from './types';
 
 const CACHE_KEY = 'quick_search_cache';
@@ -120,13 +121,13 @@ export async function copyQuickSearchItem(item: QuickSearchItem): Promise<void> 
       quickSearchState.toast = '图片素材缺少链接';
       return;
     }
-    const result = await window.desktopBridge.writeClipboardImage(item.imageUrl);
+    const result = await writeClipboardImage(item.imageUrl);
     if (!result.success) {
       quickSearchState.toast = '图片加载失败，请检查网络';
       return;
     }
   } else {
-    const result = await window.desktopBridge.writeClipboardText(resolveTemplateVariables(item.content));
+    const result = await writeClipboardText(resolveTemplateVariables(item.content));
     if (!result.success) {
       quickSearchState.toast = '复制失败，请重试';
       return;

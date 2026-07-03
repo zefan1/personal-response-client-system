@@ -1,5 +1,6 @@
 import { reactive } from 'vue';
 import { postJson } from '../../shared/apiClient';
+import { writeClipboardText as writeBridgeClipboardText } from '../../shared/desktopBridge';
 import type { ProfileSuggestion, ReplySelectedPayload, SuggestionShowPayload } from './types';
 
 const SUGGESTION_TOAST_AUTO_COLLAPSE_MS = 15000;
@@ -107,34 +108,8 @@ export function cleanupCopyBackfillStore(): void {
 }
 
 async function writeClipboardText(text: string): Promise<boolean> {
-  const electronResult = await window.desktopBridge.writeClipboardText(text);
-  if (electronResult.success) {
-    return true;
-  }
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      return fallbackCopyText(text);
-    }
-  }
-  return fallbackCopyText(text);
-}
-
-function fallbackCopyText(text: string): boolean {
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', 'true');
-  textarea.style.position = 'fixed';
-  textarea.style.opacity = '0';
-  document.body.appendChild(textarea);
-  textarea.select();
-  try {
-    return document.execCommand('copy');
-  } finally {
-    document.body.removeChild(textarea);
-  }
+  const result = await writeBridgeClipboardText(text);
+  return result.success;
 }
 
 async function sendConfirm(payload: ReplySelectedPayload, controller: AbortController): Promise<void> {

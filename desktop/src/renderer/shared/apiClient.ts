@@ -30,8 +30,16 @@ export async function putJson<T>(
   return requestJson<T>('PUT', path, body, timeoutMs, signal);
 }
 
+export async function deleteJson<T>(
+  path: string,
+  timeoutMs = loadDesktopConfig().requestTotalTimeoutMs,
+  signal?: AbortSignal
+): Promise<ApiResponse<T>> {
+  return requestJson<T>('DELETE', path, undefined, timeoutMs, signal);
+}
+
 async function requestJson<T>(
-  method: 'GET' | 'POST' | 'PUT',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
   body: unknown,
   timeoutMs: number,

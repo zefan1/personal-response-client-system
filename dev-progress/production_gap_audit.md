@@ -9,7 +9,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Module inventory exists for 34 actual modules: `01A-01H`, `20-33`, `40-51`.
 - Backend compiles and runs Java tests with Java 17:
   - `mvn -Dstyle.color=never clean test`
-  - Latest result: `BUILD SUCCESS`, `Tests run: 10, Failures: 0, Errors: 0, Skipped: 0`.
+  - Latest result: `BUILD SUCCESS`, `Tests run: 11, Failures: 0, Errors: 0, Skipped: 0`.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
 - Static module verifiers pass:
@@ -20,19 +20,27 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `bash scripts/smoke_backend_wsl.sh`
 - Backend API acceptance harness exists:
   - `python3 scripts/acceptance_backend_api.py`
-  - Latest passing evidence: 99 calls passed in mock external mode.
+- Latest passing evidence: 99 calls passed in mock external mode.
+- Browser admin smoke passed against the Vite renderer and local backend:
+  - URL: `http://127.0.0.1:5173/`
+  - Login: `admin/admin123`
+  - Checked admin sections: health/config, skill bindings, AI/external environments, datasource mappings, accounts, notices/versions/audit.
 
 ## Addressed Since Initial Audit
 
 - Datasource mapping compare no longer returns a fixed placeholder; it now returns a structured diff against the latest mapping snapshot.
 - Datasource columns no longer returns only an empty placeholder; it now samples `SheetClient` rows when available and otherwise exposes mapped columns with `fetchStatus`.
 - Datasource import logs no longer returns a fixed empty list; it now reads persisted `customer_import_log` rows.
+- Desktop renderer now has a login flow that persists the backend token into `desktop_config`.
+- Admin console pages now exist in the desktop/Vite renderer and are backed by real `/admin/api/v1/*` calls rather than static mock data.
+- Browser/Vite runtime no longer requires the Electron preload bridge for login/admin smoke testing; desktop bridge calls have web fallbacks where possible.
+- Backend CORS now permits local Vite origins and the auth filter bypasses OPTIONS preflight.
 
 ## Hard Production Gaps
 
 ### P0 - No Real Java Test Coverage
 
-- Maven now runs 10 Java tests covering AuthService and DatasourceAdminService.
+- Maven now runs 11 Java tests covering AuthService, JwtAuthenticationFilter preflight behavior, and DatasourceAdminService.
 - Remaining before production:
   - controller integration tests for all API groups
   - broader service tests for failure branches
@@ -41,10 +49,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 ### P0 - Admin Frontend Is Missing
 
-- Modules `40-51` are implemented as backend Admin APIs.
-- There is no dedicated admin web frontend in the repository.
-- Existing desktop renderer covers desktop/sidebar modules only.
-- Production cannot claim "all interfaces visible" until admin pages exist for skill scenes, AI configuration, datasource mapping, quick search management, accounts, followup rules, tags, analytics, desktop versions, notices, audit logs, and health dashboard.
+- Addressed for manual acceptance: the desktop/Vite renderer now includes a management console for health/config, skill scenes, AI configuration, datasource mapping, quick search management, accounts, followup rules, tags, analytics, desktop versions, notices, audit logs, and health dashboard.
+- Current limitation: the first admin console is a production-connected operations surface with JSON action forms; it is not yet a fully bespoke polished admin product UI for every module workflow.
 
 ### P0 - Real External Providers Not Accepted
 
@@ -79,9 +85,13 @@ This repository is not production-complete yet. The current evidence proves a ru
 ### P1 - Frontend Runtime Coverage Is Incomplete
 
 - Desktop modules exist under `desktop/src/renderer/modules`.
-- Vite page can be served, but no Playwright/browser flow has been completed.
-- Desktop renderer still has no login flow; it expects `localStorage.desktop_config.accessToken`.
+- Vite page can be served and browser smoke has covered login plus representative admin sections.
+- Desktop renderer now has a login flow and no longer requires manually editing `localStorage.desktop_config.accessToken`.
 - Desktop package has Vite dev preview, but no packaged Electron launch script in `package.json`.
+- Remaining:
+  - full browser click coverage for every desktop/admin workflow
+  - packaged Electron launch/build verification
+  - component/store tests for failure and offline branches
 
 ## Recommended Repair Order
 

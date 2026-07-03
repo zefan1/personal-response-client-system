@@ -29,8 +29,8 @@ This progress card tracks backend API acceptance work. It does not certify the S
 ## Current Known Limits
 
 - Harness intentionally does not claim real external-provider acceptance.
-- Java test suite still has no tests unless later added.
-- Admin frontend is still absent unless later implemented.
+- Java test suite now has focused coverage, but not full controller/repository integration coverage.
+- Admin frontend now exists in the desktop/Vite renderer, but the bespoke workflow UI and full browser click coverage are still incomplete.
 - Real WeCom table metadata still depends on a production `SheetClient`; datasource columns now expose `fetchStatus` and fallback source instead of returning an empty placeholder.
 
 ## Latest Passing Run
@@ -41,8 +41,9 @@ This progress card tracks backend API acceptance work. It does not certify the S
 wsl -d Ubuntu -- bash -lc 'cd /mnt/c/Users/85314/Desktop/私域工具/私域辅助系统 && python3 scripts/acceptance_backend_api.py'
 ```
 
-- Result after datasource hardening: 99 passed, 0 failed.
-- Report: `.tools/acceptance/backend_api_acceptance_20260703110901.json`.
+- Result after admin frontend/CORS work: 99 passed, 0 failed.
+- Report: `.tools/acceptance/backend_api_acceptance_20260703121721.json`.
+- Browser smoke: login at `http://127.0.0.1:5173/` using `admin/admin123`, then checked health/config, skill bindings, AI/external environments, datasource mappings, accounts, notices/versions/audit sections.
 
 ## Validation Command
 
@@ -52,5 +53,5 @@ wsl -d Ubuntu -- bash -lc 'cd /mnt/c/Users/85314/Desktop/私域工具/私域辅�
 
 ## Java And DB Evidence
 
-- `mvn test`: 10 tests run, 0 failures.
+- `mvn test`: 11 tests run, 0 failures.
 - `python scripts/verify_database_alignment.py`: 31 live MariaDB tables inspected, 14 key tables checked, 0 missing required columns.

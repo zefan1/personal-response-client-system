@@ -23,6 +23,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue';
+import { captureScreenshot, onClipboardImage } from '../../shared/desktopBridge';
 import { eventBus } from '../../shared/eventBus';
 import { connectWsMessageBus } from '../../shared/wsMessageBus';
 import {
@@ -43,7 +44,7 @@ let removeWorkbenchCaptureListener: (() => void) | null = null;
 
 onMounted(() => {
   connectWsMessageBus();
-  removeClipboardListener = window.desktopBridge.onClipboardImage((payload) => {
+  removeClipboardListener = onClipboardImage((payload) => {
     void recognizeClipboardImage(payload);
   });
   removeStatusListener = eventBus.on('image:status-changed', handleImageServiceStatus);
@@ -57,7 +58,7 @@ onBeforeUnmount(() => {
 });
 
 async function captureFromWindow() {
-  const result = await window.desktopBridge.captureScreenshot();
+  const result = await captureScreenshot();
   if (!result.success || !result.imageBase64) {
     state.toast = result.error === 'NO_WECHAT_WINDOW'
       ? '未检测到微信/企业微信窗口，请手动 Alt+A 截图'

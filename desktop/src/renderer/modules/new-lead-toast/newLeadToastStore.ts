@@ -1,5 +1,6 @@
 import { reactive } from 'vue';
 import { loadDesktopConfig } from '../../shared/config';
+import { writeClipboardText } from '../../shared/desktopBridge';
 import { eventBus } from '../../shared/eventBus';
 import type { NewLeadAlertPayload, NewLeadToastItem } from './types';
 
@@ -33,7 +34,7 @@ export async function copyNewLeadPhone(item: NewLeadToastItem): Promise<void> {
     return;
   }
   try {
-    const result = await window.desktopBridge.writeClipboardText(phone);
+    const result = await writeClipboardText(phone);
     if (!result.success) {
       throw new Error(result.error ?? 'clipboard failed');
     }

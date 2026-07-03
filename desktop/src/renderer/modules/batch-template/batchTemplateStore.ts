@@ -1,6 +1,7 @@
 import { computed, reactive } from 'vue';
 import { getJson, postJson } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
+import { writeClipboardText } from '../../shared/desktopBridge';
 import type { Customer, CustomerProfileView } from '../customer-profile/types';
 import type { QuickSearchItem } from '../quick-search/types';
 import type { BatchCustomerState, BatchCustomersResponse, BatchPhase, BatchStartPayload, BatchTemplate } from './types';
@@ -137,7 +138,7 @@ export async function copyCurrentBatchText(): Promise<void> {
   if (!current || !template || !text || current.copied) {
     return;
   }
-  const result = await window.desktopBridge.writeClipboardText(text);
+  const result = await writeClipboardText(text);
   if (!result.success) {
     recordLocalLog(current.phone, template.id, 'COPY_FAILED', result.error);
     batchTemplateState.toast = '复制失败，请重试';
@@ -152,7 +153,7 @@ export async function copyBatchCustomerField(value: string, label: string): Prom
   if (!value) {
     return;
   }
-  const result = await window.desktopBridge.writeClipboardText(value);
+  const result = await writeClipboardText(value);
   batchTemplateState.toast = result.success ? `已复制${label}` : '复制失败，请重试';
 }
 

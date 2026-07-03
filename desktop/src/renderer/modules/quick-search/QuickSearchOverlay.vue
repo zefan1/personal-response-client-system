@@ -39,6 +39,7 @@
 
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { onQuickSearchHide, onQuickSearchShow } from '../../shared/desktopBridge';
 import { eventBus } from '../../shared/eventBus';
 import {
   cleanupQuickSearchStore,
@@ -69,11 +70,11 @@ const disposers: Array<() => void> = [];
 
 onMounted(() => {
   void initializeQuickSearch();
-  disposers.push(window.desktopBridge.onQuickSearchShow(() => {
+  disposers.push(onQuickSearchShow(() => {
     showQuickSearch();
     void nextTick(() => inputRef.value?.focus());
   }));
-  disposers.push(window.desktopBridge.onQuickSearchHide(hideQuickSearch));
+  disposers.push(onQuickSearchHide(hideQuickSearch));
   disposers.push(eventBus.on('CONFIG_REFRESH', handleQuickSearchConfigRefresh));
   disposers.push(eventBus.on('network:offline', handleQuickSearchOffline));
   disposers.push(eventBus.on('network:online', handleQuickSearchOnline));
