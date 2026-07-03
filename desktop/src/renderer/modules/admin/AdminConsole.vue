@@ -69,6 +69,31 @@
               目标 ID
               <input v-model="actionState[action.name].id" inputmode="numeric" placeholder="先从上方列表复制 id" />
             </label>
+            <div v-if="editableFields(action).length" class="admin-field-grid">
+              <label v-for="field in editableFields(action)" :key="field.key">
+                {{ field.label }}
+                <select v-if="field.kind === 'enum'" :value="String(field.value ?? '')" @change="updateActionField(action, field.key, ($event.target as HTMLSelectElement).value)">
+                  <option v-for="option in field.options" :key="option" :value="option">{{ option }}</option>
+                </select>
+                <input
+                  v-else-if="field.kind === 'boolean'"
+                  type="checkbox"
+                  :checked="Boolean(field.value)"
+                  @change="updateActionField(action, field.key, ($event.target as HTMLInputElement).checked)"
+                />
+                <input
+                  v-else-if="field.kind === 'number'"
+                  type="number"
+                  :value="field.value ?? ''"
+                  @input="updateActionField(action, field.key, numberFieldValue(($event.target as HTMLInputElement).value))"
+                />
+                <input
+                  v-else
+                  :value="String(field.value ?? '')"
+                  @input="updateActionField(action, field.key, ($event.target as HTMLInputElement).value)"
+                />
+              </label>
+            </div>
             <label>
               请求体 JSON
               <textarea v-model="actionState[action.name].body" spellcheck="false" />
@@ -108,6 +133,13 @@ type AdminSection = {
 };
 
 type ActionState = Record<string, { id: string; body: string }>;
+type EditableField = {
+  key: string;
+  label: string;
+  kind: 'text' | 'number' | 'boolean' | 'enum';
+  value: unknown;
+  options?: string[];
+};
 
 const props = defineProps<{
   accountName: string;
@@ -446,6 +478,124 @@ function parseBody(action: ActionEndpoint) {
   } catch {
     throw new Error(`${action.name} 的请求体不是合法 JSON`);
   }
+}
+
+function editableFields(action: ActionEndpoint): EditableField[] {
+  const body = safeParseActionBody(action);
+  if (!body || Array.isArray(body) || typeof body !== 'object') {
+    return [];
+  }
+  return Object.entries(body as Record<string, unknown>)
+    .filter(([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value))
+    .map(([key, value]) => {
+      const options = enumOptionsFor(key);
+      return {
+        key,
+        label: fieldLabel(key),
+        kind: options.length ? 'enum' : primitiveKind(value),
+        value,
+        options
+      };
+    });
+}
+
+function updateActionField(action: ActionEndpoint, key: string, value: unknown) {
+  const body = safeParseActionBody(action) ?? {};
+  if (Array.isArray(body) || typeof body !== 'object') {
+    return;
+  }
+  (body as Record<string, unknown>)[key] = value;
+  actionState[action.name].body = JSON.stringify(body, null, 2);
+}
+
+function numberFieldValue(value: string): number | null {
+  if (value.trim() === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function safeParseActionBody(action: ActionEndpoint): unknown | null {
+  const raw = actionState[action.name].body.trim();
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function primitiveKind(value: unknown): EditableField['kind'] {
+  if (typeof value === 'boolean') return 'boolean';
+  if (typeof value === 'number') return 'number';
+  return 'text';
+}
+
+function enumOptionsFor(key: string): string[] {
+  const options: Record<string, string[]> = {
+    role: ['ADMIN', 'LEADER', 'KEEPER'],
+    scene: ['OPENING', 'ACTIVE_REPLY', 'REGENERATE'],
+    leadType: ['GENERAL', 'TUAN_GOU', 'XIAN_SUO', 'PENDING'],
+    contentType: ['TEMPLATE', 'KNOWLEDGE', 'LOCATION', 'IMAGE', 'MINI_PROGRAM'],
+    level: ['INFO', 'WARN', 'ERROR'],
+    publishType: ['IMMEDIATE', 'SCHEDULED'],
+    platform: ['WINDOWS', 'MAC'],
+    updateStrategy: ['OPTIONAL', 'FORCE'],
+    actionType: ['ALERT', 'TAG_SUGGESTION']
+  };
+  return options[key] ?? [];
+}
+
+function fieldLabel(key: string): string {
+  const labels: Record<string, string> = {
+    value: '配置值',
+    description: '说明',
+    skillId: '技能 ID',
+    skillName: '技能名称',
+    scene: '场景',
+    leadType: '线索类型',
+    priority: '优先级',
+    enabled: '启用',
+    envName: '环境名称',
+    baseUrl: 'Base URL',
+    apiKey: 'API Key',
+    name: '名称',
+    sheetId: '表格 ID',
+    sourceTable: '来源表',
+    title: '标题',
+    shortcutCode: '快捷码',
+    content: '内容',
+    imageUrl: '图片 URL',
+    sortOrder: '排序',
+    phone: '手机号',
+    password: '密码',
+    displayName: '显示名',
+    role: '角色',
+    leaderId: '直属组长',
+    isEnabled: '启用',
+    newPassword: '新密码',
+    conditionJson: '条件 JSON',
+    actionType: '动作类型',
+    actionConfig: '动作配置',
+    categoryId: '分类 ID',
+    tagValue: '标签值',
+    publishType: '发布类型',
+    publishAt: '发布时间',
+    expireDays: '有效天数',
+    version: '版本',
+    platform: '平台',
+    downloadUrl: '下载地址',
+    changelog: '更新说明',
+    updateStrategy: '更新策略',
+    gradualPercent: '灰度比例',
+    fileSize: '文件大小',
+    reason: '原因',
+    alternativeVersion: '替代版本'
+  };
+  return labels[key] ?? key;
 }
 
 function formatJson(value: unknown) {

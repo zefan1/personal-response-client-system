@@ -189,6 +189,19 @@ async function runRendererSmoke(window: BrowserWindow) {
             if (!panel.querySelector('textarea')) {
               throw new Error('action panel missing JSON textarea: ' + section);
             }
+            const bodyText = panel.querySelector('textarea')?.value ?? '';
+            const simpleBody = (() => {
+              try {
+                const parsed = JSON.parse(bodyText);
+                return parsed && !Array.isArray(parsed) && typeof parsed === 'object'
+                  && Object.values(parsed).some((value) => value === null || ['string', 'number', 'boolean'].includes(typeof value));
+              } catch {
+                return false;
+              }
+            })();
+            if (simpleBody && !panel.querySelector('.admin-field-grid')) {
+              throw new Error('action panel missing structured fields: ' + section);
+            }
           }
           await waitForText('数据读取');
           await waitForText('操作入口');

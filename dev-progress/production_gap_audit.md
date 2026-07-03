@@ -38,7 +38,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest current-state result after abnormal-alert coverage expansion: Windows x64 directory artifact created under `desktop/release/Private Domain Assistant-win32-x64`, `app.asar` present with SHA-256 report, `asarBytes=28334580`, `signed=false` because no production code-signing certificate is configured locally.
 - Renderer click smoke passes:
   - `PDA_SMOKE_API_BASE_URL=http://<WSL-IP>:8080 cd desktop && npm run renderer:smoke`
-  - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, desktop workbench switch, desktop panel presence, workbench/followup refresh buttons, all followup tabs, recognition text-mode form, customer search input/button, quick-search overlay, and quick-search lead-type filters.
+  - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, structured action controls for simple JSON bodies, desktop workbench switch, desktop panel presence, workbench/followup refresh buttons, all followup tabs, recognition text-mode form, customer search input/button, quick-search overlay, and quick-search lead-type filters.
   - Latest rerun after renderer desktop smoke expansion used `http://172.19.250.154:8080` because Windows localhost forwarding to WSL was unavailable; result: passed.
 - Static module verifiers pass:
   - `verify_module_a.py` through `verify_module_h.py`
@@ -83,6 +83,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Datasource import logs no longer returns a fixed empty list; it now reads persisted `customer_import_log` rows.
 - Desktop renderer now has a login flow that persists the backend token into `desktop_config`.
 - Admin console pages now exist in the desktop/Vite renderer and are backed by real `/admin/api/v1/*` calls rather than static mock data.
+- Admin action panels now expose structured controls for simple JSON body fields: enums render as select boxes, booleans as checkboxes, numbers as numeric inputs, and text fields as inputs while preserving the raw JSON editor for complex payloads.
 - Browser/Vite runtime no longer requires the Electron preload bridge for login/admin smoke testing; desktop bridge calls have web fallbacks where possible.
 - Backend CORS now permits local Vite origins and the auth filter bypasses OPTIONS preflight.
 - WeCom smart table read/write no longer uses unavailable placeholder clients; `HttpWecomTableClient` implements both `SheetClient` and `WecomTableClient` behind `table.api_base_url` / `table.api_key`.
@@ -130,7 +131,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 ### P0 - Admin Frontend Is Missing
 
 - Addressed for manual acceptance: the desktop/Vite renderer now includes a management console for health/config, skill scenes, AI configuration, datasource mapping, quick search management, accounts, followup rules, tags, analytics, desktop versions, notices, audit logs, and health dashboard.
-- Current limitation: the first admin console is a production-connected operations surface with JSON action forms; it is not yet a fully bespoke polished admin product UI for every module workflow.
+- Current limitation: the first admin console is a production-connected operations surface with structured controls for simple action fields plus raw JSON for complex payloads; it is not yet a fully bespoke polished admin product UI for every module workflow.
 
 ### P0 - Real External Providers Not Accepted
 
