@@ -32,10 +32,10 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest build rerun after renderer desktop smoke expansion: passed via `cd desktop && npm run renderer:smoke`. Latest standalone Electron smoke evidence remains from the controller coverage expansion checkpoint.
 - Desktop dependency audit passes:
   - `cd desktop && npm audit --json`
-  - Latest result: 0 vulnerabilities after upgrading Vite and Electron.
+  - Latest current-state result after abnormal-alert coverage expansion: 0 vulnerabilities (`critical=0 high=0 moderate=0 low=0`).
 - Desktop packaged directory verification passes:
   - `cd desktop && npm run package:verify`
-  - Latest result: Windows x64 directory artifact created under `desktop/release/Private Domain Assistant-win32-x64`, `app.asar` present with SHA-256 report, `signed=false` because no production code-signing certificate is configured locally.
+  - Latest current-state result after abnormal-alert coverage expansion: Windows x64 directory artifact created under `desktop/release/Private Domain Assistant-win32-x64`, `app.asar` present with SHA-256 report, `asarBytes=28334580`, `signed=false` because no production code-signing certificate is configured locally.
 - Renderer click smoke passes:
   - `PDA_SMOKE_API_BASE_URL=http://<WSL-IP>:8080 cd desktop && npm run renderer:smoke`
   - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, desktop workbench switch, desktop panel presence, workbench/followup refresh buttons, all followup tabs, recognition text-mode form, customer search input/button, quick-search overlay, and quick-search lead-type filters.
