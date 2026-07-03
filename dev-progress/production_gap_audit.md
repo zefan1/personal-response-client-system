@@ -70,6 +70,10 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `python scripts/acceptance_real_external_local.py`
   - Latest current-state result: `passed=true checks=30`.
   - Covered real HTTP client paths: Skill `/v1/chat/completions`, image `/v1/chat/completions`, WeCom table rows GET/PUT, admin environment create/activate, datasource create/mapping/columns, and customer save-to-table.
+- Live real-provider acceptance runner now exists:
+  - `python scripts/acceptance_real_external_live.py`
+  - It starts an isolated `MOCK_EXTERNALS=false` backend/database and reads real credentials only from environment variables: `PDA_LIVE_SKILL_BASE_URL`, `PDA_LIVE_SKILL_API_KEY`, `PDA_LIVE_IMAGE_BASE_URL`, `PDA_LIVE_IMAGE_API_KEY`, `PDA_LIVE_TABLE_BASE_URL`, `PDA_LIVE_TABLE_API_KEY`.
+  - Latest no-credential guard result: `passed=false checks=0 missingEnv=6`, proving the script fails closed until live provider credentials are supplied.
 - Database alignment verifier now checks required columns, every table declared by migrations, config keys inserted by migrations, and static repository SQL table references:
   - It now also verifies selected production-critical nullable/default assumptions, live enum values for accounts, customers, skill bindings, quick search, desktop versions, notices, audit exports, followup rules/tag suggestions, AI/image environments, prompt versions, pending table writes, and desktop client version reports, plus scanned repository SQL column references for INSERT/UPDATE/table-alias qualified columns and safely parseable single-table unqualified SELECT columns.
   - Latest current-state result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys, 0 missing repository tables, 817 repository column references checked, 0 repository column violations, 0 column property violations, 0 enum violations.
@@ -156,8 +160,10 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Controlled non-mock HTTP acceptance passes against the local fake provider:
   - `python scripts/acceptance_real_external_local.py`
   - Latest result: `passed=true checks=30`.
-- Real third-party live provider acceptance is still missing because valid external credentials/endpoints have not been supplied.
-- Remaining before production: run endpoint-level live tests against real Skill, image recognition, and WeCom gateway credentials.
+- Real third-party live provider acceptance runner exists but has not passed because valid external credentials/endpoints have not been supplied:
+  - `python scripts/acceptance_real_external_live.py`
+  - Latest no-credential guard result: `passed=false checks=0 missingEnv=6`.
+- Remaining before production: set the six `PDA_LIVE_*` environment variables and run endpoint-level live tests against real Skill, image recognition, and WeCom gateway credentials.
 
 ### P1 - API Behavior Coverage Still Incomplete
 
