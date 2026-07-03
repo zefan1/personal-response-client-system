@@ -47,3 +47,17 @@ $env:PYTHONUTF8='1'; python scripts/verify_module_g.py
 - 静态契约验证脚本已补充：`scripts/verify_module_g.py`
 - 队列重试成功后会恢复完整业务副作用：INSERT 补写 `customers` 并发布 `ProfileUpdatedEvent`；UPDATE 缺少 `sourceRowId` 时重新查询 A 的客户来源行。
 - Maven 编译/测试仍依赖本机安装 `mvn`；当前环境此前显示 `mvn` 不可识别。
+
+## Checkpoint - Real WeCom Client Boundary
+
+- Added `HttpWecomTableClient`, which implements both `SheetClient` and `WecomTableClient`.
+- Added config keys `table.api_base_url` and `table.api_key`.
+- Added migration `V52__wecom_table_real_client_configs.sql` so existing databases receive the new config keys without changing the already-applied V7 migration checksum.
+- Removed unavailable real-mode client blockers:
+  - `UnavailableSheetClient`
+  - `UnavailableWecomTableClient`
+- Validation:
+  - `mvn test`: 11 tests, 0 failures.
+  - `python scripts/verify_module_g.py`: passed.
+  - `python scripts/verify_real_external_readiness.py`: `mockExternalsFalseReady=true`.
+  - `python3 scripts/acceptance_backend_api.py --no-start`: 99 passed, 0 failed.

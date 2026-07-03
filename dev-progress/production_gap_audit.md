@@ -27,7 +27,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Checked admin sections: health/config, skill bindings, AI/external environments, datasource mappings, accounts, notices/versions/audit.
 - Real external readiness verifier exists:
   - `python scripts/verify_real_external_readiness.py`
-  - Latest result: `mockExternalsFalseReady=false`, blockers are the missing real WeCom sheet read/write clients.
+  - Latest result: `mockExternalsFalseReady=true`, source/config blockers are cleared.
 
 ## Addressed Since Initial Audit
 
@@ -38,6 +38,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Admin console pages now exist in the desktop/Vite renderer and are backed by real `/admin/api/v1/*` calls rather than static mock data.
 - Browser/Vite runtime no longer requires the Electron preload bridge for login/admin smoke testing; desktop bridge calls have web fallbacks where possible.
 - Backend CORS now permits local Vite origins and the auth filter bypasses OPTIONS preflight.
+- WeCom smart table read/write no longer uses unavailable placeholder clients; `HttpWecomTableClient` implements both `SheetClient` and `WecomTableClient` behind `table.api_base_url` / `table.api_key`.
 
 ## Hard Production Gaps
 
@@ -59,12 +60,9 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 - Runtime smoke and API acceptance currently use `MOCK_EXTERNALS=true`.
 - Skill API and image recognition have configurable real HTTP clients and admin-managed environment configuration.
-- Real provider live acceptance is still missing because valid external credentials/endpoints have not been supplied.
-- WeCom table read/write API remains a source-code blocker:
-  - `UnavailableSheetClient`
-  - `UnavailableWecomTableClient`
-- `MOCK_EXTERNALS=false` still needs complete configuration and endpoint-level validation.
-- `UnavailableSheetClient` and `UnavailableWecomTableClient` remain production blockers unless real clients are supplied.
+- WeCom table read/write now has a configurable real HTTP client and `table.api_base_url` / `table.api_key` config keys.
+- `MOCK_EXTERNALS=false` source/config readiness passes, but live provider acceptance is still missing because valid external credentials/endpoints have not been supplied.
+- Remaining before production: run endpoint-level live tests against real Skill, image recognition, and WeCom gateway credentials.
 
 ### P1 - API Behavior Coverage Still Incomplete
 

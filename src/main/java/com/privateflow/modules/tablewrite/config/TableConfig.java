@@ -1,6 +1,8 @@
 package com.privateflow.modules.tablewrite.config;
 
 public record TableConfig(
+    String apiBaseUrl,
+    String apiKey,
     int writeTimeoutMs,
     int retryMaxCount,
     int retryIntervalS,

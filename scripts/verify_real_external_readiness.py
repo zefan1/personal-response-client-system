@@ -22,14 +22,14 @@ CHECKS = [
     },
     {
         "name": "wecom_sheet_real_client",
-        "path": "src/main/java/com/privateflow/modules/customer/sync/UnavailableSheetClient.java",
-        "forbidden": ["implements SheetClient", "IllegalStateException"],
+        "path": "src/main/java/com/privateflow/modules/tablewrite/client/HttpWecomTableClient.java",
+        "required": ["implements WecomTableClient, SheetClient", "fetchIncrementalRows", "table.api_base_url", "table.api_key"],
         "blocking": True,
     },
     {
         "name": "wecom_table_write_real_client",
-        "path": "src/main/java/com/privateflow/modules/tablewrite/client/UnavailableWecomTableClient.java",
-        "forbidden": ["implements WecomTableClient", "IllegalStateException"],
+        "path": "src/main/java/com/privateflow/modules/tablewrite/client/HttpWecomTableClient.java",
+        "required": ["createRow", "updateRow", "HttpClient", "Authorization"],
         "blocking": True,
     },
 ]
@@ -39,7 +39,14 @@ CONFIG_KEYS = {
     "skill.api_key": ["src/main/java/com/privateflow/modules/skill/config/SkillConfigProvider.java", "src/main/resources/db/migration"],
     "image.api_base_url": ["src/main/java/com/privateflow/modules/image/config/ImageConfigProvider.java", "src/main/resources/db/migration"],
     "image.api_key": ["src/main/java/com/privateflow/modules/image/config/ImageConfigProvider.java", "src/main/resources/db/migration"],
+    "table.api_base_url": ["src/main/java/com/privateflow/modules/tablewrite/config/TableConfigProvider.java", "src/main/resources/db/migration"],
+    "table.api_key": ["src/main/java/com/privateflow/modules/tablewrite/config/TableConfigProvider.java", "src/main/resources/db/migration"],
 }
+
+FORBIDDEN_PATHS = [
+    "src/main/java/com/privateflow/modules/customer/sync/UnavailableSheetClient.java",
+    "src/main/java/com/privateflow/modules/tablewrite/client/UnavailableWecomTableClient.java",
+]
 
 
 def read(path: str) -> str:
@@ -88,6 +95,13 @@ def check_config_keys() -> list[dict[str, object]]:
 
 def main() -> int:
     checks = check_source() + check_config_keys()
+    for path in FORBIDDEN_PATHS:
+        checks.append({
+            "name": f"forbidden_path:{path}",
+            "path": path,
+            "ok": not (ROOT / path).exists(),
+            "blocking": True,
+        })
     blockers = [item for item in checks if item["blocking"] and not item["ok"]]
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report = {

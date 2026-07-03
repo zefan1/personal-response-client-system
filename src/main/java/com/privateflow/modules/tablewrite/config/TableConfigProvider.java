@@ -28,6 +28,8 @@ public class TableConfigProvider {
       @Value("${table.queue-alert-threshold:1000}") int queueAlertThreshold) {
     this.configRepository = configRepository;
     this.current = new AtomicReference<>(new TableConfig(
+        "",
+        "",
         clamp(writeTimeoutMs, 5000, 20000),
         clamp(retryMaxCount, 3, 10),
         clamp(retryIntervalS, 30, 300),
@@ -57,6 +59,8 @@ public class TableConfigProvider {
     TableConfig previous = current.get();
     Map<String, String> values = configRepository.findByPrefix("table.");
     current.set(new TableConfig(
+        string(values.get("table.api_base_url"), previous.apiBaseUrl()),
+        string(values.get("table.api_key"), previous.apiKey()),
         integer(values.get("table.write_timeout_ms"), previous.writeTimeoutMs(), 5000, 20000),
         integer(values.get("table.retry_max_count"), previous.retryMaxCount(), 3, 10),
         integer(values.get("table.retry_interval_s"), previous.retryIntervalS(), 30, 300),
@@ -64,6 +68,10 @@ public class TableConfigProvider {
         alertTarget(values.get("table.alert_notify_target"), previous.alertNotifyTarget()),
         integer(values.get("table.queue_warn_threshold"), previous.queueWarnThreshold(), 50, 500),
         integer(values.get("table.queue_alert_threshold"), previous.queueAlertThreshold(), 500, 5000)));
+  }
+
+  private String string(String raw, String fallback) {
+    return raw == null ? fallback : raw.trim();
   }
 
   private int integer(String raw, int fallback, int min, int max) {

@@ -19,7 +19,7 @@ required_files = [
     "src/main/java/com/privateflow/modules/tablewrite/config/TableWriteModuleConfiguration.java",
     "src/main/java/com/privateflow/modules/tablewrite/client/WecomTableClient.java",
     "src/main/java/com/privateflow/modules/tablewrite/client/MockWecomTableClient.java",
-    "src/main/java/com/privateflow/modules/tablewrite/client/UnavailableWecomTableClient.java",
+    "src/main/java/com/privateflow/modules/tablewrite/client/HttpWecomTableClient.java",
     "src/main/java/com/privateflow/modules/tablewrite/infra/TableFieldMappingResolver.java",
     "src/main/java/com/privateflow/modules/tablewrite/infra/PendingTableWriteRepository.java",
     "src/main/java/com/privateflow/modules/tablewrite/service/NewCustomerRowCreator.java",
@@ -31,6 +31,8 @@ required_files = [
 ]
 
 config_keys = [
+    "table.api_base_url",
+    "table.api_key",
     "table.write_timeout_ms",
     "table.retry_max_count",
     "table.retry_interval_s",
@@ -54,9 +56,10 @@ if not errors:
     for token in ["CREATE TABLE IF NOT EXISTS pending_table_writes", "action_type", "payload", "retry_count", "PENDING", "RESOLVED", "FAILED", "idx_status_retry", "idx_phone"]:
         if token not in sql:
             errors.append(f"V7 migration missing {token}")
+    migration_text = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "src/main/resources/db/migration").glob("*.sql"))
     for key in config_keys:
-        if key not in sql:
-            errors.append(f"V7 migration missing config key {key}")
+        if key not in migration_text:
+            errors.append(f"migrations missing config key {key}")
 
     app = read("src/main/resources/application.yml")
     for token in ["table:", "write-timeout-ms: 10000", "retry-max-count: 5", "retry-interval-s: 60", "alert-notify-target: ADMIN"]:
@@ -82,6 +85,11 @@ if not errors:
     for token in ["createRow", "updateRow", "Duration"]:
         if token not in client:
             errors.append(f"WecomTableClient missing {token}")
+
+    http_client = read("src/main/java/com/privateflow/modules/tablewrite/client/HttpWecomTableClient.java")
+    for token in ["implements WecomTableClient, SheetClient", "HttpClient", "Authorization", "fetchIncrementalRows", "createRow", "updateRow", "/tables/", "table.api_base_url", "table.api_key"]:
+        if token not in http_client:
+            errors.append(f"HttpWecomTableClient missing {token}")
 
     mapping = read("src/main/java/com/privateflow/modules/tablewrite/infra/TableFieldMappingResolver.java")
     for token in ["datasource_field_mappings", "target_field", "source_field", "toSourceFields", "datasource.field_mappings"]:
