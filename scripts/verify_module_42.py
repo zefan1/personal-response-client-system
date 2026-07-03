@@ -17,9 +17,9 @@ def require(path: str, tokens: list[str]) -> None:
 def forbid(path: str, tokens: list[str]) -> None:
     target = ROOT / path
     if target.is_dir():
-      text = "\n".join(child.read_text(encoding="utf-8") for child in target.rglob("*.java"))
+        text = "\n".join(child.read_text(encoding="utf-8") for child in target.rglob("*.java"))
     else:
-      text = read(path)
+        text = read(path)
     found = [token for token in tokens if token in text]
     if found:
         raise AssertionError(f"{path} forbidden tokens: {', '.join(found)}")
@@ -42,6 +42,7 @@ def main() -> None:
         "/admin/api/v1/datasources/import",
         "/admin/api/v1/datasources/import-logs",
         "MultipartFile",
+        "service.compareMappings(id)",
     ])
     require("src/main/java/com/privateflow/modules/customer/admin/DatasourceAdminService.java", [
         "datasource.field_mappings",
@@ -50,10 +51,12 @@ def main() -> None:
         "CONFIG_REFRESH",
         "CustomerSyncScheduler",
         "CustomerRepository",
+        "SheetClient",
         "Introspector.getBeanInfo(Customer.class)",
-        "columns",
-        "fallback",
-        "暂无法自动获取列名",
+        "compareMappings",
+        "fetchStatus",
+        "externalFetchAvailable",
+        "repository.importLogs",
         "IMPORT_MAX_ROWS = 5000",
         "same targetField can only have one enabled mapping",
         "customerRepository.findByPhone(phone).orElseGet(Customer::new)",
@@ -72,6 +75,10 @@ def main() -> None:
         "DELETE FROM datasource_field_mappings",
         "MAX(version)",
         "LIMIT 20",
+        "latestMappingSnapshot",
+        "importLogs",
+        "nameExists",
+        "SELECT COUNT(*) FROM customer_import_log",
     ])
     require("src/main/java/com/privateflow/modules/api/config/ConfigAdminService.java", [
         "datasource.",
@@ -103,6 +110,8 @@ def main() -> None:
     ])
     require("dev-progress/42_progress.md", [
         "功能签收清单",
+        "compare",
+        "import-logs",
         "python scripts/verify_module_42.py",
         "mvn test",
         "git diff --check",
@@ -110,6 +119,8 @@ def main() -> None:
     forbid("src/main/java/com/privateflow/modules/customer/admin", [
         "TODO",
         "FIXME",
+        "manual comparison pending",
+        "暂无法自动获取列名",
     ])
     print("module 42 verification passed")
 

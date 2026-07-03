@@ -2,7 +2,10 @@ package com.privateflow.modules.customer.admin;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -54,6 +57,18 @@ public class DatasourceAdminRepository {
         """, request.name().trim(), request.sheetId().trim(), request.sourceTable().trim(), request.description(), operator);
     Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     return id == null ? 0 : id;
+  }
+
+  public boolean nameExists(String name, Long exceptId) {
+    String except = exceptId == null ? "" : " AND id <> ?";
+    Object[] args = exceptId == null
+        ? new Object[] {name}
+        : new Object[] {name, exceptId};
+    Integer count = jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM datasources WHERE name = ?" + except,
+        Integer.class,
+        args);
+    return count != null && count > 0;
   }
 
   public void update(long id, DatasourceRequest request) {
@@ -149,6 +164,23 @@ public class DatasourceAdminRepository {
         """, (rs, rowNum) -> rs.getString("mappings_json"), datasourceId, version).stream().findFirst();
   }
 
+  public Optional<MappingSnapshot> latestMappingSnapshot(long datasourceId) {
+    return jdbcTemplate.query("""
+        SELECT version, mappings_json, mapping_count, changed_by, change_summary, created_at
+        FROM datasource_mapping_versions
+        WHERE datasource_id = ?
+        ORDER BY version DESC
+        LIMIT 1
+        """, (rs, rowNum) -> new MappingSnapshot(
+            rs.getInt("version"),
+            rs.getString("mappings_json"),
+            rs.getInt("mapping_count"),
+            rs.getString("changed_by"),
+            rs.getString("change_summary"),
+            rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime()), datasourceId)
+        .stream().findFirst();
+  }
+
   public List<String> unresolvedFailures(String sourceTable) {
     return jdbcTemplate.query("""
         SELECT fail_reason FROM sync_failure_log
@@ -163,6 +195,33 @@ public class DatasourceAdminRepository {
         INSERT INTO customer_import_log (file_name, total_rows, created_count, updated_count, skipped_count, error_detail, imported_by)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """, fileName, result.totalRows(), result.created(), result.updated(), result.skipped(), result.errors().toString(), operator);
+  }
+
+  public List<Map<String, Object>> importLogs(int limit) {
+    return jdbcTemplate.query("""
+        SELECT id, file_name, total_rows, created_count, updated_count, skipped_count,
+               error_detail, imported_by, created_at
+        FROM customer_import_log
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+        """, (rs, rowNum) -> {
+          Map<String, Object> item = new LinkedHashMap<>();
+          item.put("id", rs.getLong("id"));
+          item.put("fileName", rs.getString("file_name"));
+          item.put("totalRows", rs.getInt("total_rows"));
+          item.put("created", rs.getInt("created_count"));
+          item.put("updated", rs.getInt("updated_count"));
+          item.put("skipped", rs.getInt("skipped_count"));
+          item.put("errorDetail", rs.getString("error_detail"));
+          item.put("importedBy", rs.getString("imported_by"));
+          item.put("createdAt", rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime());
+          return item;
+        }, limit);
+  }
+
+  public long importLogCount() {
+    Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM customer_import_log", Long.class);
+    return count == null ? 0L : count;
   }
 
   private Datasource mapDatasource(ResultSet rs, int rowNum) throws SQLException {
@@ -183,5 +242,15 @@ public class DatasourceAdminRepository {
 
   private String blankToNull(String value) {
     return value == null || value.isBlank() ? null : value.trim();
+  }
+
+  public record MappingSnapshot(
+      int version,
+      String mappingsJson,
+      int mappingCount,
+      String changedBy,
+      String changeSummary,
+      LocalDateTime createdAt
+  ) {
   }
 }

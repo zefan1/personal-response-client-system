@@ -11,6 +11,8 @@ import com.privateflow.modules.api.ws.WsPushService;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.infra.CustomerRepository;
 import com.privateflow.modules.customer.sync.CustomerSyncScheduler;
+import com.privateflow.modules.customer.sync.SheetClient;
+import com.privateflow.modules.customer.sync.SheetRow;
 import java.beans.Introspector;
 import java.beans.PropertyDescriptor;
 import java.io.BufferedReader;
@@ -18,6 +20,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -39,6 +42,7 @@ public class DatasourceAdminService {
   private final DatasourceAdminRepository repository;
   private final CustomerRepository customerRepository;
   private final CustomerSyncScheduler syncScheduler;
+  private final SheetClient sheetClient;
   private final ApplicationEventPublisher eventPublisher;
   private final WsPushService wsPushService;
   private final ObjectMapper objectMapper;
@@ -47,12 +51,14 @@ public class DatasourceAdminService {
       DatasourceAdminRepository repository,
       CustomerRepository customerRepository,
       CustomerSyncScheduler syncScheduler,
+      SheetClient sheetClient,
       ApplicationEventPublisher eventPublisher,
       WsPushService wsPushService,
       ObjectMapper objectMapper) {
     this.repository = repository;
     this.customerRepository = customerRepository;
     this.syncScheduler = syncScheduler;
+    this.sheetClient = sheetClient;
     this.eventPublisher = eventPublisher;
     this.wsPushService = wsPushService;
     this.objectMapper = objectMapper;
@@ -64,7 +70,7 @@ public class DatasourceAdminService {
   }
 
   public Datasource create(DatasourceRequest request) {
-    validateDatasource(request, true);
+    validateDatasource(request, true, null);
     long id = repository.create(request, AuthContext.username());
     publish(CONNECTIONS_CONFIG_KEY);
     return repository.find(id).orElseThrow();
@@ -72,7 +78,7 @@ public class DatasourceAdminService {
 
   public Datasource update(long id, DatasourceRequest request) {
     repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
-    validateDatasource(request, false);
+    validateDatasource(request, false, id);
     repository.update(id, request);
     publish(CONNECTIONS_CONFIG_KEY);
     return repository.find(id).orElseThrow();
@@ -129,6 +135,49 @@ public class DatasourceAdminService {
     return Map.of("versions", repository.mappingVersions(id));
   }
 
+  public Map<String, Object> compareMappings(long id) {
+    Datasource datasource = repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
+    List<FieldMappingDto> current = repository.mappings(datasource.sourceTable());
+    DatasourceAdminRepository.MappingSnapshot snapshot = repository.latestMappingSnapshot(id).orElse(null);
+    List<FieldMappingDto> baseline = snapshot == null ? List.of() : fromJson(snapshot.mappingsJson());
+    Map<String, FieldMappingDto> currentBySource = bySourceField(current);
+    Map<String, FieldMappingDto> baselineBySource = bySourceField(baseline);
+    List<Map<String, Object>> added = new ArrayList<>();
+    List<Map<String, Object>> removed = new ArrayList<>();
+    List<Map<String, Object>> changed = new ArrayList<>();
+    List<Map<String, Object>> unchanged = new ArrayList<>();
+    for (Map.Entry<String, FieldMappingDto> entry : currentBySource.entrySet()) {
+      FieldMappingDto previous = baselineBySource.get(entry.getKey());
+      FieldMappingDto now = entry.getValue();
+      if (previous == null) {
+        added.add(mappingItem(now));
+      } else if (!sameMapping(previous, now)) {
+        changed.add(Map.of("sourceField", now.sourceField(), "before", mappingItem(previous), "after", mappingItem(now)));
+      } else {
+        unchanged.add(mappingItem(now));
+      }
+    }
+    for (Map.Entry<String, FieldMappingDto> entry : baselineBySource.entrySet()) {
+      if (!currentBySource.containsKey(entry.getKey())) {
+        removed.add(mappingItem(entry.getValue()));
+      }
+    }
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("datasourceId", id);
+    result.put("sourceTable", datasource.sourceTable());
+    result.put("baselineVersion", snapshot == null ? 0 : snapshot.version());
+    result.put("baselineCreatedAt", snapshot == null ? null : snapshot.createdAt());
+    result.put("summary", Map.of(
+        "currentCount", current.size(),
+        "baselineCount", baseline.size(),
+        "added", added.size(),
+        "removed", removed.size(),
+        "changed", changed.size(),
+        "unchanged", unchanged.size()));
+    result.put("diff", Map.of("added", added, "removed", removed, "changed", changed, "unchanged", unchanged));
+    return result;
+  }
+
   @Transactional
   public Map<String, Object> restoreMappings(long id, MappingRestoreRequest request) {
     Datasource datasource = repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
@@ -142,8 +191,57 @@ public class DatasourceAdminService {
   }
 
   public Map<String, Object> columns(long id) {
-    repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
-    return Map.of("columns", List.of(), "fallback", true, "message", "暂无法自动获取列名，请手动输入表格列名");
+    Datasource datasource = repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
+    LinkedHashSet<String> columnNames = new LinkedHashSet<>();
+    String source = "MAPPING_CONFIG";
+    String fetchStatus = "NOT_ATTEMPTED";
+    String fetchError = null;
+    try {
+      List<SheetRow> rows = sheetClient.fetchIncrementalRows(datasource.sourceTable(), LocalDateTime.of(1970, 1, 1, 0, 0), 20);
+      for (SheetRow row : rows) {
+        columnNames.addAll(row.values().keySet());
+      }
+      fetchStatus = "OK";
+      if (!columnNames.isEmpty()) {
+        source = "SHEET_SAMPLE";
+      }
+    } catch (RuntimeException ex) {
+      fetchStatus = "UNAVAILABLE";
+      fetchError = ex.getMessage();
+    }
+    List<FieldMappingDto> mappings = repository.mappings(datasource.sourceTable());
+    for (FieldMappingDto mapping : mappings) {
+      columnNames.add(mapping.sourceField());
+    }
+    List<Map<String, Object>> columns = columnNames.stream()
+        .sorted(Comparator.naturalOrder())
+        .map(column -> {
+          Map<String, Object> item = new LinkedHashMap<>();
+          item.put("name", column);
+          mappings.stream()
+              .filter(mapping -> mapping.sourceField().equals(column))
+              .findFirst()
+              .ifPresent(mapping -> {
+                item.put("mapped", true);
+                item.put("targetField", mapping.targetField());
+                item.put("enabled", mapping.enabled());
+              });
+          item.putIfAbsent("mapped", false);
+          return item;
+        })
+        .toList();
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("datasourceId", id);
+    result.put("sourceTable", datasource.sourceTable());
+    result.put("columns", columns);
+    result.put("source", source);
+    result.put("fetchStatus", fetchStatus);
+    result.put("externalFetchAvailable", "OK".equals(fetchStatus));
+    result.put("fallback", !"SHEET_SAMPLE".equals(source));
+    if (fetchError != null && !fetchError.isBlank()) {
+      result.put("fetchError", fetchError);
+    }
+    return result;
   }
 
   public Map<String, Object> customerFields() {
@@ -196,7 +294,29 @@ public class DatasourceAdminService {
   }
 
   public Map<String, Object> importLogs() {
-    return Map.of("logs", List.of());
+    int limit = 50;
+    return Map.of("logs", repository.importLogs(limit), "total", repository.importLogCount(), "limit", limit);
+  }
+
+  private Map<String, FieldMappingDto> bySourceField(List<FieldMappingDto> mappings) {
+    Map<String, FieldMappingDto> result = new LinkedHashMap<>();
+    for (FieldMappingDto mapping : mappings) {
+      result.put(mapping.sourceField(), mapping);
+    }
+    return result;
+  }
+
+  private boolean sameMapping(FieldMappingDto left, FieldMappingDto right) {
+    return left.targetField().equals(right.targetField()) && left.enabled() == right.enabled();
+  }
+
+  private Map<String, Object> mappingItem(FieldMappingDto mapping) {
+    Map<String, Object> item = new LinkedHashMap<>();
+    item.put("id", mapping.id());
+    item.put("sourceField", mapping.sourceField());
+    item.put("targetField", mapping.targetField());
+    item.put("enabled", mapping.enabled());
+    return item;
   }
 
   private CsvImportResult parseCsv(MultipartFile file) {
@@ -268,7 +388,7 @@ public class DatasourceAdminService {
     return value == null || value.isBlank();
   }
 
-  private void validateDatasource(DatasourceRequest request, boolean create) {
+  private void validateDatasource(DatasourceRequest request, boolean create, Long existingId) {
     if (request == null) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "request body required");
     }
@@ -277,6 +397,9 @@ public class DatasourceAdminService {
     }
     if (request.name() != null && request.name().length() > 100) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "name max length is 100");
+    }
+    if (request.name() != null && !request.name().isBlank() && repository.nameExists(request.name().trim(), existingId)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource name already exists");
     }
     if (create && (request.sheetId() == null || request.sheetId().isBlank())) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "sheetId is required");

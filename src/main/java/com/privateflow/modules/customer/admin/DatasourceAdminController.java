@@ -73,7 +73,7 @@ public class DatasourceAdminController {
 
   @GetMapping("/admin/api/v1/datasources/{id}/mappings/compare")
   public ApiResponse<Map<String, Object>> compareMappings(@PathVariable("id") long id) {
-    return ApiResponse.ok(Map.of("datasourceId", id, "diff", "manual comparison pending"));
+    return ApiResponse.ok(service.compareMappings(id));
   }
 
   @GetMapping("/admin/api/v1/datasources/{id}/columns")

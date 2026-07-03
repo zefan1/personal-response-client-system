@@ -42,7 +42,7 @@ MAVEN_OPTS="-Dstyle.color=never" \
 nohup mvn -Dstyle.color=never org.springframework.boot:spring-boot-maven-plugin:3.3.7:run >"$LOG_FILE" 2>&1 &
 echo "$!" > "$PID_FILE"
 
-for _ in $(seq 1 90); do
+for _ in $(seq 1 "${SMOKE_STARTUP_ATTEMPTS:-180}"); do
   if curl -fsS "http://127.0.0.1:${PORT}/api/v1/auth/config" >/tmp/pda_auth_config.json 2>/tmp/pda_curl_err; then
     echo "backend_ready pid=$(cat "$PID_FILE") url=http://127.0.0.1:${PORT}"
     echo "auth_config=$(cat /tmp/pda_auth_config.json)"

@@ -281,15 +281,16 @@ def ai_env_flow(api: ApiClient, ctx: Context):
 
 def datasource_flow(api: ApiClient, ctx: Context):
   source_table = "acceptance_" + ctx.ts
+  name = "验收数据源-" + ctx.ts
   created = api.request("datasource create", "POST", "/admin/api/v1/datasources", {
-      "name": "验收数据源",
+      "name": name,
       "sheetId": "sheet-" + ctx.ts,
       "sourceTable": source_table,
       "description": "acceptance"
   }, ctx.token)
   ds_id = data(created)["id"]
   api.request("datasource update", "PUT", f"/admin/api/v1/datasources/{ds_id}", {
-      "name": "验收数据源改",
+      "name": name + "-updated",
       "sheetId": "sheet-" + ctx.ts,
       "sourceTable": source_table,
       "description": "acceptance updated"
@@ -303,8 +304,14 @@ def datasource_flow(api: ApiClient, ctx: Context):
   }, ctx.token)
   api.request("datasource mapping versions", "GET", f"/admin/api/v1/datasources/{ds_id}/mappings/versions", token=ctx.token)
   api.request("datasource mapping restore", "POST", f"/admin/api/v1/datasources/{ds_id}/mappings/restore", {"version": 1}, ctx.token)
-  api.request("datasource mapping compare", "GET", f"/admin/api/v1/datasources/{ds_id}/mappings/compare", token=ctx.token)
-  api.request("datasource columns", "GET", f"/admin/api/v1/datasources/{ds_id}/columns", token=ctx.token)
+  compare_payload = api.request("datasource mapping compare", "GET", f"/admin/api/v1/datasources/{ds_id}/mappings/compare", token=ctx.token)
+  compare_data = data(compare_payload)
+  if not isinstance(compare_data.get("diff"), dict) or "summary" not in compare_data:
+    raise AssertionError("datasource compare did not return structured diff")
+  columns_payload = api.request("datasource columns", "GET", f"/admin/api/v1/datasources/{ds_id}/columns", token=ctx.token)
+  columns_data = data(columns_payload)
+  if not columns_data.get("columns"):
+    raise AssertionError("datasource columns did not include mapped/source columns")
   api.request("datasource replace", "PUT", f"/admin/api/v1/datasources/{ds_id}/replace", {"sheetId": "sheet-replaced-" + ctx.ts}, ctx.token)
   api.request("datasource toggle off", "PUT", f"/admin/api/v1/datasources/{ds_id}/toggle", {"enabled": False}, ctx.token)
   api.request("datasource sync disabled fails", "POST", f"/admin/api/v1/datasources/{ds_id}/sync", token=ctx.token, expect_success=False, allow_status={409})
@@ -312,6 +319,10 @@ def datasource_flow(api: ApiClient, ctx: Context):
   csv = b"phone,nickname\n13900000001,acceptance\n"
   api.request("datasource csv import", "POST", "/admin/api/v1/datasources/import", token=ctx.token,
       files={"file": ("acceptance.csv", "text/csv", csv)})
+  logs_payload = api.request("datasource import logs after csv", "GET", "/admin/api/v1/datasources/import-logs", token=ctx.token)
+  logs_data = data(logs_payload)
+  if logs_data.get("total", 0) < 1 or not logs_data.get("logs"):
+    raise AssertionError("datasource import logs did not include persisted import records")
 
 
 def quick_search_flow(api: ApiClient, ctx: Context):
