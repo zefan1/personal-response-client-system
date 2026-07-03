@@ -24,7 +24,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest rerun after controller coverage expansion: passed.
 - Desktop renderer unit tests pass:
   - `cd desktop && npm run test`
-  - Latest result: 1 test file, 5 tests passed for offline manager failure/recovery branches.
+  - Latest result: 2 test files, 10 tests passed for offline manager failure/recovery branches and quick-search store cache/search/copy/failure behavior.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
@@ -176,10 +176,11 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop package now has Vite dev, Electron dev/preview, and Electron smoke scripts.
 - Desktop package now has a repeatable Windows x64 directory packaging verifier and package report.
 - Desktop now has Vitest/jsdom coverage for offline manager branches: consecutive API network failures, non-network business errors, WS degraded/reconnected handling, debounced OS offline/recovery bridge events, and duplicate offline capability registration.
+- Desktop now also has Vitest/jsdom coverage for quick-search store behavior: API refresh and cache write, content-type/order sorting, lead-type filtering and shortcut/title/content ranking, retry failure with cached data retained, image copy validation, text copy, and auto-close after copy.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification
-  - expand component/store tests beyond the current offline manager coverage
+  - expand component/store tests beyond the current offline manager and quick-search store coverage
 
 ## Recommended Repair Order
 
