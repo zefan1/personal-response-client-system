@@ -1,0 +1,20 @@
+appId: com.privateflow.desktop
+productName: Private Domain Assistant
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+asar: true
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+win:
+  target:
+    - dir
+  signAndEditExecutable: false
+mac:
+  target:
+    - dir
+  identity: null
+linux:
+  target:
+    - dir

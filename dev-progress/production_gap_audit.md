@@ -16,7 +16,13 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
-  - Latest rerun after non-mock client changes: passed.
+  - Latest rerun after Electron/Vite security upgrades: passed.
+- Desktop dependency audit passes:
+  - `cd desktop && npm audit --json`
+  - Latest result: 0 vulnerabilities after upgrading Vite and Electron.
+- Desktop packaged directory verification passes:
+  - `cd desktop && npm run package:verify`
+  - Latest result: Windows x64 directory artifact created under `desktop/release/Private Domain Assistant-win32-x64`, `app.asar` present with SHA-256 report, `signed=false` because no production code-signing certificate is configured locally.
 - Renderer click smoke passes:
   - `PDA_SMOKE_API_BASE_URL=http://<WSL-IP>:8080 cd desktop && npm run renderer:smoke`
   - Covers login, dynamic traversal of all admin navigation sections, API-backed read/action panels, and desktop workbench switch.
@@ -66,6 +72,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Database alignment verifier now scans static repository SQL table references and fails if a referenced table is absent from the live smoke schema.
 - Customer `lead_type` writes now normalize unknown values to `PENDING` at the repository boundary, and migration `V53__normalize_customer_lead_types.sql` repairs existing out-of-contract customer enum values. This prevents quick-search `GENERAL` from leaking into the customer table.
 - Renderer smoke now discovers all admin nav sections at runtime instead of checking a fixed representative subset.
+- Desktop toolchain moved off vulnerable Electron/Vite versions; `npm audit --json` currently reports 0 vulnerabilities.
+- Added repeatable desktop package verification for Windows x64 unpacked artifacts. It proves build structure and ASAR integrity metadata, while explicitly recording that this local artifact is not signed.
 
 ## Hard Production Gaps
 
@@ -121,9 +129,10 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Renderer smoke now dynamically traverses every admin navigation section that exists in the DOM.
 - Desktop renderer now has a login flow and no longer requires manually editing `localStorage.desktop_config.accessToken`.
 - Desktop package now has Vite dev, Electron dev/preview, and Electron smoke scripts.
+- Desktop package now has a repeatable Windows x64 directory packaging verifier and package report.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
-  - signed/packaged installer verification
+  - production certificate-backed code signing and installer/notarization verification
   - component/store tests for failure and offline branches
 
 ## Recommended Repair Order
