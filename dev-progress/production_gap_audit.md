@@ -29,7 +29,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest result: Windows x64 directory artifact created under `desktop/release/Private Domain Assistant-win32-x64`, `app.asar` present with SHA-256 report, `signed=false` because no production code-signing certificate is configured locally.
 - Renderer click smoke passes:
   - `PDA_SMOKE_API_BASE_URL=http://<WSL-IP>:8080 cd desktop && npm run renderer:smoke`
-  - Covers login, dynamic traversal of all admin navigation sections, API-backed read/action panels, and desktop workbench switch.
+  - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, and desktop workbench switch.
   - Latest rerun used `http://172.19.250.154:8080` because Windows localhost forwarding to WSL was unavailable; result: passed.
 - Static module verifiers pass:
   - `verify_module_a.py` through `verify_module_h.py`
@@ -83,6 +83,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Customer `lead_type` writes now normalize unknown values to `PENDING` at the repository boundary, and migration `V53__normalize_customer_lead_types.sql` repairs existing out-of-contract customer enum values. This prevents quick-search `GENERAL` from leaking into the customer table.
 - Added `scripts/verify_enum_contract_alignment.py` and frontend/manual acceptance coverage for missing enum paths: quick search `MINI_PROGRAM`, scheduled notice creation, and Mac desktop version creation.
 - Renderer smoke now discovers all admin nav sections at runtime instead of checking a fixed representative subset.
+- Renderer smoke now also verifies every admin section has API-backed read panels that refresh into rendered JSON and that action panels expose editable JSON request bodies.
 - Desktop toolchain moved off vulnerable Electron/Vite versions; `npm audit --json` currently reports 0 vulnerabilities.
 - Added repeatable desktop package verification for Windows x64 unpacked artifacts. It proves build structure and ASAR integrity metadata, while explicitly recording that this local artifact is not signed.
 - Java tests now include controller-layer MockMvc checks for version APIs plus H2-backed repository tests for desktop version persistence, publish/revoke, latest published lookup, and desktop client report upsert semantics.
@@ -144,6 +145,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop modules exist under `desktop/src/renderer/modules`.
 - Vite page can be served and browser smoke has covered login plus representative admin sections.
 - Renderer smoke now dynamically traverses every admin navigation section that exists in the DOM.
+- Renderer smoke now validates read-panel refresh/rendering and action-form JSON inputs for every admin section that exists in the DOM.
 - Desktop renderer now has a login flow and no longer requires manually editing `localStorage.desktop_config.accessToken`.
 - Desktop package now has Vite dev, Electron dev/preview, and Electron smoke scripts.
 - Desktop package now has a repeatable Windows x64 directory packaging verifier and package report.

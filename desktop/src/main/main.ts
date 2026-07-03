@@ -114,6 +114,26 @@ async function runRendererSmoke(window: BrowserWindow) {
         for (const section of navLabels) {
           findButton(section).click();
           await waitForText(section);
+          const readPanels = [...document.querySelectorAll('.admin-read-panel')];
+          if (!readPanels.length) {
+            throw new Error('section has no read panels: ' + section);
+          }
+          const refreshButton = readPanels[0].querySelector('button');
+          if (!refreshButton) {
+            throw new Error('read panel missing refresh button: ' + section);
+          }
+          refreshButton.click();
+          await delay(150);
+          const readText = readPanels[0].querySelector('pre')?.textContent ?? '';
+          if (!readText || readText.includes('灏氭湭鍔犺浇')) {
+            throw new Error('read panel did not render data: ' + section);
+          }
+          const actionPanels = [...document.querySelectorAll('.admin-action-panel')];
+          for (const panel of actionPanels) {
+            if (!panel.querySelector('textarea')) {
+              throw new Error('action panel missing JSON textarea: ' + section);
+            }
+          }
           await waitForText('数据读取');
           await waitForText('操作入口');
         }
