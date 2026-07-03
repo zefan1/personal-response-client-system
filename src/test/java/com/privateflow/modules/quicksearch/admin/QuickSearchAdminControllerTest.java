@@ -149,6 +149,21 @@ class QuickSearchAdminControllerTest {
         .andExpect(jsonPath("$.data.imageUrl").value("cos://quick-search/test.png"));
   }
 
+  @Test
+  void unsupportedUploadTypeMapsToBadRequest() throws Exception {
+    MockMultipartFile file = new MockMultipartFile(
+        "file",
+        "acceptance.txt",
+        "text/plain",
+        "not an image".getBytes());
+    when(service.uploadImage(any())).thenThrow(new ApiException(ApiErrorCodes.BAD_REQUEST, "image type unsupported"));
+
+    mockMvc.perform(multipart("/admin/api/v1/upload/image").file(file))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.success").value(false))
+        .andExpect(jsonPath("$.errorCode").value(ApiErrorCodes.BAD_REQUEST));
+  }
+
   private QuickSearchAdminItem item(Long id, ContentType contentType, String leadType, boolean enabled) {
     LocalDateTime now = LocalDateTime.of(2026, 7, 3, 12, 0);
     return new QuickSearchAdminItem(

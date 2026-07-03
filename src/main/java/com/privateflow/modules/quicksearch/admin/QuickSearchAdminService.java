@@ -145,7 +145,7 @@ public class QuickSearchAdminService {
         && bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) {
       return "webp";
     }
-    throw new ApiException("30-10002", "image type unsupported");
+    throw new ApiException(ApiErrorCodes.BAD_REQUEST, "image type unsupported");
   }
 
   private void publishRefresh() {

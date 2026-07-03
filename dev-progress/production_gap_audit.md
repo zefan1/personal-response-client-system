@@ -50,8 +50,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `python3 scripts/acceptance_backend_api.py`
 - Latest passing evidence: 125 calls passed in mock external mode.
   - Latest rerun command: `python3 scripts/acceptance_backend_api.py --no-start`
-  - Latest rerun result after read-response field assertion expansion against `http://172.19.250.154:8080`: `passed=158 failed=0 total=158`.
-  - Coverage categories reported by the harness: `conflict:8`, `create:4`, `download:1`, `invalid:13`, `permission:6`, `read:34`, `representative:90`, `update:2`.
+  - Latest rerun result after expanded negative branch coverage and quick-search upload error mapping fix against `http://172.19.250.154:8080`: `passed=167 failed=0 total=167`.
+  - Coverage categories reported by the harness: `conflict:8`, `create:4`, `download:1`, `invalid:22`, `permission:6`, `read:34`, `representative:90`, `update:2`.
 - API mapping coverage audit exists:
   - `python scripts/verify_api_mapping_coverage.py`
   - Latest current-state result: 113 mappings, 113 covered/matched, 0 remaining route gaps, 0 unclassified gaps.
@@ -95,6 +95,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Backend API acceptance now also includes a repeatable invalid/permission/conflict matrix covering unauthenticated requests, malformed bearer token, keeper admin denial, bad login, invalid account/customer/chat/config/datasource/analytics/quick-search/notice/audit/version inputs, duplicate skill/quick-search/version guards, disabled datasource sync conflict, and published-version edit/delete conflicts.
 - Backend API acceptance response assertions now validate more returned state after high-risk create/update/toggle/publish/revoke flows, including accounts, skill bindings, datasource mapping/replace/toggle, quick search item update/list, followup rules, notices, audit export completion/download, desktop version publish/report/revoke, and Mac draft creation.
 - Backend API acceptance read assertions now validate key list/detail/stat response shapes and enum ranges for configs, datasources, quick search, rules, tags, notices, audit logs/actions, versions, desktop version checks, analytics overview/funnels/health/risks/skill calls, and other high-traffic read endpoints.
+- Backend API acceptance negative coverage now also covers invalid Skill/image environment creation, unsupported prompt type, bad quick-search image upload, missing desktop version check/report fields, notice expiry/schedule validation, and empty help requests.
+- Quick-search image upload now maps unsupported image bytes to the standard bad-request response instead of leaking a 500 for user input errors.
 - Database alignment verifier now scans static repository SQL table references and fails if a referenced table is absent from the live smoke schema.
 - Database alignment verifier now also scans repository SQL INSERT columns, UPDATE assignments, and alias-qualified `table.column` references and fails if any scanned column is absent from the live smoke schema.
 - Database alignment verifier now expands nullable/default and live enum checks to followup rules/tag suggestions, Skill/image environment tables, prompt version history, pending table writes, and desktop client version reports.
@@ -156,7 +158,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 - The acceptance harness now covers all 113 mapped HTTP routes in the current route inventory.
 - Mapping coverage audit reports 0 route gaps.
-- Expanded negative branch matrix and response-state assertions now pass with 158 total calls and explicit coverage counts for invalid, permission, conflict, read, create, update, download, and representative branches.
+- Expanded negative branch matrix and response-state assertions now pass with 167 total calls and explicit coverage counts for invalid, permission, conflict, read, create, update, download, and representative branches.
 - Remaining work:
   - continue extending the invalid/permission/conflict matrix beyond the current production-critical branch set
   - deepen response body assertions for remaining list/detail/statistics/export fields that are still checked structurally rather than field-by-field

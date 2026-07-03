@@ -957,6 +957,18 @@ def negative_matrix_flow(api: ApiClient, ctx: Context):
       "leadType": "GENERAL",
       "priority": 1
   }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative skill env invalid url", "POST", "/admin/api/v1/skill-environments", {
+      "envName": "bad-url-" + ctx.ts[-6:],
+      "baseUrl": "not-a-url",
+      "apiKey": "secret"
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative image env missing api key", "POST", "/admin/api/v1/image-environments", {
+      "envName": "missing-key-" + ctx.ts[-6:],
+      "baseUrl": "https://example.com/image",
+      "apiKey": ""
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative prompt unsupported type", "GET", "/admin/api/v1/skill-prompt/unknown/versions",
+      token=ctx.token, allow_status={400}, coverage="invalid", **bad)
 
   api.request("negative config unknown key", "PUT", "/admin/api/v1/configs/not.a.real.key", {
       "value": "x"
@@ -1012,6 +1024,8 @@ def negative_matrix_flow(api: ApiClient, ctx: Context):
       "sortOrder": 1,
       "enabled": True
   }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative quick search image upload bad extension", "POST", "/admin/api/v1/upload/image", token=ctx.token,
+      files={"file": ("bad.txt", "text/plain", b"not an image")}, allow_status={400}, coverage="invalid", **bad)
 
   no_package_version = f"7.{int(ctx.ts[-4:-2])}.{int(ctx.ts[-2:])}"
   api.request("negative version missing package", "POST", "/admin/api/v1/versions", {
@@ -1054,6 +1068,13 @@ def negative_matrix_flow(api: ApiClient, ctx: Context):
   }, ctx.token, allow_status={409}, coverage="conflict", **version_status_invalid)
   api.request("negative version delete published", "DELETE", f"/admin/api/v1/versions/{version_id}",
       token=ctx.token, allow_status={409}, coverage="conflict", **version_status_invalid)
+  api.request("negative desktop version check missing client", "GET", "/api/v1/desktop/version-check?platform=WINDOWS&currentVersion=1.0.0",
+      token=ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative desktop version report missing fields", "POST", "/api/v1/desktop/version-report", {
+      "clientId": "",
+      "version": "",
+      "platform": "WINDOWS"
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
 
   api.request("negative notice schedule missing publishAt", "POST", "/admin/api/v1/notices", {
       "title": "negative notice",
@@ -1062,6 +1083,28 @@ def negative_matrix_flow(api: ApiClient, ctx: Context):
       "publishType": "SCHEDULED",
       "publishAt": None,
       "expireDays": 1
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative notice expire days too high", "POST", "/admin/api/v1/notices", {
+      "title": "negative notice expire",
+      "content": "negative",
+      "level": "INFO",
+      "publishType": "IMMEDIATE",
+      "publishAt": None,
+      "expireDays": 99
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative notice scheduled publishAt too soon", "POST", "/admin/api/v1/notices", {
+      "title": "negative notice soon",
+      "content": "negative",
+      "level": "INFO",
+      "publishType": "SCHEDULED",
+      "publishAt": datetime.now().isoformat(),
+      "expireDays": 1
+  }, ctx.token, allow_status={400}, coverage="invalid", **bad)
+  api.request("negative help request empty content", "POST", "/api/v1/help/request", {
+      "customerPhone": "",
+      "question": "",
+      "context": "",
+      "keeperNote": ""
   }, ctx.token, allow_status={400}, coverage="invalid", **bad)
   api.request("negative audit invalid date range", "GET", "/admin/api/v1/audit-logs?startDate=2099-01-02&endDate=2099-01-01",
       token=ctx.token, allow_status={400}, coverage="invalid", **bad)
