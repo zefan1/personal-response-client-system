@@ -35,7 +35,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest current-state result after abnormal-alert coverage expansion: 0 vulnerabilities (`critical=0 high=0 moderate=0 low=0`).
 - Desktop packaged directory verification passes:
   - `cd desktop && npm run package:verify`
-  - Latest current-state result after abnormal-alert coverage expansion: Windows x64 directory artifact created under `desktop/release/Private Domain Assistant-win32-x64`, `app.asar` present with SHA-256 report, `asarBytes=28334580`, `signed=false` because no production code-signing certificate is configured locally.
+  - Latest current-state result after signing gate expansion: Windows x64 directory artifact created under `desktop/release/Private Domain Assistant-win32-x64`, `app.asar` present with SHA-256 report, `asarBytes=28341725`, Authenticode status `NotSigned`, `signed=false`, `signingConfigured=false` because no production code-signing certificate is configured locally.
+  - `PDA_REQUIRE_SIGNED_PACKAGE=1 node scripts/package-verify.mjs` fails unsigned artifacts as expected, so release CI can make signing a hard gate once production certificates are supplied.
 - Renderer click smoke passes:
   - `PDA_SMOKE_API_BASE_URL=http://<WSL-IP>:8080 cd desktop && npm run renderer:smoke`
   - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, structured action controls for simple JSON bodies, structured field-to-JSON sync for enum/number/boolean/text controls, desktop workbench switch, desktop panel presence, workbench/followup refresh buttons, all followup tabs, recognition text-mode form, customer search input/button, quick-search overlay, and quick-search lead-type filters.
@@ -110,6 +111,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Renderer smoke now also verifies desktop-mode primary panels and non-destructive clickable paths: workbench/followup refresh controls, followup tab switching, chat recognition text mode, customer search, quick-search overlay, and quick-search filters.
 - Desktop toolchain moved off vulnerable Electron/Vite versions; `npm audit --json` currently reports 0 vulnerabilities.
 - Added repeatable desktop package verification for Windows x64 unpacked artifacts. It proves build structure and ASAR integrity metadata, while explicitly recording that this local artifact is not signed.
+- Desktop package verification now records signing configuration, Windows Authenticode status, signer/timestamp certificate metadata when present, and supports `PDA_REQUIRE_SIGNED_PACKAGE=1` to fail unsigned release artifacts.
 - Java tests now include controller-layer MockMvc checks for version APIs plus H2-backed repository tests for desktop version persistence, publish/revoke, latest published lookup, and desktop client report upsert semantics.
 - Java tests now also include QuickSearch admin controller MockMvc coverage for list, create, invalid create error mapping, update, toggle, delete, and image upload response wrapping.
 - Java tests now also include Account admin controller MockMvc coverage for list filters, enum query binding errors, create/update/toggle/reset/delete, and service validation error mapping. Global API exception handling now maps request parameter type mismatches, including bad enum query values, to standard `80-10001` bad request responses instead of generic 500 responses.
@@ -206,7 +208,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now also has Vitest/jsdom component coverage for AdminConsole rendering, initial read-panel API loading, and structured action control synchronization for text, enum, number, and boolean fields.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
-  - production certificate-backed code signing and installer/notarization verification
+  - production certificate-backed code signing and installer/notarization verification with `PDA_REQUIRE_SIGNED_PACKAGE=1` enabled in release CI
   - expand component-level rendering tests and browser click coverage beyond the current store/service coverage and smoke-tested primary paths
 
 ## Recommended Repair Order
