@@ -24,7 +24,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest rerun after workbench store coverage expansion: passed.
 - Desktop renderer unit tests pass:
   - `cd desktop && npm run test`
-  - Latest result: 5 test files, 31 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, and followup-list grouping/selection/reminder/event behavior.
+  - Latest result: 6 test files, 40 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, and customer-profile search/cache/edit/suggestion/event behavior.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
@@ -181,10 +181,11 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now also has Vitest/jsdom coverage for save-to-table behavior: successful profile saves, same-customer concurrent save guard, permanent business-error mapping, transient retry and pending-save persistence, pending recovery with latest version, expired/malformed pending cleanup, and external table sync success/failure/no-source-row branches.
 - Fixed save-to-table retry control so permanent `GIVE_UP` errors such as forbidden, invalid input, or missing customer stop immediately instead of entering the transient retry loop.
 - Desktop now also has Vitest/jsdom coverage for followup-list behavior: API grouping into tabs, loaded-data stale handling, primary reminder selection and cross-tab row movement, reminder flash cleanup, new-lead upsert behavior, cross-tab selection, batch template event emission, customer navigation, and new-reminder banner tab switching.
+- Desktop now also has Vitest/jsdom coverage for customer-profile behavior: search truncation and single-result open, cached profile fallback, alert refresh, online profile caching, candidate selection/dismissal, generate-reply event flow, edit-save table sync prompts, conflict and pending-save UX, field/stage suggestion resolution, websocket suggestion merging, abnormal alert updates, stage updates, and send-confirm refresh.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification
-  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, and followup-list coverage
+  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, and customer-profile coverage
 
 ## Recommended Repair Order
 
