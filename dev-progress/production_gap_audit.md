@@ -98,6 +98,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest default current-state result: `passed=true checks=12/12 skipped=3`.
   - Default checks cover backend API acceptance, backend API acceptance quality, route mapping coverage, controller coverage audit, desktop component coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, manual test readiness, production blocker audit report generation, and the unsigned-package fail-closed gate.
   - Latest local-external current-state result: `python scripts\acceptance_p0_p1.py --backend-url http://172.19.250.154:8080 --include-local-external`, `passed=true checks=13/13 skipped=2`.
+  - Latest slow+local-external current-state result after fixing WSL Unicode path quoting: `python scripts\acceptance_p0_p1.py --backend-url http://172.19.250.154:8080 --include-slow --include-local-external`, `passed=true checks=17/17 skipped=1`.
   - Skipped by default but available as explicit flags: `--include-slow`, `--include-local-external`, `--include-live-external`, and `--require-signed-package`.
 
 ## Addressed Since Initial Audit
@@ -274,5 +275,6 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Backend mock-runtime representative API acceptance: passed for the current harness.
 - P0/P1 aggregate default acceptance: passed for currently runnable gates (`12/12`) with slow/local-external/live-external gates available behind explicit flags.
 - P0/P1 aggregate local-external acceptance: passed for current local non-mock external gates (`13/13`) with only live-provider and signed-package gates skipped.
+- P0/P1 aggregate slow+local-external acceptance: passed for all currently runnable slow/local gates (`17/17`), leaving only the live-provider gate skipped in that run.
 - Production blocker audit: not passed (`productionReady=false`, blockers: live external provider acceptance and signed release package).
 - Production-ready SaaS: not passed.

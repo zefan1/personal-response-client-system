@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -36,7 +37,8 @@ def ps_command(command: str, cwd: Path = ROOT, env: dict[str, str] | None = None
 
 
 def wsl_command(command: str, timeout: int = 600):
-    return ps_command(f"wsl bash -lc {json.dumps(command)}", timeout=timeout)
+    ps_quoted = "'" + command.replace("'", "''") + "'"
+    return ps_command(f"wsl bash -lc {ps_quoted}", timeout=timeout)
 
 
 def wsl_path(path: Path) -> str:
@@ -121,7 +123,7 @@ def main() -> int:
 
     if args.include_slow:
         results.extend([
-            run_wsl_step("java test suite", f"cd {json.dumps(wsl_path(ROOT))} && mvn -Dstyle.color=never test", timeout=900),
+            run_wsl_step("java test suite", f"cd {shlex.quote(wsl_path(ROOT))} && mvn -Dstyle.color=never test", timeout=900),
             run_step("desktop unit tests", "npm run test", cwd=ROOT / "desktop", timeout=180),
             run_step("renderer smoke", "npm run renderer:smoke", cwd=ROOT / "desktop", env={"PDA_SMOKE_API_BASE_URL": args.backend_url}, timeout=180),
             run_step("desktop package verify", "npm run package:verify", cwd=ROOT / "desktop", timeout=240),
