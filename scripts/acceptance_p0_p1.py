@@ -109,6 +109,7 @@ def main() -> int:
         run_step("api acceptance", "python scripts\\acceptance_backend_api.py --no-start", env=env, timeout=240),
         run_step("api mapping coverage", "python scripts\\verify_api_mapping_coverage.py", timeout=120),
         run_step("controller coverage audit", "python scripts\\verify_controller_test_coverage.py", timeout=120),
+        run_step("desktop component coverage audit", "python scripts\\verify_desktop_component_test_coverage.py", timeout=120),
         run_step("database alignment", "python scripts\\verify_database_alignment.py", timeout=180),
         run_step("enum contract alignment", "python scripts\\verify_enum_contract_alignment.py", timeout=120),
         run_step("real external source readiness", "python scripts\\verify_real_external_readiness.py", timeout=120),

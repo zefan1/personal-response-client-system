@@ -59,6 +59,9 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Controller Java test coverage audit exists:
   - `python scripts\verify_controller_test_coverage.py`
   - Latest current-state result: 18 controller classes, 18 covered by direct or documented aggregate controller tests, 0 missing, 14 controller test classes.
+- Desktop component test coverage audit exists:
+  - `python scripts\verify_desktop_component_test_coverage.py`
+  - Latest current-state result: 13 Vue module components, 13 covered by same-name component tests, 0 missing.
 - Browser admin smoke passed against the Vite renderer and local backend:
   - URL: `http://127.0.0.1:5173/`
   - Login: `admin/admin123`
@@ -82,8 +85,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest current-state result: 40 contract checks, 0 mismatches, 4 documented frontend exposure exceptions for JSON-form/admin-default-only controls.
 - P0/P1 aggregate acceptance runner exists:
   - `python scripts/acceptance_p0_p1.py --backend-url http://172.19.250.154:8080`
-  - Latest default current-state result: `passed=true checks=8/8 skipped=3`.
-  - Default checks cover backend API acceptance, route mapping coverage, controller coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, and the unsigned-package fail-closed gate.
+  - Latest default current-state result: `passed=true checks=9/9 skipped=3`.
+  - Default checks cover backend API acceptance, route mapping coverage, controller coverage audit, desktop component coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, and the unsigned-package fail-closed gate.
   - Skipped by default but available as explicit flags: `--include-slow`, `--include-local-external`, `--include-live-external`, and `--require-signed-package`.
 
 ## Addressed Since Initial Audit
@@ -208,6 +211,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop package now has a repeatable Windows x64 directory packaging verifier and package report.
 - Desktop now has Vitest/jsdom coverage for offline manager branches: consecutive API network failures, non-network business errors, WS degraded/reconnected handling, debounced OS offline/recovery bridge events, and duplicate offline capability registration.
 - Desktop now also has component-level OfflineStatusBar coverage for API-failure offline rendering, websocket degraded rendering while API remains online, online recovery toast rendering from `network:online`, and configured auto-hide timing.
+- Desktop component coverage is now machine-checked by `scripts/verify_desktop_component_test_coverage.py`, which fails if any `desktop/src/renderer/modules/**/*.vue` file lacks a same-name `.test.ts`; latest report covers 13/13 Vue module components with 0 missing.
 - Desktop now also has Vitest/jsdom coverage for quick-search store behavior: API refresh and cache write, content-type/order sorting, lead-type filtering and shortcut/title/content ranking, retry failure with cached data retained, image copy validation, text copy, and auto-close after copy.
 - Desktop now also has component-level QuickSearchOverlay coverage for event-bus opening, API-backed result rendering, typed search debounce, lead-type filter buttons, click-to-copy text items, Enter-to-copy image items, auto-close after success, offline hint rendering, refresh-failure messaging, and retry-button recovery.
 - Desktop now also has Vitest/jsdom coverage for workbench store behavior: followup loading and normalization, dashboard metric aggregation, urgent followup ordering and limits, new-lead queue fallback, notice filtering/dismissal/expiry, stale/retry-only fetch failures, refresh triggers, followup reminder/new-lead merge dedupe, and workbench navigation event emission.
@@ -254,5 +258,5 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 - Runnable baseline: passed.
 - Backend mock-runtime representative API acceptance: passed for the current harness.
-- P0/P1 aggregate default acceptance: passed for currently runnable gates (`8/8`) with slow/local-external/live-external gates available behind explicit flags.
+- P0/P1 aggregate default acceptance: passed for currently runnable gates (`9/9`) with slow/local-external/live-external gates available behind explicit flags.
 - Production-ready SaaS: not passed.
