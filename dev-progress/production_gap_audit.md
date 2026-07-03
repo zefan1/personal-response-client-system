@@ -9,6 +9,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Module inventory exists for 34 actual modules: `01A-01H`, `20-33`, `40-51`.
 - Backend compiles and runs Java tests with Java 17:
   - `mvn -Dstyle.color=never clean test`
+  - Latest current-state rerun from WSL because Windows PowerShell has no `mvn` on PATH: `wsl bash -lc "cd '/mnt/c/Users/85314/Desktop/私域工具/私域辅助系统' && mvn -Dstyle.color=never test"`, `BUILD SUCCESS`, `Tests run: 107, Failures: 0, Errors: 0, Skipped: 0`.
   - Latest focused rerun: `mvn -Dstyle.color=never -Dtest=AiConfigControllerTest test`, `BUILD SUCCESS`, `Tests run: 10, Failures: 0, Errors: 0, Skipped: 0`.
   - Latest focused analytics rerun: `mvn -Dstyle.color=never -Dtest=AnalyticsControllerTest test`, `BUILD SUCCESS`, `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`.
   - Latest focused tags rerun: `mvn -Dstyle.color=never -Dtest=TagAdminControllerTest test`, `BUILD SUCCESS`, `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`.
@@ -17,7 +18,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest focused customer controller rerun: `mvn -Dstyle.color=never -Dtest=CustomerControllerTest test`, `BUILD SUCCESS`, `Tests run: 8, Failures: 0, Errors: 0, Skipped: 0`.
   - Latest focused chat controller rerun: `mvn -Dstyle.color=never -Dtest=ChatControllerTest test`, `BUILD SUCCESS`, `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`.
   - Latest focused web core rerun: `mvn -Dstyle.color=never -Dtest=WebCoreControllerTest test`, `BUILD SUCCESS`, `Tests run: 3, Failures: 0, Errors: 0, Skipped: 0`.
-  - Latest full-suite result after web core tests: `mvn -Dstyle.color=never test`, `BUILD SUCCESS`, `Tests run: 107, Failures: 0, Errors: 0, Skipped: 0`.
+  - Latest full-suite result after renderer desktop smoke expansion: `mvn -Dstyle.color=never test`, `BUILD SUCCESS`, `Tests run: 107, Failures: 0, Errors: 0, Skipped: 0`.
   - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, DatasourceAdminController all datasource CRUD/toggle/replace/mapping/version/restore/compare/columns/customer-fields/sync/import routes and error mapping, AnalyticsController overview/funnels/staff/sources/stages/health/lifecycle/risks/content-ranking binding and error mapping, AccountAdminController list/create/update/toggle/reset/delete/error mapping, AuditLogController list/actions/export/status/download/error mapping, AuthController desktop/admin login, refresh, and auth config, ConfigController list/get/update, HealthController, HelpController request/resolve, user QuickSearchController list, ChatController recognize/generate/regenerate/send-confirm binding and error mapping, CustomerController search/profile/batch/update/suggestion-resolve/save-to-table and local exception mappings, FollowupController today/rules CRUD/toggle/search/error mapping, NoticeController list/create/update/stop/delete/active/error mapping, QuickSearchAdminController list/create/update/toggle/delete/upload/error mapping, SkillAdminController list/create/update/toggle/delete/available/test/analytics/error mapping, AiConfigController Skill/Image environment CRUD/activate/delete/test and prompt version restore/error mapping, TagAdminController category/value CRUD/toggle and tag business error mapping, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
@@ -49,14 +50,14 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `python3 scripts/acceptance_backend_api.py`
 - Latest passing evidence: 125 calls passed in mock external mode.
   - Latest rerun command: `python3 scripts/acceptance_backend_api.py --no-start`
-  - Latest rerun result after Java controller coverage expansion: `passed=158 failed=0 total=158`.
+  - Latest rerun result after renderer desktop smoke expansion against `http://172.19.250.154:8080`: `passed=158 failed=0 total=158`.
   - Coverage categories reported by the harness: `conflict:8`, `create:4`, `download:1`, `invalid:13`, `permission:6`, `read:34`, `representative:90`, `update:2`.
 - API mapping coverage audit exists:
   - `python scripts/verify_api_mapping_coverage.py`
-  - Latest result: 113 mappings, 113 covered/matched, 0 remaining route gaps, 0 unclassified gaps.
+  - Latest current-state result: 113 mappings, 113 covered/matched, 0 remaining route gaps, 0 unclassified gaps.
 - Controller Java test coverage audit exists:
   - `python scripts\verify_controller_test_coverage.py`
-  - Latest result: 18 controller classes, 18 covered by direct or documented aggregate controller tests, 0 missing, 14 controller test classes.
+  - Latest current-state result: 18 controller classes, 18 covered by direct or documented aggregate controller tests, 0 missing, 14 controller test classes.
 - Browser admin smoke passed against the Vite renderer and local backend:
   - URL: `http://127.0.0.1:5173/`
   - Login: `admin/admin123`
@@ -66,14 +67,14 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest result: `mockExternalsFalseReady=true`, source/config blockers are cleared.
 - Controlled non-mock external acceptance now passes against a local HTTP provider while the backend runs with `MOCK_EXTERNALS=false`:
   - `python scripts/acceptance_real_external_local.py`
-  - Latest result: `passed=true checks=30`.
+  - Latest current-state result: `passed=true checks=30`.
   - Covered real HTTP client paths: Skill `/v1/chat/completions`, image `/v1/chat/completions`, WeCom table rows GET/PUT, admin environment create/activate, datasource create/mapping/columns, and customer save-to-table.
 - Database alignment verifier now checks required columns, every table declared by migrations, config keys inserted by migrations, and static repository SQL table references:
   - It now also verifies selected production-critical nullable/default assumptions, live enum values for accounts, customers, skill bindings, quick search, desktop versions, notices, and audit exports, and scanned repository SQL column references for INSERT/UPDATE/table-alias qualified columns.
-  - Latest result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys, 0 missing repository tables, 0 repository column violations, 0 column property violations, 0 enum violations.
+  - Latest current-state result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys, 0 missing repository tables, 0 repository column violations, 0 column property violations, 0 enum violations.
 - Enum contract alignment verifier now checks production-critical enum strings across backend Java enums/constants, service validation allowlists, database enum allowlists, and frontend visible/manual-acceptance option paths:
   - `python scripts\verify_enum_contract_alignment.py`
-  - Latest result: 40 contract checks, 0 mismatches, 4 documented frontend exposure exceptions for JSON-form/admin-default-only controls.
+  - Latest current-state result: 40 contract checks, 0 mismatches, 4 documented frontend exposure exceptions for JSON-form/admin-default-only controls.
 
 ## Addressed Since Initial Audit
 
