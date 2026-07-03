@@ -20,6 +20,7 @@ const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
 const isSmoke = process.env.PDA_ELECTRON_SMOKE === '1';
 const smokeAutoQuit = process.env.PDA_ELECTRON_SMOKE_AUTO_QUIT !== '0';
 const rendererSmoke = process.env.PDA_RENDERER_SMOKE === '1';
+const rendererSmokeApiBaseUrl = process.env.PDA_SMOKE_API_BASE_URL ?? 'http://localhost:8080';
 const clipboardImageHistory: ClipboardHistoryItem[] = [];
 let clipboardPollTimer: NodeJS.Timeout | null = null;
 let onlineStatusPollTimer: NodeJS.Timeout | null = null;
@@ -90,13 +91,19 @@ async function runRendererSmoke(window: BrowserWindow) {
           }
           throw new Error('missing text: ' + text);
         };
-        await waitForText('私域辅助系统');
-        setValue(inputByLabel('API 地址'), 'http://localhost:8080');
-        setValue(inputByLabel('账号'), 'admin');
-        setValue(inputByLabel('密码'), 'admin123');
-        const mode = inputByLabel('入口');
-        if (mode) setValue(mode, 'admin');
-        findButton('登录').click();
+        const hasLoginForm = () => Boolean(inputByLabel('API 地址') && inputByLabel('账号') && inputByLabel('密码'));
+        const started = Date.now();
+        while (!hasLoginForm() && !document.body.innerText.includes('健康与系统配置') && Date.now() - started < 15000) {
+          await delay(100);
+        }
+        if (hasLoginForm()) {
+          setValue(inputByLabel('API 地址'), ${JSON.stringify(rendererSmokeApiBaseUrl)});
+          setValue(inputByLabel('账号'), 'admin');
+          setValue(inputByLabel('密码'), 'admin123');
+          const mode = inputByLabel('入口');
+          if (mode) setValue(mode, 'admin');
+          findButton('登录').click();
+        }
         await waitForText('健康与系统配置');
         for (const section of ['技能场景绑定', 'AI 与外部环境', '数据源与字段映射', '账号权限', '公告、版本、审计']) {
           findButton(section).click();

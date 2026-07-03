@@ -1,5 +1,7 @@
 package com.privateflow.modules.image.client;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.image.ImageErrorCodes;
 import com.privateflow.modules.image.ImageRecognitionException;
 import com.privateflow.modules.image.config.ImageConfig;
@@ -26,9 +28,11 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient {
   private static final Logger log = LoggerFactory.getLogger(HttpImageRecognitionClient.class);
   private final HttpClient httpClient;
   private final ImageConfigProvider configProvider;
+  private final ObjectMapper objectMapper;
 
-  public HttpImageRecognitionClient(ImageConfigProvider configProvider) {
+  public HttpImageRecognitionClient(ImageConfigProvider configProvider, ObjectMapper objectMapper) {
     this.configProvider = configProvider;
+    this.objectMapper = objectMapper;
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(3))
         .version(HttpClient.Version.HTTP_1_1)
@@ -70,7 +74,7 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient {
       if (response.body() == null || response.body().isBlank()) {
         throw new ImageRecognitionException(ImageErrorCodes.IMAGE_RECOGNITION_FAILED, "图片识别服务返回空响应");
       }
-      return response.body();
+      return unwrapProviderResponse(response.body());
     } catch (java.net.http.HttpTimeoutException ex) {
       throw new ImageRecognitionException(ImageErrorCodes.IMAGE_RECOGNITION_FAILED, "图片识别超时，建议重新截图或手动复制文字", ex);
     } catch (IOException ex) {
@@ -100,5 +104,18 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient {
 
   private void write(ByteArrayOutputStream out, String value) throws IOException {
     out.write(value.getBytes(StandardCharsets.UTF_8));
+  }
+
+  private String unwrapProviderResponse(String raw) {
+    try {
+      JsonNode root = objectMapper.readTree(raw);
+      JsonNode content = root.path("choices").path(0).path("message").path("content");
+      if (content.isTextual() && !content.asText().isBlank()) {
+        return content.asText();
+      }
+      return raw;
+    } catch (Exception ignored) {
+      return raw;
+    }
   }
 }

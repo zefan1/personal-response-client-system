@@ -12,12 +12,15 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest result: `BUILD SUCCESS`, `Tests run: 11, Failures: 0, Errors: 0, Skipped: 0`.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
+  - Latest rerun after non-mock client changes: passed.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
+  - Latest rerun after non-mock client changes: passed.
 - Renderer click smoke passes:
-  - `cd desktop && npm run renderer:smoke`
+  - `PDA_SMOKE_API_BASE_URL=http://<WSL-IP>:8080 cd desktop && npm run renderer:smoke`
   - Covers login, admin section switching, API-backed read/action panels, and desktop workbench switch.
+  - Latest rerun used `http://172.19.250.154:8080` because Windows localhost forwarding to WSL was unavailable; result: passed.
 - Static module verifiers pass:
   - `verify_module_a.py` through `verify_module_h.py`
   - `verify_module_20.py` through `verify_module_33.py`
@@ -27,6 +30,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Backend API acceptance harness exists:
   - `python3 scripts/acceptance_backend_api.py`
 - Latest passing evidence: 108 calls passed in mock external mode.
+  - Latest rerun command: `python3 scripts/acceptance_backend_api.py --no-start`
+  - Latest rerun result: `passed=108 failed=0 total=108`.
 - API mapping coverage audit exists:
   - `python scripts/verify_api_mapping_coverage.py`
   - Latest result: 113 mappings, 101 covered/matched, 12 classified remaining gaps, 0 unclassified gaps.
@@ -37,6 +42,10 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Real external readiness verifier exists:
   - `python scripts/verify_real_external_readiness.py`
   - Latest result: `mockExternalsFalseReady=true`, source/config blockers are cleared.
+- Controlled non-mock external acceptance now passes against a local HTTP provider while the backend runs with `MOCK_EXTERNALS=false`:
+  - `python scripts/acceptance_real_external_local.py`
+  - Latest result: `passed=true checks=30`.
+  - Covered real HTTP client paths: Skill `/v1/chat/completions`, image `/v1/chat/completions`, WeCom table rows GET/PUT, admin environment create/activate, datasource create/mapping/columns, and customer save-to-table.
 - Database alignment verifier now checks required columns, every table declared by migrations, and config keys inserted by migrations:
   - Latest result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys.
 
@@ -50,6 +59,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Browser/Vite runtime no longer requires the Electron preload bridge for login/admin smoke testing; desktop bridge calls have web fallbacks where possible.
 - Backend CORS now permits local Vite origins and the auth filter bypasses OPTIONS preflight.
 - WeCom smart table read/write no longer uses unavailable placeholder clients; `HttpWecomTableClient` implements both `SheetClient` and `WecomTableClient` behind `table.api_base_url` / `table.api_key`.
+- Skill and image real HTTP clients now unwrap OpenAI-compatible `choices[0].message.content` responses before handing business JSON to the existing parsers.
+- Added a local fake external provider plus repeatable `MOCK_EXTERNALS=false` acceptance runner for controlled non-mock verification.
 
 ## Hard Production Gaps
 
@@ -72,7 +83,11 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Runtime smoke and API acceptance currently use `MOCK_EXTERNALS=true`.
 - Skill API and image recognition have configurable real HTTP clients and admin-managed environment configuration.
 - WeCom table read/write now has a configurable real HTTP client and `table.api_base_url` / `table.api_key` config keys.
-- `MOCK_EXTERNALS=false` source/config readiness passes, but live provider acceptance is still missing because valid external credentials/endpoints have not been supplied.
+- `MOCK_EXTERNALS=false` source/config readiness passes.
+- Controlled non-mock HTTP acceptance passes against the local fake provider:
+  - `python scripts/acceptance_real_external_local.py`
+  - Latest result: `passed=true checks=30`.
+- Real third-party live provider acceptance is still missing because valid external credentials/endpoints have not been supplied.
 - Remaining before production: run endpoint-level live tests against real Skill, image recognition, and WeCom gateway credentials.
 
 ### P1 - API Behavior Coverage Still Incomplete

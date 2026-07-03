@@ -1,5 +1,6 @@
 package com.privateflow.modules.skill.client;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.skill.SkillErrorCodes;
 import com.privateflow.modules.skill.SkillGatewayException;
@@ -70,7 +71,7 @@ public class DefaultSkillHttpClient implements SkillHttpClient {
       if (response.body() == null || response.body().isBlank()) {
         throw new SkillGatewayException(SkillErrorCodes.SKILL_RESPONSE_INVALID, "Skill 返回空响应", true);
       }
-      return response.body();
+      return unwrapProviderResponse(response.body());
     } catch (java.net.http.HttpTimeoutException ex) {
       throw new SkillGatewayException(SkillErrorCodes.SKILL_TIMEOUT, "Skill 调用超时", true, ex);
     } catch (IOException ex) {
@@ -78,6 +79,19 @@ public class DefaultSkillHttpClient implements SkillHttpClient {
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
       throw new SkillGatewayException(SkillErrorCodes.SKILL_UNREACHABLE, "Skill 系统不可达", false, ex);
+    }
+  }
+
+  private String unwrapProviderResponse(String raw) {
+    try {
+      JsonNode root = objectMapper.readTree(raw);
+      JsonNode content = root.path("choices").path(0).path("message").path("content");
+      if (content.isTextual() && !content.asText().isBlank()) {
+        return content.asText();
+      }
+      return raw;
+    } catch (Exception ignored) {
+      return raw;
     }
   }
 }
