@@ -49,3 +49,8 @@ wsl -d Ubuntu -- bash -lc 'cd /mnt/c/Users/85314/Desktop/私域工具/私域辅�
 ```bash
 wsl -d Ubuntu -- bash -lc 'cd /mnt/c/Users/85314/Desktop/私域工具/私域辅助系统 && python3 scripts/acceptance_backend_api.py'
 ```
+
+## Java And DB Evidence
+
+- `mvn test`: 10 tests run, 0 failures.
+- `python scripts/verify_database_alignment.py`: 31 live MariaDB tables inspected, 14 key tables checked, 0 missing required columns.

@@ -7,9 +7,9 @@ This repository is not production-complete yet. The current evidence proves a ru
 ## Verified Evidence
 
 - Module inventory exists for 34 actual modules: `01A-01H`, `20-33`, `40-51`.
-- Backend compiles with Java 17:
+- Backend compiles and runs Java tests with Java 17:
   - `mvn -Dstyle.color=never clean test`
-  - Result: `BUILD SUCCESS`, but `No tests to run`.
+  - Latest result: `BUILD SUCCESS`, `Tests run: 10, Failures: 0, Errors: 0, Skipped: 0`.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
 - Static module verifiers pass:
@@ -32,11 +32,10 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 ### P0 - No Real Java Test Coverage
 
-- Maven still reports `No tests to run`.
-- Current verifiers are static contract/token checks plus an external Python acceptance harness, not Java integration tests.
-- Required before production:
+- Maven now runs 10 Java tests covering AuthService and DatasourceAdminService.
+- Remaining before production:
   - controller integration tests for all API groups
-  - service tests for failure branches
+  - broader service tests for failure branches
   - repository tests against real MySQL-compatible database
   - desktop store/component tests or scripted browser checks for all clickable paths
 
@@ -70,10 +69,10 @@ This repository is not production-complete yet. The current evidence proves a ru
 ### P1 - Database / Repository Alignment Not Fully Audited
 
 - Flyway migrations apply successfully to MariaDB.
-- This proves DDL can run, but not that every repository query maps all columns correctly.
-- Required:
-  - generate actual schema snapshot from `information_schema`
-  - compare each repository SELECT/INSERT/UPDATE with real columns
+- Added `scripts/verify_database_alignment.py`, which reads the live smoke database `information_schema`.
+- Latest result: 31 tables found, 14 key tables checked, 0 missing required columns.
+- Remaining:
+  - expand checks to every repository query
   - verify nullable/default assumptions
   - verify all enum strings are accepted by service validation and UI option lists
 
