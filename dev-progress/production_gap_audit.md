@@ -80,6 +80,11 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Enum contract alignment verifier now checks production-critical enum strings across backend Java enums/constants, service validation allowlists, database enum allowlists, and frontend visible/manual-acceptance option paths:
   - `python scripts\verify_enum_contract_alignment.py`
   - Latest current-state result: 40 contract checks, 0 mismatches, 4 documented frontend exposure exceptions for JSON-form/admin-default-only controls.
+- P0/P1 aggregate acceptance runner exists:
+  - `python scripts/acceptance_p0_p1.py --backend-url http://172.19.250.154:8080`
+  - Latest default current-state result: `passed=true checks=8/8 skipped=3`.
+  - Default checks cover backend API acceptance, route mapping coverage, controller coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, and the unsigned-package fail-closed gate.
+  - Skipped by default but available as explicit flags: `--include-slow`, `--include-local-external`, `--include-live-external`, and `--require-signed-package`.
 
 ## Addressed Since Initial Audit
 
@@ -238,4 +243,5 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 - Runnable baseline: passed.
 - Backend mock-runtime representative API acceptance: passed for the current harness.
+- P0/P1 aggregate default acceptance: passed for currently runnable gates (`8/8`) with slow/local-external/live-external gates available behind explicit flags.
 - Production-ready SaaS: not passed.
