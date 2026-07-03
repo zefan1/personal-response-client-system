@@ -9,8 +9,8 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Module inventory exists for 34 actual modules: `01A-01H`, `20-33`, `40-51`.
 - Backend compiles and runs Java tests with Java 17:
   - `mvn -Dstyle.color=never clean test`
-  - Latest result: `BUILD SUCCESS`, `Tests run: 41, Failures: 0, Errors: 0, Skipped: 0`.
-  - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AccountAdminController list/create/update/toggle/reset/delete/error mapping, NoticeController list/create/update/stop/delete/active/error mapping, QuickSearchAdminController list/create/update/toggle/delete/upload/error mapping, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
+  - Latest result: `BUILD SUCCESS`, `Tests run: 51, Failures: 0, Errors: 0, Skipped: 0`.
+  - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AccountAdminController list/create/update/toggle/reset/delete/error mapping, NoticeController list/create/update/stop/delete/active/error mapping, QuickSearchAdminController list/create/update/toggle/delete/upload/error mapping, SkillAdminController list/create/update/toggle/delete/available/test/analytics/error mapping, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
   - Latest rerun after offline Vitest coverage: passed.
@@ -90,12 +90,13 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Java tests now also include QuickSearch admin controller MockMvc coverage for list, create, invalid create error mapping, update, toggle, delete, and image upload response wrapping.
 - Java tests now also include Account admin controller MockMvc coverage for list filters, enum query binding errors, create/update/toggle/reset/delete, and service validation error mapping. Global API exception handling now maps request parameter type mismatches, including bad enum query values, to standard `80-10001` bad request responses instead of generic 500 responses.
 - Java tests now also include Notice controller MockMvc coverage for list filters, invalid status filter handling, immediate create, scheduled update, stop, delete, active desktop payloads, and status-conflict HTTP 409 mapping.
+- Java tests now also include Skill admin controller MockMvc coverage for scene/leadType filters, invalid enum query handling, create/update/toggle/delete, available skills, Skill test responses, analytics filters, and SkillAdminException bad request mapping.
 
 ## Hard Production Gaps
 
 ### P0 - No Real Java Test Coverage
 
-- Maven now runs 41 Java tests covering AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AccountAdminController, NoticeController, QuickSearchAdminController, DesktopVersionController, and DesktopVersionRepository.
+- Maven now runs 51 Java tests covering AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, AccountAdminController, NoticeController, QuickSearchAdminController, SkillAdminController, DesktopVersionController, and DesktopVersionRepository.
 - Remaining before production:
   - controller integration tests for every remaining API group beyond the current high-risk version API coverage
   - broader service tests for failure branches
