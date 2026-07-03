@@ -51,7 +51,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - `python3 scripts/acceptance_backend_api.py`
 - Latest passing evidence: 125 calls passed in mock external mode.
   - Latest rerun command: `python3 scripts/acceptance_backend_api.py --no-start`
-  - Latest rerun result after expanded negative branch coverage and quick-search upload error mapping fix against `http://172.19.250.154:8080`: `passed=167 failed=0 total=167`.
+  - Latest rerun result after audit-export CSV content assertion expansion against `http://172.19.250.154:8080`: `passed=167 failed=0 total=167`.
   - Coverage categories reported by the harness: `conflict:8`, `create:4`, `download:1`, `invalid:22`, `permission:6`, `read:34`, `representative:90`, `update:2`.
 - API mapping coverage audit exists:
   - `python scripts/verify_api_mapping_coverage.py`
@@ -163,6 +163,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - The acceptance harness now covers all 113 mapped HTTP routes in the current route inventory.
 - Mapping coverage audit reports 0 route gaps.
 - Expanded negative branch matrix and response-state assertions now pass with 167 total calls and explicit coverage counts for invalid, permission, conflict, read, create, update, download, and representative branches.
+- Audit-log export acceptance now validates downloaded CSV content beyond non-empty download: BOM-tolerant header equality, required audit columns, at least one data row, per-row column count, and required operator/action/time fields.
 - Remaining work:
   - continue extending the invalid/permission/conflict matrix beyond the current production-critical branch set
   - deepen response body assertions for remaining list/detail/statistics/export fields that are still checked structurally rather than field-by-field

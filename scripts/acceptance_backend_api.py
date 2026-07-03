@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import argparse
+import csv
+import io
 import json
 import os
 import subprocess
@@ -346,6 +348,23 @@ def combine_assertions(*checks):
 
 def require_error(code):
   return {"expect_success": False, "expect_error_code": code}
+
+
+def require_audit_csv(raw_body: str):
+  text = raw_body.lstrip("\ufeff")
+  rows = list(csv.reader(io.StringIO(text)))
+  if not rows:
+    raise AssertionError("audit export CSV has no rows")
+  expected_header = ["操作时间", "操作人", "操作类型", "操作对象", "操作摘要", "详情"]
+  if rows[0] != expected_header:
+    raise AssertionError(f"audit export CSV header mismatch: {rows[0]}")
+  if len(rows) < 2:
+    raise AssertionError("audit export CSV has header but no data rows")
+  for index, row in enumerate(rows[1:], start=2):
+    if len(row) != len(expected_header):
+      raise AssertionError(f"audit export CSV row {index} column count mismatch: {len(row)}")
+    if not row[0].strip() or not row[1].strip() or not row[2].strip():
+      raise AssertionError(f"audit export CSV row {index} missing required audit fields")
 
 
 def first_id_from_list(payload, list_key="list"):
@@ -822,6 +841,7 @@ def audit_export_flow(api: ApiClient, ctx: Context):
   raw = api.request_raw("audit export download", "GET", f"/admin/api/v1/audit-logs/export/{export_id}/download", token=ctx.token)
   if raw.status != 200 or not raw.body.strip():
     raise AssertionError("audit export download returned empty body")
+  require_audit_csv(raw.body)
 
 
 def version_flow(api: ApiClient, ctx: Context):
