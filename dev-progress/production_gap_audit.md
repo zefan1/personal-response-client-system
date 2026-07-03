@@ -70,8 +70,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest current-state result: `passed=true checks=30`.
   - Covered real HTTP client paths: Skill `/v1/chat/completions`, image `/v1/chat/completions`, WeCom table rows GET/PUT, admin environment create/activate, datasource create/mapping/columns, and customer save-to-table.
 - Database alignment verifier now checks required columns, every table declared by migrations, config keys inserted by migrations, and static repository SQL table references:
-  - It now also verifies selected production-critical nullable/default assumptions, live enum values for accounts, customers, skill bindings, quick search, desktop versions, notices, audit exports, followup rules/tag suggestions, AI/image environments, prompt versions, pending table writes, and desktop client version reports, plus scanned repository SQL column references for INSERT/UPDATE/table-alias qualified columns.
-  - Latest current-state result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys, 0 missing repository tables, 0 repository column violations, 0 column property violations, 0 enum violations.
+  - It now also verifies selected production-critical nullable/default assumptions, live enum values for accounts, customers, skill bindings, quick search, desktop versions, notices, audit exports, followup rules/tag suggestions, AI/image environments, prompt versions, pending table writes, and desktop client version reports, plus scanned repository SQL column references for INSERT/UPDATE/table-alias qualified columns and safely parseable single-table unqualified SELECT columns.
+  - Latest current-state result: 31 live tables, 30 migration-declared tables, 0 missing migration tables, 0 missing config keys, 0 missing repository tables, 758 repository column references checked, 0 repository column violations, 0 column property violations, 0 enum violations.
 - Enum contract alignment verifier now checks production-critical enum strings across backend Java enums/constants, service validation allowlists, database enum allowlists, and frontend visible/manual-acceptance option paths:
   - `python scripts\verify_enum_contract_alignment.py`
   - Latest current-state result: 40 contract checks, 0 mismatches, 4 documented frontend exposure exceptions for JSON-form/admin-default-only controls.
@@ -98,6 +98,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Database alignment verifier now scans static repository SQL table references and fails if a referenced table is absent from the live smoke schema.
 - Database alignment verifier now also scans repository SQL INSERT columns, UPDATE assignments, and alias-qualified `table.column` references and fails if any scanned column is absent from the live smoke schema.
 - Database alignment verifier now expands nullable/default and live enum checks to followup rules/tag suggestions, Skill/image environment tables, prompt version history, pending table writes, and desktop client version reports.
+- Database alignment verifier now also scans safely parseable single-table unqualified SELECT column lists and records checked column counts in `.tools/db/schema_alignment_report.json`.
 - Customer `lead_type` writes now normalize unknown values to `PENDING` at the repository boundary, and migration `V53__normalize_customer_lead_types.sql` repairs existing out-of-contract customer enum values. This prevents quick-search `GENERAL` from leaking into the customer table.
 - Added `scripts/verify_enum_contract_alignment.py` and frontend/manual acceptance coverage for missing enum paths: quick search `MINI_PROGRAM`, scheduled notice creation, and Mac desktop version creation.
 - Renderer smoke now discovers all admin nav sections at runtime instead of checking a fixed representative subset.
@@ -166,12 +167,12 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Flyway migrations apply successfully to MariaDB.
 - Added `scripts/verify_database_alignment.py`, which reads the live smoke database `information_schema`.
 - Latest result: 31 tables found, 14 key table column sets checked, 30 migration-declared tables checked, 0 missing required columns, 0 missing migration tables, 0 missing config keys, 0 missing repository tables, 0 nullable/default violations, 0 enum violations.
-  - Latest expanded repository SQL result: 0 repository column violations across scanned INSERT, UPDATE, and alias-qualified column references.
+  - Latest expanded repository SQL result: 758 repository column references checked and 0 repository column violations across scanned INSERT, UPDATE, alias-qualified columns, and safely parseable single-table unqualified SELECT lists.
 - Cross-layer enum contract verifier now passes:
   - `python scripts\verify_enum_contract_alignment.py`
   - Latest result: 40 checked contracts, 0 mismatches, with intentional exceptions recorded in `.tools/contracts/enum_contract_alignment.json`.
 - Remaining:
-  - expand column-level checks to unqualified SELECT lists and dynamically composed query fragments that are not yet safely parseable by the static verifier
+  - continue expanding dynamically composed query fragments that are not yet safely parseable by the static verifier
   - expand nullable/default checks beyond the current production-critical subset
   - broaden frontend enum exposure from JSON action examples into dedicated controls where product UX requires it
 

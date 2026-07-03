@@ -232,6 +232,10 @@ UPDATE_SET_PATTERN = re.compile(
     r"\bUPDATE\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?\s+SET\s+(.*?)(?:\bWHERE\b|\bON\b|\Z)",
     re.IGNORECASE | re.DOTALL,
 )
+SIMPLE_SELECT_PATTERN = re.compile(
+    r"\bSELECT\s+(.*?)\s+FROM\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?(?:\s+(?:AS\s+)?([a-zA-Z][a-zA-Z0-9_]*))?",
+    re.IGNORECASE | re.DOTALL,
+)
 ALIAS_PATTERN = re.compile(
     r"\b(?:FROM|JOIN)\s+`?([a-zA-Z][a-zA-Z0-9_]*)`?(?:\s+(?:AS\s+)?([a-zA-Z][a-zA-Z0-9_]*))?",
     re.IGNORECASE,
@@ -247,6 +251,10 @@ IGNORED_SQL_ALIASES = {
 }
 IGNORED_QUALIFIED_PREFIXES = {
     "com", "privateflow", "modules", "java", "time", "util", "org", "springframework",
+}
+SQL_CLAUSE_WORDS = {
+    "WHERE", "ORDER", "GROUP", "HAVING", "LIMIT", "OFFSET", "UNION", "JOIN",
+    "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "ON",
 }
 
 
@@ -343,8 +351,70 @@ def split_sql_columns(raw: str) -> list[str]:
     return columns
 
 
-def repository_column_references(schema: dict[str, dict[str, dict[str, str]]]) -> list[dict[str, str]]:
+def split_top_level_commas(raw: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    quote: str | None = None
+    index = 0
+    while index < len(raw):
+        char = raw[index]
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in {"'", '"', "`"}:
+            quote = char
+            current.append(char)
+        elif char == "(":
+            depth += 1
+            current.append(char)
+        elif char == ")":
+            depth = max(0, depth - 1)
+            current.append(char)
+        elif char == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+        index += 1
+    tail = "".join(current).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def is_single_table_select(sql: str, table: str, alias: str) -> bool:
+    upper = sql.upper()
+    if any(f" {word} " in f" {upper} " for word in ("JOIN", "UNION")):
+        return False
+    if re.search(r"\bFROM\s*\(", sql, re.IGNORECASE):
+        return False
+    from_matches = SQL_TABLE_PATTERN.findall(sql)
+    real_tables = [item for item in from_matches if item in {table, alias}]
+    return len(real_tables) == len(from_matches) == 1
+
+
+def bare_select_column(item: str) -> str | None:
+    text = re.sub(r"--.*$", "", item).strip()
+    text = re.sub(r"\bDISTINCT\b", "", text, flags=re.IGNORECASE).strip()
+    if not text or text == "*" or "." in text or "(" in text or ")" in text:
+        return None
+    text = re.split(r"\s+\bAS\b\s+", text, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+    text = text.split()[0] if text.split() else text
+    text = text.strip("` ")
+    if text.upper() in SQL_CLAUSE_WORDS:
+        return None
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", text):
+        return text
+    return None
+
+
+def repository_column_references(schema: dict[str, dict[str, dict[str, str]]]) -> tuple[list[dict[str, str]], dict[str, int]]:
     violations: list[dict[str, str]] = []
+    checked_counts = {"insert": 0, "update": 0, "qualified": 0, "select": 0}
     for path in JAVA_DIR.rglob("*.java"):
         text = path.read_text(encoding="utf-8", errors="replace")
         if "JdbcTemplate" not in text and "jdbcTemplate" not in text:
@@ -355,6 +425,7 @@ def repository_column_references(schema: dict[str, dict[str, dict[str, str]]]) -
                 if table not in schema:
                     continue
                 for column in split_sql_columns(raw_columns):
+                    checked_counts["insert"] += 1
                     if column not in schema[table]:
                         violations.append({
                             "file": str(path.relative_to(ROOT)),
@@ -366,12 +437,30 @@ def repository_column_references(schema: dict[str, dict[str, dict[str, str]]]) -
                 if table not in schema:
                     continue
                 for column in re.findall(r"`?([a-zA-Z][a-zA-Z0-9_]*)`?\s*=", raw_set):
+                    checked_counts["update"] += 1
                     if column not in schema[table]:
                         violations.append({
                             "file": str(path.relative_to(ROOT)),
                             "table": table,
                             "column": column,
                             "context": "update",
+                        })
+            for raw_select, table, alias in SIMPLE_SELECT_PATTERN.findall(sql):
+                if table not in schema:
+                    continue
+                if not is_single_table_select(sql, table, alias):
+                    continue
+                for item in split_top_level_commas(raw_select):
+                    column = bare_select_column(item)
+                    if not column:
+                        continue
+                    checked_counts["select"] += 1
+                    if column not in schema[table]:
+                        violations.append({
+                            "file": str(path.relative_to(ROOT)),
+                            "table": table,
+                            "column": column,
+                            "context": "select",
                         })
             alias_to_table: dict[str, str] = {}
             for table, alias in ALIAS_PATTERN.findall(sql):
@@ -386,6 +475,7 @@ def repository_column_references(schema: dict[str, dict[str, dict[str, str]]]) -
                 table = alias_to_table.get(alias)
                 if not table:
                     continue
+                checked_counts["qualified"] += 1
                 if column not in schema[table]:
                     violations.append({
                         "file": str(path.relative_to(ROOT)),
@@ -400,7 +490,7 @@ def repository_column_references(schema: dict[str, dict[str, dict[str, str]]]) -
         if key not in seen:
             unique.append(violation)
             seen.add(key)
-    return unique
+    return unique, checked_counts
 
 
 def normalize_default(value: str) -> str:
@@ -479,7 +569,7 @@ def main() -> int:
     missing_repository_tables = sorted(set(referenced_tables) - set(schema))
     column_property_violations = validate_column_properties(schema)
     enum_violations = invalid_enum_values(schema)
-    repository_column_violations = repository_column_references(schema)
+    repository_column_violations, repository_column_checked_counts = repository_column_references(schema)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report = {
         "database": DB_NAME,
@@ -493,6 +583,7 @@ def main() -> int:
         "repositoryReferencedTables": len(referenced_tables),
         "missingRepositoryTables": missing_repository_tables,
         "repositoryReferences": repository_refs,
+        "repositoryColumnCheckedCounts": repository_column_checked_counts,
         "repositoryColumnViolations": repository_column_violations,
         "columnPropertyViolations": column_property_violations,
         "enumViolations": enum_violations,
@@ -505,6 +596,7 @@ def main() -> int:
         f"tables={len(schema)} required={len(REQUIRED_COLUMNS)} migration_tables={len(expected_tables)} "
         f"missing_required_tables={len(missing)} missing_migration_tables={len(missing_tables)} "
         f"missing_config_keys={len(missing_configs)} missing_repository_tables={len(missing_repository_tables)} "
+        f"repository_column_checked={sum(repository_column_checked_counts.values())} "
         f"repository_column_violations={len(repository_column_violations)} "
         f"column_property_violations={len(column_property_violations)} enum_violations={len(enum_violations)}"
     )
