@@ -21,14 +21,14 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Coverage now includes AuthService, JwtAuthenticationFilter preflight behavior, DatasourceAdminService, DatasourceAdminController all datasource CRUD/toggle/replace/mapping/version/restore/compare/columns/customer-fields/sync/import routes and error mapping, AnalyticsController overview/funnels/staff/sources/stages/health/lifecycle/risks/content-ranking binding and error mapping, AccountAdminController list/create/update/toggle/reset/delete/error mapping, AuditLogController list/actions/export/status/download/error mapping, AuthController desktop/admin login, refresh, and auth config, ConfigController list/get/update, HealthController, HelpController request/resolve, user QuickSearchController list, ChatController recognize/generate/regenerate/send-confirm binding and error mapping, CustomerController search/profile/batch/update/suggestion-resolve/save-to-table and local exception mappings, FollowupController today/rules CRUD/toggle/search/error mapping, NoticeController list/create/update/stop/delete/active/error mapping, QuickSearchAdminController list/create/update/toggle/delete/upload/error mapping, SkillAdminController list/create/update/toggle/delete/available/test/analytics/error mapping, AiConfigController Skill/Image environment CRUD/activate/delete/test and prompt version restore/error mapping, TagAdminController category/value CRUD/toggle and tag business error mapping, DesktopVersionController error/status mapping, and DesktopVersionRepository SQL persistence/upsert behavior.
 - Desktop renderer type-checks:
   - `cd desktop && npm run typecheck`
-  - Latest rerun after workbench store coverage expansion: passed.
+  - Latest rerun after renderer desktop smoke expansion: passed.
 - Desktop renderer unit tests pass:
   - `cd desktop && npm run test`
   - Latest result: 7 test files, 49 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, and reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
-  - Latest build rerun after workbench store coverage expansion: passed. Latest Electron smoke evidence remains from the controller coverage expansion checkpoint.
+  - Latest build rerun after renderer desktop smoke expansion: passed via `cd desktop && npm run renderer:smoke`. Latest standalone Electron smoke evidence remains from the controller coverage expansion checkpoint.
 - Desktop dependency audit passes:
   - `cd desktop && npm audit --json`
   - Latest result: 0 vulnerabilities after upgrading Vite and Electron.
@@ -37,8 +37,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest result: Windows x64 directory artifact created under `desktop/release/Private Domain Assistant-win32-x64`, `app.asar` present with SHA-256 report, `signed=false` because no production code-signing certificate is configured locally.
 - Renderer click smoke passes:
   - `PDA_SMOKE_API_BASE_URL=http://<WSL-IP>:8080 cd desktop && npm run renderer:smoke`
-  - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, and desktop workbench switch.
-  - Latest rerun after workbench store coverage expansion used `http://172.19.250.154:8080` because Windows localhost forwarding to WSL was unavailable; result: passed.
+  - Covers login, dynamic traversal of all admin navigation sections, API-backed read panel refresh/rendering, action form JSON input presence, desktop workbench switch, desktop panel presence, workbench/followup refresh buttons, all followup tabs, recognition text-mode form, customer search input/button, quick-search overlay, and quick-search lead-type filters.
+  - Latest rerun after renderer desktop smoke expansion used `http://172.19.250.154:8080` because Windows localhost forwarding to WSL was unavailable; result: passed.
 - Static module verifiers pass:
   - `verify_module_a.py` through `verify_module_h.py`
   - `verify_module_20.py` through `verify_module_33.py`
@@ -96,6 +96,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Added `scripts/verify_enum_contract_alignment.py` and frontend/manual acceptance coverage for missing enum paths: quick search `MINI_PROGRAM`, scheduled notice creation, and Mac desktop version creation.
 - Renderer smoke now discovers all admin nav sections at runtime instead of checking a fixed representative subset.
 - Renderer smoke now also verifies every admin section has API-backed read panels that refresh into rendered JSON and that action panels expose editable JSON request bodies.
+- Renderer smoke now also verifies desktop-mode primary panels and non-destructive clickable paths: workbench/followup refresh controls, followup tab switching, chat recognition text mode, customer search, quick-search overlay, and quick-search filters.
 - Desktop toolchain moved off vulnerable Electron/Vite versions; `npm audit --json` currently reports 0 vulnerabilities.
 - Added repeatable desktop package verification for Windows x64 unpacked artifacts. It proves build structure and ASAR integrity metadata, while explicitly recording that this local artifact is not signed.
 - Java tests now include controller-layer MockMvc checks for version APIs plus H2-backed repository tests for desktop version persistence, publish/revoke, latest published lookup, and desktop client report upsert semantics.

@@ -91,6 +91,62 @@ async function runRendererSmoke(window: BrowserWindow) {
           }
           throw new Error('missing text: ' + text);
         };
+        const waitForSelector = async (selector, timeout = 15000) => {
+          const started = Date.now();
+          while (Date.now() - started < timeout) {
+            const element = document.querySelector(selector);
+            if (element) return element;
+            await delay(100);
+          }
+          throw new Error('missing selector: ' + selector);
+        };
+        const clickFirst = async (selector) => {
+          const element = await waitForSelector(selector);
+          element.click();
+          await delay(150);
+          return element;
+        };
+        const assertDesktopSmoke = async () => {
+          await waitForSelector('.workbench-panel');
+          await waitForSelector('.recognition');
+          await waitForSelector('.followup-panel');
+          await waitForSelector('.customer-panel');
+          await waitForSelector('.reply-panel');
+          const refreshButtons = [...document.querySelectorAll('.workbench-panel button, .followup-panel button')]
+            .filter((button) => !button.disabled);
+          if (refreshButtons.length < 2) {
+            throw new Error('desktop panels expose too few enabled buttons');
+          }
+          refreshButtons[0].click();
+          refreshButtons[1].click();
+          await delay(300);
+          const followupTabs = [...document.querySelectorAll('.followup-panel .tab-button')];
+          if (followupTabs.length !== 4) {
+            throw new Error('followup tab count mismatch: ' + followupTabs.length);
+          }
+          followupTabs.forEach((tab) => tab.click());
+          await clickFirst('.recognition .toolbar .secondary');
+          const textForm = await waitForSelector('.recognition .two-box');
+          if (!textForm.querySelector('input') || !textForm.querySelector('textarea')) {
+            throw new Error('recognition text mode missing inputs');
+          }
+          const customerSearch = await waitForSelector('.customer-panel .search-row input');
+          setValue(customerSearch, '18800001111');
+          await clickFirst('.customer-panel .search-row button');
+          await delay(500);
+          const quickActionButtons = [...document.querySelectorAll('.workbench-panel .quick-actions button')];
+          if (quickActionButtons.length < 3) {
+            throw new Error('workbench quick action count mismatch: ' + quickActionButtons.length);
+          }
+          quickActionButtons[1].click();
+          await waitForSelector('.quick-search-overlay .quick-search-input');
+          const quickFilters = [...document.querySelectorAll('.quick-search-overlay .quick-filter button')];
+          if (quickFilters.length < 4) {
+            throw new Error('quick-search filter count mismatch: ' + quickFilters.length);
+          }
+          quickFilters.forEach((filter) => filter.click());
+          return true;
+        };
         const hasLoginForm = () => Boolean(inputByLabel('API 地址') && inputByLabel('账号') && inputByLabel('密码'));
         const started = Date.now();
         while (!hasLoginForm() && !document.body.innerText.includes('健康与系统配置') && Date.now() - started < 15000) {
@@ -139,6 +195,7 @@ async function runRendererSmoke(window: BrowserWindow) {
         }
         findButton('工作台').click();
         await waitForText('桌面工作台');
+        await assertDesktopSmoke();
         return true;
       })();
     `);
