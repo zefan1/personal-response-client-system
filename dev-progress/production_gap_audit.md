@@ -258,6 +258,14 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now also has component-level ReplySuggestionPanel coverage for rendered recognized reply cards, DOM-driven reply selection, leader-help request events, profile suggestion batch resolve buttons, and abnormal-alert banner clearing after acknowledgement.
 - Desktop now also has component-level ChatRecognitionPanel coverage for screenshot-button recognition, WebSocket/clipboard listener setup, recognize:start/result emission, text-mode opening and submission, image-service DOWN banner/disabled screenshot behavior, and text fallback submission while image recognition is unavailable.
 - Renderer smoke now also covers additional stateful desktop click paths: workbench followup/new-lead view-all tab selection, recognition quick action, batch-template guidance, quick-search query/filter active states, admin/desktop roundtrip, and logout.
+- Desktop shell now opens authenticated users on a visible left sidebar workbench by default instead of dropping them into the admin console. The sidebar exposes 工作台、聊天识别、跟进列表、客户档案、话术建议, keeps 管理后台/退出 as explicit actions, and routes existing event-bus flows to the matching main panel.
+- Added component-level App shell coverage for authenticated default desktop rendering, sidebar navigation, active panel switching, and explicit admin-console entry.
+- Updated renderer smoke downstream selectors so the smoke suite validates the new `.desktop-sidebar` shell and still covers admin/desktop roundtrip and logout.
+- Latest verification for the sidebar fix:
+  - `cd desktop && npm run typecheck` -> passed
+  - `cd desktop && npm run test` -> passed, 28 files / 144 tests
+  - `cd desktop && npm run renderer:smoke` -> passed
+  - `python scripts\verify_manual_test_readiness.py --frontend-url http://127.0.0.1:5173/ --backend-url http://172.19.250.154:8080` -> passed, 3/3
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification with `PDA_REQUIRE_SIGNED_PACKAGE=1` enabled in release CI

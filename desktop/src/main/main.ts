@@ -189,7 +189,12 @@ async function runRendererSmoke(window: BrowserWindow) {
         };
         const hasLoginForm = () => Boolean(inputByLabel('API 地址') && inputByLabel('账号') && inputByLabel('密码'));
         const started = Date.now();
-        while (!hasLoginForm() && !document.body.innerText.includes('健康与系统配置') && Date.now() - started < 15000) {
+        while (
+          !hasLoginForm()
+          && !document.body.innerText.includes('健康与系统配置')
+          && !document.querySelector('.desktop-sidebar')
+          && Date.now() - started < 15000
+        ) {
           await delay(100);
         }
         if (hasLoginForm()) {
@@ -199,6 +204,9 @@ async function runRendererSmoke(window: BrowserWindow) {
           const mode = inputByLabel('入口');
           if (mode) setValue(mode, 'admin');
           findButton('登录').click();
+        }
+        if (document.querySelector('.desktop-sidebar')) {
+          findButton('管理后台').click();
         }
         await waitForText('健康与系统配置');
         const navLabels = [...document.querySelectorAll('.admin-nav-button span')]
@@ -302,17 +310,18 @@ async function runRendererSmoke(window: BrowserWindow) {
           await waitForText('操作入口');
         }
         findButton('工作台').click();
-        await waitForText('桌面工作台');
+        await waitForSelector('.desktop-sidebar');
+        await waitForText('工作台');
         await assertDesktopSmoke();
-        document.querySelector('.desktop-mode-bar button.secondary')?.click();
+        findButton('管理后台').click();
         await waitForSelector('.admin-console');
         document.querySelector('.admin-toolbar-actions button.secondary')?.click();
         await waitForSelector('.workbench-panel');
-        const logoutButtons = [...document.querySelectorAll('.desktop-mode-bar button.secondary')];
-        if (logoutButtons.length < 2) {
+        const sidebarButtons = [...document.querySelectorAll('.desktop-sidebar-actions button.secondary')];
+        if (sidebarButtons.length < 2) {
           throw new Error('desktop logout button missing');
         }
-        logoutButtons[1].click();
+        sidebarButtons[1].click();
         await waitForSelector('.login-panel');
         return true;
       })();
