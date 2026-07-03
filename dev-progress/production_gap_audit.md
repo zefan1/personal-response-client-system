@@ -25,7 +25,7 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest rerun after renderer desktop smoke expansion: passed.
 - Desktop renderer unit tests pass:
   - `cd desktop && npm run test`
-  - Latest result: 11 test files, 82 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, chat-recognition dedupe/concurrency/status/error/event behavior, copy-backfill clipboard/send-confirm/suggestion-toast behavior, help-mode request/resolve/reply event behavior, and batch-template customer/template/copy/confirm behavior.
+  - Latest result: 12 test files, 89 tests passed for offline manager failure/recovery branches, quick-search store cache/search/copy/failure behavior, workbench store metrics/sorting/new-lead/notice/load-failure/event behavior, save-to-table profile persistence/retry/pending/sync behavior, followup-list grouping/selection/reminder/event behavior, customer-profile search/cache/edit/suggestion/event behavior, reply-suggestion loading/fallback/regenerate/help/suggestion/event behavior, chat-recognition dedupe/concurrency/status/error/event behavior, copy-backfill clipboard/send-confirm/suggestion-toast behavior, help-mode request/resolve/reply event behavior, batch-template customer/template/copy/confirm behavior, and stage-suggestion event/confirm/ignore behavior.
 - Desktop build and Electron smoke pass:
   - `cd desktop && npm run build`
   - `cd desktop && npm run electron:smoke`
@@ -190,10 +190,11 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now also has Vitest/jsdom coverage for copy-backfill behavior: empty reply rejection, clipboard success/failure branches, silent send-confirm dispatch, fallback direction mapping, aborting stale send-confirm requests, suggestion toast show/reopen/close/auto-collapse, single and batch suggestion resolution, completion hiding, and resolve-failure recovery.
 - Desktop now also has Vitest/jsdom coverage for help-mode behavior: request dialog validation, help request submission with keeper-note truncation, pending and timeout events, permission/network failure UX, helper queue upsert/offline replay, draft reply limits and editing, helper resolve success/failure, received helper response state, reply-selected emission for helper replies, and response expand/close controls.
 - Desktop now also has Vitest/jsdom coverage for batch-template behavior: unique phone handling and max-size guard, template API loading and cache fallback, bulk customer loading and one-by-one fallback, visible template filters, auto-selection, unavailable-customer skipping, template variable filling, clipboard copy success/failure, local logs, send-confirm dispatch, navigation, pause/resume, completion, and exit reset.
+- Desktop now also has Vitest/jsdom coverage for stage-suggestion behavior: current-profile stage suggestion emission and dedupe, non-current customer pending/flush behavior, pending TTL expiry, confirm-stage success event emission, conflict refresh handling, transient retry exhaustion, and ignore-stage batch resolve with non-blocking backend failure.
 - Remaining:
   - exhaustive browser click coverage for every desktop/admin workflow and failure branch
   - production certificate-backed code signing and installer/notarization verification
-  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, customer-profile, reply-suggestion, chat-recognition, copy-backfill, help-mode, and batch-template coverage
+  - expand component/store tests beyond the current offline manager, quick-search, workbench, save-to-table, followup-list, customer-profile, reply-suggestion, chat-recognition, copy-backfill, help-mode, batch-template, and stage-suggestion coverage
 
 ## Recommended Repair Order
 
