@@ -69,6 +69,9 @@ This repository is not production-complete yet. The current evidence proves a ru
   - URL: `http://127.0.0.1:5173/`
   - Login: `admin/admin123`
   - Checked admin sections: health/config, skill bindings, AI/external environments, datasource mappings, accounts, notices/versions/audit.
+- Manual test readiness verifier exists:
+  - `python scripts\verify_manual_test_readiness.py --frontend-url http://127.0.0.1:5173/ --backend-url http://172.19.250.154:8080`
+  - Latest current-state result: `passed=true checks=3/3`, covering Vite frontend HTML/app mount, backend auth config, and `admin/admin123` admin login returning an access token.
 - Real external readiness verifier exists:
   - `python scripts/verify_real_external_readiness.py`
   - Latest result: `mockExternalsFalseReady=true`, source/config blockers are cleared.
@@ -88,8 +91,8 @@ This repository is not production-complete yet. The current evidence proves a ru
   - Latest current-state result: 40 contract checks, 0 mismatches, 4 documented frontend exposure exceptions for JSON-form/admin-default-only controls.
 - P0/P1 aggregate acceptance runner exists:
   - `python scripts/acceptance_p0_p1.py --backend-url http://172.19.250.154:8080`
-  - Latest default current-state result: `passed=true checks=10/10 skipped=3`.
-  - Default checks cover backend API acceptance, backend API acceptance quality, route mapping coverage, controller coverage audit, desktop component coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, and the unsigned-package fail-closed gate.
+  - Latest default current-state result: `passed=true checks=11/11 skipped=3`.
+  - Default checks cover backend API acceptance, backend API acceptance quality, route mapping coverage, controller coverage audit, desktop component coverage audit, database alignment, enum contract alignment, real-external source readiness, desktop typecheck, manual test readiness, and the unsigned-package fail-closed gate.
   - Skipped by default but available as explicit flags: `--include-slow`, `--include-local-external`, `--include-live-external`, and `--require-signed-package`.
 
 ## Addressed Since Initial Audit
@@ -216,6 +219,7 @@ This repository is not production-complete yet. The current evidence proves a ru
 - Desktop now has Vitest/jsdom coverage for offline manager branches: consecutive API network failures, non-network business errors, WS degraded/reconnected handling, debounced OS offline/recovery bridge events, and duplicate offline capability registration.
 - Desktop now also has component-level OfflineStatusBar coverage for API-failure offline rendering, websocket degraded rendering while API remains online, online recovery toast rendering from `network:online`, and configured auto-hide timing.
 - Desktop component coverage is now machine-checked by `scripts/verify_desktop_component_test_coverage.py`, which fails if any `desktop/src/renderer/modules/**/*.vue` file lacks a same-name `.test.ts`; latest report covers 13/13 Vue module components with 0 missing.
+- Manual test readiness is now machine-checked by `scripts/verify_manual_test_readiness.py`, which fails if the Vite frontend is unavailable, the backend auth config is unavailable, or `admin/admin123` no longer returns an admin access token.
 - Desktop now also has Vitest/jsdom coverage for quick-search store behavior: API refresh and cache write, content-type/order sorting, lead-type filtering and shortcut/title/content ranking, retry failure with cached data retained, image copy validation, text copy, and auto-close after copy.
 - Desktop now also has component-level QuickSearchOverlay coverage for event-bus opening, API-backed result rendering, typed search debounce, lead-type filter buttons, click-to-copy text items, Enter-to-copy image items, auto-close after success, offline hint rendering, refresh-failure messaging, and retry-button recovery.
 - Desktop now also has Vitest/jsdom coverage for workbench store behavior: followup loading and normalization, dashboard metric aggregation, urgent followup ordering and limits, new-lead queue fallback, notice filtering/dismissal/expiry, stale/retry-only fetch failures, refresh triggers, followup reminder/new-lead merge dedupe, and workbench navigation event emission.
@@ -262,5 +266,5 @@ This repository is not production-complete yet. The current evidence proves a ru
 
 - Runnable baseline: passed.
 - Backend mock-runtime representative API acceptance: passed for the current harness.
-- P0/P1 aggregate default acceptance: passed for currently runnable gates (`10/10`) with slow/local-external/live-external gates available behind explicit flags.
+- P0/P1 aggregate default acceptance: passed for currently runnable gates (`11/11`) with slow/local-external/live-external gates available behind explicit flags.
 - Production-ready SaaS: not passed.

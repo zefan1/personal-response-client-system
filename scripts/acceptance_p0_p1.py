@@ -115,6 +115,7 @@ def main() -> int:
         run_step("enum contract alignment", "python scripts\\verify_enum_contract_alignment.py", timeout=120),
         run_step("real external source readiness", "python scripts\\verify_real_external_readiness.py", timeout=120),
         run_step("desktop typecheck", "npm run typecheck", cwd=ROOT / "desktop", timeout=180),
+        run_step("manual test readiness", f"python scripts\\verify_manual_test_readiness.py --frontend-url http://127.0.0.1:5173/ --backend-url {args.backend_url}", timeout=120),
     ])
 
     if args.include_slow:
