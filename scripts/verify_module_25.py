@@ -26,6 +26,7 @@ def main() -> None:
     followup_panel = read("desktop/src/renderer/modules/followup-list/FollowupListPanel.vue")
     panel_vue = read("desktop/src/renderer/modules/new-lead-toast/NewLeadToastAgent.vue")
     store_ts = read("desktop/src/renderer/modules/new-lead-toast/newLeadToastStore.ts")
+    bridge_ts = read("desktop/src/renderer/shared/desktopBridge.ts")
     types_ts = read("desktop/src/renderer/modules/new-lead-toast/types.ts")
     progress = read("dev-progress/25_progress.md")
 
@@ -39,7 +40,8 @@ def main() -> None:
     assert_contains(store_ts, "tab: 'NEW_LEAD'", "new lead tab")
     assert_contains(followup_panel, "followup:switch-tab", "followup panel listens switch event")
     assert_contains(store_ts + types_ts, "phoneFull", "phoneFull copy field")
-    assert_contains(store_ts, "window.desktopBridge.writeClipboardText(phone)", "clipboard bridge use")
+    assert_contains(store_ts, "writeClipboardText(phone)", "clipboard bridge use")
+    assert_contains(bridge_ts, "window.desktopBridge.writeClipboardText", "electron clipboard bridge use")
     assert_contains(config_ts, "toastMaxCount: 3", "toast max default")
     assert_contains(config_ts, "toastNewLeadDismissS: 15", "toast dismiss default")
     assert_contains(config_ts, "newReminderFlashMs: 3000", "flash default")

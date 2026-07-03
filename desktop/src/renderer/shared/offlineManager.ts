@@ -54,8 +54,8 @@ export async function initializeOfflineManager(): Promise<void> {
   await initOfflineDatabase().catch(() => undefined);
 
   if (!window.desktopBridge) {
-    osOnline = navigator.onLine;
-    isOnline.value = osOnline;
+    osOnline = true;
+    isOnline.value = true;
     lastOnlineAt.value = Date.now();
     disposeWsStatus = eventBus.on<WsStatusPayload>('ws:status-change', handleWsStatus);
     return;

@@ -28,6 +28,7 @@ def main() -> None:
     app = read("desktop/src/renderer/App.vue")
     overlay = read("desktop/src/renderer/modules/batch-template/BatchTemplateOverlay.vue")
     store = read("desktop/src/renderer/modules/batch-template/batchTemplateStore.ts")
+    bridge = read("desktop/src/renderer/shared/desktopBridge.ts")
     types = read("desktop/src/renderer/modules/batch-template/types.ts")
     followup = read("desktop/src/renderer/modules/followup-list/followupListStore.ts")
     styles = read("desktop/src/renderer/styles.css")
@@ -49,13 +50,13 @@ def main() -> None:
         "'/api/v1/chat/send-confirm'",
         "selectedDirection: 'BATCH_TEMPLATE'",
         "source: 'BATCH_TEMPLATE'",
-        "window.desktopBridge.writeClipboardText",
+        "writeClipboardText",
         "pauseBatchTemplate",
         "resumeBatchTemplate",
         "fillTemplate",
         "localLogs",
     ]:
-        assert_contains(config + app + overlay + store + followup + styles + progress, token, token)
+        assert_contains(config + app + overlay + store + followup + styles + progress + bridge, token, token)
 
     for variable in ["客户昵称", "预约时间", "预约门店", "预约项目", "管家名", "意向门店", "手机后4位"]:
         assert_contains(store + progress, variable, f"template variable {variable}")

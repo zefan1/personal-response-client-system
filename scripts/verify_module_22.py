@@ -25,6 +25,7 @@ def main() -> None:
     main_ts = read("desktop/src/main/main.ts")
     preload_ts = read("desktop/src/preload/preload.ts")
     api_client_ts = read("desktop/src/renderer/shared/apiClient.ts")
+    bridge_ts = read("desktop/src/renderer/shared/desktopBridge.ts")
     agent_vue = read("desktop/src/renderer/modules/copy-backfill/CopyBackfillAgent.vue")
     store_ts = read("desktop/src/renderer/modules/copy-backfill/copyBackfillStore.ts")
     types_ts = read("desktop/src/renderer/modules/copy-backfill/types.ts")
@@ -39,9 +40,10 @@ def main() -> None:
     for event_name in ["reply:selected", "suggestion:show"]:
         assert_contains(agent_vue + store_ts + progress, event_name, f"consumed event {event_name}")
 
-    assert_contains(store_ts, "window.desktopBridge.writeClipboardText", "Electron clipboard write path")
-    assert_contains(store_ts, "navigator.clipboard.writeText", "navigator clipboard fallback")
-    assert_contains(store_ts, "document.execCommand('copy')", "execCommand clipboard fallback")
+    assert_contains(store_ts, "writeBridgeClipboardText", "shared clipboard writer")
+    assert_contains(bridge_ts, "window.desktopBridge.writeClipboardText", "Electron clipboard write path")
+    assert_contains(bridge_ts, "navigator.clipboard.writeText", "navigator clipboard fallback")
+    assert_contains(bridge_ts, "document.execCommand('copy')", "execCommand clipboard fallback")
     assert_contains(store_ts, "'/api/v1/chat/send-confirm'", "send-confirm API")
     assert_contains(store_ts, "/suggestions/batch-resolve", "batch resolve API")
     assert_contains(store_ts, "AbortController", "send-confirm abort controller")

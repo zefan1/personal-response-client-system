@@ -25,6 +25,9 @@ This repository is not production-complete yet. The current evidence proves a ru
   - URL: `http://127.0.0.1:5173/`
   - Login: `admin/admin123`
   - Checked admin sections: health/config, skill bindings, AI/external environments, datasource mappings, accounts, notices/versions/audit.
+- Real external readiness verifier exists:
+  - `python scripts/verify_real_external_readiness.py`
+  - Latest result: `mockExternalsFalseReady=false`, blockers are the missing real WeCom sheet read/write clients.
 
 ## Addressed Since Initial Audit
 
@@ -55,10 +58,11 @@ This repository is not production-complete yet. The current evidence proves a ru
 ### P0 - Real External Providers Not Accepted
 
 - Runtime smoke and API acceptance currently use `MOCK_EXTERNALS=true`.
-- Real provider acceptance is missing for:
-  - Skill API
-  - image recognition API
-  - WeCom table read/write API
+- Skill API and image recognition have configurable real HTTP clients and admin-managed environment configuration.
+- Real provider live acceptance is still missing because valid external credentials/endpoints have not been supplied.
+- WeCom table read/write API remains a source-code blocker:
+  - `UnavailableSheetClient`
+  - `UnavailableWecomTableClient`
 - `MOCK_EXTERNALS=false` still needs complete configuration and endpoint-level validation.
 - `UnavailableSheetClient` and `UnavailableWecomTableClient` remain production blockers unless real clients are supplied.
 
