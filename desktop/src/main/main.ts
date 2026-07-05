@@ -191,7 +191,7 @@ async function runRendererSmoke(window: BrowserWindow) {
         const started = Date.now();
         while (
           !hasLoginForm()
-          && !document.body.innerText.includes('健康与系统配置')
+          && !document.querySelector('.ops-admin-shell')
           && !document.querySelector('.desktop-sidebar')
           && Date.now() - started < 15000
         ) {
@@ -208,120 +208,68 @@ async function runRendererSmoke(window: BrowserWindow) {
         if (document.querySelector('.desktop-sidebar')) {
           findButton('管理后台').click();
         }
-        await waitForText('健康与系统配置');
-        const navLabels = [...document.querySelectorAll('.admin-nav-button span')]
+        await waitForSelector('.ops-admin-shell');
+        await waitForText('AI 与 Skill 配置');
+        const forbiddenAdminText = ['请求体 JSON', '目标 ID', 'GET /admin', 'POST /admin', 'PUT /admin', 'DELETE /admin'];
+        for (const text of forbiddenAdminText) {
+          if (document.querySelector('.ops-admin-shell')?.textContent.includes(text)) {
+            throw new Error('production admin exposes debug text: ' + text);
+          }
+        }
+        if (document.querySelector('.admin-read-panel') || document.querySelector('.admin-action-panel')) {
+          throw new Error('production admin rendered debug console panels');
+        }
+        const expectedAdminSections = ['AI 与 Skill 配置', '数据源与内容', '组织、规则与标签', '分析与系统运营'];
+        const navLabels = [...document.querySelectorAll('.ops-admin-nav span')]
           .map((item) => item.textContent.trim())
           .filter(Boolean);
-        if (navLabels.length < 9) {
-          throw new Error('admin section count too small: ' + navLabels.length);
+        if (JSON.stringify(navLabels) !== JSON.stringify(expectedAdminSections)) {
+          throw new Error('admin section labels mismatch: ' + JSON.stringify(navLabels));
         }
-        for (const section of navLabels) {
+        const sectionMarkers = {
+          'AI 与 Skill 配置': ['Skill 场景绑定', 'Skill 环境', '识图环境', 'Prompt 与规则'],
+          '数据源与内容': ['客户数据源', '字段映射', 'CSV 导入', '速搜内容'],
+          '组织、规则与标签': ['账号与权限', '跟进规则', '标签与分层'],
+          '分析与系统运营': ['运营分析看板', '桌面版本', '系统公告', '审计日志', '系统健康']
+        };
+        for (const section of expectedAdminSections) {
           findButton(section).click();
           await waitForText(section);
-          const readPanels = [...document.querySelectorAll('.admin-read-panel')];
-          if (!readPanels.length) {
-            throw new Error('section has no read panels: ' + section);
+          for (const marker of sectionMarkers[section]) {
+            await waitForText(marker);
           }
-          const refreshButton = readPanels[0].querySelector('button');
-          if (!refreshButton) {
-            throw new Error('read panel missing refresh button: ' + section);
+          const panels = [...document.querySelectorAll('.ops-panel')];
+          if (!panels.length) {
+            throw new Error('section has no business panels: ' + section);
           }
-          refreshButton.click();
-          await delay(150);
-          const readText = readPanels[0].querySelector('pre')?.textContent ?? '';
-          if (!readText || readText.includes('灏氭湭鍔犺浇')) {
-            throw new Error('read panel did not render data: ' + section);
+          const emptyStates = [...document.querySelectorAll('.ops-empty')];
+          if (!panels.length && !emptyStates.length) {
+            throw new Error('section lacks panel or empty-state coverage: ' + section);
           }
-          const actionPanels = [...document.querySelectorAll('.admin-action-panel')];
-          for (const panel of actionPanels) {
-            if (!panel.querySelector('textarea')) {
-              throw new Error('action panel missing JSON textarea: ' + section);
-            }
-            const bodyText = panel.querySelector('textarea')?.value ?? '';
-            const simpleBody = (() => {
-              try {
-                const parsed = JSON.parse(bodyText);
-                return parsed && !Array.isArray(parsed) && typeof parsed === 'object'
-                  && Object.values(parsed).some((value) => value === null || ['string', 'number', 'boolean'].includes(typeof value));
-              } catch {
-                return false;
-              }
-            })();
-            if (simpleBody && !panel.querySelector('.admin-field-grid')) {
-              throw new Error('action panel missing structured fields: ' + section);
-            }
-            if (simpleBody) {
-              const textarea = panel.querySelector('textarea');
-              const fieldGrid = panel.querySelector('.admin-field-grid');
-              const parseBody = () => JSON.parse(textarea.value);
-              const enumSelect = fieldGrid.querySelector('select');
-              if (enumSelect) {
-                const original = enumSelect.value;
-                const nextOption = [...enumSelect.options].map((option) => option.value).find((value) => value !== original);
-                if (nextOption) {
-                  const fieldLabel = enumSelect.closest('label').textContent.trim().split('\\n')[0].trim();
-                  const before = JSON.stringify(parseBody());
-                  setValue(enumSelect, nextOption);
-                  await delay(50);
-                  const after = JSON.stringify(parseBody());
-                  if (before === after || !after.includes(nextOption)) {
-                    throw new Error('structured enum field did not sync JSON: ' + section + ' ' + fieldLabel);
-                  }
-                  setValue(enumSelect, original);
-                  await delay(50);
-                }
-              }
-              const numberInput = fieldGrid.querySelector('input[type="number"]');
-              if (numberInput) {
-                const original = numberInput.value;
-                setValue(numberInput, '77');
-                await delay(50);
-                if (!Object.values(parseBody()).includes(77)) {
-                  throw new Error('structured number field did not sync JSON: ' + section);
-                }
-                setValue(numberInput, original);
-                await delay(50);
-              }
-              const checkbox = fieldGrid.querySelector('input[type="checkbox"]');
-              if (checkbox) {
-                const before = JSON.stringify(parseBody());
-                checkbox.click();
-                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                await delay(50);
-                const after = JSON.stringify(parseBody());
-                if (before === after) {
-                  throw new Error('structured boolean field did not sync JSON: ' + section);
-                }
-              }
-              const textInput = fieldGrid.querySelector('input:not([type]), input[type="text"]');
-              if (textInput) {
-                const original = textInput.value;
-                setValue(textInput, 'smoke-sync-value');
-                await delay(50);
-                if (!Object.values(parseBody()).includes('smoke-sync-value')) {
-                  throw new Error('structured text field did not sync JSON: ' + section);
-                }
-                setValue(textInput, original);
-                await delay(50);
-              }
-            }
+          const filterInputs = [...document.querySelectorAll('.ops-filter-bar input, .ops-filter-bar select')];
+          if ((section === '数据源与内容' || section === '组织、规则与标签' || section === '分析与系统运营') && !filterInputs.length) {
+            throw new Error('section missing filters: ' + section);
           }
-          await waitForText('数据读取');
-          await waitForText('操作入口');
         }
-        findButton('工作台').click();
+        findButton('AI 与 Skill 配置').click();
+        await waitForText('Skill 场景绑定');
+        findButton('新增 Skill 绑定').click();
+        const drawer = await waitForSelector('.ops-drawer');
+        if (drawer.textContent.includes('请求体 JSON') || drawer.textContent.includes('目标 ID')) {
+          throw new Error('admin drawer exposes debug form text');
+        }
+        if (!drawer.querySelector('select') || !drawer.querySelector('input')) {
+          throw new Error('admin drawer missing business form controls');
+        }
+        findButton('关闭').click();
+        await delay(100);
+        findButton('桌面工作台').click();
         await waitForSelector('.desktop-sidebar');
         await waitForText('工作台');
         await assertDesktopSmoke();
         findButton('管理后台').click();
-        await waitForSelector('.admin-console');
-        document.querySelector('.admin-toolbar-actions button.secondary')?.click();
-        await waitForSelector('.workbench-panel');
-        const sidebarButtons = [...document.querySelectorAll('.desktop-sidebar-actions button.secondary')];
-        if (sidebarButtons.length < 2) {
-          throw new Error('desktop logout button missing');
-        }
-        sidebarButtons[1].click();
+        await waitForSelector('.ops-admin-shell');
+        findButton('退出').click();
         await waitForSelector('.login-panel');
         return true;
       })();

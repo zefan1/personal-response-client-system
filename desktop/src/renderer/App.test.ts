@@ -15,9 +15,24 @@ vi.mock('./modules/stage-suggestion/stageSuggestionHandler', () => ({
 vi.mock('./modules/admin/AdminConsole.vue', () => ({
   default: {
     props: ['accountName'],
-    emits: ['logout', 'switch-desktop'],
+    emits: ['logout', 'switch-desktop', 'switch-dev-console'],
+    template: `
+      <section class="ops-admin-shell">
+        <button type="button" @click="$emit('switch-desktop')">桌面工作台</button>
+        <button type="button" @click="$emit('switch-dev-console')">开发调试台</button>
+        <button type="button" @click="$emit('logout')">退出</button>
+      </section>
+    `
+  }
+}));
+
+vi.mock('./modules/admin/AdminDevConsole.vue', () => ({
+  default: {
+    props: ['accountName'],
+    emits: ['logout', 'switch-admin', 'switch-desktop'],
     template: `
       <section class="admin-console">
+        <button type="button" @click="$emit('switch-admin')">正式后台</button>
         <button type="button" @click="$emit('switch-desktop')">工作台</button>
         <button type="button" @click="$emit('logout')">退出</button>
       </section>
@@ -62,7 +77,15 @@ async function flushUi() {
   await nextTick();
 }
 
-async function mountAppWithToken(): Promise<MountedApp> {
+async function flushAsyncComponent() {
+  await flushUi();
+  await Promise.resolve();
+  await Promise.resolve();
+  await nextTick();
+}
+
+async function mountAppWithToken(hash = '#/desktop'): Promise<MountedApp> {
+  window.history.replaceState(null, '', hash);
   localStorage.setItem('desktop_config', JSON.stringify({ apiBaseUrl: 'http://localhost:8080', accessToken: 'token-a' }));
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -72,9 +95,10 @@ async function mountAppWithToken(): Promise<MountedApp> {
   return { app, host };
 }
 
-describe('App desktop shell', () => {
+describe('App route shell', () => {
   beforeEach(() => {
     installMemoryLocalStorage();
+    window.history.replaceState(null, '', '#/desktop');
   });
 
   afterEach(() => {
@@ -83,12 +107,13 @@ describe('App desktop shell', () => {
     vi.clearAllMocks();
   });
 
-  it('opens authenticated users on the desktop sidebar instead of the admin console', async () => {
-    const { app, host } = await mountAppWithToken();
+  it('opens authenticated users on the Electron sidebar preview at #/desktop', async () => {
+    const { app, host } = await mountAppWithToken('#/desktop');
 
+    expect(window.location.hash).toBe('#/desktop');
     expect(host.querySelector('.desktop-shell')).toBeTruthy();
     expect(host.querySelector('.desktop-sidebar')).toBeTruthy();
-    expect(host.querySelector('.admin-console')).toBeFalsy();
+    expect(host.querySelector('.ops-admin-shell')).toBeFalsy();
     expect([...host.querySelectorAll('.desktop-nav-button span')].map((item) => item.textContent)).toEqual([
       '工作台',
       '聊天识别',
@@ -97,12 +122,42 @@ describe('App desktop shell', () => {
       '话术建议'
     ]);
     expect((host.querySelector('.desktop-nav-button.active span') as HTMLElement | null)?.textContent).toBe('工作台');
+    expect(host.querySelectorAll('.desktop-sidebar-actions button').length).toBe(2);
+    expect(host.querySelectorAll('.desktop-mode-bar button').length).toBe(0);
 
     app.unmount();
   });
 
-  it('switches desktop panels from the sidebar and keeps the admin console as an explicit action', async () => {
-    const { app, host } = await mountAppWithToken();
+  it('opens the full-screen operations admin at #/admin and can return to the desktop route', async () => {
+    const { app, host } = await mountAppWithToken('#/admin');
+
+    expect(host.querySelector('.ops-admin-shell')).toBeTruthy();
+    expect(host.querySelector('.desktop-shell')).toBeFalsy();
+
+    const desktopButton = [...host.querySelectorAll('.ops-admin-shell button')]
+      .find((button) => button.textContent?.includes('桌面工作台')) as HTMLButtonElement | undefined;
+    expect(desktopButton).toBeTruthy();
+    desktopButton?.click();
+    await flushUi();
+
+    expect(window.location.hash).toBe('#/desktop');
+    expect(host.querySelector('.desktop-sidebar')).toBeTruthy();
+
+    app.unmount();
+  });
+
+  it('keeps the development console route out of the default desktop preview', async () => {
+    const { app, host } = await mountAppWithToken('#/admin/dev-console');
+    await flushAsyncComponent();
+
+    expect(window.location.hash).toBe('#/admin/dev-console');
+    expect(host.querySelector('.desktop-shell')).toBeFalsy();
+
+    app.unmount();
+  });
+
+  it('switches desktop panels from the sidebar and opens admin via the explicit sidebar action', async () => {
+    const { app, host } = await mountAppWithToken('#/desktop');
     const navButtons = [...host.querySelectorAll('.desktop-nav-button')] as HTMLButtonElement[];
 
     navButtons[2].click();
@@ -116,7 +171,8 @@ describe('App desktop shell', () => {
     expect(adminButton).toBeTruthy();
     adminButton?.click();
     await flushUi();
-    expect(host.querySelector('.admin-console')).toBeTruthy();
+    expect(window.location.hash).toBe('#/admin');
+    expect(host.querySelector('.ops-admin-shell')).toBeTruthy();
 
     app.unmount();
   });

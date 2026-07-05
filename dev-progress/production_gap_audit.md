@@ -271,6 +271,61 @@ This repository is not production-complete yet. The current evidence proves a ru
   - production certificate-backed code signing and installer/notarization verification with `PDA_REQUIRE_SIGNED_PACKAGE=1` enabled in release CI
   - expand component-level rendering tests and browser click coverage beyond the current store/service coverage and smoke-tested primary paths
 
+## Productized Admin Correction - 2026-07-04
+
+This pass corrected the product-direction drift where the production operations admin had become an API/debug console. The formal surfaces are now explicitly separated:
+
+- `#/desktop` is the Electron renderer preview for the frontline sidebar; Electron remains the formal colleague-facing app surface.
+- `#/admin` is the full-screen production operations admin.
+- `#/admin/dev-console` is the isolated development/debug console route and is not part of the production admin navigation.
+
+Files and artifacts added/updated:
+
+- Added `dev-progress/product_direction_gap.md` with the five root causes requested by the user.
+- Added `dev-progress/admin_product_coverage_audit.md` from the subagent audit, mapping 02 and 40-51 manuals to endpoint shapes and A-L production workflows.
+- Replaced the production `AdminConsole.vue` with a business-surface admin covering four groups: AI/Skill, data/content, org/rules/tags, and analytics/ops.
+- Moved the old API console into `AdminDevConsole.vue` and added `AdminDevConsole.test.ts`.
+- Added `scripts/verify_admin_product_surface.py`, wired into `scripts/acceptance_p0_p1.py`, to fail production admin if debug-console text or method/path affordances reappear.
+- Updated renderer smoke to validate `.ops-admin-shell` business panels and reject `请求体 JSON`, `目标 ID`, and visible admin HTTP method/path labels in production admin.
+
+Latest verification for this correction:
+
+- `cd desktop && npm run typecheck` -> passed.
+- `cd desktop && npm run test` -> passed, 29 files / 150 tests.
+- `python scripts\verify_desktop_component_test_coverage.py` -> passed, 14/14 components.
+- `python scripts\verify_admin_product_surface.py` -> passed, 0 violations.
+- `cd desktop && npm run renderer:smoke` with `PDA_SMOKE_API_BASE_URL=http://172.19.250.154:8080` -> passed.
+- `wsl bash -lc "cd '/mnt/c/Users/85314/Desktop/私域工具/私域辅助系统' && mvn -Dstyle.color=never test"` -> passed, 108 tests.
+- `python scripts\acceptance_p0_p1.py --backend-url http://172.19.250.154:8080` -> passed, 13/13 checks, 3 explicit skips.
+- `python scripts\verify_manual_test_readiness.py --frontend-url http://127.0.0.1:5173/ --backend-url http://172.19.250.154:8080` -> passed, 3/3.
+
+Remaining production blockers are unchanged from the blocker audit: live external provider acceptance and signed release package.
+
+## Admin A-L Deepening - 2026-07-04
+
+This pass followed the user's priority change: do item 3 first, while keeping real API key live acceptance and signed release package as remembered unfinished production items.
+
+Implemented in the production operations admin:
+
+- Added A/B flows: Skill scene/lead-type/day filtering, available Skill selection, online Skill test, call monitoring, AI environment edit/delete, `active` field compatibility, prompt history restore, and config Map compatibility.
+- Added C/D flows: datasource edit/replace/delete, column discovery, mapping compare/history/restore, multipart CSV import, import result display, quick-search image upload/replace/clear, and batch quick-search enable/disable/delete.
+- Added E/F/G flows: account keyword/role/status filters, dangerous account confirmations with current-account guard, backend-backed rule filtering with condition backfill, tag category search, tag value edit/toggle/delete, and category delete protection.
+- Added H/I/J/K/L flows: analytics filters plus health/lifecycle blocks and CSV export, version filters/edit/publish-confirm/delete-confirm, notice filters/edit/stop/delete confirmations, audit filters/detail/export-status refresh, and health monitor rendering from the real five-component backend structure with alert filtering/detail and auto-refresh pause after repeated failure.
+- Added shared renderer `postForm` for authenticated multipart uploads so CSV and image uploads match backend controller contracts.
+
+Latest verification for this pass:
+
+- `cd desktop && npm run typecheck` -> passed.
+- `cd desktop && npm run test -- AdminConsole.test.ts` -> passed, 5 tests.
+- `cd desktop && npm run test` -> passed, 29 files / 150 tests.
+- `python scripts\verify_admin_product_surface.py` -> passed, 0 violations.
+- `python scripts\verify_desktop_component_test_coverage.py` -> passed, 14/14 components.
+
+Still intentionally not done in this pass:
+
+- Live external provider acceptance, because the required real API keys/endpoints have not been supplied.
+- Signed release package verification, because production signing material is not configured yet and the user deferred it until formal launch.
+
 ## Recommended Repair Order
 
 1. Rerun backend API acceptance after datasource hardening and fix any regressions.

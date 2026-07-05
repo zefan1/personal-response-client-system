@@ -33,7 +33,15 @@
     v-else-if="currentMode === 'admin'"
     :account-name="session.accountName"
     @logout="logout"
-    @switch-desktop="currentMode = 'desktop'"
+    @switch-desktop="setMode('desktop')"
+  />
+
+  <AdminDevConsole
+    v-else-if="currentMode === 'admin-dev' && devConsoleEnabled"
+    :account-name="session.accountName"
+    @logout="logout"
+    @switch-admin="setMode('admin')"
+    @switch-desktop="setMode('desktop')"
   />
 
   <main v-else class="desktop-shell">
@@ -56,7 +64,7 @@
         </button>
       </nav>
       <div class="desktop-sidebar-actions">
-        <button class="secondary small" type="button" @click="currentMode = 'admin'">管理后台</button>
+        <button class="secondary small" type="button" @click="setMode('admin')">管理后台</button>
         <button class="secondary small" type="button" @click="logout">退出</button>
       </div>
     </aside>
@@ -86,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, onBeforeUnmount, onMounted } from 'vue';
+import { computed, defineAsyncComponent, reactive, ref, onBeforeUnmount, onMounted } from 'vue';
 import AlertBell from './modules/abnormal-alert/AlertBell.vue';
 import { cleanupAbnormalAlertRouter, initializeAbnormalAlertRouter } from './modules/abnormal-alert/alertStore';
 import AdminConsole from './modules/admin/AdminConsole.vue';
@@ -122,6 +130,7 @@ type LoginPayload = {
 };
 
 type DesktopPanelKey = 'workbench' | 'recognition' | 'followups' | 'customer' | 'reply';
+type RouteMode = 'admin' | 'desktop' | 'admin-dev';
 
 type DesktopNavItem = {
   key: DesktopPanelKey;
@@ -138,7 +147,11 @@ const desktopNavItems: DesktopNavItem[] = [
 ];
 
 const config = loadDesktopConfig();
-const currentMode = ref<'admin' | 'desktop'>('desktop');
+const devConsoleEnabled = !import.meta.env.PROD;
+const AdminDevConsole = devConsoleEnabled
+  ? defineAsyncComponent(async () => (await import('./modules/admin/AdminDevConsole.vue')).default)
+  : null;
+const currentMode = ref<RouteMode>(modeFromHash());
 const activeDesktopPanel = ref<DesktopPanelKey>('workbench');
 const loginLoading = ref(false);
 const loginError = ref('');
@@ -146,7 +159,7 @@ const loginForm = reactive({
   apiBaseUrl: config.apiBaseUrl,
   username: 'admin',
   password: 'admin123',
-  mode: 'desktop' as 'admin' | 'desktop'
+  mode: (currentMode.value === 'desktop' ? 'desktop' : 'admin') as 'admin' | 'desktop'
 });
 const session = reactive({
   accessToken: config.accessToken,
@@ -157,6 +170,8 @@ const activeDesktopNav = computed(() => desktopNavItems.find((item) => item.key 
 const eventDisposers: Array<() => void> = [];
 
 onMounted(() => {
+  normalizeInitialHash();
+  window.addEventListener('hashchange', syncModeFromHash);
   initializeAbnormalAlertRouter();
   initializeStageSuggestionHandler();
   eventDisposers.push(eventBus.on('followup:switch-tab', () => selectDesktopPanel('followups')));
@@ -167,6 +182,7 @@ onMounted(() => {
   eventDisposers.push(eventBus.on('workbench:capture-chat', () => selectDesktopPanel('recognition')));
 });
 onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', syncModeFromHash);
   cleanupAbnormalAlertRouter();
   cleanupStageSuggestionHandler();
   eventDisposers.splice(0).forEach((dispose) => dispose());
@@ -189,7 +205,7 @@ async function login() {
     session.accessToken = response.data.accessToken;
     session.refreshToken = response.data.refreshToken ?? '';
     session.accountName = account?.displayName || account?.username || loginForm.username.trim();
-    currentMode.value = loginForm.mode;
+    setMode(loginForm.mode === 'admin' ? currentMode.value === 'admin-dev' && devConsoleEnabled ? 'admin-dev' : 'admin' : 'desktop');
     saveDesktopConfig({ accessToken: session.accessToken });
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : String(error);
@@ -203,6 +219,48 @@ function logout() {
   session.refreshToken = '';
   session.accountName = '';
   saveDesktopConfig({ accessToken: '' });
+}
+
+function setMode(mode: RouteMode) {
+  const nextMode = mode === 'admin-dev' && !devConsoleEnabled ? 'admin' : mode;
+  currentMode.value = nextMode;
+  loginForm.mode = nextMode === 'desktop' ? 'desktop' : 'admin';
+  const nextHash = hashForMode(nextMode);
+  if (window.location.hash !== nextHash) {
+    window.location.hash = nextHash;
+  }
+}
+
+function syncModeFromHash() {
+  const routeMode = modeFromHash();
+  currentMode.value = routeMode;
+  loginForm.mode = routeMode === 'desktop' ? 'desktop' : 'admin';
+}
+
+function modeFromHash(): RouteMode {
+  const hash = window.location.hash || '#/desktop';
+  if (hash.startsWith('#/admin/dev-console')) {
+    return devConsoleEnabled ? 'admin-dev' : 'admin';
+  }
+  if (hash.startsWith('#/admin')) {
+    return 'admin';
+  }
+  return 'desktop';
+}
+
+function hashForMode(mode: RouteMode) {
+  if (mode === 'admin') return '#/admin';
+  if (mode === 'admin-dev') return '#/admin/dev-console';
+  return '#/desktop';
+}
+
+function normalizeInitialHash() {
+  if (!window.location.hash) {
+    window.history.replaceState(null, '', '#/desktop');
+  } else if (window.location.hash.startsWith('#/admin/dev-console') && !devConsoleEnabled) {
+    window.history.replaceState(null, '', '#/admin');
+  }
+  syncModeFromHash();
 }
 
 function selectDesktopPanel(panel: DesktopPanelKey) {
