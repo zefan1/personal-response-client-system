@@ -52,6 +52,14 @@ vi.mock('./modules/help-mode/HelpModeAgent.vue', () => ({ default: { template: '
 vi.mock('./modules/new-lead-toast/NewLeadToastAgent.vue', () => ({ default: { template: '<div class="new-lead-toast-agent"></div>' } }));
 vi.mock('./modules/offline/OfflineStatusBar.vue', () => ({ default: { template: '<div class="offline-status-bar"></div>' } }));
 vi.mock('./modules/quick-search/QuickSearchOverlay.vue', () => ({ default: { template: '<div class="quick-search-overlay"></div>' } }));
+vi.mock('./shared/desktopBridge', () => ({
+  captureScreenshot: vi.fn(async () => ({ success: true, imageBase64: 'capture-image' })),
+  openAdminConsole: vi.fn(async () => ({ success: true }))
+}));
+vi.mock('./modules/chat-recognition/recognitionStore', () => ({
+  recognitionState: { isRecognizePending: false },
+  triggerRecognize: vi.fn(async () => undefined)
+}));
 
 type MountedApp = {
   app: VueApp<Element>;
@@ -86,13 +94,19 @@ async function flushAsyncComponent() {
 
 async function mountAppWithToken(hash = '#/desktop'): Promise<MountedApp> {
   window.history.replaceState(null, '', hash);
-  localStorage.setItem('desktop_config', JSON.stringify({ apiBaseUrl: 'http://localhost:8080', accessToken: 'token-a' }));
+  localStorage.setItem('desktop_config', JSON.stringify({ apiBaseUrl: 'http://localhost:8080', accessToken: 'token-a', accountRole: 'ADMIN' }));
   const host = document.createElement('div');
   document.body.appendChild(host);
   const app = createApp(App);
   app.mount(host);
   await flushUi();
   return { app, host };
+}
+
+function unsignedJwt(payload: Record<string, unknown>): string {
+  const json = JSON.stringify(payload);
+  const base64 = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  return `header.${base64}.signature`;
 }
 
 describe('App route shell', () => {
@@ -123,7 +137,7 @@ describe('App route shell', () => {
     ]);
     expect((host.querySelector('.desktop-nav-button.active span') as HTMLElement | null)?.textContent).toBe('工作台');
     expect(host.querySelectorAll('.desktop-sidebar-actions button').length).toBe(2);
-    expect(host.querySelectorAll('.desktop-mode-bar button').length).toBe(0);
+    expect(host.querySelector('.global-recognize-button')).toBeTruthy();
 
     app.unmount();
   });
@@ -156,7 +170,11 @@ describe('App route shell', () => {
     app.unmount();
   });
 
-  it('switches desktop panels from the sidebar and opens admin via the explicit sidebar action', async () => {
+  it('switches desktop panels, triggers global recognition, and opens admin externally', async () => {
+    const [{ captureScreenshot, openAdminConsole }, { triggerRecognize }] = await Promise.all([
+      import('./shared/desktopBridge'),
+      import('./modules/chat-recognition/recognitionStore')
+    ]);
     const { app, host } = await mountAppWithToken('#/desktop');
     const navButtons = [...host.querySelectorAll('.desktop-nav-button')] as HTMLButtonElement[];
 
@@ -166,13 +184,55 @@ describe('App route shell', () => {
     expect((host.querySelector('.followup-panel') as HTMLElement | null)?.style.display).not.toBe('none');
     expect((host.querySelector('.workbench-panel') as HTMLElement | null)?.style.display).toBe('none');
 
+    const recognizeButton = host.querySelector('.global-recognize-button') as HTMLButtonElement | null;
+    expect(recognizeButton).toBeTruthy();
+    recognizeButton?.click();
+    await flushUi();
+    expect(captureScreenshot).toHaveBeenCalled();
+    expect(triggerRecognize).toHaveBeenCalledWith('BUTTON_CLICK', { imageBase64: 'capture-image' });
+    expect((host.querySelector('.desktop-nav-button.active span') as HTMLElement | null)?.textContent).toBe('聊天识别');
+
     const adminButton = [...host.querySelectorAll('.desktop-sidebar-actions button')]
       .find((button) => button.textContent?.includes('管理后台')) as HTMLButtonElement | undefined;
     expect(adminButton).toBeTruthy();
     adminButton?.click();
     await flushUi();
-    expect(window.location.hash).toBe('#/admin');
-    expect(host.querySelector('.ops-admin-shell')).toBeTruthy();
+    expect(openAdminConsole).toHaveBeenCalledWith('http://localhost:3000/#/admin');
+    expect(window.location.hash).toBe('#/desktop');
+    expect(host.querySelector('.desktop-sidebar')).toBeTruthy();
+
+    app.unmount();
+  });
+
+  it('hides the admin shortcut for keeper accounts', async () => {
+    window.history.replaceState(null, '', '#/desktop');
+    localStorage.setItem('desktop_config', JSON.stringify({ apiBaseUrl: 'http://localhost:8080', accessToken: 'token-a', accountRole: 'KEEPER' }));
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const app = createApp(App);
+    app.mount(host);
+    await flushUi();
+
+    expect([...host.querySelectorAll('.desktop-sidebar-actions button')]
+      .some((button) => button.textContent?.includes('管理后台'))).toBe(false);
+
+    app.unmount();
+  });
+
+  it('recovers the admin shortcut role from legacy cached tokens', async () => {
+    window.history.replaceState(null, '', '#/desktop');
+    localStorage.setItem('desktop_config', JSON.stringify({
+      apiBaseUrl: 'http://localhost:8080',
+      accessToken: unsignedJwt({ role: 'LEADER' })
+    }));
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const app = createApp(App);
+    app.mount(host);
+    await flushUi();
+
+    expect([...host.querySelectorAll('.desktop-sidebar-actions button')]
+      .some((button) => button.textContent?.includes('管理后台'))).toBe(true);
 
     app.unmount();
   });

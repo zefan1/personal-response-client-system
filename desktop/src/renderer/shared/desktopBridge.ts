@@ -2,6 +2,8 @@ export type BridgeResult = {
   success: boolean;
   error?: string;
   imageBase64?: string;
+  message?: string;
+  url?: string;
 };
 
 type ClipboardImagePayload = {
@@ -38,6 +40,25 @@ export async function captureScreenshot(): Promise<BridgeResult> {
     return window.desktopBridge.captureScreenshot();
   }
   return { success: false, error: 'DESKTOP_BRIDGE_UNAVAILABLE' };
+}
+
+export async function openAdminConsole(url: string): Promise<BridgeResult> {
+  if (window.desktopBridge?.openAdminConsole) {
+    return window.desktopBridge.openAdminConsole();
+  }
+  if (window.desktopBridge || isElectronUserAgent()) {
+    return {
+      success: false,
+      error: 'DESKTOP_BRIDGE_STALE',
+      message: '应用桥接未更新，请重启桌面端后再打开管理后台'
+    };
+  }
+  const opened = window.open(url, '_blank', 'noopener,noreferrer');
+  return { success: Boolean(opened) };
+}
+
+function isElectronUserAgent(): boolean {
+  return navigator.userAgent.includes('Electron');
 }
 
 export function onClipboardImage(listener: (payload: ClipboardImagePayload) => void): () => void {

@@ -1,6 +1,7 @@
 export type DesktopConfig = {
   apiBaseUrl: string;
   accessToken: string;
+  accountRole: string;
   wsUrl: string;
   clipboardPollIntervalMs: number;
   clipboardMd5CacheSize: number;
@@ -49,6 +50,7 @@ export type DesktopConfig = {
 const defaults: DesktopConfig = {
   apiBaseUrl: 'http://localhost:8080',
   accessToken: '',
+  accountRole: '',
   wsUrl: 'ws://localhost:8080/ws/v1/desktop',
   clipboardPollIntervalMs: 500,
   clipboardMd5CacheSize: 5,

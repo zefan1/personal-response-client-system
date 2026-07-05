@@ -20,7 +20,7 @@
       <label>
         入口
         <select v-model="loginForm.mode">
-          <option value="admin">管理后台</option>
+          <option v-if="!isElectronRuntime" value="admin">管理后台</option>
           <option value="desktop">桌面工作台</option>
         </select>
       </label>
@@ -30,14 +30,14 @@
   </main>
 
   <AdminConsole
-    v-else-if="currentMode === 'admin'"
+    v-else-if="currentMode === 'admin' && !isElectronRuntime"
     :account-name="session.accountName"
     @logout="logout"
     @switch-desktop="setMode('desktop')"
   />
 
   <AdminDevConsole
-    v-else-if="currentMode === 'admin-dev' && devConsoleEnabled"
+    v-else-if="currentMode === 'admin-dev' && devConsoleEnabled && !isElectronRuntime"
     :account-name="session.accountName"
     @logout="logout"
     @switch-admin="setMode('admin')"
@@ -64,7 +64,7 @@
         </button>
       </nav>
       <div class="desktop-sidebar-actions">
-        <button class="secondary small" type="button" @click="setMode('admin')">管理后台</button>
+        <button v-if="canOpenAdmin" class="secondary small" type="button" @click="openAdmin">管理后台</button>
         <button class="secondary small" type="button" @click="logout">退出</button>
       </div>
     </aside>
@@ -77,6 +77,15 @@
         </div>
         <span>{{ session.accountName }}</span>
       </header>
+      <button
+        class="global-recognize-button"
+        type="button"
+        :disabled="recognitionState.isRecognizePending"
+        @click="recognizeFromAnywhere"
+      >
+        {{ recognitionState.isRecognizePending ? '识别中' : '识别聊天' }}
+      </button>
+      <p v-if="desktopNotice" class="admin-message" :class="{ error: desktopNoticeKind === 'error' }">{{ desktopNotice }}</p>
       <OfflineStatusBar />
       <AlertBell />
       <CopyBackfillAgent />
@@ -109,10 +118,12 @@ import OfflineStatusBar from './modules/offline/OfflineStatusBar.vue';
 import QuickSearchOverlay from './modules/quick-search/QuickSearchOverlay.vue';
 import ReplySuggestionPanel from './modules/reply-suggestions/ReplySuggestionPanel.vue';
 import { postJson } from './shared/apiClient';
+import { captureScreenshot, openAdminConsole } from './shared/desktopBridge';
 import { loadDesktopConfig, saveDesktopConfig } from './shared/config';
 import { eventBus } from './shared/eventBus';
 import { cleanupStageSuggestionHandler, initializeStageSuggestionHandler } from './modules/stage-suggestion/stageSuggestionHandler';
 import WorkbenchPanel from './modules/workbench/WorkbenchPanel.vue';
+import { recognitionState, triggerRecognize } from './modules/chat-recognition/recognitionStore';
 
 type LoginPayload = {
   accessToken: string;
@@ -131,6 +142,7 @@ type LoginPayload = {
 
 type DesktopPanelKey = 'workbench' | 'recognition' | 'followups' | 'customer' | 'reply';
 type RouteMode = 'admin' | 'desktop' | 'admin-dev';
+type AccountRole = 'ADMIN' | 'LEADER' | 'KEEPER' | '';
 
 type DesktopNavItem = {
   key: DesktopPanelKey;
@@ -148,6 +160,7 @@ const desktopNavItems: DesktopNavItem[] = [
 
 const config = loadDesktopConfig();
 const devConsoleEnabled = !import.meta.env.PROD;
+const isElectronRuntime = Boolean(window.desktopBridge);
 const AdminDevConsole = devConsoleEnabled
   ? defineAsyncComponent(async () => (await import('./modules/admin/AdminDevConsole.vue')).default)
   : null;
@@ -155,6 +168,8 @@ const currentMode = ref<RouteMode>(modeFromHash());
 const activeDesktopPanel = ref<DesktopPanelKey>('workbench');
 const loginLoading = ref(false);
 const loginError = ref('');
+const desktopNotice = ref('');
+const desktopNoticeKind = ref<'info' | 'error'>('info');
 const loginForm = reactive({
   apiBaseUrl: config.apiBaseUrl,
   username: 'admin',
@@ -164,9 +179,11 @@ const loginForm = reactive({
 const session = reactive({
   accessToken: config.accessToken,
   refreshToken: '',
-  accountName: config.accessToken ? '已登录账号' : ''
+  accountName: config.accessToken ? '已登录账号' : '',
+  role: resolveInitialRole(config)
 });
 const activeDesktopNav = computed(() => desktopNavItems.find((item) => item.key === activeDesktopPanel.value) ?? desktopNavItems[0]);
+const canOpenAdmin = computed(() => session.role === 'ADMIN' || session.role === 'LEADER');
 const eventDisposers: Array<() => void> = [];
 
 onMounted(() => {
@@ -193,7 +210,7 @@ async function login() {
   loginError.value = '';
   try {
     saveDesktopConfig({ apiBaseUrl: loginForm.apiBaseUrl.trim().replace(/\/$/, '') });
-    const path = loginForm.mode === 'admin' ? '/admin/api/v1/auth/login' : '/api/v1/auth/login';
+    const path = loginForm.mode === 'admin' && !isElectronRuntime ? '/admin/api/v1/auth/login' : '/api/v1/auth/login';
     const response = await postJson<LoginPayload>(path, {
       username: loginForm.username.trim(),
       password: loginForm.password
@@ -205,8 +222,9 @@ async function login() {
     session.accessToken = response.data.accessToken;
     session.refreshToken = response.data.refreshToken ?? '';
     session.accountName = account?.displayName || account?.username || loginForm.username.trim();
-    setMode(loginForm.mode === 'admin' ? currentMode.value === 'admin-dev' && devConsoleEnabled ? 'admin-dev' : 'admin' : 'desktop');
-    saveDesktopConfig({ accessToken: session.accessToken });
+    session.role = normalizeRole(account?.role);
+    setMode(loginForm.mode === 'admin' && !isElectronRuntime ? currentMode.value === 'admin-dev' && devConsoleEnabled ? 'admin-dev' : 'admin' : 'desktop');
+    saveDesktopConfig({ accessToken: session.accessToken, accountRole: session.role });
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -218,11 +236,14 @@ function logout() {
   session.accessToken = '';
   session.refreshToken = '';
   session.accountName = '';
-  saveDesktopConfig({ accessToken: '' });
+  session.role = '';
+  saveDesktopConfig({ accessToken: '', accountRole: '' });
 }
 
 function setMode(mode: RouteMode) {
-  const nextMode = mode === 'admin-dev' && !devConsoleEnabled ? 'admin' : mode;
+  const nextMode = isElectronRuntime
+    ? 'desktop'
+    : mode === 'admin-dev' && !devConsoleEnabled ? 'admin' : mode;
   currentMode.value = nextMode;
   loginForm.mode = nextMode === 'desktop' ? 'desktop' : 'admin';
   const nextHash = hashForMode(nextMode);
@@ -238,6 +259,9 @@ function syncModeFromHash() {
 }
 
 function modeFromHash(): RouteMode {
+  if (isElectronRuntime) {
+    return 'desktop';
+  }
   const hash = window.location.hash || '#/desktop';
   if (hash.startsWith('#/admin/dev-console')) {
     return devConsoleEnabled ? 'admin-dev' : 'admin';
@@ -255,7 +279,9 @@ function hashForMode(mode: RouteMode) {
 }
 
 function normalizeInitialHash() {
-  if (!window.location.hash) {
+  if (isElectronRuntime) {
+    window.history.replaceState(null, '', '#/desktop');
+  } else if (!window.location.hash) {
     window.history.replaceState(null, '', '#/desktop');
   } else if (window.location.hash.startsWith('#/admin/dev-console') && !devConsoleEnabled) {
     window.history.replaceState(null, '', '#/admin');
@@ -267,6 +293,67 @@ function selectDesktopPanel(panel: DesktopPanelKey) {
   activeDesktopPanel.value = panel;
   if (panel === 'workbench') {
     eventBus.emit('workbench:show', {});
+  }
+}
+
+async function recognizeFromAnywhere() {
+  desktopNotice.value = '';
+  selectDesktopPanel('recognition');
+  const result = await captureScreenshot();
+  if (!result.success || !result.imageBase64) {
+    desktopNoticeKind.value = 'error';
+    desktopNotice.value = result.error === 'NO_WECHAT_WINDOW'
+      ? '未检测到微信/企业微信窗口，请先打开聊天窗口后再识别'
+      : '截图失败，请确认聊天窗口可见后重试';
+    return;
+  }
+  await triggerRecognize('BUTTON_CLICK', { imageBase64: result.imageBase64 });
+}
+
+async function openAdmin() {
+  if (!canOpenAdmin.value) {
+    return;
+  }
+  desktopNotice.value = '';
+  const adminUrl = `${window.location.origin}${window.location.pathname}#/admin`;
+  const result = await openAdminConsole(adminUrl);
+  if (!result.success) {
+    desktopNoticeKind.value = 'error';
+    desktopNotice.value = result.message ?? '管理后台打开失败，请在浏览器中访问后台地址';
+  }
+}
+
+function normalizeRole(value?: string): AccountRole {
+  if (value === 'ADMIN' || value === 'LEADER' || value === 'KEEPER') {
+    return value;
+  }
+  return '';
+}
+
+function resolveInitialRole(savedConfig: typeof config): AccountRole {
+  const savedRole = normalizeRole(savedConfig.accountRole);
+  if (savedRole) {
+    return savedRole;
+  }
+  const tokenRole = normalizeRole(readJwtRole(savedConfig.accessToken));
+  if (tokenRole) {
+    saveDesktopConfig({ accountRole: tokenRole });
+  }
+  return tokenRole;
+}
+
+function readJwtRole(token?: string): string {
+  const payload = token?.split('.')[1];
+  if (!payload) {
+    return '';
+  }
+  try {
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='));
+    const data = JSON.parse(json) as { role?: string };
+    return data.role ?? '';
+  } catch {
+    return '';
   }
 }
 </script>

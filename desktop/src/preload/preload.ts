@@ -26,6 +26,7 @@ const api = {
   captureScreenshot: (): Promise<ScreenshotResult> => ipcRenderer.invoke('screenshot:capture'),
   writeClipboardText: (text: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('clipboard:write-text', { text }),
   writeClipboardImage: (imageUrl: string): Promise<{ success: boolean; error?: string; message?: string }> => ipcRenderer.invoke('clipboard:write-image', { imageUrl }),
+  openAdminConsole: (): Promise<{ success: boolean; error?: string; message?: string; url?: string }> => ipcRenderer.invoke('admin:open-external'),
   getOnlineStatus: (): Promise<OnlineStatusPayload> => ipcRenderer.invoke('app:get-online-status'),
   onOnlineStatusChange: (callback: (payload: OnlineStatusPayload) => void) => {
     const listener = (_: Electron.IpcRendererEvent, payload: OnlineStatusPayload) => callback(payload);

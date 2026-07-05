@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net, shell } from 'electron';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +48,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false
     }
+  });
+  mainWindow.setMenu(null);
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedAdminConsoleUrl(url)) {
+      void openExternalBrowser(adminConsoleUrl());
+    }
+    return { action: 'deny' };
   });
 
   if (isDev) {
@@ -191,7 +198,6 @@ async function runRendererSmoke(window: BrowserWindow) {
         const started = Date.now();
         while (
           !hasLoginForm()
-          && !document.querySelector('.ops-admin-shell')
           && !document.querySelector('.desktop-sidebar')
           && Date.now() - started < 15000
         ) {
@@ -202,73 +208,28 @@ async function runRendererSmoke(window: BrowserWindow) {
           setValue(inputByLabel('账号'), 'admin');
           setValue(inputByLabel('密码'), 'admin123');
           const mode = inputByLabel('入口');
-          if (mode) setValue(mode, 'admin');
+          if (mode) setValue(mode, 'desktop');
           findButton('登录').click();
         }
-        if (document.querySelector('.desktop-sidebar')) {
-          findButton('管理后台').click();
-        }
-        await waitForSelector('.ops-admin-shell');
-        await waitForText('AI 与 Skill 配置');
-        const forbiddenAdminText = ['请求体 JSON', '目标 ID', 'GET /admin', 'POST /admin', 'PUT /admin', 'DELETE /admin'];
-        for (const text of forbiddenAdminText) {
-          if (document.querySelector('.ops-admin-shell')?.textContent.includes(text)) {
-            throw new Error('production admin exposes debug text: ' + text);
-          }
-        }
-        if (document.querySelector('.admin-read-panel') || document.querySelector('.admin-action-panel')) {
-          throw new Error('production admin rendered debug console panels');
-        }
-        const expectedAdminSections = ['AI 与 Skill 配置', '数据源与内容', '组织、规则与标签', '分析与系统运营'];
-        const navLabels = [...document.querySelectorAll('.ops-admin-nav span')]
-          .map((item) => item.textContent.trim())
-          .filter(Boolean);
-        if (JSON.stringify(navLabels) !== JSON.stringify(expectedAdminSections)) {
-          throw new Error('admin section labels mismatch: ' + JSON.stringify(navLabels));
-        }
-        const sectionMarkers = {
-          'AI 与 Skill 配置': ['Skill 场景绑定', 'Skill 环境', '识图环境', 'Prompt 与规则'],
-          '数据源与内容': ['客户数据源', '字段映射', 'CSV 导入', '速搜内容'],
-          '组织、规则与标签': ['账号与权限', '跟进规则', '标签与分层'],
-          '分析与系统运营': ['运营分析看板', '桌面版本', '系统公告', '审计日志', '系统健康']
-        };
-        for (const section of expectedAdminSections) {
-          findButton(section).click();
-          await waitForText(section);
-          for (const marker of sectionMarkers[section]) {
-            await waitForText(marker);
-          }
-          const panels = [...document.querySelectorAll('.ops-panel')];
-          if (!panels.length) {
-            throw new Error('section has no business panels: ' + section);
-          }
-          const emptyStates = [...document.querySelectorAll('.ops-empty')];
-          if (!panels.length && !emptyStates.length) {
-            throw new Error('section lacks panel or empty-state coverage: ' + section);
-          }
-          const filterInputs = [...document.querySelectorAll('.ops-filter-bar input, .ops-filter-bar select')];
-          if ((section === '数据源与内容' || section === '组织、规则与标签' || section === '分析与系统运营') && !filterInputs.length) {
-            throw new Error('section missing filters: ' + section);
-          }
-        }
-        findButton('AI 与 Skill 配置').click();
-        await waitForText('Skill 场景绑定');
-        findButton('新增 Skill 绑定').click();
-        const drawer = await waitForSelector('.ops-drawer');
-        if (drawer.textContent.includes('请求体 JSON') || drawer.textContent.includes('目标 ID')) {
-          throw new Error('admin drawer exposes debug form text');
-        }
-        if (!drawer.querySelector('select') || !drawer.querySelector('input')) {
-          throw new Error('admin drawer missing business form controls');
-        }
-        findButton('关闭').click();
-        await delay(100);
-        findButton('桌面工作台').click();
         await waitForSelector('.desktop-sidebar');
         await waitForText('工作台');
         await assertDesktopSmoke();
-        findButton('管理后台').click();
-        await waitForSelector('.ops-admin-shell');
+        const globalRecognize = await waitForSelector('.global-recognize-button');
+        if (!globalRecognize.textContent.includes('识别聊天')) {
+          throw new Error('global recognize button missing visible label');
+        }
+        if (document.querySelector('.ops-admin-shell')) {
+          throw new Error('Electron desktop rendered admin shell inline');
+        }
+        const adminButton = findButton('管理后台');
+        if (!adminButton) {
+          throw new Error('admin shortcut missing for admin account');
+        }
+        adminButton.click();
+        await delay(200);
+        if (document.querySelector('.ops-admin-shell')) {
+          throw new Error('admin shortcut rendered admin shell inline');
+        }
         findButton('退出').click();
         await waitForSelector('.login-panel');
         return true;
@@ -284,6 +245,7 @@ async function runRendererSmoke(window: BrowserWindow) {
 
 app.whenReady().then(() => {
   registerOnlineStatusIpc();
+  registerAdminOpenExternal();
   registerScreenshotCapture();
   registerClipboardWriteText();
   registerClipboardWriteImage();
@@ -317,6 +279,58 @@ function getOnlineStatus(): OnlineStatusPayload {
 
 function registerOnlineStatusIpc() {
   ipcMain.handle('app:get-online-status', () => getOnlineStatus());
+}
+
+function registerAdminOpenExternal() {
+  ipcMain.handle('admin:open-external', async () => {
+    try {
+      const url = adminConsoleUrl();
+      if (isSmoke) {
+        return { success: true, url };
+      }
+      await openExternalBrowser(url);
+      return { success: true, url };
+    } catch (error) {
+      return {
+        success: false,
+        error: 'ADMIN_OPEN_FAILED',
+        message: error instanceof Error ? error.message : 'Failed to open admin console'
+      };
+    }
+  });
+}
+
+function adminConsoleUrl(): string {
+  const configured = process.env.PDA_ADMIN_CONSOLE_URL;
+  const base = configured && configured.trim()
+    ? configured.trim()
+    : `${process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173'}/#/admin`;
+  const url = new URL(base);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Admin console URL must use http or https');
+  }
+  url.hash = '#/admin';
+  return url.toString();
+}
+
+function isAllowedAdminConsoleUrl(rawUrl: string): boolean {
+  try {
+    const requested = new URL(rawUrl);
+    const allowed = new URL(adminConsoleUrl());
+    return requested.protocol === allowed.protocol
+      && requested.origin === allowed.origin
+      && requested.pathname === allowed.pathname
+      && (requested.hash === '#/admin' || requested.hash.startsWith('#/admin/'));
+  } catch {
+    return false;
+  }
+}
+
+async function openExternalBrowser(url: string): Promise<void> {
+  if (isSmoke) {
+    return;
+  }
+  await shell.openExternal(url);
 }
 
 function broadcastOnlineStatus() {
