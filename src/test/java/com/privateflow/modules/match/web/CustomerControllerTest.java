@@ -70,13 +70,14 @@ class CustomerControllerTest {
   @Test
   void searchBindsQueryAndLimit() throws Exception {
     when(customerSearchService.search("Alice", 5)).thenReturn(new CustomerSearchResult(List.of(
-        new CustomerSummary("13800000000", "Alice", "TUAN_GOU", "keeper-1", LocalDateTime.of(2026, 7, 3, 12, 0), "Store A", Confidence.HIGH)), 1));
+        new CustomerSummary("138****0000", "13800000000", "Alice", "TUAN_GOU", "keeper-1", LocalDateTime.of(2026, 7, 3, 12, 0), "Store A", Confidence.HIGH)), 1));
 
     mockMvc.perform(get("/api/v1/customers/search").param("q", "Alice").param("limit", "5"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.total").value(1))
-        .andExpect(jsonPath("$.data.customers[0].phone").value("13800000000"))
+        .andExpect(jsonPath("$.data.customers[0].phone").value("138****0000"))
+        .andExpect(jsonPath("$.data.customers[0].phoneFull").value("13800000000"))
         .andExpect(jsonPath("$.data.customers[0].confidence").value("HIGH"));
 
     verify(customerSearchService).search("Alice", 5);
@@ -89,6 +90,7 @@ class CustomerControllerTest {
     mockMvc.perform(get("/api/v1/customers/13800000000"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.customer.phone").value("13800000000"))
+        .andExpect(jsonPath("$.data.phoneFull").value("13800000000"))
         .andExpect(jsonPath("$.data.customer.nickname").value("Alice"));
   }
 
@@ -186,6 +188,6 @@ class CustomerControllerTest {
     customer.setNickname(nickname);
     customer.setLeadType("TUAN_GOU");
     customer.setVersion(2);
-    return new CustomerProfileView(customer, List.of());
+    return new CustomerProfileView(customer, phone, List.of());
   }
 }

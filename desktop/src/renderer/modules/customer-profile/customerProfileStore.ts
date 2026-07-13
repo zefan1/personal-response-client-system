@@ -30,6 +30,14 @@ import type {
 } from './types';
 
 type SectionKey = 'intent' | 'body' | 'followup' | 'suggestions' | 'appointment';
+type TableSyncStatusLevel = 'pending' | 'syncing' | 'success' | 'retrying' | 'skipped';
+
+type TableSyncStatus = {
+  phone: string;
+  level: TableSyncStatusLevel;
+  message: string;
+  detail?: string;
+};
 
 const SEARCH_TIMEOUT_MS = 3000;
 const PROFILE_TIMEOUT_MS = 5000;
@@ -44,6 +52,7 @@ export const customerProfileState = reactive({
   searchMessage: '',
   candidateVisible: false,
   candidates: [] as CustomerSummary[],
+  candidateSessionId: '',
   profileLoading: false,
   profile: null as CustomerProfileView | null,
   fromCache: false,
@@ -53,8 +62,10 @@ export const customerProfileState = reactive({
   saving: false,
   editFields: {} as Record<string, unknown>,
   pendingSaveBanner: '',
+  tableSyncStatus: null as TableSyncStatus | null,
   profileAlert: null as AbnormalAlertPayload | null,
   tableSyncPrompt: null as SaveProfileInput | null,
+  activeReplySessionId: '',
   generating: false,
   suggestions: [] as ProfileSuggestion[],
   sectionCollapsed: {
@@ -97,15 +108,13 @@ export function searchImmediately(keyword: string): void {
 export async function searchCustomers(keyword: string): Promise<void> {
   const trimmed = keyword.trim();
   if (!trimmed) {
-    customerProfileState.searchResults = [];
-    customerProfileState.searchTotal = 0;
-    customerProfileState.searchMessage = '';
+    clearSearchResults();
     return;
   }
   searchAbort?.abort();
   searchAbort = new AbortController();
+  clearSearchResults();
   customerProfileState.searchLoading = true;
-  customerProfileState.searchMessage = '';
   try {
     const limit = loadDesktopConfig().searchResultLimit;
     const response = await getJson<CustomerSearchResult>(
@@ -125,7 +134,7 @@ export async function searchCustomers(keyword: string): Promise<void> {
       customerProfileState.searchMessage = '未找到客户，请检查搜索词或确认客户已登记';
     } else if (total === 1 && customers[0]) {
       customerProfileState.searchResults = [];
-      await openProfile(customers[0].phone, 'SEARCH');
+      await openProfile(summaryPhone(customers[0]), 'SEARCH');
     } else {
       customerProfileState.searchResults = customers.slice(0, limit);
     }
@@ -136,13 +145,22 @@ export async function searchCustomers(keyword: string): Promise<void> {
   }
 }
 
-export async function openProfile(phone: string, sourceFrom: SourceFrom): Promise<void> {
+export async function openProfile(phone: string, sourceFrom: SourceFrom, sessionId = ''): Promise<void> {
   if (!phone) {
     return;
   }
+  if (!isSamePhone(phone, currentProfilePhone())) {
+    clearTableSyncStatus();
+  }
+  clearSearchResults();
   profileAbort?.abort();
   profileAbort = new AbortController();
   customerProfileState.profileLoading = true;
+  if (sessionId) {
+    customerProfileState.activeReplySessionId = sessionId;
+  } else if (sourceFrom !== 'CANDIDATE_LIST') {
+    customerProfileState.activeReplySessionId = '';
+  }
   customerProfileState.toast = '';
   try {
     const cached = loadCachedCustomer(phone);
@@ -160,11 +178,11 @@ export async function openProfile(phone: string, sourceFrom: SourceFrom): Promis
       return;
     }
     renderProfile(response.data, false, false, '');
-    await refreshProfileAlert(response.data.customer.phone);
+    await refreshProfileAlert(profilePhone(response.data));
     cacheCustomer(response.data);
     handleCustomerProfileLoaded(response.data);
     await recoverPendingForProfile(response.data);
-    emitCustomerSelected(response.data.customer, sourceFrom);
+    emitCustomerSelected(response.data.customer, sourceFrom, sessionId);
   } catch {
     const cached = loadCachedCustomer(phone);
     if (cached) {
@@ -181,40 +199,51 @@ export function showCandidates(payload: RecognizeMultiplePayload): void {
   const candidates = payload.candidates ?? payload.matchInfo?.customers ?? [];
   customerProfileState.candidateVisible = true;
   customerProfileState.candidates = candidates.slice(0, 5);
+  customerProfileState.candidateSessionId = payload.sessionId ?? '';
 }
 
 export function chooseCandidate(candidate: CustomerSummary): void {
+  const sessionId = customerProfileState.candidateSessionId;
   customerProfileState.candidateVisible = false;
   customerProfileState.candidates = [];
-  void openProfile(candidate.phone, 'CANDIDATE_LIST');
+  customerProfileState.candidateSessionId = '';
+  void openProfile(summaryPhone(candidate), 'CANDIDATE_LIST', sessionId);
 }
 
 export function dismissCandidates(): void {
+  const sessionId = customerProfileState.candidateSessionId;
   customerProfileState.candidateVisible = false;
   customerProfileState.candidates = [];
-  eventBus.emit('customer:selected', { phone: '', scene: 'CHAT_RECOGNIZE', sourceFrom: 'CANDIDATE_DISMISSED' });
+  customerProfileState.candidateSessionId = '';
+  eventBus.emit('customer:selected', { ...(sessionId ? { sessionId } : {}), phone: '', scene: 'CHAT_RECOGNIZE', sourceFrom: 'CANDIDATE_DISMISSED' });
 }
 
 export async function generateReplyFromProfile(): Promise<void> {
   const customer = customerProfileState.profile?.customer;
-  if (!customer?.phone || customerProfileState.generating) {
+  const phone = currentProfilePhone();
+  if (!customer || !phone || customerProfileState.generating) {
     return;
   }
   customerProfileState.generating = true;
   eventBus.emit('customer:selected', {
-    phone: customer.phone,
+    ...(customerProfileState.activeReplySessionId ? { sessionId: customerProfileState.activeReplySessionId } : {}),
+    phone,
     scene: 'ACTIVE_REPLY',
     leadType: customer.leadType ?? '',
     sourceFrom: 'PROFILE_CARD'
   });
   try {
     const response = await postJson('/api/v1/chat/generate', {
-      phone: customer.phone,
+      phone,
       scene: 'ACTIVE_REPLY',
       clientMessage: ''
     });
     if (response.success && response.data) {
-      eventBus.emit('recognize:result', response.data);
+      eventBus.emit('recognize:result', {
+        ...(customerProfileState.activeReplySessionId ? { sessionId: customerProfileState.activeReplySessionId } : {}),
+        source: 'PROFILE_CARD',
+        response: response.data
+      });
     } else {
       customerProfileState.toast = '生成回复失败，请稍后重试';
     }
@@ -241,19 +270,22 @@ export function cancelEditMode(): void {
 
 export async function saveProfileEdits(): Promise<void> {
   const customer = customerProfileState.profile?.customer;
-  if (!customer) {
+  const phone = currentProfilePhone();
+  if (!customer || !phone) {
     return;
   }
   const fields = collectChangedFields(customer, customerProfileState.editFields);
   if (Object.keys(fields).length === 0) {
+    customerProfileState.toast = '没有改动需要保存';
     cancelEditMode();
     return;
   }
   customerProfileState.saving = true;
   customerProfileState.pendingSaveBanner = '';
+  clearTableSyncStatus();
   try {
     const input: SaveProfileInput = {
-      phone: customer.phone,
+      phone,
       editedFields: fields,
       version: customer.version ?? 0,
       hasTableRow: Boolean(customer.sourceRowId),
@@ -264,7 +296,7 @@ export async function saveProfileEdits(): Promise<void> {
     customerProfileState.toast = result.message;
     if (result.status === 'CONFLICT') {
       const editingSnapshot = { ...customerProfileState.editFields };
-      void openProfile(customer.phone, 'PROFILE_CARD');
+      void openProfile(phone, 'PROFILE_CARD');
       customerProfileState.editFields = editingSnapshot;
       customerProfileState.editMode = true;
       return;
@@ -278,10 +310,15 @@ export async function saveProfileEdits(): Promise<void> {
     }
     customerProfileState.editMode = false;
     customerProfileState.editFields = {};
+    if (result.needRefresh) {
+      const message = result.message;
+      await openProfile(phone, 'PROFILE_CARD');
+      customerProfileState.toast = message;
+    }
     if (result.askTableSync) {
       showTableSyncPrompt(input);
-    } else if (result.needRefresh) {
-      await openProfile(customer.phone, 'PROFILE_CARD');
+      setTableSyncStatus(input.phone, 'pending', '档案已保存，等待同步企微表格', '确认同步后会写回该客户的原表格行');
+      customerProfileState.toast = result.message;
     }
   } catch {
     customerProfileState.toast = '保存超时，请重试';
@@ -291,9 +328,9 @@ export async function saveProfileEdits(): Promise<void> {
 }
 
 export async function resolveProfileSuggestion(action: 'CONFIRM' | 'REJECT', suggestion?: ProfileSuggestion): Promise<void> {
-  const customer = customerProfileState.profile?.customer;
   const targets = suggestion ? [suggestion] : customerProfileState.suggestions.filter((item) => !item.resolved);
-  if (!customer?.phone || targets.length === 0) {
+  const phone = currentProfilePhone();
+  if (!phone || targets.length === 0) {
     return;
   }
   targets.forEach((item) => {
@@ -315,7 +352,7 @@ export async function resolveProfileSuggestion(action: 'CONFIRM' | 'REJECT', sug
   }
   const suggestionIds = targets.map((item) => item.id ?? item.suggestionId).filter((id): id is number => typeof id === 'number');
   try {
-    await postJson(`/api/v1/customers/${encodeURIComponent(customer.phone)}/suggestions/batch-resolve`, {
+    await postJson(`/api/v1/customers/${encodeURIComponent(phone)}/suggestions/batch-resolve`, {
       action,
       suggestionIds,
       operator: 'desktop'
@@ -334,7 +371,7 @@ export async function resolveProfileSuggestion(action: 'CONFIRM' | 'REJECT', sug
 }
 
 export function appendProfileSuggestions(payload: { phone?: string; suggestions?: ProfileSuggestion[] }): void {
-  const currentPhone = customerProfileState.profile?.customer.phone;
+  const currentPhone = currentProfilePhone();
   if (!payload.phone || payload.phone !== currentPhone) {
     return;
   }
@@ -342,7 +379,7 @@ export function appendProfileSuggestions(payload: { phone?: string; suggestions?
 }
 
 export function appendStageSuggestion(payload: StageSuggestPayload): void {
-  const currentPhone = customerProfileState.profile?.customer.phone;
+  const currentPhone = currentProfilePhone();
   if (payload.phone !== currentPhone) {
     return;
   }
@@ -363,7 +400,7 @@ export function appendStageSuggestion(payload: StageSuggestPayload): void {
 }
 
 export function handleProfileAbnormalAlert(payload: AbnormalAlertPayload): void {
-  const currentPhone = customerProfileState.profile?.customer.phone;
+  const currentPhone = currentProfilePhone();
   if (!currentPhone || payload.phone !== currentPhone) {
     return;
   }
@@ -372,7 +409,7 @@ export function handleProfileAbnormalAlert(payload: AbnormalAlertPayload): void 
 
 export function handleStageUpdated(payload: { phone?: string; newStage?: string }): void {
   const customer = customerProfileState.profile?.customer;
-  if (!customer || payload.phone !== customer.phone) {
+  if (!customer || payload.phone !== currentProfilePhone()) {
     return;
   }
   customer.customerStage = payload.newStage ?? customer.customerStage;
@@ -380,7 +417,7 @@ export function handleStageUpdated(payload: { phone?: string; newStage?: string 
 }
 
 export function handleSendConfirmed(payload: { phone?: string }): void {
-  const currentPhone = customerProfileState.profile?.customer.phone;
+  const currentPhone = currentProfilePhone();
   if (payload.phone && currentPhone && payload.phone.endsWith(currentPhone.slice(-4))) {
     void openProfile(currentPhone, 'PROFILE_CARD');
   }
@@ -406,10 +443,18 @@ export async function confirmTableSync(): Promise<void> {
     return;
   }
   clearTableSyncPrompt();
+  setTableSyncStatus(input.phone, 'syncing', '正在同步到企微表格', '请稍候，完成后会刷新档案');
   const result = await syncProfileToTable(input);
-  customerProfileState.toast = result.message;
+  const message = result.message;
+  if (result.status === 'OK') {
+    setTableSyncStatus(input.phone, 'success', message || '已同步到表格', '表格和本地档案已进入同一轮刷新');
+  } else {
+    setTableSyncStatus(input.phone, 'retrying', message || '表格同步失败，系统将在后台自动重试', '无需重复保存，可稍后刷新确认');
+  }
+  customerProfileState.toast = message;
   if (result.needRefresh) {
     await openProfile(input.phone, 'PROFILE_CARD');
+    customerProfileState.toast = message;
   }
 }
 
@@ -417,18 +462,20 @@ export async function skipTableSync(): Promise<void> {
   const input = customerProfileState.tableSyncPrompt;
   clearTableSyncPrompt();
   if (input) {
+    setTableSyncStatus(input.phone, 'skipped', '已暂不同步企微表格', '本地档案已保存，表格保留原值');
     await openProfile(input.phone, 'PROFILE_CARD');
   }
 }
 
 function renderProfile(profile: CustomerProfileView, fromCache: boolean, offline: boolean, cachedAt: string): void {
   customerProfileState.profile = profile;
-  customerProfileState.profileAlert = getAlertsByPhone(profile.customer.phone)[0] ?? null;
+  const phone = profilePhone(profile);
+  customerProfileState.profileAlert = getAlertsByPhone(phone)[0] ?? null;
   customerProfileState.fromCache = fromCache;
   customerProfileState.offline = offline;
   customerProfileState.cachedAt = cachedAt;
   customerProfileState.suggestions = (profile.pendingSuggestions ?? []).map((item) => ({ ...item, resolved: false, resolving: false }));
-  customerProfileState.pendingSaveBanner = getPendingSave(profile.customer.phone) ? '上次编辑内容未保存成功，系统将在稍后自动重试' : '';
+  customerProfileState.pendingSaveBanner = getPendingSave(phone) ? '上次编辑内容未保存成功，系统将在稍后自动重试' : '';
   resetSectionState();
 }
 
@@ -437,9 +484,11 @@ async function refreshProfileAlert(phone: string): Promise<void> {
   customerProfileState.profileAlert = alerts[0] ?? null;
 }
 
-function emitCustomerSelected(customer: Customer, sourceFrom: SourceFrom): void {
+function emitCustomerSelected(customer: Customer, sourceFrom: SourceFrom, sessionId = ''): void {
+  const phone = customerPhone(customer);
   eventBus.emit('customer:selected', {
-    phone: customer.phone,
+    ...(sessionId ? { sessionId } : {}),
+    phone,
     scene: sourceFrom === 'PROFILE_CARD' ? 'ACTIVE_REPLY' : 'CHAT_RECOGNIZE',
     leadType: customer.leadType ?? '',
     sourceFrom
@@ -465,7 +514,7 @@ function suggestionKey(item: ProfileSuggestion): string {
 function collectChangedFields(original: Customer, edited: Record<string, unknown>): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
   Object.entries(edited).forEach(([key, value]) => {
-    if (['id', 'phone', 'version', 'createdAt', 'updatedAt'].includes(key)) {
+    if (['id', 'phone', 'phoneFull', 'version', 'createdAt', 'updatedAt'].includes(key)) {
       return;
     }
     if (value !== (original as unknown as Record<string, unknown>)[key]) {
@@ -483,11 +532,19 @@ function resetSectionState(): void {
   customerProfileState.sectionCollapsed.appointment = false;
 }
 
+function clearSearchResults(): void {
+  customerProfileState.searchResults = [];
+  customerProfileState.searchTotal = 0;
+  customerProfileState.searchTruncated = false;
+  customerProfileState.searchMessage = '';
+}
+
 function cacheCustomer(profile: CustomerProfileView): void {
   try {
-    const key = `customer_cache:${profile.customer.phone}`;
+    const phone = profilePhone(profile);
+    const key = `customer_cache:${phone}`;
     localStorage.setItem(key, JSON.stringify({
-      phone: profile.customer.phone,
+      phone,
       fullProfile: profile,
       cachedAt: new Date().toISOString(),
       lastViewedAt: new Date().toISOString()
@@ -530,12 +587,13 @@ function enforceCacheLimit(): void {
 }
 
 async function recoverPendingForProfile(profile: CustomerProfileView): Promise<void> {
-  const pending = getPendingSave(profile.customer.phone);
+  const phone = profilePhone(profile);
+  const pending = getPendingSave(phone);
   if (!pending) {
     return;
   }
   customerProfileState.pendingSaveBanner = '上次编辑内容未保存成功，系统正在自动重试';
-  const result = await recoverPendingSave(profile.customer.phone, profile.customer.version ?? pending.version);
+  const result = await recoverPendingSave(phone, profile.customer.version ?? pending.version);
   if (result?.status === 'OK') {
     customerProfileState.pendingSaveBanner = '';
     customerProfileState.toast = '上次未保存内容已恢复保存';
@@ -558,4 +616,36 @@ function clearTableSyncPrompt(): void {
     tableSyncTimer = null;
   }
   customerProfileState.tableSyncPrompt = null;
+}
+
+function setTableSyncStatus(phone: string, level: TableSyncStatusLevel, message: string, detail?: string): void {
+  customerProfileState.tableSyncStatus = { phone, level, message, detail };
+}
+
+function clearTableSyncStatus(): void {
+  customerProfileState.tableSyncStatus = null;
+}
+
+function summaryPhone(customer: CustomerSummary): string {
+  return customer.phoneFull || customer.phone;
+}
+
+function customerPhone(customer: Customer): string {
+  return customer.phoneFull || customerProfileState.profile?.phoneFull || customer.phone;
+}
+
+function profilePhone(profile: CustomerProfileView): string {
+  return profile.phoneFull || profile.customer.phoneFull || profile.customer.phone;
+}
+
+function currentProfilePhone(): string {
+  const profile = customerProfileState.profile;
+  return profile ? profilePhone(profile) : '';
+}
+
+function isSamePhone(left: string, right: string): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  return left === right || left.endsWith(right.slice(-4)) || right.endsWith(left.slice(-4));
 }

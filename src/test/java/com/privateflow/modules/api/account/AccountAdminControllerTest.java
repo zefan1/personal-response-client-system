@@ -49,6 +49,7 @@ class AccountAdminControllerTest {
         "total", 1,
         "page", 2,
         "pageSize", 30,
+        "totalPages", 1,
         "list", List.of(item)));
 
     mockMvc.perform(get("/admin/api/v1/accounts")
@@ -60,6 +61,7 @@ class AccountAdminControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.total").value(1))
+        .andExpect(jsonPath("$.data.totalPages").value(1))
         .andExpect(jsonPath("$.data.list[0].role").value("LEADER"))
         .andExpect(jsonPath("$.data.list[0].isEnabled").value(true));
 

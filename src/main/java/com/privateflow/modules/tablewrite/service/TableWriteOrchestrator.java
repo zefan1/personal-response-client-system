@@ -56,7 +56,7 @@ public class TableWriteOrchestrator {
     TableWriteActionType actionType = create ? TableWriteActionType.INSERT : TableWriteActionType.UPDATE;
     PendingWritePayload payload;
     if (create) {
-      payload = new PendingWritePayload(event.sourceTable(), null, newCustomerRowCreator.newCustomerFields(event));
+      payload = new PendingWritePayload(newCustomerRowCreator.resolveSourceTable(event.sourceTable()), null, newCustomerRowCreator.newCustomerFields(event));
     } else {
       String sourceTable = customer == null ? event.sourceTable() : customer.getSourceTable();
       String sourceRowId = customer == null ? null : customer.getSourceRowId();

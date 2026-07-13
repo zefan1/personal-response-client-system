@@ -68,7 +68,7 @@ def main() -> None:
         "ConfigChangedEvent",
         "active environment cannot be deleted",
         "at least one environment must remain",
-        "imageRecognitionService.recognize",
+        "testClient.recognize",
         "TEST_IMAGE",
         "last_test_ok",
     ])
@@ -80,7 +80,9 @@ def main() -> None:
         "last_test_at",
         "last_test_ok",
         "encryptedApiKey",
-        "{plain}",
+        "SecretCipher",
+        "secretCipher.encrypt",
+        "secretCipher.decrypt",
     ])
     require("src/main/java/com/privateflow/modules/api/ai/PromptVersionService.java", [
         "skill.system_prompt_format",
@@ -104,7 +106,7 @@ def main() -> None:
         "skill.system_prompt_red_lines",
         "'[]'",
         "skill.regenerate_max_count",
-        "'0'",
+        "'3'",
         "skill.prompt_version_max",
         "'50'",
         "image.api_base_url",

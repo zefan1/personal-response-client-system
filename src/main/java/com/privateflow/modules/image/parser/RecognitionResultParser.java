@@ -48,7 +48,7 @@ public class RecognitionResultParser {
         if (text == null || text.isBlank()) {
           continue;
         }
-        messages.add(new Message(normalizeRole(textOrNull(node.path("role"))), text.trim()));
+        messages.add(new Message(normalizeRole(providerRole(node)), text.trim()));
       }
       if (messages.isEmpty()) {
         throw failed("未能从图片中识别到聊天内容，请确认截图中包含聊天窗口");
@@ -74,6 +74,24 @@ public class RecognitionResultParser {
         yield "client";
       }
     };
+  }
+
+  private String providerRole(JsonNode node) {
+    String role = textOrNull(node.path("role"));
+    if (role == null || role.isBlank()) {
+      role = textOrNull(node.path("sender"));
+    }
+    if (role == null || role.isBlank()) {
+      return null;
+    }
+    String normalized = role.trim().toLowerCase();
+    if (List.of("client", "customer", "sender", "user").contains(normalized)) {
+      return "client";
+    }
+    if (List.of("keeper", "staff", "assistant", "service", "agent").contains(normalized)) {
+      return "keeper";
+    }
+    return role;
   }
 
   private String normalizePhone(String phone) {

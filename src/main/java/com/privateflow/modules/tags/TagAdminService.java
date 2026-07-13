@@ -62,10 +62,10 @@ public class TagAdminService {
     TagCategory existing = requireCategory(id);
     TagCategoryRequest safeRequest = request == null ? new TagCategoryRequest(null, null, null, null) : request;
     if (safeRequest.boundField() != null && !safeRequest.boundField().isBlank() && !existing.boundField().equals(safeRequest.boundField())) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "boundField cannot be changed");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "已绑定的客户档案字段不能修改");
     }
     if (safeRequest.categoryName() != null && (safeRequest.categoryName().isBlank() || safeRequest.categoryName().trim().length() > 30)) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "categoryName length is 1-30");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "分类名称长度必须为 1-30 个字符");
     }
     repository.updateCategory(id, safeRequest);
     publish("TAG_CATEGORY_UPDATE", "category " + id);
@@ -76,10 +76,10 @@ public class TagAdminService {
   public void deleteCategory(long id) {
     TagCategory existing = requireCategory(id);
     if (existing.isBuiltin()) {
-      throw new ApiException(TagErrorCodes.BUILTIN_CATEGORY_DELETE_FORBIDDEN, "builtin category cannot be deleted");
+      throw new ApiException(TagErrorCodes.BUILTIN_CATEGORY_DELETE_FORBIDDEN, "内置标签分类不能删除，可以停用");
     }
     if (!existing.values().isEmpty()) {
-      throw new ApiException(TagErrorCodes.CATEGORY_HAS_VALUES, "category has " + existing.values().size() + " values");
+      throw new ApiException(TagErrorCodes.CATEGORY_HAS_VALUES, "该分类还有 " + existing.values().size() + " 个标签值，请先处理标签值");
     }
     repository.deleteCategory(id);
     publish("TAG_CATEGORY_DELETE", "category " + existing.categoryName());
@@ -90,10 +90,10 @@ public class TagAdminService {
     validateValueCreate(request);
     TagCategory category = requireCategory(request.categoryId());
     if (repository.valueCount(category.id()) >= VALUE_MAX_PER_CATEGORY) {
-      throw new ApiException(TagErrorCodes.VALUE_LIMIT_EXCEEDED, "tag value count limit exceeded");
+      throw new ApiException(TagErrorCodes.VALUE_LIMIT_EXCEEDED, "每个分类最多只能创建 50 个标签值");
     }
     if (repository.valueExists(category.id(), request.tagValue().trim())) {
-      throw new ApiException(TagErrorCodes.VALUE_EXISTS, "tagValue already exists in category");
+      throw new ApiException(TagErrorCodes.VALUE_EXISTS, "该分类中已经存在相同的标签编码");
     }
     int sortOrder = request.sortOrder() == null ? repository.valueCount(category.id()) + 1 : request.sortOrder();
     long id = repository.createValue(request, sortOrder);
@@ -106,7 +106,7 @@ public class TagAdminService {
     requireValue(id);
     TagValueRequest safeRequest = request == null ? new TagValueRequest(null, null, null, null, null) : request;
     if (safeRequest.displayName() != null && (safeRequest.displayName().isBlank() || safeRequest.displayName().trim().length() > 30)) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "displayName length is 1-30");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签展示名称长度必须为 1-30 个字符");
     }
     repository.updateValue(id, safeRequest);
     publish("TAG_VALUE_UPDATE", "value " + id);
@@ -127,7 +127,7 @@ public class TagAdminService {
     TagCategory category = requireCategory(value.categoryId());
     int usage = repository.usageCount(category.boundField(), value.tagValue());
     if (usage > 0) {
-      throw new ApiException(TagErrorCodes.VALUE_IN_USE, "tag value is used by " + usage + " customers");
+      throw new ApiException(TagErrorCodes.VALUE_IN_USE, "该标签正在被 " + usage + " 个客户使用，请改为停用");
     }
     repository.deleteValue(id);
     publish("TAG_VALUE_DELETE", "value " + value.tagValue());
@@ -135,25 +135,25 @@ public class TagAdminService {
 
   private void validateCategoryCreate(TagCategoryRequest request) {
     if (request == null || request.categoryName() == null || request.categoryName().isBlank() || request.categoryName().trim().length() > 30) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "categoryName length is 1-30");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "分类名称长度必须为 1-30 个字符");
     }
     if (request.boundField() == null || request.boundField().isBlank() || !customerFieldExists(request.boundField().trim())) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "boundField invalid");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "请选择有效的客户档案字段");
     }
     if (repository.boundFieldExists(request.boundField().trim())) {
-      throw new ApiException(TagErrorCodes.CATEGORY_EXISTS, "boundField already bound");
+      throw new ApiException(TagErrorCodes.CATEGORY_EXISTS, "该客户档案字段已经绑定了标签分类");
     }
   }
 
   private void validateValueCreate(TagValueRequest request) {
     if (request == null || request.categoryId() == null) {
-      throw new ApiException(TagErrorCodes.CATEGORY_NOT_FOUND, "category not found");
+      throw new ApiException(TagErrorCodes.CATEGORY_NOT_FOUND, "标签分类不存在或已被删除");
     }
     if (request.tagValue() == null || !TAG_VALUE.matcher(request.tagValue().trim()).matches()) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "tagValue must match [A-Z0-9_]{1,50}");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签编码只能包含 1-50 位大写字母、数字或下划线");
     }
     if (request.displayName() == null || request.displayName().isBlank() || request.displayName().trim().length() > 30) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "displayName length is 1-30");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签展示名称长度必须为 1-30 个字符");
     }
   }
 
@@ -166,21 +166,21 @@ public class TagAdminService {
       }
       return false;
     } catch (Exception ex) {
-      throw new ApiException(ApiErrorCodes.INTERNAL_ERROR, "customer field validation failed");
+      throw new ApiException(ApiErrorCodes.INTERNAL_ERROR, "客户档案字段校验失败，请稍后重试");
     }
   }
 
   private TagCategory requireCategory(Long id) {
     if (id == null) {
-      throw new ApiException(TagErrorCodes.CATEGORY_NOT_FOUND, "category not found");
+      throw new ApiException(TagErrorCodes.CATEGORY_NOT_FOUND, "标签分类不存在或已被删除");
     }
     return repository.findCategory(id)
-        .orElseThrow(() -> new ApiException(TagErrorCodes.CATEGORY_NOT_FOUND, "category not found"));
+        .orElseThrow(() -> new ApiException(TagErrorCodes.CATEGORY_NOT_FOUND, "标签分类不存在或已被删除"));
   }
 
   private TagValue requireValue(long id) {
     return repository.findValue(id)
-        .orElseThrow(() -> new ApiException(TagErrorCodes.VALUE_NOT_FOUND, "tag value not found"));
+        .orElseThrow(() -> new ApiException(TagErrorCodes.VALUE_NOT_FOUND, "标签值不存在或已被删除"));
   }
 
   private String generateCategoryKey(String categoryName) {

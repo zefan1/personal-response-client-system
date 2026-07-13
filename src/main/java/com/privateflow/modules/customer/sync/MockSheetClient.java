@@ -11,7 +11,8 @@ import org.springframework.stereotype.Component;
 public class MockSheetClient implements SheetClient {
 
   @Override
-  public List<SheetRow> fetchIncrementalRows(String sourceTable, LocalDateTime modifiedAfter, int limit) {
+  public List<SheetRow> fetchIncrementalRows(SheetSource source, LocalDateTime modifiedAfter, int limit) {
+    String sourceTable = source.sourceTable();
     if ("推广组客资登记表".equals(sourceTable)) {
       return List.of(new SheetRow("mock-promo-1", Map.of(
           "手机号/微信", "13800000001",

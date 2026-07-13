@@ -132,7 +132,7 @@ describe('followupListStore', () => {
     expect(followups.followupListState.groups.OVERDUE[0].flashUntil).toBeUndefined();
   });
 
-  it('upserts new lead alerts and only schedules flash cleanup on the active new-lead tab', async () => {
+  it('upserts new lead alerts, counts new reminders, and clears flash even when another tab is active', async () => {
     const { followups } = await freshStore();
     const payload: NewLeadAlertPayload = {
       phone: 'masked-1111',
@@ -154,9 +154,11 @@ describe('followupListStore', () => {
       nickname: 'Lead A Updated',
       alertLevel: 'NORMAL'
     });
+    expect(followups.followupListState.newReminderCount).toBe(2);
+    expect(followups.followupListState.newReminderTab).toBe('NEW_LEAD');
 
     vi.advanceTimersByTime(200);
-    expect(followups.followupListState.groups.NEW_LEAD[0].flashUntil).toBeDefined();
+    expect(followups.followupListState.groups.NEW_LEAD[0].flashUntil).toBeUndefined();
 
     followups.setActiveFollowupTab('NEW_LEAD');
     followups.handleNewLeadAlert({ ...payload, phoneFull: '18800002222' });

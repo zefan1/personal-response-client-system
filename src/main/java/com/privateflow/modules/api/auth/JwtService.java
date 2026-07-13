@@ -40,12 +40,13 @@ public class JwtService {
       payload.put("displayName", user.displayName());
       payload.put("role", user.role().name());
       payload.put("leaderId", user.leaderId());
+      payload.put("tokenVersion", user.tokenVersion());
       payload.put("iat", now);
       payload.put("exp", exp);
       String unsigned = encode(header) + "." + encode(payload);
       return unsigned + "." + sign(unsigned);
     } catch (Exception ex) {
-      throw new ApiException(ApiErrorCodes.INTERNAL_ERROR, "failed to issue token");
+      throw new ApiException(ApiErrorCodes.INTERNAL_ERROR, "登录凭证生成失败");
     }
   }
 
@@ -53,28 +54,30 @@ public class JwtService {
     try {
       String[] parts = token == null ? new String[0] : token.split("\\.");
       if (parts.length != 3) {
-        throw new ApiException(ApiErrorCodes.AUTH_FAILED, "Token invalid");
+        throw new ApiException(ApiErrorCodes.AUTH_FAILED, "登录状态无效，请重新登录");
       }
       String unsigned = parts[0] + "." + parts[1];
       if (!constantEquals(sign(unsigned), parts[2])) {
-        throw new ApiException(ApiErrorCodes.AUTH_FAILED, "Token invalid");
+        throw new ApiException(ApiErrorCodes.AUTH_FAILED, "登录状态无效，请重新登录");
       }
       Map<String, Object> payload = objectMapper.readValue(URL_DECODER.decode(parts[1]), new TypeReference<>() {});
       long exp = ((Number) payload.get("exp")).longValue();
       if (Instant.now().getEpochSecond() >= exp) {
-        throw new ApiException(ApiErrorCodes.AUTH_FAILED, "Token expired");
+        throw new ApiException(ApiErrorCodes.AUTH_FAILED, "登录已过期，请重新登录");
       }
       Object leaderId = payload.get("leaderId");
       Object phone = payload.get("phone") == null ? payload.get("username") : payload.get("phone");
+      Object tokenVersion = payload.get("tokenVersion");
       return new AuthUser(
           phone.toString(),
           payload.get("displayName").toString(),
           Role.valueOf(payload.get("role").toString()),
-          leaderId == null ? null : Long.valueOf(leaderId.toString()));
+          leaderId == null ? null : Long.valueOf(leaderId.toString()),
+          tokenVersion == null ? 0L : Long.parseLong(tokenVersion.toString()));
     } catch (ApiException ex) {
       throw ex;
     } catch (Exception ex) {
-      throw new ApiException(ApiErrorCodes.AUTH_FAILED, "Token invalid");
+      throw new ApiException(ApiErrorCodes.AUTH_FAILED, "登录状态无效，请重新登录");
     }
   }
 

@@ -29,6 +29,7 @@ spring:
 
 app:
   mock-externals: ${MOCK_EXTERNALS:false}
+  environment: ${APP_ENV:${ENVIRONMENT:}}
 
 cache:
   sync-cron: "0 */30 * * * *"

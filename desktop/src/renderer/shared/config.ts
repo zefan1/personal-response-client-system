@@ -7,6 +7,7 @@ export type DesktopConfig = {
   clipboardMd5CacheSize: number;
   clipboardMinImageDimension: number;
   clipboardImageTextCoverMs: number;
+  clipboardScreenshotConfirmPromptS: number;
   requestTotalTimeoutMs: number;
   fallbackRetryIntervalMs: number;
   fallbackMaxRetries: number;
@@ -47,15 +48,18 @@ export type DesktopConfig = {
   recoverSyncTimeoutS: number;
 };
 
+const WS_PATH = '/ws/v1/desktop';
+
 const defaults: DesktopConfig = {
   apiBaseUrl: 'http://localhost:8080',
   accessToken: '',
   accountRole: '',
-  wsUrl: 'ws://localhost:8080/ws/v1/desktop',
+  wsUrl: '',
   clipboardPollIntervalMs: 500,
   clipboardMd5CacheSize: 5,
   clipboardMinImageDimension: 200,
   clipboardImageTextCoverMs: 2000,
+  clipboardScreenshotConfirmPromptS: 10,
   requestTotalTimeoutMs: 15000,
   fallbackRetryIntervalMs: 10000,
   fallbackMaxRetries: 3,
@@ -99,14 +103,44 @@ const defaults: DesktopConfig = {
 export function loadDesktopConfig(): DesktopConfig {
   try {
     const raw = localStorage.getItem('desktop_config');
-    return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
+    const parsed = raw ? { ...defaults, ...JSON.parse(raw) } : { ...defaults };
+    return normalizeConfig(parsed);
   } catch {
-    return defaults;
+    return normalizeConfig({ ...defaults });
   }
 }
 
 export function saveDesktopConfig(patch: Partial<DesktopConfig>): DesktopConfig {
-  const next = { ...loadDesktopConfig(), ...patch };
+  const next = normalizeConfig({ ...loadDesktopConfig(), ...patch }, 'wsUrl' in patch);
   localStorage.setItem('desktop_config', JSON.stringify(next));
   return next;
+}
+
+function normalizeConfig(config: DesktopConfig, explicitWsUrl = false): DesktopConfig {
+  const apiBaseUrl = trimTrailingSlash(config.apiBaseUrl || defaults.apiBaseUrl);
+  const wsUrl = explicitWsUrl && config.wsUrl.trim()
+    ? config.wsUrl.trim()
+    : deriveWsUrl(apiBaseUrl);
+  return { ...config, apiBaseUrl, wsUrl };
+}
+
+export function deriveWsUrl(apiBaseUrl: string): string {
+  try {
+    const url = new URL(trimTrailingSlash(apiBaseUrl || defaults.apiBaseUrl));
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.pathname = WS_PATH;
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return 'ws://localhost:8080/ws/v1/desktop';
+  }
+}
+
+function trimTrailingSlash(value: string): string {
+  let normalized = value.trim();
+  while (normalized.endsWith('/') && normalized.length > 1) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized;
 }

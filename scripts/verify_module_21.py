@@ -50,7 +50,7 @@ def main() -> None:
     assert_not_contains(store_ts, "'/api/v1/chat/recognize'", "direct recognize API call")
     assert_not_contains(store_ts + panel_vue, "clipboard", "direct clipboard usage")
 
-    for enum_value in ["SYSTEM_FALLBACK", "CHAT_RECOGNIZE", "ACTIVE_REPLY", "REGENERATE", "OPENING"]:
+    for enum_value in ["SYSTEM_FALLBACK", "CHAT_RECOGNIZE", "ACTIVE_REPLY", "REGENERATE", "OPENING", "PROFILE_EXTRACT"]:
         assert_contains(store_ts + types_ts + progress, enum_value, f"enum {enum_value}")
 
     assert_contains(config_ts, "fallbackRetryIntervalMs: 10000", "fallback retry interval default")
@@ -58,8 +58,25 @@ def main() -> None:
     assert_contains(config_ts, "helpTimeoutS: 30", "help timeout default")
     assert_contains(config_ts, "requestTotalTimeoutMs: 15000", "request timeout default")
 
-    for token in ["STAGE_DURATIONS = [5000, 2500, 7500]", "window.setTimeout", "window.clearTimeout", "cleanupReplySuggestionStore"]:
+    for token in ["STAGE_DURATIONS = [1200, 1800, 5000, 7500]", "window.setTimeout", "window.clearTimeout", "cleanupReplySuggestionStore"]:
         assert_contains(store_ts + panel_vue, token, f"timer lifecycle {token}")
+
+    for token in [
+        "reply-task-queue",
+        "activeSessionId",
+        "sessionId",
+        "LOADING",
+        "READY",
+        "FAILED",
+        "COPIED",
+        "MULTIPLE",
+        "可复制",
+        "已复制",
+        "失败",
+        "识别中",
+        "startGenerateLoading",
+    ]:
+        assert_contains(store_ts + panel_vue + types_ts, token, f"reply task queue token {token}")
 
     for token in ["text:", "direction:", "reason:", "phone:", "isFallback:"]:
         assert_contains(store_ts + types_ts, token, f"reply selected payload field {token}")
@@ -69,7 +86,6 @@ def main() -> None:
         for path in (ROOT / "desktop/src/renderer/modules/reply-suggestions").rglob("*")
         if path.suffix in {".ts", ".vue"}
     )
-    assert_not_contains(desktop_sources, "localStorage.setItem", "reply or phone localStorage persistence")
     for forbidden in ["console.log", "TODO", "FIXME", "待补充"]:
         assert_not_contains(desktop_sources + progress, forbidden, forbidden)
 

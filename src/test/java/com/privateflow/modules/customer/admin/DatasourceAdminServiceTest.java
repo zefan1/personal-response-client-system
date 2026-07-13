@@ -2,6 +2,7 @@ package com.privateflow.modules.customer.admin;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -11,11 +12,13 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.ws.WsPushService;
 import com.privateflow.modules.customer.infra.CustomerRepository;
 import com.privateflow.modules.customer.sync.CustomerSyncScheduler;
 import com.privateflow.modules.customer.sync.SheetClient;
 import com.privateflow.modules.customer.sync.SheetRow;
+import com.privateflow.modules.customer.sync.SheetSource;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -28,12 +31,14 @@ class DatasourceAdminServiceTest {
 
   private DatasourceAdminRepository repository;
   private SheetClient sheetClient;
+  private AuditLogger auditLogger;
   private DatasourceAdminService service;
 
   @BeforeEach
   void setUp() {
     repository = mock(DatasourceAdminRepository.class);
     sheetClient = mock(SheetClient.class);
+    auditLogger = mock(AuditLogger.class);
     service = new DatasourceAdminService(
         repository,
         mock(CustomerRepository.class),
@@ -41,7 +46,20 @@ class DatasourceAdminServiceTest {
         sheetClient,
         mock(ApplicationEventPublisher.class),
         mock(WsPushService.class),
-        new ObjectMapper());
+        new ObjectMapper(),
+        auditLogger);
+  }
+
+  @Test
+  void createDatasourceWritesAuditLog() {
+    Datasource datasource = datasource();
+    when(repository.nameExists("test-datasource", null)).thenReturn(false);
+    when(repository.create(any(), anyString())).thenReturn(7L);
+    when(repository.find(7L)).thenReturn(Optional.of(datasource));
+
+    service.create(new DatasourceRequest("test-datasource", "sheet-1", "source_table", ""));
+
+    verify(auditLogger).log(eq("DATASOURCE_CREATE"), anyString(), eq("datasource"), eq("7"), anyString());
   }
 
   @Test
@@ -89,7 +107,7 @@ class DatasourceAdminServiceTest {
   void columnsUseSheetRowsAndSavedMappings() {
     Datasource datasource = datasource();
     when(repository.find(7L)).thenReturn(Optional.of(datasource));
-    when(sheetClient.fetchIncrementalRows(eq("source_table"), eq(LocalDateTime.of(1970, 1, 1, 0, 0)), eq(20)))
+    when(sheetClient.fetchIncrementalRows(eq(new SheetSource(7L, "sheet-1", "source_table")), eq(LocalDateTime.of(1970, 1, 1, 0, 0)), eq(20)))
         .thenReturn(List.of(new SheetRow("row-1", Map.of("phone", "13900000000", "nickname", "Alice"))));
     when(repository.mappings("source_table")).thenReturn(List.of(new FieldMappingDto(1L, "phone", "phone", true)));
 
@@ -103,7 +121,7 @@ class DatasourceAdminServiceTest {
   void columnsFallBackToMappingsWhenSheetClientUnavailable() {
     Datasource datasource = datasource();
     when(repository.find(7L)).thenReturn(Optional.of(datasource));
-    when(sheetClient.fetchIncrementalRows(eq("source_table"), eq(LocalDateTime.of(1970, 1, 1, 0, 0)), eq(20)))
+    when(sheetClient.fetchIncrementalRows(eq(new SheetSource(7L, "sheet-1", "source_table")), eq(LocalDateTime.of(1970, 1, 1, 0, 0)), eq(20)))
         .thenThrow(new IllegalStateException("not configured"));
     when(repository.mappings("source_table")).thenReturn(List.of(new FieldMappingDto(1L, "phone", "phone", true)));
 
@@ -123,6 +141,17 @@ class DatasourceAdminServiceTest {
     assertThat(result).containsEntry("total", 1L).containsEntry("limit", 50);
     assertThat((List<?>) result.get("logs")).hasSize(1);
     verify(repository).importLogs(50);
+  }
+
+  @Test
+  void customerFieldDictionaryReturnsChineseBusinessLabels() {
+    Map<String, Object> result = service.customerFields();
+    @SuppressWarnings("unchecked")
+    List<CustomerFieldDto> fields = (List<CustomerFieldDto>) result.get("fields");
+
+    assertThat(fields).extracting(CustomerFieldDto::label)
+        .contains("客户昵称", "意向等级", "下次跟进时间", "预约项目", "是否到店", "分配管家");
+    assertThat(fields).allSatisfy(field -> assertThat(field.label()).doesNotMatch("^[A-Za-z][A-Za-z0-9]*$"));
   }
 
   @Test

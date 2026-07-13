@@ -7,10 +7,16 @@ import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
+import com.privateflow.modules.image.ImageRecognitionException;
 import com.privateflow.modules.image.ImageRecognitionService;
 import com.privateflow.modules.image.Message;
 import com.privateflow.modules.image.RecognitionResult;
 import com.privateflow.modules.image.Source;
+import com.privateflow.modules.llm.LlmReplyGenerationService;
+import com.privateflow.modules.llm.LlmFollowupSuggestionInput;
+import com.privateflow.modules.llm.LlmFollowupSuggestionService;
+import com.privateflow.modules.llm.LlmSummaryInput;
+import com.privateflow.modules.llm.LlmSummaryService;
 import com.privateflow.modules.match.MatchRequest;
 import com.privateflow.modules.match.MatchResult;
 import com.privateflow.modules.match.MatchType;
@@ -19,6 +25,7 @@ import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillGatewayService;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.SkillResponse;
+import com.privateflow.modules.skill.config.SkillConfigProvider;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +42,10 @@ public class ChatOrchestrationService {
   private final RequestContextStore contextStore;
   private final ApplicationEventPublisher eventPublisher;
   private final AuditLogger auditLogger;
+  private final SkillConfigProvider skillConfigProvider;
+  private final LlmReplyGenerationService llmReplyGenerationService;
+  private final LlmFollowupSuggestionService llmFollowupSuggestionService;
+  private final LlmSummaryService llmSummaryService;
 
   public ChatOrchestrationService(
       ImageRecognitionService imageRecognitionService,
@@ -43,7 +54,11 @@ public class ChatOrchestrationService {
       CustomerQueryService customerQueryService,
       RequestContextStore contextStore,
       ApplicationEventPublisher eventPublisher,
-      AuditLogger auditLogger) {
+      AuditLogger auditLogger,
+      SkillConfigProvider skillConfigProvider,
+      LlmReplyGenerationService llmReplyGenerationService,
+      LlmFollowupSuggestionService llmFollowupSuggestionService,
+      LlmSummaryService llmSummaryService) {
     this.imageRecognitionService = imageRecognitionService;
     this.customerMatchService = customerMatchService;
     this.skillGatewayService = skillGatewayService;
@@ -51,6 +66,10 @@ public class ChatOrchestrationService {
     this.contextStore = contextStore;
     this.eventPublisher = eventPublisher;
     this.auditLogger = auditLogger;
+    this.skillConfigProvider = skillConfigProvider;
+    this.llmReplyGenerationService = llmReplyGenerationService;
+    this.llmFollowupSuggestionService = llmFollowupSuggestionService;
+    this.llmSummaryService = llmSummaryService;
   }
 
   public ChatResponse recognize(ChatRecognizeRequest request) {
@@ -63,11 +82,11 @@ public class ChatOrchestrationService {
     MatchResult match = match(nickname, phone, request.leadType(), request.sourceTable());
     Customer customer = firstCustomer(match);
     String clientMessage = buildClientMessage(request, recognized);
-    SkillResponse skill = generateSkill(Scene.CHAT_RECOGNIZE, request.leadType(), customer, phone, clientMessage, List.of(), messages(request, recognized));
+    GeneratedReplies generated = generateSkill(Scene.CHAT_RECOGNIZE, request.leadType(), customer, phone, clientMessage, List.of(), messages(request, recognized));
     String responsePhone = customer == null ? phone : customer.getPhone();
-    saveContext(responsePhone, clientMessage, skill, Scene.CHAT_RECOGNIZE, customer, request.leadType(), 0);
+    saveContext(responsePhone, clientMessage, generated.skill(), Scene.CHAT_RECOGNIZE, customer, request.leadType(), 0);
     auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", responsePhone, "chat recognize");
-    return new ChatResponse(responsePhone, nickname, match.matchType() == MatchType.NONE, match, skill, null);
+    return new ChatResponse(responsePhone, nickname, match.matchType() == MatchType.NONE, match, generated.skill(), null, generated.source());
   }
 
   public ChatResponse generate(GenerateRequest request) {
@@ -80,9 +99,9 @@ public class ChatOrchestrationService {
     }
     Scene scene = "OPENING".equalsIgnoreCase(request.scene()) ? Scene.OPENING : Scene.ACTIVE_REPLY;
     String clientMessage = blank(request.clientMessage()) ? customer.getFollowupNotes() : request.clientMessage();
-    SkillResponse skill = generateSkill(scene, customer.getLeadType(), customer, customer.getPhone(), clientMessage, List.of(), List.of());
-    saveContext(customer.getPhone(), clientMessage, skill, scene, customer, customer.getLeadType(), 0);
-    return new ChatResponse(customer.getPhone(), customer.getNickname(), false, null, skill, null);
+    GeneratedReplies generated = generateSkill(scene, customer.getLeadType(), customer, customer.getPhone(), clientMessage, List.of(), List.of());
+    saveContext(customer.getPhone(), clientMessage, generated.skill(), scene, customer, customer.getLeadType(), 0);
+    return new ChatResponse(customer.getPhone(), customer.getNickname(), false, null, generated.skill(), null, generated.source());
   }
 
   public ChatResponse regenerate(RegenerateRequest request) {
@@ -107,11 +126,11 @@ public class ChatOrchestrationService {
         previousSuggestions,
         previous.chatContext(),
         AuthContext.username());
-    SkillResponse skill = skillGatewayService.generateReplies(next);
+    GeneratedReplies generated = generateReplies(next);
     int count = context.regenerateCount() + 1;
-    contextStore.save(AuthContext.username(), request.phone(), new RequestContext(next, skill, count));
-    String warning = count >= 3 ? "已连续换 3 次，可以尝试求助组长" : null;
-    return new ChatResponse(request.phone(), null, false, null, skill, warning);
+    contextStore.save(AuthContext.username(), request.phone(), new RequestContext(next, generated.skill(), count));
+    String warning = regenerateWarning(count);
+    return new ChatResponse(request.phone(), null, false, null, generated.skill(), warning, generated.source());
   }
 
   public Map<String, Object> sendConfirm(SendConfirmRequest request) {
@@ -121,20 +140,47 @@ public class ChatOrchestrationService {
     List<CustomerMessageSentEvent.ChatMessage> rawMessages = request.rawMessages() == null ? List.of() : request.rawMessages().stream()
         .map(message -> new CustomerMessageSentEvent.ChatMessage(message.role(), message.text(), message.timestamp()))
         .toList();
+    String conversationSummary = conversationSummary(request, rawMessages);
+    CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest = request.followupSuggest() == null
+        ? llmFollowupSuggestionService.trySuggest(new LlmFollowupSuggestionInput(
+            request.phone(),
+            request.nickname(),
+            request.leadType(),
+            conversationSummary,
+            rawMessages,
+            request.sentText(),
+            request.selectedDirection(),
+            AuthContext.username())).orElse(null)
+        : request.followupSuggest();
     eventPublisher.publishEvent(new CustomerMessageSentEvent(
         request.phone(),
         request.nickname(),
         request.isNewCustomer(),
         request.sourceTable(),
         request.leadType(),
-        firstNonBlank(request.conversationSummary(), request.sentText()),
+        conversationSummary,
         rawMessages,
         request.sentText(),
         request.selectedDirection(),
-        request.followupSuggest(),
+        followupSuggest,
         AuthContext.username()));
     auditLogger.log("SEND_CONFIRM", AuthContext.username(), "CUSTOMER", request.phone(), "message sent");
     return Map.of("accepted", true);
+  }
+
+  private String conversationSummary(SendConfirmRequest request, List<CustomerMessageSentEvent.ChatMessage> rawMessages) {
+    if (!blank(request.conversationSummary())) {
+      return request.conversationSummary();
+    }
+    return llmSummaryService.trySummarize(new LlmSummaryInput(
+        request.phone(),
+        request.nickname(),
+        request.leadType(),
+        rawMessages,
+        request.sentText(),
+        request.selectedDirection(),
+        AuthContext.username()))
+        .orElse(request.sentText());
   }
 
   private RecognitionResult recognizeImage(String imageBase64) {
@@ -143,8 +189,12 @@ public class ChatOrchestrationService {
     }
     try {
       return imageRecognitionService.recognize(Base64.getDecoder().decode(imageBase64), Source.BUTTON_CLICK);
+    } catch (IllegalArgumentException ex) {
+      throw new ApiException("30-10002", "图片格式不支持，请重新截图或使用 PNG/JPG");
+    } catch (ImageRecognitionException ex) {
+      throw new ApiException(ex.getErrorCode(), ex.getMessage());
     } catch (RuntimeException ex) {
-      return null;
+      throw new ApiException("30-10001", "图片识别失败，请使用文字通道后重新生成回复");
     }
   }
 
@@ -156,7 +206,7 @@ public class ChatOrchestrationService {
     }
   }
 
-  private SkillResponse generateSkill(Scene scene, String leadType, Customer customer, String phone, String clientMessage, List<String> previousSuggestions, List<Map<String, String>> chatContext) {
+  private GeneratedReplies generateSkill(Scene scene, String leadType, Customer customer, String phone, String clientMessage, List<String> previousSuggestions, List<Map<String, String>> chatContext) {
     SkillRequest skillRequest = new SkillRequest(
         scene,
         leadType,
@@ -167,7 +217,30 @@ public class ChatOrchestrationService {
         previousSuggestions,
         chatContext,
         AuthContext.username());
-    return skillGatewayService.generateReplies(skillRequest);
+    return generateReplies(skillRequest);
+  }
+
+  private GeneratedReplies generateReplies(SkillRequest skillRequest) {
+    return llmReplyGenerationService.tryGenerate(skillRequest)
+        .map(skill -> new GeneratedReplies(skill, ChatReplySource.llm()))
+        .orElseGet(() -> {
+          if (!llmReplyGenerationService.fallbackToSkill()) {
+            return new GeneratedReplies(new SkillResponse(List.of(), null, null, null), ChatReplySource.fallback("LLM 回复生成失败，且未启用 Skill 回落"));
+          }
+          SkillResponse skill = skillGatewayService.generateReplies(skillRequest);
+          return new GeneratedReplies(skill, replySourceForSkill(skill));
+        });
+  }
+
+  private ChatReplySource replySourceForSkill(SkillResponse skill) {
+    if (skill == null || skill.suggestions() == null || skill.suggestions().isEmpty()) {
+      return ChatReplySource.fallback("Skill 未返回可用回复");
+    }
+    String direction = skill.suggestions().get(0).direction();
+    if ("SYSTEM_FALLBACK".equalsIgnoreCase(direction)) {
+      return ChatReplySource.fallback("Skill 不可用，已使用系统降级回复");
+    }
+    return ChatReplySource.skill();
   }
 
   private void saveContext(String phone, String clientMessage, SkillResponse skill, Scene scene, Customer customer, String leadType, int regenerateCount) {
@@ -175,6 +248,14 @@ public class ChatOrchestrationService {
       SkillRequest skillRequest = new SkillRequest(scene, leadType, phone, clientMessage, customerMap(customer), Map.of(), List.of(), List.of(), AuthContext.username());
       contextStore.save(AuthContext.username(), phone, new RequestContext(skillRequest, skill, regenerateCount));
     }
+  }
+
+  private String regenerateWarning(int count) {
+    int maxCount = skillConfigProvider.get().regenerateMaxCount();
+    if (maxCount <= 0 || count < maxCount) {
+      return null;
+    }
+    return "已连续换 " + maxCount + " 次，可以尝试求助组长";
   }
 
   private Customer firstCustomer(MatchResult match) {
@@ -226,5 +307,8 @@ public class ChatOrchestrationService {
 
   private String nvl(String value) {
     return value == null ? "" : value;
+  }
+
+  private record GeneratedReplies(SkillResponse skill, ChatReplySource source) {
   }
 }

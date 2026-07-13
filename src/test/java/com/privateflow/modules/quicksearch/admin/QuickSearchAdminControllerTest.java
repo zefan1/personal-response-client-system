@@ -21,6 +21,7 @@ import com.privateflow.modules.quicksearch.ContentType;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -45,15 +46,43 @@ class QuickSearchAdminControllerTest {
   }
 
   @Test
-  void listWrapsItemsInApiResponse() throws Exception {
-    when(service.list()).thenReturn(List.of(item(7L, ContentType.MINI_PROGRAM, "GENERAL", true)));
+  void listBindsFiltersAndWrapsPagedItemsInApiResponse() throws Exception {
+    when(service.list(any())).thenReturn(Map.of(
+        "items", List.of(item(7L, ContentType.MINI_PROGRAM, "GENERAL", true)),
+        "total", 21,
+        "page", 2,
+        "size", 20,
+        "totalPages", 2));
 
-    mockMvc.perform(get("/admin/api/v1/quick-search/items"))
+    mockMvc.perform(get("/admin/api/v1/quick-search/items")
+            .param("contentType", "MINI_PROGRAM")
+            .param("leadType", "GENERAL")
+            .param("enabled", "true")
+            .param("keyword", "title")
+            .param("page", "2")
+            .param("size", "20")
+            .param("sortBy", "updatedAt")
+            .param("sortDir", "DESC"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.data[0].id").value(7))
-        .andExpect(jsonPath("$.data[0].contentType").value("MINI_PROGRAM"))
-        .andExpect(jsonPath("$.data[0].leadType").value("GENERAL"));
+        .andExpect(jsonPath("$.data.total").value(21))
+        .andExpect(jsonPath("$.data.page").value(2))
+        .andExpect(jsonPath("$.data.totalPages").value(2))
+        .andExpect(jsonPath("$.data.items[0].id").value(7))
+        .andExpect(jsonPath("$.data.items[0].contentType").value("MINI_PROGRAM"))
+        .andExpect(jsonPath("$.data.items[0].leadType").value("GENERAL"));
+
+    ArgumentCaptor<QuickSearchAdminListQuery> query = ArgumentCaptor.forClass(QuickSearchAdminListQuery.class);
+    verify(service).list(query.capture());
+    org.assertj.core.api.Assertions.assertThat(query.getValue()).isEqualTo(new QuickSearchAdminListQuery(
+        ContentType.MINI_PROGRAM,
+        "GENERAL",
+        true,
+        "title",
+        2,
+        20,
+        "updatedAt",
+        "DESC"));
   }
 
   @Test
@@ -141,12 +170,12 @@ class QuickSearchAdminControllerTest {
         "acceptance.png",
         "image/png",
         new byte[] {(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a});
-    when(service.uploadImage(any())).thenReturn(new ImageUploadResponse("cos://quick-search/test.png"));
+    when(service.uploadImage(any())).thenReturn(new ImageUploadResponse("/uploads/quick-search/2026-07-07/test.png"));
 
     mockMvc.perform(multipart("/admin/api/v1/upload/image").file(file))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.data.imageUrl").value("cos://quick-search/test.png"));
+        .andExpect(jsonPath("$.data.imageUrl").value("/uploads/quick-search/2026-07-07/test.png"));
   }
 
   @Test

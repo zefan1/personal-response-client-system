@@ -29,10 +29,38 @@ public class CustomerRepository {
 
   public List<Customer> searchByNickname(String nickname, int limit) {
     return jdbcTemplate.query(
-        "SELECT * FROM customers WHERE nickname LIKE CONCAT('%', ?, '%') ORDER BY last_followup_at DESC LIMIT ?",
+        "SELECT * FROM customers WHERE phone NOT LIKE '%*%' AND nickname LIKE CONCAT('%', ?, '%') ORDER BY last_followup_at DESC LIMIT ?",
         ROW_MAPPER,
         nickname,
         limit);
+  }
+
+  public List<Customer> searchByKeyword(String keyword, int limit) {
+    String trimmed = keyword == null ? "" : keyword.trim();
+    String digits = trimmed.replaceAll("[^\\d]", "");
+    List<Object> args = new ArrayList<>();
+    StringBuilder sql = new StringBuilder("""
+        SELECT * FROM customers
+        WHERE phone NOT LIKE '%*%'
+          AND (
+             nickname LIKE CONCAT('%', ?, '%')
+           OR source_channel LIKE CONCAT('%', ?, '%')
+           OR intended_store LIKE CONCAT('%', ?, '%')
+           OR intended_project LIKE CONCAT('%', ?, '%')
+           OR followup_notes LIKE CONCAT('%', ?, '%')
+        """);
+    args.add(trimmed);
+    args.add(trimmed);
+    args.add(trimmed);
+    args.add(trimmed);
+    args.add(trimmed);
+    if (!digits.isBlank()) {
+      sql.append(" OR phone LIKE CONCAT('%', ?) ");
+      args.add(digits);
+    }
+    sql.append(") ORDER BY last_followup_at DESC LIMIT ? ");
+    args.add(limit);
+    return jdbcTemplate.query(sql.toString(), ROW_MAPPER, args.toArray());
   }
 
   public List<Customer> scanActiveCustomers(ScanFilter filter, int defaultLimit) {

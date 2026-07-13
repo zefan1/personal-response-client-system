@@ -42,16 +42,16 @@ export function cleanupStageSuggestionHandler(): void {
 }
 
 export function handleCustomerProfileLoaded(profile: CustomerProfileView): void {
-  currentPhone = profile.customer.phone;
+  currentPhone = profilePhone(profile);
   (profile.pendingSuggestions ?? []).forEach((suggestion) => {
     if (suggestion.fieldName === 'customerStage') {
-      emitOrPend(profile.customer.phone, suggestion);
+      emitOrPend(currentPhone, suggestion);
     }
   });
 }
 
 export async function confirmStageSuggestion(suggestion: ProfileSuggestion): Promise<boolean> {
-  const phone = suggestion.phone ?? customerProfileState.profile?.customer.phone;
+  const phone = suggestion.phone ?? currentProfilePhone();
   const newStage = suggestion.toStage ?? String(suggestion.suggestedValue ?? '');
   const version = customerProfileState.profile?.customer.version ?? 0;
   if (!phone || !newStage) {
@@ -83,7 +83,7 @@ export async function confirmStageSuggestion(suggestion: ProfileSuggestion): Pro
 }
 
 export async function ignoreStageSuggestion(suggestion: ProfileSuggestion): Promise<boolean> {
-  const phone = suggestion.phone ?? customerProfileState.profile?.customer.phone;
+  const phone = suggestion.phone ?? currentProfilePhone();
   const id = suggestion.id ?? suggestion.suggestionId;
   if (!phone || typeof id !== 'number') {
     return true;
@@ -187,4 +187,13 @@ function wait(ms: number): Promise<void> {
     }, ms);
     retryTimers.add(timer);
   });
+}
+
+function profilePhone(profile: CustomerProfileView): string {
+  return profile.phoneFull || profile.customer.phoneFull || profile.customer.phone;
+}
+
+function currentProfilePhone(): string {
+  const profile = customerProfileState.profile;
+  return profile ? profilePhone(profile) : '';
 }

@@ -5,8 +5,8 @@ type ScreenshotResult = {
   imageBase64?: string;
   width?: number;
   height?: number;
-  windowTitle?: string;
-  error?: 'NO_WECHAT_WINDOW' | 'CAPTURE_FAILED';
+  screenTitle?: string;
+  error?: 'CAPTURE_FAILED' | 'DESKTOP_BRIDGE_UNAVAILABLE';
   message?: string;
 };
 
@@ -22,11 +22,19 @@ type OnlineStatusPayload = {
   type?: string;
 };
 
+type AlwaysOnTopResult = {
+  success: boolean;
+  alwaysOnTop: boolean;
+  error?: string;
+};
+
 const api = {
   captureScreenshot: (): Promise<ScreenshotResult> => ipcRenderer.invoke('screenshot:capture'),
   writeClipboardText: (text: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('clipboard:write-text', { text }),
   writeClipboardImage: (imageUrl: string): Promise<{ success: boolean; error?: string; message?: string }> => ipcRenderer.invoke('clipboard:write-image', { imageUrl }),
-  openAdminConsole: (): Promise<{ success: boolean; error?: string; message?: string; url?: string }> => ipcRenderer.invoke('admin:open-external'),
+  openAdminConsole: (url?: string): Promise<{ success: boolean; error?: string; message?: string; url?: string }> => ipcRenderer.invoke('admin:open-external', { url }),
+  toggleAlwaysOnTop: (): Promise<AlwaysOnTopResult> => ipcRenderer.invoke('window:toggle-always-on-top'),
+  getAlwaysOnTop: (): Promise<AlwaysOnTopResult> => ipcRenderer.invoke('window:get-always-on-top'),
   getOnlineStatus: (): Promise<OnlineStatusPayload> => ipcRenderer.invoke('app:get-online-status'),
   onOnlineStatusChange: (callback: (payload: OnlineStatusPayload) => void) => {
     const listener = (_: Electron.IpcRendererEvent, payload: OnlineStatusPayload) => callback(payload);

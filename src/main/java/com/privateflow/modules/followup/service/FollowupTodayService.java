@@ -3,6 +3,10 @@ package com.privateflow.modules.followup.service;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.ScanFilter;
+import com.privateflow.modules.api.Role;
+import com.privateflow.modules.api.auth.AuthContext;
+import com.privateflow.modules.api.auth.AuthUser;
+import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.followup.AlertLevel;
 import com.privateflow.modules.followup.FollowupItem;
 import com.privateflow.modules.followup.FollowupTodayResponse;
@@ -22,16 +26,22 @@ public class FollowupTodayService {
 
   private final CustomerQueryService customerQueryService;
   private final ReminderLogRepository reminderLogRepository;
+  private final CustomerAccessService customerAccessService;
 
-  public FollowupTodayService(CustomerQueryService customerQueryService, ReminderLogRepository reminderLogRepository) {
+  public FollowupTodayService(
+      CustomerQueryService customerQueryService,
+      ReminderLogRepository reminderLogRepository,
+      CustomerAccessService customerAccessService) {
     this.customerQueryService = customerQueryService;
     this.reminderLogRepository = reminderLogRepository;
+    this.customerAccessService = customerAccessService;
   }
 
   public FollowupTodayResponse today(String keeperId) {
+    String requestedKeeperId = keeperId == null ? "" : keeperId.trim();
     List<FollowupItem> items = new ArrayList<>();
     for (Customer customer : customerQueryService.scanActiveCustomers(new ScanFilter(null, null, null, true, 5000))) {
-      if (keeperId != null && !keeperId.isBlank() && !keeperId.equals(customer.getAssignedKeeper())) {
+      if (!canInclude(customer, requestedKeeperId)) {
         continue;
       }
       FollowupItem item = classify(customer);
@@ -41,12 +51,30 @@ public class FollowupTodayService {
     }
     for (String phone : reminderLogRepository.findTodayPhones(ReminderType.NEW_LEAD)) {
       Customer customer = customerQueryService.getByPhone(phone);
-      if (customer != null && (keeperId == null || keeperId.isBlank() || keeperId.equals(customer.getAssignedKeeper()))) {
+      if (canInclude(customer, requestedKeeperId)) {
         items.add(toItem(customer, ReminderType.NEW_LEAD, null, AlertLevel.NORMAL, LocalDateTime.now(), null));
       }
     }
     List<FollowupItem> sorted = items.stream().sorted(this::compare).toList();
-    return new FollowupTodayResponse(keeperId, sorted.size(), sorted);
+    return new FollowupTodayResponse(effectiveKeeperId(requestedKeeperId), sorted.size(), sorted);
+  }
+
+  private boolean canInclude(Customer customer, String requestedKeeperId) {
+    if (customer == null || !customerAccessService.canAccess(customer)) {
+      return false;
+    }
+    if (requestedKeeperId.isBlank()) {
+      return true;
+    }
+    return requestedKeeperId.equals(customer.getAssignedKeeper());
+  }
+
+  private String effectiveKeeperId(String requestedKeeperId) {
+    AuthUser user = AuthContext.current();
+    if (user != null && user.role() == Role.KEEPER) {
+      return user.username();
+    }
+    return requestedKeeperId.isBlank() ? null : requestedKeeperId;
   }
 
   private FollowupItem classify(Customer customer) {
@@ -72,6 +100,7 @@ public class FollowupTodayService {
       FollowupItem.TagSuggestionPayload tagSuggestion) {
     return new FollowupItem(
         PhoneUtils.mask(customer.getPhone()),
+        customer.getPhone(),
         customer.getNickname(),
         customer.getLeadType(),
         customer.getLastFollowupAt(),

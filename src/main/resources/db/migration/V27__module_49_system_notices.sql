@@ -30,4 +30,4 @@ VALUES
   ('notice.scan_interval_s', '30', 'scheduled notice scan interval seconds, range 15-120'),
   ('notice.auto_expire_hours', '1', 'automatic notice expire hours, range 1-24'),
   ('notice.list_page_size', '20', 'notice list page size, range 10-50')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

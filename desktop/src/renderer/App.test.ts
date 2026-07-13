@@ -2,9 +2,20 @@ import { createApp, nextTick, type App as VueApp } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.vue';
 
+const apiMocks = vi.hoisted(() => ({
+  getJson: vi.fn(),
+  postJson: vi.fn()
+}));
+
+vi.mock('./shared/apiClient', () => ({
+  getJson: apiMocks.getJson,
+  postJson: apiMocks.postJson
+}));
+
 vi.mock('./modules/abnormal-alert/alertStore', () => ({
   cleanupAbnormalAlertRouter: vi.fn(),
-  initializeAbnormalAlertRouter: vi.fn()
+  initializeAbnormalAlertRouter: vi.fn(),
+  alertStore: new Map()
 }));
 
 vi.mock('./modules/stage-suggestion/stageSuggestionHandler', () => ({
@@ -15,10 +26,9 @@ vi.mock('./modules/stage-suggestion/stageSuggestionHandler', () => ({
 vi.mock('./modules/admin/AdminConsole.vue', () => ({
   default: {
     props: ['accountName'],
-    emits: ['logout', 'switch-desktop', 'switch-dev-console'],
+    emits: ['logout', 'switch-dev-console'],
     template: `
       <section class="ops-admin-shell">
-        <button type="button" @click="$emit('switch-desktop')">桌面工作台</button>
         <button type="button" @click="$emit('switch-dev-console')">开发调试台</button>
         <button type="button" @click="$emit('logout')">退出</button>
       </section>
@@ -29,11 +39,10 @@ vi.mock('./modules/admin/AdminConsole.vue', () => ({
 vi.mock('./modules/admin/AdminDevConsole.vue', () => ({
   default: {
     props: ['accountName'],
-    emits: ['logout', 'switch-admin', 'switch-desktop'],
+    emits: ['logout', 'switch-admin'],
     template: `
       <section class="admin-console">
         <button type="button" @click="$emit('switch-admin')">正式后台</button>
-        <button type="button" @click="$emit('switch-desktop')">工作台</button>
         <button type="button" @click="$emit('logout')">退出</button>
       </section>
     `
@@ -44,7 +53,7 @@ vi.mock('./modules/workbench/WorkbenchPanel.vue', () => ({ default: { template: 
 vi.mock('./modules/chat-recognition/ChatRecognitionPanel.vue', () => ({ default: { template: '<section class="recognition">聊天识别内容</section>' } }));
 vi.mock('./modules/followup-list/FollowupListPanel.vue', () => ({ default: { template: '<section class="followup-panel">跟进列表内容</section>' } }));
 vi.mock('./modules/customer-profile/CustomerProfilePanel.vue', () => ({ default: { template: '<section class="customer-panel">客户档案内容</section>' } }));
-vi.mock('./modules/reply-suggestions/ReplySuggestionPanel.vue', () => ({ default: { template: '<section class="reply-panel">话术建议内容</section>' } }));
+vi.mock('./modules/reply-suggestions/ReplySuggestionPanel.vue', () => ({ default: { template: '<section class="reply-panel">回复助手内容</section>' } }));
 vi.mock('./modules/abnormal-alert/AlertBell.vue', () => ({ default: { template: '<div class="alert-bell-wrap"></div>' } }));
 vi.mock('./modules/batch-template/BatchTemplateOverlay.vue', () => ({ default: { template: '<div class="batch-template-overlay"></div>' } }));
 vi.mock('./modules/copy-backfill/CopyBackfillAgent.vue', () => ({ default: { template: '<div class="copy-backfill-agent"></div>' } }));
@@ -54,7 +63,9 @@ vi.mock('./modules/offline/OfflineStatusBar.vue', () => ({ default: { template: 
 vi.mock('./modules/quick-search/QuickSearchOverlay.vue', () => ({ default: { template: '<div class="quick-search-overlay"></div>' } }));
 vi.mock('./shared/desktopBridge', () => ({
   captureScreenshot: vi.fn(async () => ({ success: true, imageBase64: 'capture-image' })),
-  openAdminConsole: vi.fn(async () => ({ success: true }))
+  openAdminConsole: vi.fn(async () => ({ success: true })),
+  getAlwaysOnTop: vi.fn(async () => ({ success: true, alwaysOnTop: false })),
+  toggleAlwaysOnTop: vi.fn(async () => ({ success: true, alwaysOnTop: true }))
 }));
 vi.mock('./modules/chat-recognition/recognitionStore', () => ({
   recognitionState: { isRecognizePending: false },
@@ -103,6 +114,29 @@ async function mountAppWithToken(hash = '#/desktop'): Promise<MountedApp> {
   return { app, host };
 }
 
+function installDesktopBridge(): void {
+  Object.defineProperty(window, 'desktopBridge', {
+    value: {
+      captureScreenshot: vi.fn(),
+      writeClipboardText: vi.fn(),
+      writeClipboardImage: vi.fn(),
+      getAlwaysOnTop: vi.fn(async () => ({ success: true, alwaysOnTop: false })),
+      toggleAlwaysOnTop: vi.fn(async () => ({ success: true, alwaysOnTop: true })),
+      openAdminConsole: vi.fn(async (_url?: string) => ({ success: true })),
+      onClipboardImage: vi.fn(() => undefined),
+      onQuickSearchShow: vi.fn(() => undefined),
+      onQuickSearchHide: vi.fn(() => undefined),
+      getOnlineStatus: vi.fn(async () => ({ online: true, type: 'unknown' })),
+      onOnlineStatusChange: vi.fn(() => undefined)
+    },
+    configurable: true
+  });
+}
+
+function uninstallDesktopBridge(): void {
+  delete (window as { desktopBridge?: unknown }).desktopBridge;
+}
+
 function unsignedJwt(payload: Record<string, unknown>): string {
   const json = JSON.stringify(payload);
   const base64 = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -112,50 +146,81 @@ function unsignedJwt(payload: Record<string, unknown>): string {
 describe('App route shell', () => {
   beforeEach(() => {
     installMemoryLocalStorage();
+    uninstallDesktopBridge();
     window.history.replaceState(null, '', '#/desktop');
+    apiMocks.getJson.mockResolvedValue({
+      success: true,
+      data: {
+        accountName: 'Admin',
+        role: 'ADMIN',
+        skillStatus: {
+          status: 'OK',
+          expireAt: '2026-08-01',
+          daysLeft: 27,
+          label: '有效至 2026-08-01'
+        }
+      },
+      errorCode: null,
+      message: null
+    });
+    apiMocks.postJson.mockResolvedValue({ success: true, data: null, errorCode: null, message: null });
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
     localStorage.clear();
+    uninstallDesktopBridge();
     vi.clearAllMocks();
   });
 
   it('opens authenticated users on the Electron sidebar preview at #/desktop', async () => {
+    installDesktopBridge();
     const { app, host } = await mountAppWithToken('#/desktop');
 
     expect(window.location.hash).toBe('#/desktop');
     expect(host.querySelector('.desktop-shell')).toBeTruthy();
     expect(host.querySelector('.desktop-sidebar')).toBeTruthy();
     expect(host.querySelector('.ops-admin-shell')).toBeFalsy();
-    expect([...host.querySelectorAll('.desktop-nav-button span')].map((item) => item.textContent)).toEqual([
+    expect([...host.querySelectorAll('.desktop-nav-button .nav-label')].map((item) => item.textContent)).toEqual([
       '工作台',
-      '聊天识别',
-      '跟进列表',
       '客户档案',
-      '话术建议'
+      '回复助手'
     ]);
-    expect((host.querySelector('.desktop-nav-button.active span') as HTMLElement | null)?.textContent).toBe('工作台');
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('工作台');
     expect(host.querySelectorAll('.desktop-sidebar-actions button').length).toBe(2);
-    expect(host.querySelector('.global-recognize-button')).toBeTruthy();
+    expect(host.querySelector('.sidebar-quick-actions')).toBeTruthy();
+    expect(host.querySelector('.desktop-mode-tools .alert-bell-wrap')).toBeTruthy();
+    expect(host.querySelector('.global-action-bar')).toBeFalsy();
+    expect(host.querySelector('.global-recognize-button')).toBeFalsy();
+    expect(host.textContent).toContain('有效至 2026-08-01');
 
     app.unmount();
   });
 
-  it('opens the full-screen operations admin at #/admin and can return to the desktop route', async () => {
-    const { app, host } = await mountAppWithToken('#/admin');
+  it('keeps browser users inside the operations admin and blocks the web desktop route', async () => {
+    const { app, host } = await mountAppWithToken('#/desktop');
 
+    expect(window.location.hash).toBe('#/admin');
     expect(host.querySelector('.ops-admin-shell')).toBeTruthy();
     expect(host.querySelector('.desktop-shell')).toBeFalsy();
+    expect(host.textContent).not.toContain('桌面工作台');
 
-    const desktopButton = [...host.querySelectorAll('.ops-admin-shell button')]
-      .find((button) => button.textContent?.includes('桌面工作台')) as HTMLButtonElement | undefined;
-    expect(desktopButton).toBeTruthy();
-    desktopButton?.click();
+    app.unmount();
+  });
+
+  it('returns to the login page when the API reports an expired session', async () => {
+    const { eventBus } = await import('./shared/eventBus');
+    const { app, host } = await mountAppWithToken('#/admin');
+
+    eventBus.emit('auth:expired', { message: '登录已过期，请重新登录' });
     await flushUi();
 
-    expect(window.location.hash).toBe('#/desktop');
-    expect(host.querySelector('.desktop-sidebar')).toBeTruthy();
+    expect(host.querySelector('.login-shell')).toBeTruthy();
+    expect(host.querySelector('.ops-admin-shell')).toBeFalsy();
+    expect(host.textContent).toContain('登录已过期，请重新登录');
+    const saved = JSON.parse(localStorage.getItem('desktop_config') ?? '{}');
+    expect(saved.accessToken).toBe('');
+    expect(saved.accountRole).toBe('');
 
     app.unmount();
   });
@@ -170,30 +235,42 @@ describe('App route shell', () => {
     app.unmount();
   });
 
-  it('switches desktop panels, triggers global recognition, and opens admin externally', async () => {
+  it('switches desktop panels, triggers global actions, and opens admin externally', async () => {
     const [{ captureScreenshot, openAdminConsole }, { triggerRecognize }] = await Promise.all([
       import('./shared/desktopBridge'),
       import('./modules/chat-recognition/recognitionStore')
     ]);
+    installDesktopBridge();
     const { app, host } = await mountAppWithToken('#/desktop');
     const navButtons = [...host.querySelectorAll('.desktop-nav-button')] as HTMLButtonElement[];
 
-    navButtons[2].click();
+    navButtons[1].click();
     await flushUi();
-    expect((host.querySelector('.desktop-nav-button.active span') as HTMLElement | null)?.textContent).toBe('跟进列表');
-    expect((host.querySelector('.followup-panel') as HTMLElement | null)?.style.display).not.toBe('none');
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('客户档案');
+    expect((host.querySelector('.customer-panel') as HTMLElement | null)?.style.display).not.toBe('none');
     expect((host.querySelector('.workbench-panel') as HTMLElement | null)?.style.display).toBe('none');
 
-    const recognizeButton = host.querySelector('.global-recognize-button') as HTMLButtonElement | null;
+    const actionButtons = [...host.querySelectorAll('.sidebar-quick-actions button')] as HTMLButtonElement[];
+    expect([...host.querySelectorAll('.sidebar-quick-actions .action-label')].map((item) => item.textContent)).toEqual([
+      '识别',
+      '模板',
+      '批量'
+    ]);
+    const recognizeButton = actionButtons[0];
     expect(recognizeButton).toBeTruthy();
     recognizeButton?.click();
     await flushUi();
     expect(captureScreenshot).toHaveBeenCalled();
     expect(triggerRecognize).toHaveBeenCalledWith('BUTTON_CLICK', { imageBase64: 'capture-image' });
-    expect((host.querySelector('.desktop-nav-button.active span') as HTMLElement | null)?.textContent).toBe('聊天识别');
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('回复助手');
+
+    actionButtons[2].click();
+    await flushUi();
+    expect((host.querySelector('.task-queue-backdrop') as HTMLElement | null)?.style.display).not.toBe('none');
+    expect(host.querySelector('.task-queue-drawer .followup-panel')).toBeTruthy();
 
     const adminButton = [...host.querySelectorAll('.desktop-sidebar-actions button')]
-      .find((button) => button.textContent?.includes('管理后台')) as HTMLButtonElement | undefined;
+      .find((button) => button.textContent?.includes('后台')) as HTMLButtonElement | undefined;
     expect(adminButton).toBeTruthy();
     adminButton?.click();
     await flushUi();
@@ -204,7 +281,38 @@ describe('App route shell', () => {
     app.unmount();
   });
 
+  it('toggles the pinned window button through the desktop bridge', async () => {
+    const { toggleAlwaysOnTop } = await import('./shared/desktopBridge');
+    installDesktopBridge();
+    const { app, host } = await mountAppWithToken('#/desktop');
+
+    const pinButton = host.querySelector('.pin-window-button') as HTMLButtonElement | null;
+    expect(pinButton).toBeTruthy();
+    expect(pinButton?.getAttribute('aria-pressed')).toBe('false');
+    expect(pinButton?.textContent).toContain('置');
+
+    pinButton?.click();
+    await flushUi();
+
+    expect(toggleAlwaysOnTop).toHaveBeenCalledTimes(1);
+    expect(pinButton?.getAttribute('aria-pressed')).toBe('true');
+    expect(pinButton?.textContent).toContain('顶');
+
+    app.unmount();
+  });
+
   it('hides the admin shortcut for keeper accounts', async () => {
+    installDesktopBridge();
+    apiMocks.getJson.mockResolvedValueOnce({
+      success: true,
+      data: {
+        accountName: 'Keeper',
+        role: 'KEEPER',
+        skillStatus: { status: 'UNKNOWN', expireAt: null, daysLeft: null, label: '技能有效期未配置' }
+      },
+      errorCode: null,
+      message: null
+    });
     window.history.replaceState(null, '', '#/desktop');
     localStorage.setItem('desktop_config', JSON.stringify({ apiBaseUrl: 'http://localhost:8080', accessToken: 'token-a', accountRole: 'KEEPER' }));
     const host = document.createElement('div');
@@ -214,12 +322,23 @@ describe('App route shell', () => {
     await flushUi();
 
     expect([...host.querySelectorAll('.desktop-sidebar-actions button')]
-      .some((button) => button.textContent?.includes('管理后台'))).toBe(false);
+      .some((button) => button.textContent?.includes('后台'))).toBe(false);
 
     app.unmount();
   });
 
-  it('recovers the admin shortcut role from legacy cached tokens', async () => {
+  it('does not expose the admin shortcut for leader cached tokens', async () => {
+    installDesktopBridge();
+    apiMocks.getJson.mockResolvedValueOnce({
+      success: true,
+      data: {
+        accountName: 'Leader',
+        role: 'LEADER',
+        skillStatus: { status: 'UNKNOWN', expireAt: null, daysLeft: null, label: '技能有效期未配置' }
+      },
+      errorCode: null,
+      message: null
+    });
     window.history.replaceState(null, '', '#/desktop');
     localStorage.setItem('desktop_config', JSON.stringify({
       apiBaseUrl: 'http://localhost:8080',
@@ -232,7 +351,7 @@ describe('App route shell', () => {
     await flushUi();
 
     expect([...host.querySelectorAll('.desktop-sidebar-actions button')]
-      .some((button) => button.textContent?.includes('管理后台'))).toBe(true);
+      .some((button) => button.textContent?.includes('后台'))).toBe(false);
 
     app.unmount();
   });

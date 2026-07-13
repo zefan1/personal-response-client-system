@@ -20,7 +20,8 @@ public class GlobalApiExceptionHandler {
     HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
     if (ApiErrorCodes.BAD_REQUEST.equals(ex.getErrorCode()) || ApiErrorCodes.CONFIG_INVALID.equals(ex.getErrorCode())
         || ApiErrorCodes.VERSION_EXISTS.equals(ex.getErrorCode()) || ApiErrorCodes.VERSION_PACKAGE_MISSING.equals(ex.getErrorCode())
-        || ApiErrorCodes.VERSION_UPLOAD_FAILED.equals(ex.getErrorCode())) {
+        || ApiErrorCodes.VERSION_UPLOAD_FAILED.equals(ex.getErrorCode()) || isImageClientError(ex.getErrorCode())
+        || "20-10005".equals(ex.getErrorCode())) {
       status = HttpStatus.BAD_REQUEST;
     } else if (ApiErrorCodes.VERSION_STATUS_INVALID.equals(ex.getErrorCode()) || ApiErrorCodes.CONFLICT.equals(ex.getErrorCode())) {
       status = HttpStatus.CONFLICT;
@@ -51,5 +52,9 @@ public class GlobalApiExceptionHandler {
   public ResponseEntity<ApiResponse<Void>> handleAny(Exception ex) {
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
         .body(ApiResponse.error(ApiErrorCodes.INTERNAL_ERROR, "system internal error"));
+  }
+
+  private boolean isImageClientError(String errorCode) {
+    return "30-10001".equals(errorCode) || "30-10002".equals(errorCode);
   }
 }

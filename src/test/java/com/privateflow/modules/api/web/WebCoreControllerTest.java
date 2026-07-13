@@ -21,6 +21,13 @@ import com.privateflow.modules.api.config.SystemConfig;
 import com.privateflow.modules.api.config.SystemConfigProvider;
 import com.privateflow.modules.api.health.HealthService;
 import com.privateflow.modules.api.help.HelpService;
+import com.privateflow.modules.desktop.DesktopRuntimeConfigResponse;
+import com.privateflow.modules.desktop.DesktopSkillStatus;
+import com.privateflow.modules.desktop.DesktopSkillStatusResponse;
+import com.privateflow.modules.desktop.DesktopStatusController;
+import com.privateflow.modules.desktop.DesktopStatusResponse;
+import com.privateflow.modules.desktop.DesktopStatusService;
+import com.privateflow.modules.runtime.RuntimeModeStatus;
 import com.privateflow.modules.quicksearch.ContentType;
 import com.privateflow.modules.quicksearch.QuickSearchController;
 import com.privateflow.modules.quicksearch.QuickSearchItem;
@@ -43,6 +50,7 @@ class WebCoreControllerTest {
   private HealthService healthService;
   private HelpService helpService;
   private QuickSearchService quickSearchService;
+  private DesktopStatusService desktopStatusService;
   private MockMvc mockMvc;
 
   @BeforeEach
@@ -53,13 +61,15 @@ class WebCoreControllerTest {
     healthService = org.mockito.Mockito.mock(HealthService.class);
     helpService = org.mockito.Mockito.mock(HelpService.class);
     quickSearchService = org.mockito.Mockito.mock(QuickSearchService.class);
+    desktopStatusService = org.mockito.Mockito.mock(DesktopStatusService.class);
     mockMvc = MockMvcBuilders
         .standaloneSetup(
             new AuthController(authService, configProvider),
             new ConfigController(configAdminService),
             new HealthController(healthService),
             new HelpController(helpService),
-            new QuickSearchController(quickSearchService))
+            new QuickSearchController(quickSearchService),
+            new DesktopStatusController(desktopStatusService))
         .setControllerAdvice(new GlobalApiExceptionHandler())
         .build();
   }
@@ -128,6 +138,12 @@ class WebCoreControllerTest {
     when(healthService.health()).thenReturn(Map.of("status", "UP"));
     when(helpService.request(any())).thenReturn(Map.of("requestId", 7));
     when(helpService.resolve(any())).thenReturn(Map.of("resolved", true));
+    when(desktopStatusService.currentStatus()).thenReturn(new DesktopStatusResponse(
+        "Admin",
+        Role.ADMIN,
+        new DesktopSkillStatusResponse(DesktopSkillStatus.OK, "2026-08-01", 27, "有效至 2026-08-01"),
+        new RuntimeModeStatus(false, "真实接口模式", "外部表格、AI 技能和图片识别调用真实接口。"),
+        new DesktopRuntimeConfigResponse(10)));
     when(quickSearchService.listEnabledItems()).thenReturn(List.of(new QuickSearchItem(
         1L,
         ContentType.TEMPLATE,
@@ -158,6 +174,16 @@ class WebCoreControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].contentType").value("TEMPLATE"))
         .andExpect(jsonPath("$.data[0].shortcutCode").value("op"));
+    mockMvc.perform(get("/api/v1/desktop/status"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.accountName").value("Admin"))
+        .andExpect(jsonPath("$.data.role").value("ADMIN"))
+        .andExpect(jsonPath("$.data.skillStatus.status").value("OK"))
+        .andExpect(jsonPath("$.data.skillStatus.label").value("有效至 2026-08-01"))
+        .andExpect(jsonPath("$.data.llmStatus.status").value("UNKNOWN"))
+        .andExpect(jsonPath("$.data.runtimeMode.mockExternals").value(false))
+        .andExpect(jsonPath("$.data.runtimeMode.label").value("真实接口模式"))
+        .andExpect(jsonPath("$.data.runtimeConfig.clipboardScreenshotConfirmPromptS").value(10));
   }
 
   private SystemConfig systemConfig() {

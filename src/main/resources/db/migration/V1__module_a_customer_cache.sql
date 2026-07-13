@@ -94,7 +94,7 @@ VALUES
   ('cache.lock_spin_max', '3', '缓存击穿锁自旋次数'),
   ('cache.lock_spin_interval_ms', '100', '缓存击穿锁自旋间隔毫秒'),
   ('cache.lock_ttl_s', '5', '缓存击穿锁TTL秒数')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);
 
 INSERT INTO datasource_field_mappings (source_table, source_field, target_field, transform_rule)
 VALUES

@@ -19,6 +19,10 @@ public class ProfileFieldRegistry {
 
   static {
     register("nickname", "nickname", String.class);
+    register("sourceChannel", "source_channel", String.class);
+    register("intendedStore", "intended_store", String.class);
+    register("intendedProject", "intended_project", String.class);
+    register("purchasedProject", "purchased_project", String.class);
     register("personalityType", "personality_type", String.class);
     register("postpartumMonths", "postpartum_months", BigDecimal.class);
     register("parity", "parity", String.class);

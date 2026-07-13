@@ -6,6 +6,13 @@ export type BridgeResult = {
   url?: string;
 };
 
+export type AlwaysOnTopResult = {
+  success: boolean;
+  alwaysOnTop: boolean;
+  error?: string;
+  message?: string;
+};
+
 type ClipboardImagePayload = {
   imageBase64: string;
   md5: string;
@@ -44,7 +51,7 @@ export async function captureScreenshot(): Promise<BridgeResult> {
 
 export async function openAdminConsole(url: string): Promise<BridgeResult> {
   if (window.desktopBridge?.openAdminConsole) {
-    return window.desktopBridge.openAdminConsole();
+    return window.desktopBridge.openAdminConsole(url);
   }
   if (window.desktopBridge || isElectronUserAgent()) {
     return {
@@ -55,6 +62,20 @@ export async function openAdminConsole(url: string): Promise<BridgeResult> {
   }
   const opened = window.open(url, '_blank', 'noopener,noreferrer');
   return { success: Boolean(opened) };
+}
+
+export async function toggleAlwaysOnTop(): Promise<AlwaysOnTopResult> {
+  if (window.desktopBridge?.toggleAlwaysOnTop) {
+    return window.desktopBridge.toggleAlwaysOnTop();
+  }
+  return { success: false, alwaysOnTop: false, error: 'DESKTOP_BRIDGE_UNAVAILABLE' };
+}
+
+export async function getAlwaysOnTop(): Promise<AlwaysOnTopResult> {
+  if (window.desktopBridge?.getAlwaysOnTop) {
+    return window.desktopBridge.getAlwaysOnTop();
+  }
+  return { success: false, alwaysOnTop: false, error: 'DESKTOP_BRIDGE_UNAVAILABLE' };
 }
 
 function isElectronUserAgent(): boolean {

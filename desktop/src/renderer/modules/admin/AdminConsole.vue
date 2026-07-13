@@ -5,19 +5,33 @@
         <strong>运营后台</strong>
         <span>{{ sessionLabel }}</span>
       </div>
-      <button
-        v-for="section in sections"
-        :key="section.key"
-        class="ops-admin-nav"
-        :class="{ active: activeSectionKey === section.key }"
-        type="button"
-        @click="selectSection(section.key)"
-      >
-        <span>{{ section.title }}</span>
-        <small>{{ section.subtitle }}</small>
-      </button>
+      <nav class="ops-admin-nav-groups" aria-label="运营后台模块">
+        <section v-for="group in navGroups" :key="group.key" class="ops-admin-nav-group">
+          <button
+            class="ops-admin-group-button"
+            :class="{ active: activeSection.groupKey === group.key }"
+            type="button"
+            @click="selectSection(group.defaultKey)"
+          >
+            <span>{{ group.title }}</span>
+            <small>{{ group.subtitle }}</small>
+          </button>
+          <div class="ops-admin-subnav">
+            <button
+              v-for="section in group.pages"
+              :key="section.key"
+              class="ops-admin-subnav-button"
+              :class="{ active: activeSectionKey === section.key }"
+              type="button"
+              @click="selectSection(section.key)"
+            >
+              <span>{{ section.module }}</span>
+              <small>{{ section.title }}</small>
+            </button>
+          </div>
+        </section>
+      </nav>
       <div class="ops-admin-sidebar-actions">
-        <button class="secondary small" type="button" @click="$emit('switch-desktop')">桌面工作台</button>
         <button class="secondary small" type="button" @click="$emit('logout')">退出</button>
       </div>
     </aside>
@@ -30,6 +44,7 @@
           <span>{{ activeSection.description }}</span>
         </div>
         <div class="ops-admin-toolbar-actions">
+          <span :class="['runtime-mode-pill', runtimeModePillClass]" :title="runtimeModeDescription">{{ runtimeModeLabel }}</span>
           <button class="secondary" type="button" :disabled="loading" @click="refreshActiveSection">刷新</button>
           <button class="primary" type="button" @click="startPrimaryAction">{{ activeSection.primaryAction }}</button>
         </div>
@@ -45,8 +60,8 @@
         </article>
       </section>
 
-      <section v-if="activeSection.key === 'skill-ai'" class="ops-admin-layout">
-        <article class="ops-panel wide">
+      <section v-if="activeSection.groupKey === 'config-center'" class="ops-admin-layout">
+        <article v-if="activeSection.key === 'skill-scenes'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>Skill 场景绑定</h2>
@@ -57,16 +72,11 @@
           <div class="ops-filter-bar three">
             <select v-model="skillSceneFilter" @change="loadSkillAi">
               <option value="">全部场景</option>
-              <option value="OPENING">开场白</option>
-              <option value="ACTIVE_REPLY">主动回复</option>
-              <option value="REGENERATE">换一组</option>
+              <option v-for="scene in SKILL_SCENE_OPTIONS" :key="scene.value" :value="scene.value">{{ scene.label }}</option>
             </select>
             <select v-model="skillLeadTypeFilter" @change="loadSkillAi">
               <option value="">全部线索类型</option>
-              <option value="GENERAL">通用</option>
-              <option value="TUAN_GOU">团购客资</option>
-              <option value="XIAN_SUO">线索客资</option>
-              <option value="PENDING">待确认</option>
+              <option v-for="option in LEAD_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
             <select v-model.number="skillAnalyticsDays" @change="loadSkillAnalytics">
               <option :value="7">近 7 天</option>
@@ -100,7 +110,7 @@
           </div>
         </article>
 
-        <article class="ops-panel wide">
+        <article v-if="activeSection.key === 'skill-scenes'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>在线测试与调用监控</h2>
@@ -129,7 +139,7 @@
           <p v-else class="ops-empty">还没有测试结果。先在上方列表选择一条绑定测试。</p>
         </article>
 
-        <article class="ops-panel">
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel">
           <div class="ops-panel-head">
             <div>
               <h2>Skill 环境</h2>
@@ -148,13 +158,13 @@
                 {{ isActiveEnvironment(env) ? '当前使用' : '启用' }}
               </button>
               <button class="secondary small" type="button" @click="openForm('skillEnv', env)">编辑</button>
-              <button class="secondary small danger" type="button" :disabled="isActiveEnvironment(env)" @click="confirmDeleteEnvironment('skill', env)">删除</button>
+              <button class="secondary small danger" type="button" :disabled="!canDeleteEnvironment('skill', env)" @click="confirmDeleteEnvironment('skill', env)">删除</button>
             </div>
           </div>
           <p v-if="!skillEnvironments.length" class="ops-empty">暂无 Skill 环境，请先新增。</p>
         </article>
 
-        <article class="ops-panel">
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel">
           <div class="ops-panel-head">
             <div>
               <h2>识图环境</h2>
@@ -174,19 +184,497 @@
               </button>
               <button class="secondary small" type="button" @click="openForm('imageEnv', env)">编辑</button>
               <button class="secondary small" type="button" @click="testImageEnvironment(env)">测试连接</button>
-              <button class="secondary small danger" type="button" :disabled="isActiveEnvironment(env)" @click="confirmDeleteEnvironment('image', env)">删除</button>
+              <button class="secondary small danger" type="button" :disabled="!canDeleteEnvironment('image', env)" @click="confirmDeleteEnvironment('image', env)">删除</button>
             </div>
           </div>
           <p v-if="!imageEnvironments.length" class="ops-empty">暂无识图环境，请先新增。</p>
         </article>
 
-        <article class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>配置顺序</h2>
+              <p>先配置 Skill、识图、LLM 环境并测试连接，再按场景开启回复生成、档案提取、跟进建议等开关；真实 Key 未配置前建议保持生产开关关闭。</p>
+            </div>
+          </div>
+          <div class="ops-chip-list">
+            <span class="ops-chip">1. 环境与 API Key</span>
+            <span class="ops-chip">2. 测试连接</span>
+            <span class="ops-chip">3. 场景路由</span>
+            <span class="ops-chip">4. 开启业务能力</span>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h2>LLM 思考环境</h2>
+              <p>用于后续接入独立推理、总结和回复优化，可配置多个供应商轮流测试。</p>
+            </div>
+            <button class="secondary small" type="button" @click="openForm('llmEnv')">新增环境</button>
+          </div>
+          <div v-for="env in llmEnvironments" :key="env.id" class="ops-env-card">
+            <div>
+              <strong>{{ env.envName }}</strong>
+              <span>{{ env.baseUrl }}</span>
+              <small>{{ llmEnvironmentLabel(env) }}</small>
+            </div>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="isActiveEnvironment(env)" @click="confirmActivateEnvironment('llm', env)">
+                {{ isActiveEnvironment(env) ? '当前使用' : '启用' }}
+              </button>
+              <button class="secondary small" type="button" @click="openForm('llmEnv', env)">编辑</button>
+              <button class="secondary small" type="button" @click="testLlmEnvironment(env)">测试连接</button>
+              <button class="secondary small danger" type="button" :disabled="!canDeleteEnvironment('llm', env)" @click="confirmDeleteEnvironment('llm', env)">删除</button>
+            </div>
+          </div>
+          <p v-if="!llmEnvironments.length" class="ops-empty">暂无 LLM 环境，请先新增。</p>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>LLM 回复生成</h2>
+              <p>控制回复建议是否优先走 LLM，并保留 Skill 回落，未配置真实模型前建议保持关闭。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveLlmReplySettings">保存回复生成</button>
+          </div>
+          <div class="ops-form-grid">
+            <label>
+              启用 LLM 回复生成
+              <input v-model="llmReplyDraft.enabled" type="checkbox" />
+            </label>
+            <label>
+              失败时回落 Skill
+              <input v-model="llmReplyDraft.fallbackToSkill" type="checkbox" />
+            </label>
+            <label>
+              温度覆盖
+              <input v-model="llmReplyDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用环境默认值" />
+            </label>
+            <label>
+              最大 Tokens
+              <input v-model.number="llmReplyDraft.maxTokens" type="number" min="1" max="32000" />
+            </label>
+            <label class="ops-form-span-2">
+              系统 Prompt
+              <textarea v-model="llmReplyDraft.systemPrompt" rows="8" placeholder="填写回复建议 LLM 的系统提示词"></textarea>
+            </label>
+          </div>
+          <div class="ops-detail-box">
+            <strong>当前策略</strong>
+            <p>{{ llmReplyDraft.enabled ? 'LLM 优先生成回复建议' : '继续使用 Skill 生成回复建议' }}；{{ llmReplyDraft.fallbackToSkill ? 'LLM 异常时自动回落 Skill' : 'LLM 异常时直接走降级提示' }}。</p>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>LLM 档案提取</h2>
+              <p>控制发送确认后的资料更新建议是否优先走 LLM，默认关闭并保留 Skill 回落。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveLlmProfileSettings">保存档案提取</button>
+          </div>
+          <div class="ops-form-grid">
+            <label>
+              启用 LLM 档案提取
+              <input v-model="llmProfileDraft.enabled" type="checkbox" />
+            </label>
+            <label>
+              失败时回落 Skill
+              <input v-model="llmProfileDraft.fallbackToSkill" type="checkbox" />
+            </label>
+            <label>
+              温度覆盖
+              <input v-model="llmProfileDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用环境默认值" />
+            </label>
+            <label>
+              最大 Tokens
+              <input v-model.number="llmProfileDraft.maxTokens" type="number" min="1" max="32000" />
+            </label>
+            <label class="ops-form-span-2">
+              系统 Prompt
+              <textarea v-model="llmProfileDraft.systemPrompt" rows="7" placeholder="填写档案提取 LLM 的系统提示词"></textarea>
+            </label>
+          </div>
+          <div class="ops-detail-box">
+            <strong>当前策略</strong>
+            <p>{{ llmProfileDraft.enabled ? '发送确认后优先用 LLM 提取资料更新' : '继续使用 Skill 提取资料更新' }}；{{ llmProfileDraft.fallbackToSkill ? 'LLM 异常时自动回落 Skill' : 'LLM 异常时不写入建议' }}。</p>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>LLM 跟进建议</h2>
+              <p>当回复流程没有返回下次跟进建议时，用 LLM 补充跟进时间和方向。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveLlmFollowupSettings">保存跟进建议</button>
+          </div>
+          <div class="ops-form-grid">
+            <label>
+              启用 LLM 跟进建议
+              <input v-model="llmFollowupDraft.enabled" type="checkbox" />
+            </label>
+            <label>
+              温度覆盖
+              <input v-model="llmFollowupDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用环境默认值" />
+            </label>
+            <label>
+              最大 Tokens
+              <input v-model.number="llmFollowupDraft.maxTokens" type="number" min="1" max="32000" />
+            </label>
+            <label class="ops-form-span-2">
+              系统 Prompt
+              <textarea v-model="llmFollowupDraft.systemPrompt" rows="6" placeholder="填写跟进建议 LLM 的系统提示词"></textarea>
+            </label>
+          </div>
+          <div class="ops-detail-box">
+            <strong>当前策略</strong>
+            <p>{{ llmFollowupDraft.enabled ? '缺少跟进建议时由 LLM 补充' : '继续使用当前回复方向作为跟进方向' }}。</p>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>LLM 异常识别</h2>
+              <p>发送确认后异步识别客户不满或流失风险，命中后推送到侧边栏提醒中心。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveLlmAbnormalSettings">保存异常识别</button>
+          </div>
+          <div class="ops-form-grid">
+            <label>
+              启用 LLM 异常识别
+              <input v-model="llmAbnormalDraft.enabled" type="checkbox" />
+            </label>
+            <label>
+              温度覆盖
+              <input v-model="llmAbnormalDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用环境默认值" />
+            </label>
+            <label>
+              最大 Tokens
+              <input v-model.number="llmAbnormalDraft.maxTokens" type="number" min="1" max="32000" />
+            </label>
+            <label class="ops-form-span-2">
+              系统 Prompt
+              <textarea v-model="llmAbnormalDraft.systemPrompt" rows="6" placeholder="填写异常识别 LLM 的系统提示词"></textarea>
+            </label>
+          </div>
+          <div class="ops-detail-box">
+            <strong>当前策略</strong>
+            <p>{{ llmAbnormalDraft.enabled ? '发送确认后异步识别客户不满和流失风险' : '不启用 LLM 异常识别' }}。</p>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>LLM 总结补位</h2>
+              <p>当发送确认没有会话摘要时，用 LLM 生成短跟进备注，供客户档案和表格写入使用。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveLlmSummarySettings">保存总结补位</button>
+          </div>
+          <div class="ops-form-grid">
+            <label>
+              启用 LLM 总结补位
+              <input v-model="llmSummaryDraft.enabled" type="checkbox" />
+            </label>
+            <label>
+              温度覆盖
+              <input v-model="llmSummaryDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用环境默认值" />
+            </label>
+            <label>
+              最大 Tokens
+              <input v-model.number="llmSummaryDraft.maxTokens" type="number" min="1" max="32000" />
+            </label>
+            <label class="ops-form-span-2">
+              系统 Prompt
+              <textarea v-model="llmSummaryDraft.systemPrompt" rows="6" placeholder="填写总结补位 LLM 的系统提示词"></textarea>
+            </label>
+          </div>
+          <div class="ops-detail-box">
+            <strong>当前策略</strong>
+            <p>{{ llmSummaryDraft.enabled ? '缺少摘要时由 LLM 生成跟进备注' : '缺少摘要时继续使用已发送文本作为备注' }}。</p>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>LLM 场景路由</h2>
+              <p>按业务场景和线索类型选择 LLM 环境，可用多个模型做并行测试和灰度切换。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="!llmEnvironments.length" @click="openForm('llmRoute')">新增路由</button>
+          </div>
+          <div class="ops-table">
+            <div class="ops-table-row head llm-route">
+              <span>场景</span>
+              <span>线索类型</span>
+              <span>环境</span>
+              <span>模型</span>
+              <span>优先级</span>
+              <span>状态</span>
+              <span>操作</span>
+            </div>
+            <div v-for="route in llmRoutes" :key="route.id" class="ops-table-row llm-route">
+              <span>{{ llmSceneLabel(route.scene) }}</span>
+              <span>{{ route.leadType ? leadTypeLabel(route.leadType) : '通用' }}</span>
+              <span>{{ route.environmentName || llmEnvironmentName(route.environmentId) }}</span>
+              <span>{{ route.model || '-' }}</span>
+              <span>{{ route.priority ?? 0 }}</span>
+              <span><b :class="route.enabled !== false ? 'ok-text' : 'warn-text'">{{ route.enabled !== false ? '当前可用' : '已停用' }}</b></span>
+              <span class="ops-row-actions">
+                <button class="secondary small" type="button" @click="openForm('llmRoute', route)">编辑</button>
+                <button class="secondary small" type="button" @click="confirmToggleLlmRoute(route)">{{ route.enabled !== false ? '停用' : '启用' }}</button>
+                <button class="secondary small danger" type="button" @click="confirmDeleteLlmRoute(route)">删除</button>
+              </span>
+            </div>
+            <p v-if="!llmRoutes.length" class="ops-empty">尚未配置 LLM 场景路由；未命中路由时会使用当前启用的 LLM 环境。</p>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>LLM 调用统计</h2>
+              <p>查看 LLM 按场景、线索类型和模型的调用量、成功率与平均响应时间。</p>
+            </div>
+            <button class="secondary small" type="button" @click="loadLlmAnalytics">刷新统计</button>
+          </div>
+          <div class="ops-filter-bar">
+            <select v-model.number="llmAnalyticsDays" @change="loadLlmAnalytics">
+              <option :value="7">近 7 天</option>
+              <option :value="14">近 14 天</option>
+              <option :value="30">近 30 天</option>
+            </select>
+            <span class="ops-inline-info">统计窗口：近 {{ llmAnalyticsDays }} 天</span>
+          </div>
+          <div class="ops-health-grid">
+            <div class="ops-health-card">
+              <span>调用次数</span>
+              <strong>{{ llmCallSummary.totalCalls ?? 0 }}</strong>
+              <small>含成功与失败调用</small>
+            </div>
+            <div class="ops-health-card">
+              <span>成功率</span>
+              <strong>{{ percentLabel(llmCallSummary.successRate) }}</strong>
+              <small>按成功调用占比计算</small>
+            </div>
+            <div class="ops-health-card">
+              <span>平均响应</span>
+              <strong>{{ llmCallSummary.avgResponseTime ?? 0 }}ms</strong>
+              <small>近 {{ llmAnalyticsDays }} 天平均值</small>
+            </div>
+          </div>
+          <div v-if="llmCallDetails.length" class="ops-mini-table">
+            <div class="ops-mini-row head">
+              <span>场景</span>
+              <span>线索类型</span>
+              <span>模型</span>
+              <span>调用</span>
+              <span>成功</span>
+              <span>失败</span>
+              <span>响应ms</span>
+            </div>
+            <div v-for="detail in llmCallDetails" :key="`${detail.scene}-${detail.leadType}-${detail.environmentId}-${detail.model}`" class="ops-mini-row">
+              <span>{{ llmSceneLabel(detail.scene) }}</span>
+              <span>{{ detail.leadType ? leadTypeLabel(detail.leadType) : '通用' }}</span>
+              <span>{{ detail.model || llmEnvironmentName(detail.environmentId) }}</span>
+              <span>{{ detail.totalCalls ?? 0 }}</span>
+              <span>{{ detail.successCount ?? 0 }}</span>
+              <span>{{ detail.failCount ?? 0 }}</span>
+              <span>{{ detail.avgResponseTime ?? 0 }}</span>
+            </div>
+          </div>
+          <p v-else class="ops-empty">暂无 LLM 调用记录。开启 LLM 回复生成或通过测试接口调用后会出现数据。</p>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>Skill 运行参数</h2>
+              <p>控制 AI 调用超时、熔断和失败率告警，保存后立即影响生产路由。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveSkillRuntimeSettings">保存 Skill 参数</button>
+          </div>
+          <div class="ops-form-grid">
+            <label>
+              Skill 调用超时（毫秒）
+              <input v-model.number="skillRuntimeDraft.timeoutMs" type="number" min="5000" max="15000" />
+            </label>
+            <label>
+              熔断窗口（秒）
+              <input v-model.number="skillRuntimeDraft.circuitBreakerWindowS" type="number" min="10" max="300" />
+            </label>
+            <label>
+              熔断失败率
+              <input v-model.number="skillRuntimeDraft.circuitBreakerFailureRate" type="number" min="0.05" max="1" step="0.01" />
+            </label>
+            <label>
+              熔断最小调用数
+              <input v-model.number="skillRuntimeDraft.circuitBreakerMinCalls" type="number" min="1" max="100" />
+            </label>
+            <label>
+              熔断持续时间（秒）
+              <input v-model.number="skillRuntimeDraft.circuitBreakerOpenS" type="number" min="10" max="600" />
+            </label>
+            <label>
+              健康告警失败率
+              <input v-model.number="skillRuntimeDraft.alertFailureRate" type="number" min="0.01" max="1" step="0.01" />
+            </label>
+            <label>
+              告警持续时间（分钟）
+              <input v-model.number="skillRuntimeDraft.alertFailureDurationMinutes" type="number" min="1" max="120" />
+            </label>
+            <label>
+              档案提取超时（毫秒）
+              <input v-model.number="skillRuntimeDraft.profileExtractTimeoutMs" type="number" min="5000" max="12000" />
+            </label>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>识图运行参数</h2>
+              <p>控制截图识别模型、图片限制和连续失败告警。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveImageRuntimeSettings">保存识图参数</button>
+          </div>
+          <div class="ops-form-grid">
+            <label>
+              识图模型
+              <input v-model="imageRuntimeDraft.model" type="text" placeholder="qwen3-vl-plus" />
+            </label>
+            <label>
+              识图超时（毫秒）
+              <input v-model.number="imageRuntimeDraft.timeoutMs" type="number" min="1000" max="60000" />
+            </label>
+            <label>
+              最大图片体积（字节）
+              <input v-model.number="imageRuntimeDraft.maxSizeBytes" type="number" min="1048576" max="20971520" />
+            </label>
+            <label>
+              最大长边像素
+              <input v-model.number="imageRuntimeDraft.maxDimensionPx" type="number" min="640" max="4096" />
+            </label>
+            <label>
+              JPEG 压缩质量
+              <input v-model.number="imageRuntimeDraft.compressQuality" type="number" min="60" max="95" />
+            </label>
+            <label>
+              连续失败告警次数
+              <input v-model.number="imageRuntimeDraft.consecutiveFailuresAlert" type="number" min="1" max="10" />
+            </label>
+            <label>
+              截图确认提示停留（秒）
+              <input v-model.number="imageRuntimeDraft.clipboardScreenshotConfirmPromptS" type="number" min="0" max="60" />
+              <small>0 表示不自动忽略，持续等待手动处理；自动忽略请输入 3-60 秒，建议 10 秒。</small>
+            </label>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>企微表格网关</h2>
+              <p>配置真实企微/智能表格读写网关，影响客户同步和保存到表格。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveTableRuntimeSettings">保存表格参数</button>
+          </div>
+          <div class="ops-form-grid">
+            <label>
+              网关 Base URL
+              <input v-model="tableRuntimeDraft.apiBaseUrl" type="text" placeholder="https://table-gateway.example.com" />
+            </label>
+            <label>
+              网关 API Key
+              <input v-model="tableRuntimeDraft.apiKey" type="password" autocomplete="new-password" aria-label="企微表格网关 API Key" placeholder="留空表示沿用当前 Key" />
+              <small>当前 Key：{{ configSecretStatus('table.api_key') }}</small>
+            </label>
+            <label>
+              写入超时（毫秒）
+              <input v-model.number="tableRuntimeDraft.writeTimeoutMs" type="number" min="5000" max="20000" />
+            </label>
+            <label>
+              最大重试次数
+              <input v-model.number="tableRuntimeDraft.retryMaxCount" type="number" min="3" max="10" />
+            </label>
+            <label>
+              重试间隔（秒）
+              <input v-model.number="tableRuntimeDraft.retryIntervalS" type="number" min="30" max="300" />
+            </label>
+            <label>
+              失败告警小时数
+              <input v-model.number="tableRuntimeDraft.alertFailureHours" type="number" min="1" max="24" />
+            </label>
+            <label>
+              告警通知对象
+              <select v-model="tableRuntimeDraft.alertNotifyTarget">
+                <option value="ADMIN">管理员</option>
+                <option value="LEADER">组长</option>
+                <option value="BOTH">管理员和组长</option>
+              </select>
+            </label>
+            <label>
+              队列提醒阈值
+              <input v-model.number="tableRuntimeDraft.queueWarnThreshold" type="number" min="50" max="500" />
+            </label>
+            <label>
+              队列告警阈值
+              <input v-model.number="tableRuntimeDraft.queueAlertThreshold" type="number" min="500" max="5000" />
+            </label>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>数据同步策略</h2>
+              <p>控制企微表格同步频率、缓存 TTL、手动同步和导入限制。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveDatasourceRuntimeSettings">保存同步策略</button>
+          </div>
+          <div class="ops-form-grid">
+            <label>
+              自动同步 Cron
+              <input v-model="datasourceRuntimeDraft.syncCron" type="text" placeholder="0 */30 * * * *" />
+            </label>
+            <label>
+              客户缓存 TTL（秒）
+              <input v-model.number="datasourceRuntimeDraft.ttlSeconds" type="number" min="60" max="86400" />
+            </label>
+            <label>
+              同步 API 超时（毫秒）
+              <input v-model.number="datasourceRuntimeDraft.syncTimeoutMs" type="number" min="5000" max="60000" />
+            </label>
+            <label>
+              映射版本保留数
+              <input v-model.number="datasourceRuntimeDraft.mappingVersionMax" type="number" min="20" max="200" />
+            </label>
+            <label>
+              CSV 单次导入行数
+              <input v-model.number="datasourceRuntimeDraft.importMaxRows" type="number" min="1000" max="10000" />
+            </label>
+            <label>
+              手动同步超时（秒）
+              <input v-model.number="datasourceRuntimeDraft.manualSyncTimeoutS" type="number" min="30" max="120" />
+            </label>
+            <label>
+              同步状态刷新（秒）
+              <input v-model.number="datasourceRuntimeDraft.syncStatusRefreshS" type="number" min="15" max="120" />
+            </label>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>Prompt 与规则</h2>
               <p>红线逐条编辑，前缀规则一行一个，保存后立即生效。</p>
             </div>
-            <button class="primary small" type="button" @click="savePromptSettings">保存配置</button>
+            <button class="primary small" type="button" :disabled="loading" @click="savePromptSettings">保存配置</button>
           </div>
           <div class="ops-filter-bar">
             <select v-model="selectedPromptType" @change="loadPromptVersions">
@@ -213,6 +701,14 @@
               降级回复
               <textarea v-model="promptDraft.fallbackReply" rows="5" placeholder="AI 服务不可用时展示给同事的回复"></textarea>
             </label>
+            <label>
+              识图提示词
+              <textarea v-model="promptDraft.imageRecognitionPrompt" rows="5" placeholder="告诉识图模型需要提取昵称、手机号、消息和时间"></textarea>
+            </label>
+            <label>
+              换一组次数上限
+              <input v-model.number="promptDraft.regenerateMaxCount" type="number" min="0" max="10" placeholder="0 表示不限制" />
+            </label>
           </div>
           <div v-if="promptVersions.length" class="ops-card-grid">
             <article v-for="version in promptVersions" :key="version.version" class="ops-content-card">
@@ -225,8 +721,60 @@
         </article>
       </section>
 
-      <section v-else-if="activeSection.key === 'data-content'" class="ops-admin-layout">
-        <article class="ops-panel wide">
+      <section v-else-if="activeSection.groupKey === 'data-content'" class="ops-admin-layout">
+        <article v-if="activeSection.key === 'data-integration'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>客户查询</h2>
+              <p>查询已同步到数据库的客户，可按姓名/昵称、手机号、门店、项目、来源或管家搜索。</p>
+            </div>
+          </div>
+          <div class="ops-filter-bar customer-search-filter">
+            <input v-model="customerSearchKeyword" placeholder="例如：1111、王女士、万江店" @keyup.enter="resetCustomerSearchPageAndLoad" />
+            <button class="primary small" type="button" :disabled="loading" @click="resetCustomerSearchPageAndLoad">查询客户</button>
+          </div>
+          <div class="ops-table">
+            <div class="ops-table-row head customer-search">
+              <span>客户</span>
+              <span>手机号</span>
+              <span>来源</span>
+              <span>线索类型</span>
+              <span>门店 / 项目</span>
+              <span>阶段 / 意向</span>
+              <span>分配管家</span>
+              <span>操作</span>
+            </div>
+            <div v-for="customer in customerSearchItems" :key="customer.id || customer.phone" class="ops-table-row customer-search">
+              <span>{{ customer.nickname || '未填写昵称' }}</span>
+              <span>{{ customer.phone || '-' }}</span>
+              <span>{{ customer.sourceChannel || customer.sourceTable || '-' }}</span>
+              <span>{{ leadTypeLabel(customer.leadType) }}</span>
+              <span>{{ customer.intendedStore || customer.appointmentStore || '-' }} / {{ customer.intendedProject || customer.appointmentItem || '-' }}</span>
+              <span>{{ translateValue(customer.customerStage) }} / {{ translateValue(customer.intentLevel) }}</span>
+              <span>{{ customer.assignedKeeper || '-' }}</span>
+              <span class="ops-row-actions">
+                <button class="secondary small" type="button" @click="toggleAdminCustomerDetail(customer)">{{ selectedAdminCustomer?.phone === customer.phone ? '收起' : '查看档案' }}</button>
+              </span>
+            </div>
+            <p v-if="!customerSearchItems.length" class="ops-empty">没有找到符合条件的客户。</p>
+          </div>
+          <div v-if="selectedAdminCustomer" class="ops-detail-box customer-search-detail">
+            <strong>{{ selectedAdminCustomer.nickname || '未填写昵称' }} · {{ selectedAdminCustomer.phone }}</strong>
+            <p>客户阶段：{{ translateValue(selectedAdminCustomer.customerStage) }} · 意向等级：{{ translateValue(selectedAdminCustomer.intentLevel) }} · 最近跟进：{{ formatDate(selectedAdminCustomer.lastFollowupAt) }} · 下次跟进：{{ formatDate(selectedAdminCustomer.nextFollowupAt) }}</p>
+            <p>预约：{{ formatDate(selectedAdminCustomer.appointmentDate) }} · {{ selectedAdminCustomer.appointmentStore || '-' }} · {{ selectedAdminCustomer.appointmentItem || '-' }} · 到店：{{ selectedAdminCustomer.arrived || '-' }}</p>
+            <p>数据来源：{{ selectedAdminCustomer.sourceTable || selectedAdminCustomer.sourceChannel || '-' }} · 最后更新：{{ formatDate(selectedAdminCustomer.updatedAt) }}</p>
+          </div>
+          <div class="ops-pagination">
+            <strong>当前筛选：{{ customerSearchPageInfo.total }} 个客户</strong>
+            <p>第 {{ customerSearchPageInfo.page }} / {{ customerSearchTotalPages }} 页，每页 {{ customerSearchPageInfo.size }} 条</p>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="customerSearchPageInfo.page <= 1" @click="changeCustomerSearchPage(-1)">上一页</button>
+              <button class="secondary small" type="button" :disabled="customerSearchPageInfo.page >= customerSearchTotalPages" @click="changeCustomerSearchPage(1)">下一页</button>
+            </div>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'data-integration'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>客户数据源</h2>
@@ -262,7 +810,7 @@
           </div>
         </article>
 
-        <article class="ops-panel wide">
+        <article v-if="activeSection.key === 'data-integration'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>字段映射</h2>
@@ -277,16 +825,38 @@
           </div>
           <div v-if="selectedDatasource" class="ops-mapping-grid">
             <label v-for="field in customerFields" :key="field.key">
-              {{ field.label || field.key }}
+              <span class="ops-field-title">
+                {{ field.label || field.key }}
+                <label class="ops-inline-toggle">
+                  <input v-model="mappingEnabledDraft[field.key]" type="checkbox" />
+                  启用
+                </label>
+              </span>
               <input v-model="mappingDraft[field.key]" :list="`columns-${field.key}`" :placeholder="field.key === 'phone' ? '必须映射手机号列' : '填写表格列名'" />
               <datalist :id="`columns-${field.key}`">
                 <option v-for="column in datasourceColumns" :key="`${field.key}-${columnName(column)}`" :value="columnName(column)" />
               </datalist>
             </label>
           </div>
+          <div v-if="datasourceColumnStatus" class="ops-detail-box">
+            <strong>列名识别：{{ datasourceColumnStatusLabel }}</strong>
+            <p>{{ datasourceColumnStatusDetail }}</p>
+            <div v-if="datasourceColumns.length" class="ops-chip-list">
+              <span v-for="column in datasourceColumns.slice(0, 12)" :key="`column-${columnName(column)}`" class="ops-chip" :class="{ muted: !columnMapped(column) }">
+                {{ columnName(column) }}{{ columnTarget(column) ? ` -> ${customerFieldLabel(columnTarget(column))}` : '' }}
+              </span>
+            </div>
+          </div>
           <div v-if="mappingCompare" class="ops-detail-box">
             <strong>映射差异</strong>
             <p>{{ summarizeObject(mappingCompare.summary) }}</p>
+            <div class="ops-diff-grid">
+              <div v-for="group in mappingDiffGroups" :key="group.key" class="ops-diff-group">
+                <strong>{{ group.label }}（{{ group.items.length }}）</strong>
+                <span v-for="item in group.items.slice(0, 6)" :key="`${group.key}-${mappingDiffKey(item)}`">{{ mappingDiffText(item) }}</span>
+                <small v-if="group.items.length > 6">还有 {{ group.items.length - 6 }} 条未展示</small>
+              </div>
+            </div>
           </div>
           <div v-if="mappingVersions.length" class="ops-card-grid">
             <article v-for="version in mappingVersions" :key="version.version" class="ops-content-card">
@@ -299,7 +869,7 @@
           <p v-if="!selectedDatasource" class="ops-empty">从上方数据源列表选择一项。</p>
         </article>
 
-        <article class="ops-panel">
+        <article v-if="activeSection.key === 'data-integration'" class="ops-panel">
           <div class="ops-panel-head">
             <div>
               <h2>CSV 导入</h2>
@@ -314,16 +884,23 @@
           </div>
           <div v-if="csvImportResult" class="ops-detail-box">
             <strong>导入结果</strong>
-            <p>{{ summarizeObject(csvImportResult) }}</p>
+            <p>{{ csvImportSummary }}</p>
+            <div v-if="csvImportErrors.length" class="ops-error-list">
+              <span v-for="error in csvImportErrors.slice(0, 8)" :key="`${error.row}-${error.reason}`">第 {{ error.row }} 行：{{ error.reason }}</span>
+              <small v-if="csvImportErrors.length > 8">还有 {{ csvImportErrors.length - 8 }} 条错误未展示</small>
+            </div>
           </div>
           <div v-if="importLogs.length" class="ops-preview-list">
             <strong>最近导入记录</strong>
-            <span v-for="log in importLogs.slice(0, 4)" :key="log.id || log.createdAt">{{ formatDate(log.createdAt) }} · {{ log.status || log.result || '已记录' }}</span>
+            <span v-for="log in importLogs.slice(0, 4)" :key="log.id || log.createdAt">
+              {{ formatDate(log.createdAt) }} · {{ log.fileName || 'CSV 文件' }} · {{ importLogSummary(log) }}
+              <small v-if="log.errorDetail">错误：{{ textSnippet(log.errorDetail) }}</small>
+            </span>
           </div>
           <p v-if="!csvPreview.length && !importLogs.length" class="ops-empty">拖拽或选择 CSV 文件。</p>
         </article>
 
-        <article class="ops-panel wide">
+        <article v-if="activeSection.key === 'quick-search-content'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>速搜内容</h2>
@@ -331,15 +908,20 @@
             </div>
             <button class="primary small" type="button" @click="openForm('quickSearch')">新增内容</button>
           </div>
-          <div class="ops-filter-bar">
-            <input v-model="quickSearchKeyword" placeholder="搜索标题、快线码或正文" />
-            <select v-model="quickSearchType">
+          <div class="ops-filter-bar three">
+            <input v-model="quickSearchKeyword" placeholder="搜索标题、快线码或正文" @change="resetQuickSearchPageAndLoad" />
+            <select v-model="quickSearchType" @change="resetQuickSearchPageAndLoad">
               <option value="">全部类型</option>
               <option value="TEMPLATE">话术模板</option>
               <option value="KNOWLEDGE">知识片段</option>
               <option value="LOCATION">门店定位</option>
               <option value="IMAGE">图片素材</option>
               <option value="MINI_PROGRAM">小程序引导</option>
+            </select>
+            <select v-model="quickSearchEnabledFilter" @change="resetQuickSearchPageAndLoad">
+              <option value="">全部状态</option>
+              <option value="1">启用</option>
+              <option value="0">停用</option>
             </select>
           </div>
           <div class="ops-row-actions">
@@ -348,7 +930,7 @@
             <button class="secondary small danger" type="button" :disabled="!quickSearchSelectedIds.length" @click="batchDeleteQuickSearch">批量删除</button>
           </div>
           <div class="ops-card-grid">
-            <article v-for="item in filteredQuickSearchItems" :key="item.id" class="ops-content-card">
+            <article v-for="item in quickSearchItems" :key="item.id" class="ops-content-card">
               <label class="ops-checkline">
                 <input v-model="quickSearchSelectedIds" type="checkbox" :value="item.id" />
                 选中
@@ -373,12 +955,20 @@
               </div>
             </article>
           </div>
-          <p v-if="!filteredQuickSearchItems.length" class="ops-empty">暂无匹配内容。</p>
+          <p v-if="!quickSearchItems.length" class="ops-empty">暂无匹配内容。</p>
+          <div class="ops-pagination">
+            <strong>当前筛选：{{ quickSearchPageInfo.total }} 条速搜内容</strong>
+            <p>第 {{ quickSearchPageInfo.page }} / {{ quickSearchTotalPages }} 页，每页 {{ quickSearchPageInfo.size }} 条</p>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="quickSearchPageInfo.page <= 1" @click="changeQuickSearchPage(-1)">上一页</button>
+              <button class="secondary small" type="button" :disabled="quickSearchPageInfo.page >= quickSearchTotalPages" @click="changeQuickSearchPage(1)">下一页</button>
+            </div>
+          </div>
         </article>
       </section>
 
-      <section v-else-if="activeSection.key === 'org-rules-tags'" class="ops-admin-layout">
-        <article class="ops-panel wide">
+      <section v-else-if="activeSection.groupKey === 'org-rules-tags'" class="ops-admin-layout">
+        <article v-if="activeSection.key === 'account-permissions'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>账号与权限</h2>
@@ -387,33 +977,35 @@
             <button class="primary small" type="button" @click="openForm('account')">新增账号</button>
           </div>
           <div class="ops-filter-bar three">
-            <input v-model="accountKeyword" placeholder="搜索姓名或手机号" @change="loadOrgRulesTags" />
-            <select v-model="accountRoleFilter" @change="loadOrgRulesTags">
+            <input v-model="accountKeyword" placeholder="搜索姓名或手机号" @change="resetAccountPageAndLoad" />
+            <select v-model="accountRoleFilter" @change="resetAccountPageAndLoad">
               <option value="">全部角色</option>
               <option value="ADMIN">管理员</option>
               <option value="LEADER">组长</option>
               <option value="KEEPER">管家</option>
             </select>
-            <select v-model="accountEnabledFilter" @change="loadOrgRulesTags">
+            <select v-model="accountEnabledFilter" @change="resetAccountPageAndLoad">
               <option value="">全部状态</option>
               <option value="1">启用中</option>
               <option value="0">已停用</option>
             </select>
           </div>
           <div class="ops-table">
-            <div class="ops-table-row head">
+            <div class="ops-table-row head accounts">
               <span>姓名</span>
               <span>手机号</span>
               <span>角色</span>
               <span>直属组长</span>
+              <span>最近登录</span>
               <span>状态</span>
               <span>操作</span>
             </div>
-            <div v-for="account in accounts" :key="account.id" class="ops-table-row">
+            <div v-for="account in accounts" :key="account.id" class="ops-table-row accounts">
               <span>{{ account.displayName || account.username }}</span>
               <span>{{ account.phone || account.username }}</span>
               <span>{{ roleLabel(account.role) }}</span>
-              <span>{{ leaderName(account.leaderId) }}</span>
+              <span>{{ account.leaderName || leaderName(account.leaderId) }}</span>
+              <span>{{ formatDate(account.lastLoginAt) }}</span>
               <span><b :class="account.isEnabled === false ? 'warn-text' : 'ok-text'">{{ account.isEnabled === false ? '已停用' : '启用中' }}</b></span>
               <span class="ops-row-actions">
                 <button class="secondary small" type="button" @click="openForm('account', account)">编辑</button>
@@ -424,9 +1016,17 @@
             </div>
             <p v-if="!accounts.length" class="ops-empty">暂无账号。</p>
           </div>
+          <div class="ops-pagination">
+            <strong>当前筛选：{{ accountPageInfo.total }} 个账号</strong>
+            <p>第 {{ accountPageInfo.page }} / {{ accountTotalPages }} 页，每页 {{ accountPageInfo.size }} 条</p>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="accountPageInfo.page <= 1" @click="changeAccountPage(-1)">上一页</button>
+              <button class="secondary small" type="button" :disabled="accountPageInfo.page >= accountTotalPages" @click="changeAccountPage(1)">下一页</button>
+            </div>
+          </div>
         </article>
 
-        <article class="ops-panel wide">
+        <article v-if="activeSection.key === 'followup-rules'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>跟进规则</h2>
@@ -435,16 +1035,30 @@
             <button class="primary small" type="button" @click="openForm('rule')">新增规则</button>
           </div>
           <div class="ops-filter-bar">
-            <input v-model="ruleKeyword" placeholder="搜索规则名称" />
-            <select v-model="ruleActionType">
+            <input v-model="ruleKeyword" placeholder="搜索规则名称" @change="resetRulePageAndLoad" />
+            <select v-model="ruleActionType" @change="resetRulePageAndLoad">
               <option value="">全部动作</option>
               <option value="ALERT">提醒/告警</option>
-              <option value="TAG_SUGGESTION">标签建议</option>
+              <option value="TAG_CHANGE">标签建议</option>
               <option value="NOTIFY_LEADER">通知组长</option>
             </select>
+            <select v-model="ruleEnabledFilter" @change="resetRulePageAndLoad">
+              <option value="">全部状态</option>
+              <option value="1">启用</option>
+              <option value="0">停用</option>
+            </select>
+          </div>
+          <div class="ops-row-actions">
+            <button class="secondary small" type="button" :disabled="!ruleSelectedIds.length" @click="batchToggleRules(true)">批量启用</button>
+            <button class="secondary small" type="button" :disabled="!ruleSelectedIds.length" @click="batchToggleRules(false)">批量停用</button>
+            <button class="secondary small danger" type="button" :disabled="!deletableSelectedRules.length" @click="batchDeleteRules">批量删除</button>
           </div>
           <div class="ops-card-grid">
-            <article v-for="rule in filteredRules" :key="rule.id" class="ops-rule-card">
+            <article v-for="rule in rules" :key="rule.id" class="ops-rule-card">
+              <label class="ops-checkline">
+                <input v-model="ruleSelectedIds" type="checkbox" :value="rule.id" />
+                选中
+              </label>
               <div>
                 <strong>{{ rule.name }}</strong>
                 <span>{{ actionTypeLabel(rule.actionType) }} · 优先级 {{ rule.priority }}</span>
@@ -453,18 +1067,26 @@
               <div class="ops-row-actions">
                 <button class="secondary small" type="button" @click="openForm('rule', rule)">编辑</button>
                 <button class="secondary small" type="button" @click="confirmToggleRule(rule)">{{ rule.enabled === false ? '启用' : '停用' }}</button>
-                <button class="secondary small danger" type="button" :disabled="rule.isBuiltin" @click="confirmDeleteRule(rule)">删除</button>
+                <button class="secondary small danger" type="button" :disabled="isBuiltinRule(rule)" @click="confirmDeleteRule(rule)">删除</button>
               </div>
             </article>
           </div>
-          <p v-if="!filteredRules.length" class="ops-empty">暂无匹配规则。</p>
+          <p v-if="!rules.length" class="ops-empty">暂无匹配规则。</p>
+          <div class="ops-pagination">
+            <strong>当前筛选：{{ rulePageInfo.total }} 条规则</strong>
+            <p>第 {{ rulePageInfo.page }} / {{ ruleTotalPages }} 页，每页 {{ rulePageInfo.size }} 条</p>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="rulePageInfo.page <= 1" @click="changeRulePage(-1)">上一页</button>
+              <button class="secondary small" type="button" :disabled="rulePageInfo.page >= ruleTotalPages" @click="changeRulePage(1)">下一页</button>
+            </div>
+          </div>
         </article>
 
-        <article class="ops-panel wide">
+        <article v-if="activeSection.key === 'customer-tags'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>标签与分层</h2>
-              <p>展示名可改，代码值稳定；有客户占用时建议禁用。</p>
+              <p>用于客户筛选、运营分层、跟进规则和 AI 判断；修改中文名称不会改变已有客户数据。</p>
             </div>
             <button class="primary small" type="button" @click="openForm('tagCategory')">新增分类</button>
           </div>
@@ -474,14 +1096,14 @@
           </div>
           <div class="ops-card-grid">
             <article v-for="category in filteredTagCategories" :key="category.id" class="ops-tag-card">
-              <div>
-                <strong>{{ category.categoryName || category.name }}</strong>
-                <span>{{ category.boundField || category.fieldName || '未绑定字段' }}</span>
+              <div class="ops-tag-card-head">
+                <strong>{{ tagCategoryName(category) }}</strong>
+                <span>{{ tagCategoryFieldText(category) }}</span>
               </div>
               <div class="ops-tag-list">
                 <span v-for="tag in category.values || category.tags || []" :key="tag.id || tag.tagValue" class="ops-tag-value">
                   <button class="status-pill" type="button" @click="openForm('tagValue', tagDraft(category, tag))">
-                    {{ tag.displayName || tag.tagValue }}
+                    {{ tagDisplayName(tag) }}
                   </button>
                   <button class="secondary small" type="button" @click="toggleTagValue(category, tag)">{{ tag.isEnabled === false ? '启用' : '停用' }}</button>
                   <button class="secondary small danger" type="button" @click="confirmDeleteTagValue(category, tag)">删除</button>
@@ -490,7 +1112,7 @@
               <div class="ops-row-actions">
                 <button class="secondary small" type="button" @click="openForm('tagValue', category)">新增标签值</button>
                 <button class="secondary small" type="button" @click="openForm('tagCategory', category)">编辑分类</button>
-                <button class="secondary small danger" type="button" :disabled="category.isBuiltin" @click="confirmDeleteTagCategory(category)">删除分类</button>
+                <button class="secondary small danger" type="button" :disabled="isBuiltinTagCategory(category)" @click="confirmDeleteTagCategory(category)">删除分类</button>
               </div>
             </article>
           </div>
@@ -498,8 +1120,8 @@
         </article>
       </section>
 
-      <section v-else class="ops-admin-layout">
-        <article class="ops-panel wide">
+      <section v-else-if="activeSection.groupKey === 'insight-ops'" class="ops-admin-layout">
+        <article v-if="activeSection.key === 'analytics-dashboard'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>运营分析看板</h2>
@@ -507,18 +1129,23 @@
             </div>
           </div>
           <div class="ops-filter-bar three">
-            <select v-model="skillAnalyticsDays" @change="loadInsightOps">
+            <select v-model="skillAnalyticsDays" @change="loadAnalyticsDashboard()">
               <option :value="7">近 7 天</option>
               <option :value="14">近 14 天</option>
               <option :value="30">近 30 天</option>
             </select>
-            <select v-model="skillLeadTypeFilter" @change="loadInsightOps">
+            <select v-model="skillLeadTypeFilter" @change="loadAnalyticsDashboard()">
               <option value="">全部线索类型</option>
-              <option value="GENERAL">通用</option>
-              <option value="TUAN_GOU">团购客资</option>
-              <option value="XIAN_SUO">线索客资</option>
-              <option value="PENDING">待确认</option>
+              <option v-for="option in LEAD_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
+            <select v-model="analyticsCallerFilter" @change="loadAnalyticsDashboard()">
+              <option value="">全部同事</option>
+              <option v-for="account in analyticsCallerOptions" :key="account.phone || account.username || account.id" :value="account.phone || account.username">
+                {{ account.displayName || account.phone || account.username }}
+              </option>
+            </select>
+          </div>
+          <div class="ops-row-actions">
             <button class="secondary small" type="button" @click="downloadAnalyticsCsv">导出当前看板</button>
           </div>
           <div class="ops-analytics-grid">
@@ -527,9 +1154,31 @@
               <p>{{ block.summary }}</p>
             </div>
           </div>
+          <div v-if="analyticsFailedSections.length" class="ops-detail-box warning">
+            <strong>部分分析区块刷新失败</strong>
+            <p>{{ analyticsFailureSummary }}</p>
+            <button class="secondary small" type="button" @click="loadAnalyticsDashboard()">重试分析区块</button>
+          </div>
+          <div class="ops-insight-grid">
+            <article v-for="section in analyticsDetailSections" :key="section.key" class="ops-detail-box">
+              <strong>{{ section.title }}</strong>
+              <p>{{ section.description }}</p>
+              <p v-if="section.status.error" class="ops-empty compact error">刷新失败：{{ section.status.error }}</p>
+              <div v-if="section.rows.length" class="ops-mini-table">
+                <div class="ops-mini-row head">
+                  <span v-for="column in section.columns" :key="column.key">{{ column.label }}</span>
+                </div>
+                <div v-for="(row, rowIndex) in section.rows.slice(0, 8)" :key="`${section.key}-${rowIndex}`" class="ops-mini-row">
+                  <span v-for="column in section.columns" :key="column.key">{{ analyticsCell(row, column.key) }}</span>
+                </div>
+              </div>
+              <small v-if="section.rows.length > 8">还有 {{ section.rows.length - 8 }} 行可在导出 CSV 中查看</small>
+              <p v-if="!section.rows.length && !section.status.error" class="ops-empty compact">{{ section.status.loading ? '正在刷新' : '暂无数据' }}</p>
+            </article>
+          </div>
         </article>
 
-        <article class="ops-panel wide">
+        <article v-if="activeSection.key === 'version-management'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>桌面版本</h2>
@@ -538,42 +1187,65 @@
             <button class="primary small" type="button" @click="openForm('version')">新增版本</button>
           </div>
           <div class="ops-filter-bar">
-            <select v-model="versionStatusFilter" @change="loadInsightOps">
+            <select v-model="versionStatusFilter" @change="resetVersionPageAndLoad">
               <option value="">全部状态</option>
               <option value="DRAFT">草稿</option>
               <option value="PUBLISHED">已发布</option>
               <option value="REVOKED">已撤回</option>
             </select>
-            <select v-model="versionPlatformFilter" @change="loadInsightOps">
+            <select v-model="versionPlatformFilter" @change="resetVersionPageAndLoad">
               <option value="">全部平台</option>
               <option value="WINDOWS">Windows</option>
               <option value="MAC">macOS</option>
             </select>
           </div>
+          <div class="ops-detail-box">
+            <strong>安装包上传</strong>
+            <p>新增版本时可先上传安装包，系统会自动回填下载地址和文件大小；也可以继续使用已有下载地址。</p>
+            <button class="secondary small" type="button" @click="openForm('version')">上传或新增版本</button>
+          </div>
           <div class="ops-table">
-            <div class="ops-table-row head">
+            <div class="ops-table-row head version">
               <span>版本</span>
               <span>平台</span>
               <span>策略</span>
               <span>状态</span>
+              <span>时间</span>
               <span>操作</span>
             </div>
-            <div v-for="version in versions" :key="version.id" class="ops-table-row compact">
+            <div v-for="version in versions" :key="version.id" class="ops-table-row version">
               <span>{{ version.version }}</span>
               <span>{{ version.platform }}</span>
               <span>{{ updateStrategyLabel(version.updateStrategy) }}</span>
-              <span>{{ version.status || 'DRAFT' }}</span>
-              <span class="ops-row-actions">
-                <button class="secondary small" type="button" @click="openForm('version', version)">编辑</button>
-                <button class="secondary small" type="button" @click="confirmPublishVersion(version)">发布</button>
-                <button class="secondary small danger" type="button" @click="openForm('revokeVersion', version)">撤回</button>
-                <button class="secondary small danger" type="button" @click="confirmDeleteVersion(version)">删除</button>
+              <span>
+                <b :class="versionStatusClass(version)">{{ versionStatusLabel(version.status) }}</b>
+                <small v-if="version.revokeReason" class="ops-cell-note">撤回原因：{{ version.revokeReason }}</small>
+                <small v-if="version.alternativeVersion" class="ops-cell-note">替代版本：{{ version.alternativeVersion }}</small>
               </span>
+              <span>
+                <small class="ops-cell-note">发布：{{ formatDate(version.publishedAt) }}</small>
+                <small class="ops-cell-note">撤回：{{ formatDate(version.revokedAt) }}</small>
+              </span>
+              <span class="ops-row-actions">
+                <button class="secondary small" type="button" :disabled="!canEditVersion(version)" :title="versionActionReason(version, 'edit')" @click="openForm('version', version)">编辑</button>
+                <button class="secondary small" type="button" :disabled="!canPublishVersion(version)" :title="versionActionReason(version, 'publish')" @click="confirmPublishVersion(version)">发布</button>
+                <button class="secondary small danger" type="button" :disabled="!canRevokeVersion(version)" :title="versionActionReason(version, 'revoke')" @click="openForm('revokeVersion', version)">撤回</button>
+                <button class="secondary small danger" type="button" :disabled="!canDeleteVersion(version)" :title="versionActionReason(version, 'delete')" @click="confirmDeleteVersion(version)">删除</button>
+              </span>
+            </div>
+          </div>
+          <p v-if="!versions.length" class="ops-empty">暂无匹配版本。</p>
+          <div class="ops-pagination">
+            <strong>当前筛选：{{ versionPageInfo.total }} 个版本</strong>
+            <p>第 {{ versionPageInfo.page }} / {{ versionTotalPages }} 页，每页 {{ versionPageInfo.size }} 条</p>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="versionPageInfo.page <= 1" @click="changeVersionPage(-1)">上一页</button>
+              <button class="secondary small" type="button" :disabled="versionPageInfo.page >= versionTotalPages" @click="changeVersionPage(1)">下一页</button>
             </div>
           </div>
         </article>
 
-        <article class="ops-panel">
+        <article v-if="activeSection.key === 'system-notices'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>系统公告</h2>
@@ -581,34 +1253,48 @@
             </div>
             <button class="primary small" type="button" @click="openForm('notice')">新增公告</button>
           </div>
-          <div class="ops-filter-bar">
-            <select v-model="noticeStatusFilter" @change="loadInsightOps">
+          <div class="ops-filter-bar three">
+            <select v-model="noticeStatusFilter" @change="resetNoticePageAndLoad">
               <option value="">全部状态</option>
-              <option value="ACTIVE">生效中</option>
+              <option value="PUBLISHED">生效中</option>
               <option value="SCHEDULED">待发布</option>
               <option value="STOPPED">已停止</option>
             </select>
-            <select v-model="noticeLevelFilter" @change="loadInsightOps">
+            <select v-model="noticeLevelFilter" @change="resetNoticePageAndLoad">
               <option value="">全部级别</option>
               <option value="INFO">普通</option>
               <option value="WARN">提醒</option>
               <option value="ERROR">故障</option>
             </select>
+            <select v-model="noticeSourceFilter" @change="resetNoticePageAndLoad">
+              <option value="">全部来源</option>
+              <option value="MANUAL">人工公告</option>
+              <option value="AUTO">系统自动</option>
+            </select>
           </div>
           <div v-for="item in notices" :key="item.id" class="ops-notice-row">
             <strong>{{ item.title }}</strong>
-            <span>{{ item.level }} · {{ item.status || item.publishType || '有效' }}</span>
+            <span>{{ noticeLevelLabel(item.level) }} · {{ noticeStatusLabel(item) }} · {{ noticeSourceLabel(item.source) }}</span>
+            <small>发布时间：{{ formatDate(item.publishAt) }} · 过期时间：{{ formatDate(item.expireAt) }}</small>
             <p>{{ item.content }}</p>
             <div class="ops-row-actions">
-              <button class="secondary small" type="button" @click="openForm('notice', item)">编辑</button>
-              <button class="secondary small" type="button" @click="confirmStopNotice(item)">停止</button>
-              <button class="secondary small danger" type="button" @click="confirmDeleteNotice(item)">删除</button>
+              <button class="secondary small" type="button" :disabled="!canEditNotice(item)" :title="noticeActionReason(item, 'edit')" @click="openForm('notice', item)">编辑</button>
+              <button class="secondary small" type="button" :disabled="!canStopNotice(item)" :title="noticeActionReason(item, 'stop')" @click="confirmStopNotice(item)">停止</button>
+              <button class="secondary small danger" type="button" :disabled="!canDeleteNotice(item)" :title="noticeActionReason(item, 'delete')" @click="confirmDeleteNotice(item)">删除</button>
             </div>
           </div>
           <p v-if="!notices.length" class="ops-empty">暂无公告。</p>
+          <div class="ops-pagination">
+            <strong>当前筛选：{{ noticePageInfo.total }} 条公告</strong>
+            <p>第 {{ noticePageInfo.page }} / {{ noticeTotalPages }} 页，每页 {{ noticePageInfo.size }} 条</p>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="noticePageInfo.page <= 1" @click="changeNoticePage(-1)">上一页</button>
+              <button class="secondary small" type="button" :disabled="noticePageInfo.page >= noticeTotalPages" @click="changeNoticePage(1)">下一页</button>
+            </div>
+          </div>
         </article>
 
-        <article class="ops-panel">
+        <article v-if="activeSection.key === 'audit-logs'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>审计日志</h2>
@@ -616,34 +1302,69 @@
             </div>
             <button class="secondary small" type="button" @click="exportAuditLogs">导出 CSV</button>
           </div>
-          <div class="ops-filter-bar">
-            <input v-model="auditKeyword" placeholder="搜索操作人或对象" />
-            <select v-model="auditAction">
-              <option value="">全部动作</option>
-              <option v-for="action in auditActions" :key="action" :value="action">{{ action }}</option>
+          <div class="ops-filter-bar three">
+            <input v-model="auditKeyword" placeholder="搜索操作人或对象" @change="resetAuditPageAndLoad" />
+            <select v-model="auditTargetType" @change="loadAuditLogs">
+              <option value="">全部对象</option>
+              <option v-for="target in auditTargetTypes" :key="target.type" :value="target.type">{{ target.label }}</option>
             </select>
+            <input v-model="auditTargetId" placeholder="对象 ID" @change="resetAuditPageAndLoad" />
+          </div>
+          <div class="audit-action-groups">
+            <section v-for="group in auditActionGroups" :key="group.group" class="audit-action-group">
+              <strong>{{ group.group }}</strong>
+              <div class="audit-action-picker">
+                <label
+                  v-for="action in group.actions"
+                  :key="action.action"
+                  class="audit-action-chip"
+                  :class="{ active: auditActionsSelected.includes(action.action) }"
+                >
+                  <input
+                    v-model="auditActionsSelected"
+                    type="checkbox"
+                    :value="action.action"
+                    @change="resetAuditPageAndLoad"
+                  />
+                  <span>{{ action.label }}</span>
+                </label>
+              </div>
+            </section>
           </div>
           <div class="ops-filter-bar three">
-            <input v-model="auditTargetType" placeholder="对象类型" @change="loadAuditLogs" />
             <input v-model="auditStartDate" type="date" @change="loadAuditLogs" />
             <input v-model="auditEndDate" type="date" @change="loadAuditLogs" />
+            <button class="secondary small" type="button" @click="loadAuditLogs">查询</button>
+            <button class="secondary small" type="button" @click="clearAuditActions">清空动作</button>
+          </div>
+          <div class="ops-detail-box">
+            <strong>当前筛选：{{ auditPageInfo.total }} 条</strong>
+            <p>第 {{ auditPageInfo.page }} / {{ auditTotalPages }} 页，动作：{{ selectedAuditActionsText }}，对象：{{ auditTargetType || '全部' }} {{ auditTargetId || '' }}，日志保留 {{ auditPageInfo.retentionDays || '-' }} 天，最早记录：{{ formatDate(auditPageInfo.earliestCreatedAt) }}</p>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="auditPageInfo.page <= 1" @click="changeAuditPage(-1)">上一页</button>
+              <button class="secondary small" type="button" :disabled="auditPageInfo.page >= auditTotalPages" @click="changeAuditPage(1)">下一页</button>
+            </div>
           </div>
           <div v-if="auditExportJob" class="ops-detail-box">
             <strong>导出任务：{{ auditExportJob.status || '处理中' }}</strong>
             <p>{{ auditExportJob.message || summarizeObject(auditExportJob) }}</p>
-            <button class="secondary small" type="button" @click="refreshAuditExportStatus">刷新导出状态</button>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" @click="refreshAuditExportStatus">刷新导出状态</button>
+              <button v-if="auditDownloadUrl" class="primary small" type="button" @click="downloadAuditExport">下载 CSV</button>
+            </div>
           </div>
           <div v-for="log in filteredAuditLogs" :key="log.id" class="ops-notice-row">
-            <strong>{{ log.action }}</strong>
-            <span>{{ log.operator || '-' }} · {{ formatDate(log.createdAt) }}</span>
-            <p>{{ log.detail || log.target || '无详情' }}</p>
+            <strong>{{ log.actionLabel || actionLabel(log.action) }}</strong>
+            <span>{{ log.actionGroup || '-' }} · {{ log.targetTypeLabel || targetTypeLabel(log.targetType) }} {{ log.targetId || '' }}</span>
+            <small>{{ log.operator || '-' }} · {{ formatDate(log.createdAt) }}</small>
+            <p>{{ log.detailSummary || log.detail || log.target || '无详情' }}</p>
             <button class="secondary small" type="button" @click="toggleAuditDetail(log)">查看详情</button>
-            <pre v-if="expandedAuditId === log.id" class="ops-raw-detail">{{ formatDetail(log.detailJson ?? log.detail ?? log) }}</pre>
+            <pre v-if="expandedAuditId === log.id" class="ops-raw-detail">{{ formatDetail(log.detailParsed ?? log.detailJson ?? log.detail ?? log) }}</pre>
           </div>
           <p v-if="!filteredAuditLogs.length" class="ops-empty">暂无审计记录。</p>
         </article>
 
-        <article class="ops-panel wide">
+        <article v-if="activeSection.key === 'system-health'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>系统健康</h2>
@@ -651,12 +1372,18 @@
             </div>
             <button class="secondary small" type="button" @click="loadHealth(true)">手动刷新</button>
           </div>
-          <div class="ops-filter-bar">
-            <span class="ops-inline-info">最近刷新：{{ healthLastRefreshAt || '尚未刷新' }}</span>
+          <div class="ops-filter-bar three">
+            <span class="ops-inline-info">最近刷新：{{ healthLastRefreshAt || '尚未刷新' }} · 自动刷新 {{ healthRefreshIntervalS }} 秒</span>
             <select v-model="healthAlertStatusFilter">
               <option value="">全部告警</option>
               <option value="OPEN">未恢复</option>
               <option value="RECOVERED">已恢复</option>
+            </select>
+            <select v-model="healthAlertLevelFilter">
+              <option value="">全部级别</option>
+              <option value="ERROR">故障</option>
+              <option value="WARN">提醒</option>
+              <option value="INFO">普通</option>
             </select>
           </div>
           <div class="ops-health-grid">
@@ -668,8 +1395,9 @@
           </div>
           <div v-if="filteredHealthAlerts.length" class="ops-card-grid">
             <article v-for="alert in filteredHealthAlerts" :key="alert.id || alert.createdAt" class="ops-content-card">
-              <strong>{{ alert.title || alert.type || alert.component || '系统告警' }}</strong>
-              <span>{{ alert.status || 'OPEN' }} · {{ formatDate(alert.createdAt || alert.lastSeenAt) }}</span>
+              <strong>{{ healthAlertTitle(alert) }}</strong>
+              <span>{{ healthAlertStatusLabel(alert) }} · {{ alert.level || alert.alertLevel || '-' }}</span>
+              <small>发生：{{ formatDate(alert.occurredAt || alert.createdAt || alert.lastSeenAt) }} · 恢复：{{ formatDate(alert.resolvedAt) }} · 持续 {{ healthAlertDuration(alert) }}</small>
               <p>{{ alert.message || alert.detail || '暂无详情' }}</p>
               <button class="secondary small" type="button" @click="toggleHealthAlert(alert)">展开详情</button>
               <pre v-if="expandedHealthAlertId === (alert.id || alert.createdAt)" class="ops-raw-detail">{{ formatDetail(alert.detailJson ?? alert.detail ?? alert) }}</pre>
@@ -687,18 +1415,43 @@
             <h2>{{ activeFormTitle }}</h2>
             <p>{{ activeFormDescription }}</p>
           </div>
-          <button class="secondary small" type="button" @click="closeForm">关闭</button>
+          <button class="icon-close-button" type="button" aria-label="关闭表单" title="关闭表单" @click="closeForm">
+            <span aria-hidden="true">×</span>
+          </button>
         </header>
         <div class="ops-form-grid one">
-          <label v-for="field in activeFormFields" :key="field.key">
-            {{ field.label }}
-            <select v-if="field.type === 'select'" v-model="formDraft[field.key]">
+          <div v-if="activeForm === 'version'" class="ops-upload-box">
+            <strong>安装包</strong>
+            <p>选择安装包后会上传到后端并回填下载地址；提交版本前可以继续修改版本号、策略和更新说明。</p>
+            <label class="secondary small file-button">
+              选择安装包
+              <input type="file" @change="uploadVersionPackage" />
+            </label>
+            <span v-if="versionUploadState.message" :class="{ 'warn-text': versionUploadState.kind === 'error', 'ok-text': versionUploadState.kind === 'success' }">
+              {{ versionUploadState.message }}
+            </span>
+          </div>
+          <label v-for="field in activeFormFields" :key="field.key" :class="{ 'ops-form-span-2': field.type === 'textarea' }">
+            <span class="ops-label-title">{{ field.label }}</span>
+            <div v-if="activeForm === 'quickSearch' && field.key === 'content'" class="ops-variable-bar">
+              <button
+                v-for="variable in quickSearchVariables"
+                :key="variable.value"
+                class="secondary tiny"
+                type="button"
+                @click="insertQuickSearchVariable(variable.value)"
+              >
+                {{ variable.label }}
+              </button>
+            </div>
+            <select v-if="field.type === 'select'" v-model="formDraft[field.key]" :disabled="field.disabled">
               <option v-for="option in field.options ?? []" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
             </select>
-            <textarea v-else-if="field.type === 'textarea'" v-model="formDraft[field.key]" :placeholder="field.placeholder" rows="5"></textarea>
-            <input v-else-if="field.type === 'checkbox'" v-model="formDraft[field.key]" type="checkbox" />
-            <input v-else-if="field.type === 'number'" v-model.number="formDraft[field.key]" type="number" :placeholder="field.placeholder" />
-            <input v-else v-model="formDraft[field.key]" :type="field.type" :placeholder="field.placeholder" />
+            <textarea v-else-if="field.type === 'textarea'" v-model="formDraft[field.key]" :placeholder="field.placeholder" :disabled="field.disabled" rows="5"></textarea>
+            <input v-else-if="field.type === 'checkbox'" v-model="formDraft[field.key]" type="checkbox" :disabled="field.disabled" />
+            <input v-else-if="field.type === 'number'" v-model.number="formDraft[field.key]" type="number" :placeholder="field.placeholder" :disabled="field.disabled" :min="field.min" :max="field.max" :step="field.step" />
+            <input v-else v-model="formDraft[field.key]" :type="field.type" :placeholder="field.placeholder" :disabled="field.disabled" />
+            <small v-if="field.help">{{ field.help }}</small>
           </label>
         </div>
         <p v-if="formError" class="admin-message error">{{ formError }}</p>
@@ -713,9 +1466,31 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
-import { deleteJson, getJson, postForm, postJson, putJson, type ApiResponse } from '../../shared/apiClient';
+import {
+  deleteJson as requestDeleteJson,
+  getJson as requestGetJson,
+  postForm as requestPostForm,
+  postJson as requestPostJson,
+  putJson as requestPutJson,
+  type ApiResponse
+} from '../../shared/apiClient';
+import { loadDesktopConfig } from '../../shared/config';
+import { QUICK_SEARCH_TEMPLATE_VARIABLES } from '../quick-search/templateVariables';
 
-type SectionKey = 'skill-ai' | 'data-content' | 'org-rules-tags' | 'insight-ops';
+type SectionGroupKey = 'config-center' | 'data-content' | 'org-rules-tags' | 'insight-ops';
+type SectionKey =
+  | 'skill-scenes'
+  | 'configuration-center'
+  | 'data-integration'
+  | 'quick-search-content'
+  | 'account-permissions'
+  | 'followup-rules'
+  | 'customer-tags'
+  | 'analytics-dashboard'
+  | 'version-management'
+  | 'system-notices'
+  | 'audit-logs'
+  | 'system-health';
 type NoticeKind = 'info' | 'error';
 type AnyRecord = Record<string, any>;
 type FormOptionValue = string | number | boolean;
@@ -723,6 +1498,8 @@ type FormKind =
   | 'skill'
   | 'skillEnv'
   | 'imageEnv'
+  | 'llmEnv'
+  | 'llmRoute'
   | 'datasource'
   | 'quickSearch'
   | 'account'
@@ -739,6 +1516,11 @@ type FormField = {
   type: 'text' | 'number' | 'password' | 'textarea' | 'select' | 'checkbox';
   placeholder?: string;
   options?: Array<{ label: string; value: FormOptionValue }>;
+  disabled?: boolean;
+  help?: string;
+  min?: number;
+  max?: number;
+  step?: number | string;
 };
 
 const props = defineProps<{
@@ -747,18 +1529,244 @@ const props = defineProps<{
 
 defineEmits<{
   logout: [];
-  'switch-desktop': [];
 }>();
 
 const sessionLabel = computed(() => (props.accountName ? `当前账号：${props.accountName}` : '已登录'));
-const sections: Array<{ key: SectionKey; group: string; title: string; subtitle: string; description: string; primaryAction: string }> = [
-  { key: 'skill-ai', group: '运营 A/B', title: 'AI 与 Skill 配置', subtitle: '场景、环境、Prompt', description: '管理 AI 路由、外部环境、连接测试、Prompt 模板和企业红线。', primaryAction: '新增 Skill 绑定' },
-  { key: 'data-content', group: '运营 C/D', title: '数据源与内容', subtitle: '表格、映射、速搜', description: '管理客户数据同步、字段映射版本、CSV 导入和桌面速搜内容。', primaryAction: '添加数据源' },
-  { key: 'org-rules-tags', group: '运营 E/F/G', title: '组织、规则与标签', subtitle: '账号、跟进、分层', description: '管理账号权限、跟进规则条件和客户标签体系。', primaryAction: '新增账号' },
-  { key: 'insight-ops', group: '运营 H/I/J/K/L', title: '分析与系统运营', subtitle: '看板、版本、公告、审计、健康', description: '查看运营表现，管理版本公告，追溯操作并监控系统健康。', primaryAction: '新增公告' }
+type AdminSection = {
+  key: SectionKey;
+  groupKey: SectionGroupKey;
+  group: string;
+  module: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  primaryAction: string;
+};
+type AnalyticsKey = 'overview' | 'funnels' | 'staff' | 'sources' | 'stages' | 'health' | 'lifecycle' | 'risks' | 'contentRanking';
+type AdminNavGroup = {
+  key: SectionGroupKey;
+  title: string;
+  subtitle: string;
+  defaultKey: SectionKey;
+  pages: AdminSection[];
+};
+
+const sections: AdminSection[] = [
+  { key: 'skill-scenes', groupKey: 'config-center', group: '运营 A', module: 'A', title: 'Skill 场景管理', subtitle: '场景绑定、测试、调用监控', description: '按业务场景和线索类型维护 AI 路由，测试真实话术效果并观察调用质量。', primaryAction: '新增 Skill 绑定' },
+  { key: 'configuration-center', groupKey: 'config-center', group: '运营 B', module: 'B', title: '配置中心', subtitle: 'AI、LLM、识图、Prompt', description: '集中管理 Skill 环境、LLM 思考环境、识图环境、Prompt 模板、企业红线和降级回复。', primaryAction: '新增 Skill 环境' },
+  { key: 'data-integration', groupKey: 'data-content', group: '运营 C', module: 'C', title: '客户数据对接', subtitle: '数据源、字段映射、同步、导入', description: '管理企微表格数据源、字段映射版本、同步状态和 CSV 导入。', primaryAction: '添加数据源' },
+  { key: 'quick-search-content', groupKey: 'data-content', group: '运营 D', module: 'D', title: '速搜内容管理', subtitle: '模板、知识、图片、小程序', description: '维护桌面端速搜可用的话术、知识片段、门店定位、图片素材和小程序引导。', primaryAction: '新增内容' },
+  { key: 'account-permissions', groupKey: 'org-rules-tags', group: '运营 E', module: 'E', title: '账号与权限', subtitle: '账号、角色、组长关系', description: '管理 ADMIN、LEADER、KEEPER 的账号权限和直属组长关系。', primaryAction: '新增账号' },
+  { key: 'followup-rules', groupKey: 'org-rules-tags', group: '运营 F', module: 'F', title: '跟进规则引擎配置', subtitle: '条件、动作、启停', description: '配置跟进提醒、标签建议和通知组长的业务规则。', primaryAction: '新增规则' },
+  { key: 'customer-tags', groupKey: 'org-rules-tags', group: '运营 G', module: 'G', title: '客户标签与分层', subtitle: '标签分类、字段绑定、标签值', description: '维护 AI 和运营共用的客户标签分类、分层字段和展示名称。', primaryAction: '新增分类' },
+  { key: 'analytics-dashboard', groupKey: 'insight-ops', group: '运营 H', module: 'H', title: '运营分析看板', subtitle: '使用、漏斗、来源、风险', description: '查看 AI 使用、转化漏斗、同事效能、客户来源、阶段、风险和内容排行。', primaryAction: '导出当前看板' },
+  { key: 'version-management', groupKey: 'insight-ops', group: '运营 I', module: 'I', title: '版本管理', subtitle: '桌面版本、发布、撤回', description: '管理桌面端版本、发布策略、灰度和撤回记录。', primaryAction: '新增版本' },
+  { key: 'system-notices', groupKey: 'insight-ops', group: '运营 J', module: 'J', title: '系统公告', subtitle: '公告、排期、停止', description: '发布工具能力变化、维护窗口和故障通知。', primaryAction: '新增公告' },
+  { key: 'audit-logs', groupKey: 'insight-ops', group: '运营 K', module: 'K', title: '操作审计日志', subtitle: '查询、详情、导出', description: '查询、筛选和导出关键后台操作，审计日志不可修改。', primaryAction: '导出 CSV' },
+  { key: 'system-health', groupKey: 'insight-ops', group: '运营 L', module: 'L', title: '系统健康监控', subtitle: 'DB、缓存、AI、识图、表格', description: '监控数据库、缓存、Skill、识图和表格通道状态，查看故障与恢复情况。', primaryAction: '手动刷新' }
 ];
 
-const activeSectionKey = ref<SectionKey>('skill-ai');
+const SKILL_SCENE_OPTIONS = [
+  { label: '聊天识别', value: 'CHAT_RECOGNIZE' },
+  { label: '开场白', value: 'OPENING' },
+  { label: '主动回复', value: 'ACTIVE_REPLY' },
+  { label: '换一组', value: 'REGENERATE' },
+  { label: '档案提取', value: 'PROFILE_EXTRACT' }
+];
+
+const LLM_SCENE_LABELS: Record<string, string> = {
+  REPLY_GENERATION: '回复生成',
+  PROFILE_EXTRACTION: '档案提取',
+  FOLLOWUP_SUGGESTION: '跟进建议',
+  ABNORMAL_DETECTION: '异常检测',
+  SUMMARY: '总结分析'
+};
+
+const LEAD_TYPE_OPTIONS = [
+  { label: '全部客资', value: 'GENERAL' },
+  { label: '团购客资', value: 'TUAN_GOU' },
+  { label: '线索客资', value: 'XIAN_SUO' },
+  { label: '待确认', value: 'PENDING' }
+];
+
+const CUSTOMER_FIELD_LABELS: Record<string, string> = {
+  phone: '手机号',
+  nickname: '客户昵称',
+  leadType: '线索类型',
+  assignedKeeper: '负责管家',
+  intendedStore: '意向门店',
+  intendedProject: '意向项目',
+  purchasedProject: '已购项目',
+  intentLevel: '意向等级',
+  customerStage: '客户阶段',
+  personalityType: '性格类型',
+  bodyConcerns: '身体关注',
+  postpartumMonths: '产后月份',
+  parity: '胎次',
+  deliveryMethod: '分娩方式',
+  breastfeeding: '哺乳情况',
+  worries: '客户顾虑',
+  nextFollowupAt: '下次跟进时间',
+  nextFollowupDir: '下次跟进方向',
+  appointmentDate: '预约日期',
+  appointmentStore: '预约门店'
+};
+
+const TRANSLATED_VALUE_LABELS: Record<string, string> = {
+  GENERAL: '全部客资',
+  TUAN_GOU: '团购客资',
+  XIAN_SUO: '线索客资',
+  PENDING: '待确认',
+  HIGH: '高',
+  MEDIUM: '中',
+  LOW: '低',
+  UNKNOWN: '未填写',
+  ACTIVE_REPLY: '主动回复',
+  CHAT_RECOGNIZE: '聊天识别',
+  PROFILE_EXTRACT: '档案提取',
+  REGENERATE: '换一组',
+  OPENING: '开场白'
+};
+
+const TAG_CATEGORY_LABELS: Record<string, string> = {
+  'Personality Type': '性格类型',
+  'Body Concerns': '身体关注',
+  Worries: '客户顾虑',
+  'Intent Level': '意向等级',
+  'Customer Stage': '客户阶段',
+  'Lead Type': '线索类型',
+  personalityType: '性格类型',
+  bodyConcerns: '身体关注',
+  worries: '客户顾虑',
+  intentLevel: '意向等级',
+  customerStage: '客户阶段',
+  leadType: '线索类型'
+};
+
+const TAG_VALUE_LABELS: Record<string, string> = {
+  Loyalist: '忠诚型',
+  LOYALIST: '忠诚型',
+  Peacemaker: '温和型',
+  PEACEMAKER: '温和型',
+  Decisive: '果断型',
+  DECISIVE: '果断型',
+  'Diastasis Recti': '腹直肌分离',
+  DIASTASIS_RECTI: '腹直肌分离',
+  'Pelvic Floor': '盆底问题',
+  PELVIC_FLOOR: '盆底问题',
+  'Urine Leakage': '漏尿',
+  URINE_LEAKAGE: '漏尿',
+  Lumbago: '腰痛',
+  LUMBAGO: '腰痛',
+  'Pubic Pain': '耻骨疼痛',
+  PUBIC_PAIN: '耻骨疼痛',
+  'Stretch Marks': '妊娠纹',
+  STRETCH_MARKS: '妊娠纹',
+  'Belly Sag': '腹部松弛',
+  BELLY_SAG: '腹部松弛',
+  'Weight Gain': '体重增加',
+  WEIGHT_GAIN: '体重增加',
+  'Fear No Effect': '担心没有效果',
+  FEAR_NO_EFFECT: '担心没有效果',
+  'Fear Expensive': '担心价格高',
+  FEAR_EXPENSIVE: '担心价格高',
+  'Fear Pain': '担心疼痛',
+  FEAR_PAIN: '担心疼痛',
+  'Fear Hard Sell': '担心强行推销',
+  FEAR_HARD_SELL: '担心强行推销',
+  Comparing: '正在对比',
+  COMPARING: '正在对比',
+  'Husband Disagree': '丈夫不同意',
+  HUSBAND_DISAGREE: '丈夫不同意',
+  'Family Unsupport': '家人不支持',
+  FAMILY_UNSUPPORT: '家人不支持',
+  'No Time': '没有时间',
+  NO_TIME: '没有时间',
+  'Too Far': '距离太远',
+  TOO_FAR: '距离太远',
+  High: '高意向',
+  HIGH: '高意向',
+  Medium: '中意向',
+  MEDIUM: '中意向',
+  Low: '低意向',
+  LOW: '低意向',
+  Pending: '待判断',
+  PENDING: '待判断',
+  Closed: '已成交',
+  CLOSED: '已成交',
+  Lost: '已流失',
+  LOST: '已流失'
+};
+
+const ANALYTICS_KEY_LABELS: Record<string, string> = {
+  totalCalls: '调用次数',
+  successCount: '成功',
+  failCount: '失败',
+  successRate: '成功率',
+  adoptionRate: '采纳率',
+  adoptionCount: '采纳次数',
+  avgResponseTime: '平均响应',
+  avgResponseTimeMs: '平均响应',
+  activeCallerCount: '活跃同事',
+  totalCustomers: '客户数',
+  keeperCount: '管家数',
+  overdueCount: '逾期客户',
+  silentCount: '沉默客户',
+  total: '总数',
+  currentCount: '当前映射',
+  baselineCount: '对比版本',
+  added: '新增',
+  removed: '移除',
+  changed: '变更',
+  unchanged: '未变化'
+};
+
+const QUICK_SEARCH_CONTENT_META: Record<string, { contentLabel: string; contentPlaceholder: string; imageLabel: string; imagePlaceholder: string; help: string }> = {
+  TEMPLATE: {
+    contentLabel: '话术正文',
+    contentPlaceholder: '写同事可以直接发送给客户的话术，可插入客户档案变量',
+    imageLabel: '图片地址（可选）',
+    imagePlaceholder: '有配图时填写或上传图片',
+    help: '适合开场、跟进、邀约等可直接复制发送的话术。'
+  },
+  KNOWLEDGE: {
+    contentLabel: '知识内容',
+    contentPlaceholder: '写产品、项目、门店或政策说明，可插入客户档案变量',
+    imageLabel: '参考链接（可选）',
+    imagePlaceholder: '可填写知识来源链接',
+    help: '适合内部查询，不一定直接发给客户。'
+  },
+  LOCATION: {
+    contentLabel: '门店定位与到店说明',
+    contentPlaceholder: '填写门店地址、路线、停车、营业时间等信息',
+    imageLabel: '地图/定位链接',
+    imagePlaceholder: '填写地图链接或定位链接',
+    help: '适合门店位置、路线和预约到店提醒。'
+  },
+  IMAGE: {
+    contentLabel: '图片说明/配套话术',
+    contentPlaceholder: '说明图片适用场景，或写发送图片时配套的一句话',
+    imageLabel: '图片地址',
+    imagePlaceholder: '上传图片后会自动回填，也可以粘贴图片 URL',
+    help: '适合海报、案例图、项目图等素材。'
+  },
+  MINI_PROGRAM: {
+    contentLabel: '小程序引导话术',
+    contentPlaceholder: '写引导客户打开小程序或领取权益的话术',
+    imageLabel: '小程序路径/链接',
+    imagePlaceholder: '填写小程序 path、二维码图片或跳转链接',
+    help: '适合预约、领券、查看套餐等小程序入口。'
+  }
+};
+
+const navGroups: AdminNavGroup[] = [
+  { key: 'config-center', title: '配置中心', subtitle: 'Skill、AI、识图、Prompt', defaultKey: 'skill-scenes', pages: sections.filter((section) => section.groupKey === 'config-center') },
+  { key: 'data-content', title: '数据源与内容', subtitle: '数据对接、速搜内容', defaultKey: 'data-integration', pages: sections.filter((section) => section.groupKey === 'data-content') },
+  { key: 'org-rules-tags', title: '组织与规则', subtitle: '账号、规则、标签', defaultKey: 'account-permissions', pages: sections.filter((section) => section.groupKey === 'org-rules-tags') },
+  { key: 'insight-ops', title: '分析与系统', subtitle: '看板、版本、公告、审计、健康', defaultKey: 'analytics-dashboard', pages: sections.filter((section) => section.groupKey === 'insight-ops') }
+];
+
+const activeSectionKey = ref<SectionKey>('skill-scenes');
 const loading = ref(false);
 const notice = ref('');
 const noticeKind = ref<NoticeKind>('info');
@@ -766,20 +1774,27 @@ const activeForm = ref<FormKind | null>(null);
 const editingItem = ref<AnyRecord | null>(null);
 const formDraft = reactive<AnyRecord>({});
 const formError = ref('');
+const versionUploadState = reactive<{ kind: 'idle' | 'loading' | 'success' | 'error'; message: string }>({ kind: 'idle', message: '' });
 const selectedDatasource = ref<AnyRecord | null>(null);
 const mappingDraft = reactive<Record<string, string>>({});
+const mappingEnabledDraft = reactive<Record<string, boolean>>({});
 const skillSceneFilter = ref('');
 const skillLeadTypeFilter = ref('');
 const skillAnalyticsDays = ref(7);
 const skillTestMessage = ref('请基于当前客户状态生成一条跟进回复');
 const selectedPromptType = ref('format');
 const datasourceColumns = ref<Array<AnyRecord | string>>([]);
+const datasourceColumnStatus = ref<AnyRecord | null>(null);
 const mappingCompare = ref<AnyRecord | null>(null);
+const customerSearchKeyword = ref('');
 const quickSearchKeyword = ref('');
 const quickSearchType = ref('');
+const quickSearchEnabledFilter = ref('');
 const quickSearchSelectedIds = ref<Array<string | number>>([]);
 const ruleKeyword = ref('');
 const ruleActionType = ref('');
+const ruleEnabledFilter = ref('');
+const ruleSelectedIds = ref<Array<string | number>>([]);
 const csvPreview = ref<string[]>([]);
 const csvFile = ref<File | null>(null);
 const csvImportResult = ref<AnyRecord | null>(null);
@@ -789,19 +1804,25 @@ const accountEnabledFilter = ref('');
 const tagKeyword = ref('');
 const versionStatusFilter = ref('');
 const versionPlatformFilter = ref('');
+const analyticsCallerFilter = ref('');
 const noticeStatusFilter = ref('');
 const noticeLevelFilter = ref('');
+const noticeSourceFilter = ref('');
 const auditKeyword = ref('');
-const auditAction = ref('');
+const auditActionsSelected = ref<string[]>([]);
 const auditTargetType = ref('');
+const auditTargetId = ref('');
 const auditStartDate = ref('');
 const auditEndDate = ref('');
 const expandedAuditId = ref<string | number | null>(null);
 const auditExportJob = ref<AnyRecord | null>(null);
+const auditExportPollTimer = ref<number | null>(null);
 const expandedHealthAlertId = ref<string | number | null>(null);
 const healthAlertStatusFilter = ref('');
+const healthAlertLevelFilter = ref('');
 const healthLastRefreshAt = ref('');
 const healthConsecutiveFailures = ref(0);
+const healthRefreshIntervalS = ref(30);
 
 const skillBindings = ref<AnyRecord[]>([]);
 const availableSkills = ref<AnyRecord[]>([]);
@@ -809,6 +1830,10 @@ const skillAnalytics = ref<AnyRecord | null>(null);
 const skillTestResults = reactive<Record<string, AnyRecord>>({});
 const skillEnvironments = ref<AnyRecord[]>([]);
 const imageEnvironments = ref<AnyRecord[]>([]);
+const llmEnvironments = ref<AnyRecord[]>([]);
+const llmRoutes = ref<AnyRecord[]>([]);
+const llmRouteScenes = ref<string[]>([]);
+const llmAnalytics = ref<AnyRecord | null>(null);
 const configs = ref<AnyRecord[]>([]);
 const datasources = ref<AnyRecord[]>([]);
 const syncStatuses = ref<AnyRecord[]>([]);
@@ -816,80 +1841,268 @@ const customerFields = ref<AnyRecord[]>([]);
 const mappings = ref<AnyRecord[]>([]);
 const mappingVersions = ref<AnyRecord[]>([]);
 const importLogs = ref<AnyRecord[]>([]);
+const customerSearchItems = ref<AnyRecord[]>([]);
+const selectedAdminCustomer = ref<AnyRecord | null>(null);
 const quickSearchItems = ref<AnyRecord[]>([]);
 const accounts = ref<AnyRecord[]>([]);
+const leaderAccounts = ref<AnyRecord[]>([]);
+const analyticsAccounts = ref<AnyRecord[]>([]);
 const rules = ref<AnyRecord[]>([]);
 const tagCategories = ref<AnyRecord[]>([]);
 const analytics = reactive<Record<string, AnyRecord>>({});
+const analyticsStatus = reactive<Record<AnalyticsKey, { loading: boolean; error: string }>>({
+  overview: { loading: false, error: '' },
+  funnels: { loading: false, error: '' },
+  staff: { loading: false, error: '' },
+  sources: { loading: false, error: '' },
+  stages: { loading: false, error: '' },
+  health: { loading: false, error: '' },
+  lifecycle: { loading: false, error: '' },
+  risks: { loading: false, error: '' },
+  contentRanking: { loading: false, error: '' }
+});
+const analyticsLabels: Record<AnalyticsKey, string> = {
+  overview: '使用量概览',
+  funnels: '转化漏斗',
+  staff: '同事效能',
+  sources: '客户来源',
+  stages: '阶段分布',
+  health: '健康趋势',
+  lifecycle: '生命周期',
+  risks: '风险客户',
+  contentRanking: '内容排行'
+};
 const versions = ref<AnyRecord[]>([]);
 const notices = ref<AnyRecord[]>([]);
 const auditLogs = ref<AnyRecord[]>([]);
-const auditActions = ref<string[]>([]);
+const auditActions = ref<AnyRecord[]>([]);
+const auditTargetTypes = ref<AnyRecord[]>([]);
+const auditPageInfo = reactive({
+  total: 0,
+  page: 1,
+  size: 20,
+  totalPages: 1,
+  retentionDays: 0,
+  earliestCreatedAt: ''
+});
+const accountPageInfo = reactive({
+  total: 0,
+  page: 1,
+  size: 20,
+  totalPages: 1
+});
+const customerSearchPageInfo = reactive({
+  total: 0,
+  page: 1,
+  size: 20,
+  totalPages: 1
+});
+const rulePageInfo = reactive({
+  total: 0,
+  page: 1,
+  size: 20,
+  totalPages: 1
+});
+const quickSearchPageInfo = reactive({
+  total: 0,
+  page: 1,
+  size: 20,
+  totalPages: 1
+});
+const versionPageInfo = reactive({
+  total: 0,
+  page: 1,
+  size: 20,
+  totalPages: 1
+});
+const noticePageInfo = reactive({
+  total: 0,
+  page: 1,
+  size: 20,
+  totalPages: 1
+});
 const health = ref<AnyRecord | null>(null);
 const promptVersions = ref<AnyRecord[]>([]);
 const promptDraft = reactive({
   format: '',
   redLinesText: '',
   tagRemovalRulesText: '',
-  fallbackReply: ''
+  fallbackReply: '',
+  imageRecognitionPrompt: '',
+  regenerateMaxCount: 0
+});
+const skillRuntimeDraft = reactive({
+  timeoutMs: 10000,
+  circuitBreakerWindowS: 30,
+  circuitBreakerFailureRate: 0.5,
+  circuitBreakerMinCalls: 5,
+  circuitBreakerOpenS: 30,
+  alertFailureRate: 0.3,
+  alertFailureDurationMinutes: 15,
+  profileExtractTimeoutMs: 8000
+});
+const imageRuntimeDraft = reactive({
+  model: 'qwen3-vl-plus',
+  timeoutMs: 5000,
+  maxSizeBytes: 5242880,
+  maxDimensionPx: 1920,
+  compressQuality: 85,
+  consecutiveFailuresAlert: 3,
+  clipboardScreenshotConfirmPromptS: 10
+});
+const llmAnalyticsDays = ref(7);
+const llmReplyDraft = reactive({
+  enabled: false,
+  fallbackToSkill: true,
+  temperature: '',
+  maxTokens: 900,
+  systemPrompt: ''
+});
+const llmProfileDraft = reactive({
+  enabled: false,
+  fallbackToSkill: true,
+  temperature: '',
+  maxTokens: 700,
+  systemPrompt: ''
+});
+const llmFollowupDraft = reactive({
+  enabled: false,
+  temperature: '',
+  maxTokens: 500,
+  systemPrompt: ''
+});
+const llmAbnormalDraft = reactive({
+  enabled: false,
+  temperature: '',
+  maxTokens: 500,
+  systemPrompt: ''
+});
+const llmSummaryDraft = reactive({
+  enabled: false,
+  temperature: '',
+  maxTokens: 500,
+  systemPrompt: ''
+});
+const tableRuntimeDraft = reactive({
+  apiBaseUrl: '',
+  apiKey: '',
+  writeTimeoutMs: 10000,
+  retryMaxCount: 5,
+  retryIntervalS: 60,
+  alertFailureHours: 1,
+  alertNotifyTarget: 'ADMIN',
+  queueWarnThreshold: 100,
+  queueAlertThreshold: 1000
+});
+const datasourceRuntimeDraft = reactive({
+  syncCron: '0 */30 * * * *',
+  ttlSeconds: 900,
+  syncTimeoutMs: 10000,
+  mappingVersionMax: 50,
+  importMaxRows: 5000,
+  manualSyncTimeoutS: 60,
+  syncStatusRefreshS: 30
 });
 
 let healthTimer: number | null = null;
+let analyticsTimer: number | null = null;
 
 const activeSection = computed(() => sections.find((section) => section.key === activeSectionKey.value) ?? sections[0]);
 const activeMetrics = computed(() => {
-  if (activeSectionKey.value === 'skill-ai') {
-    return [
+  const metricsBySection: Record<SectionKey, Array<{ label: string; value: string | number; help: string }>> = {
+    'skill-scenes': [
       { label: '场景绑定', value: skillBindings.value.length, help: '覆盖开场白、主动回复和换一组' },
+      { label: '启用中', value: skillBindings.value.filter((item) => item.enabled !== false).length, help: '停用项不会参与生产路由' },
+      { label: '测试结果', value: Object.keys(skillTestResults).length, help: '本页可直接验证话术质量' }
+    ],
+    'configuration-center': [
       { label: 'Skill 环境', value: skillEnvironments.value.length, help: activeEnvironmentName(skillEnvironments.value) },
-      { label: '识图环境', value: imageEnvironments.value.length, help: activeEnvironmentName(imageEnvironments.value) }
-    ];
-  }
-  if (activeSectionKey.value === 'data-content') {
-    return [
+      { label: '识图环境', value: imageEnvironments.value.length, help: activeEnvironmentName(imageEnvironments.value) },
+      { label: 'LLM 路由', value: llmRoutes.value.length, help: llmReplyDraft.enabled ? '回复生成已启用 LLM' : activeEnvironmentName(llmEnvironments.value) }
+    ],
+    'data-integration': [
       { label: '数据源', value: datasources.value.length, help: '企微表格与 CSV 导入' },
       { label: '同步异常', value: syncStatuses.value.filter((item) => String(item.syncStatus || item.status || '').includes('FAIL')).length, help: '失败项需人工检查' },
-      { label: '速搜内容', value: quickSearchItems.value.length, help: '推送到桌面端快线模板' }
-    ];
-  }
-  if (activeSectionKey.value === 'org-rules-tags') {
-    return [
-      { label: '账号', value: accounts.value.length, help: 'ADMIN/LEADER/KEEPER' },
-      { label: '规则', value: rules.value.length, help: '提醒、标签建议、通知组长' },
+      { label: '映射版本', value: mappingVersions.value.length, help: selectedDatasource.value ? selectedDatasource.value.name : '选择数据源后查看' }
+    ],
+    'quick-search-content': [
+      { label: '速搜内容', value: quickSearchPageInfo.total, help: '推送到桌面端快线模板' },
+      { label: '当前页', value: quickSearchItems.value.length, help: '支持按标题、快线码、正文筛选' },
+      { label: '已选中', value: quickSearchSelectedIds.value.length, help: '可批量启用、停用或删除' }
+    ],
+    'account-permissions': [
+      { label: '账号', value: accountPageInfo.total, help: 'ADMIN/LEADER/KEEPER' },
+      { label: '启用组长', value: leaderAccounts.value.length, help: '用于绑定管家直属组长' },
+      { label: '当前页停用', value: accounts.value.filter((item) => item.isEnabled === false).length, help: '停用后不可登录' }
+    ],
+    'followup-rules': [
+      { label: '规则', value: rulePageInfo.total, help: '提醒、标签建议、通知组长' },
+      { label: '启用中', value: rules.value.filter((item) => item.enabled !== false).length, help: '内置规则优先停用而非删除' },
+      { label: '当前页', value: rules.value.length, help: '按规则名称、动作和状态筛选' }
+    ],
+    'customer-tags': [
       { label: '标签分类', value: tagCategories.value.length, help: 'AI 和运营共用标签库' }
-    ];
-  }
-  return [
-    { label: '公告', value: notices.value.length, help: '工具能力和故障通知' },
-    { label: '版本', value: versions.value.length, help: 'Windows/macOS 发布记录' },
-    { label: '健康', value: healthStatusText.value, help: '系统、AI、表格、缓存状态' }
-  ];
+      ,
+      { label: '筛选结果', value: filteredTagCategories.value.length, help: '可按分类、字段和标签值搜索' },
+      { label: '绑定字段', value: new Set(tagCategories.value.map((item) => item.boundField || item.fieldName).filter(Boolean)).size, help: '字段应与客户档案一致' }
+    ],
+    'analytics-dashboard': [
+      { label: '看板区块', value: analyticsBlocks.value.length, help: '使用、漏斗、效能、来源、风险' },
+      { label: '统计窗口', value: `${skillAnalyticsDays.value} 天`, help: '同一窗口联动所有分析 API' },
+      { label: '运行模式', value: runtimeModeLabel.value, help: runtimeModeDescription.value }
+    ],
+    'version-management': [
+      { label: '版本', value: versionPageInfo.total, help: 'Windows/macOS 发布记录' },
+      { label: '已发布', value: versions.value.filter((item) => item.status === 'PUBLISHED').length, help: '发布后桌面端可收到升级信息' },
+      { label: '当前页', value: versions.value.length, help: '草稿、发布、撤回分状态管理' }
+    ],
+    'system-notices': [
+      { label: '公告', value: noticePageInfo.total, help: '工具能力和故障通知' },
+      { label: '生效中', value: notices.value.filter((item) => noticeStatus(item) === 'PUBLISHED').length, help: '会展示给桌面端同事' },
+      { label: '当前页', value: notices.value.length, help: '按状态和级别筛选' }
+    ],
+    'audit-logs': [
+      { label: '审计记录', value: filteredAuditLogs.value.length, help: '当前筛选结果' },
+      { label: '动作类型', value: auditActions.value.length, help: '来自后端动作字典' },
+      { label: '导出任务', value: auditExportJob.value?.status ?? '未创建', help: '导出后可刷新任务状态' }
+    ],
+    'system-health': [
+      { label: '健康', value: healthStatusText.value, help: '系统、AI、表格、缓存状态' },
+      { label: '告警', value: filteredHealthAlerts.value.length, help: '按恢复状态筛选' },
+      { label: '最近刷新', value: healthLastRefreshAt.value || '未刷新', help: '连续失败会暂停自动刷新' }
+    ]
+  };
+  return metricsBySection[activeSectionKey.value] ?? [];
 });
-const filteredQuickSearchItems = computed(() => quickSearchItems.value.filter((item) => {
-  const keyword = quickSearchKeyword.value.trim().toLowerCase();
-  const matchesKeyword = !keyword || [item.title, item.shortcutCode, item.content].some((value) => String(value ?? '').toLowerCase().includes(keyword));
-  const matchesType = !quickSearchType.value || item.contentType === quickSearchType.value;
-  return matchesKeyword && matchesType;
-}));
 const filteredRules = computed(() => rules.value.filter((rule) => {
   const matchesKeyword = !ruleKeyword.value.trim() || String(rule.name ?? '').includes(ruleKeyword.value.trim());
   const matchesType = !ruleActionType.value || rule.actionType === ruleActionType.value;
   return matchesKeyword && matchesType;
 }));
+const deletableSelectedRules = computed(() => rules.value.filter((rule) => ruleSelectedIds.value.includes(rule.id) && !isBuiltinRule(rule)));
 const filteredTagCategories = computed(() => tagCategories.value.filter((category) => {
   const keyword = tagKeyword.value.trim().toLowerCase();
   if (!keyword) return true;
   const tags = category.values || category.tags || [];
-  return [category.categoryName, category.name, category.boundField, category.fieldName]
+          return [tagCategoryName(category), category.categoryName, category.name, category.boundField, category.fieldName]
     .some((value) => String(value ?? '').toLowerCase().includes(keyword))
-    || tags.some((tag: AnyRecord) => [tag.displayName, tag.tagValue].some((value) => String(value ?? '').toLowerCase().includes(keyword)));
+    || tags.some((tag: AnyRecord) => [tagDisplayName(tag), tag.displayName, tag.tagValue].some((value) => String(value ?? '').toLowerCase().includes(keyword)));
 }));
 const filteredAuditLogs = computed(() => auditLogs.value.filter((log) => {
   const keyword = auditKeyword.value.trim();
   const matchesKeyword = !keyword || [log.operator, log.action, log.detail, log.target].some((value) => String(value ?? '').includes(keyword));
-  const matchesAction = !auditAction.value || log.action === auditAction.value;
+  const matchesAction = !auditActionsSelected.value.length || auditActionsSelected.value.includes(String(log.action ?? ''));
   return matchesKeyword && matchesAction;
 }));
+const selectedAuditActionsText = computed(() => auditActionsSelected.value.length
+  ? auditActionsSelected.value.map((action) => actionLabel(action)).join('、')
+  : '全部动作');
+const analyticsFailedSections = computed(() => (Object.entries(analyticsStatus) as Array<[AnalyticsKey, { loading: boolean; error: string }]>)
+  .filter(([, status]) => status.error)
+  .map(([key, status]) => ({ key, label: analyticsLabels[key], error: status.error })));
+const analyticsFailureSummary = computed(() => analyticsFailedSections.value
+  .map((item) => `${item.label}：${item.error}`)
+  .join('；'));
 const analyticsBlocks = computed(() => [
   { title: '使用量概览', summary: summarizeObject(analytics.overview?.summary ?? analytics.overview) },
   { title: '转化漏斗', summary: summarizeObject(analytics.funnels) },
@@ -899,6 +2112,109 @@ const analyticsBlocks = computed(() => [
   { title: '健康趋势', summary: summarizeObject(analytics.health?.summary ?? analytics.health) },
   { title: '生命周期', summary: summarizeObject(analytics.lifecycle?.summary ?? analytics.lifecycle) },
   { title: '风险与内容', summary: `${listFrom(analytics.risks, 'customers').length} 个风险客户，${listFrom(analytics.contentRanking, 'items').length} 条内容排行` }
+]);
+const analyticsCallerOptions = computed(() => analyticsAccounts.value.filter((account) => ['KEEPER', 'LEADER', 'ADMIN'].includes(String(account.role ?? ''))));
+const llmCallSummary = computed(() => (llmAnalytics.value?.summary ?? {}) as AnyRecord);
+const llmCallDetails = computed(() => listFrom(llmAnalytics.value ?? {}, 'details'));
+const analyticsDetailSections = computed(() => [
+  {
+    key: 'trend',
+    title: '使用趋势',
+    description: '按天查看调用量、采纳量和响应时间。',
+    columns: [
+      { key: 'date', label: '日期' },
+      { key: 'totalCalls', label: '调用' },
+      { key: 'adoptionCount', label: '采纳' },
+      { key: 'adoptionRate', label: '采纳率' },
+      { key: 'avgResponseTimeMs', label: '响应ms' }
+    ],
+    rows: listFrom(analytics.overview, 'dailyTrend'),
+    status: analyticsStatus.overview
+  },
+  {
+    key: 'staff',
+    title: '同事效能',
+    description: '按 caller 汇总客户数、调用量、逾期和沉默客户。',
+    columns: [
+      { key: 'caller', label: '同事' },
+      { key: 'totalCustomers', label: '客户' },
+      { key: 'totalCalls', label: '调用' },
+      { key: 'adoptionRate', label: '采纳率' },
+      { key: 'overdueCount', label: '逾期' },
+      { key: 'silentCount', label: '沉默' }
+    ],
+    rows: listFrom(analytics.staff),
+    status: analyticsStatus.staff
+  },
+  {
+    key: 'sources',
+    title: '客户来源',
+    description: '来源渠道和到店率快照。',
+    columns: [
+      { key: 'sourceChannel', label: '来源' },
+      { key: 'total', label: '总数' },
+      { key: 'tuanGouCount', label: '团购' },
+      { key: 'xianSuoCount', label: '线索' },
+      { key: 'arrivalRate', label: '到店率' }
+    ],
+    rows: listFrom(analytics.sources),
+    status: analyticsStatus.sources
+  },
+  {
+    key: 'stages',
+    title: '阶段分布',
+    description: '当前客户阶段分布。',
+    columns: [
+      { key: 'customerStage', label: '阶段' },
+      { key: 'total', label: '总数' },
+      { key: 'tuanGouCount', label: '团购' },
+      { key: 'xianSuoCount', label: '线索' }
+    ],
+    rows: listFrom(analytics.stages),
+    status: analyticsStatus.stages
+  },
+  {
+    key: 'lifecycle',
+    title: '生命周期估算',
+    description: '基于现有客户更新时间估算，适合趋势参考。',
+    columns: [
+      { key: 'leadType', label: '线索类型' },
+      { key: 'allocationToFirstContact', label: '分配到首触' },
+      { key: 'allocationToArrival', label: '分配到到店' },
+      { key: 'estimateSource', label: '估算来源' }
+    ],
+    rows: listFrom(analytics.lifecycle),
+    status: analyticsStatus.lifecycle
+  },
+  {
+    key: 'risks',
+    title: '风险客户',
+    description: '逾期、沉默和待跟进客户。',
+    columns: [
+      { key: 'phone', label: '客户' },
+      { key: 'nickname', label: '昵称' },
+      { key: 'leadType', label: '线索' },
+      { key: 'customerStage', label: '阶段' },
+      { key: 'assignedKeeper', label: '管家' },
+      { key: 'lastFollowupAt', label: '最近跟进' }
+    ],
+    rows: listFrom(analytics.risks, 'customers'),
+    status: analyticsStatus.risks
+  },
+  {
+    key: 'content',
+    title: '内容排行',
+    description: '基于审计/使用记录的内容动作排行。',
+    columns: [
+      { key: 'action', label: '动作' },
+      { key: 'targetType', label: '对象' },
+      { key: 'targetId', label: '对象 ID' },
+      { key: 'useCount', label: '次数' },
+      { key: 'sampleDetail', label: '样例' }
+    ],
+    rows: listFrom(analytics.contentRanking),
+    status: analyticsStatus.contentRanking
+  }
 ]);
 const healthCards = computed(() => {
   const data = health.value ?? {};
@@ -917,27 +2233,79 @@ const healthCards = computed(() => {
   });
 });
 const healthStatusText = computed(() => healthCards.value.some((item) => !item.ok) ? '需关注' : '正常');
+const runtimeMode = computed(() => (health.value?.runtimeMode ?? {}) as AnyRecord);
+const runtimeModeLabel = computed(() => String(runtimeMode.value.label ?? '运行模式未连接'));
+const runtimeModeDescription = computed(() => String(runtimeMode.value.description ?? '正在等待后端返回运行模式。'));
+const runtimeModePillClass = computed(() => runtimeMode.value.mockExternals === true ? 'mock' : runtimeMode.value.mockExternals === false ? 'real' : 'unknown');
+const auditDownloadUrl = computed(() => String(auditExportJob.value?.downloadUrl ?? ''));
+const accountTotalPages = computed(() => Math.max(1, Number(accountPageInfo.totalPages || Math.ceil(accountPageInfo.total / Math.max(1, accountPageInfo.size)) || 1)));
+const customerSearchTotalPages = computed(() => Math.max(1, Number(customerSearchPageInfo.totalPages || Math.ceil(customerSearchPageInfo.total / Math.max(1, customerSearchPageInfo.size)) || 1)));
+const ruleTotalPages = computed(() => Math.max(1, Number(rulePageInfo.totalPages || Math.ceil(rulePageInfo.total / Math.max(1, rulePageInfo.size)) || 1)));
+const quickSearchTotalPages = computed(() => Math.max(1, Number(quickSearchPageInfo.totalPages || Math.ceil(quickSearchPageInfo.total / Math.max(1, quickSearchPageInfo.size)) || 1)));
+const versionTotalPages = computed(() => Math.max(1, Number(versionPageInfo.totalPages || Math.ceil(versionPageInfo.total / Math.max(1, versionPageInfo.size)) || 1)));
+const noticeTotalPages = computed(() => Math.max(1, Number(noticePageInfo.totalPages || Math.ceil(noticePageInfo.total / Math.max(1, noticePageInfo.size)) || 1)));
+const auditTotalPages = computed(() => Math.max(1, Number(auditPageInfo.totalPages || Math.ceil(auditPageInfo.total / Math.max(1, auditPageInfo.size)) || 1)));
 const filteredHealthAlerts = computed(() => listFrom(health.value ?? {}, 'recentAlerts').filter((alert) => {
-  if (!healthAlertStatusFilter.value) return true;
-  return String(alert.status ?? 'OPEN').toUpperCase() === healthAlertStatusFilter.value;
+  const matchesStatus = !healthAlertStatusFilter.value || String(alert.status ?? 'OPEN').toUpperCase() === healthAlertStatusFilter.value;
+  const matchesLevel = !healthAlertLevelFilter.value || String(alert.level ?? alert.alertLevel ?? '').toUpperCase() === healthAlertLevelFilter.value;
+  return matchesStatus && matchesLevel;
 }));
 const activeFormTitle = computed(() => formMeta(activeForm.value).title);
 const activeFormDescription = computed(() => formMeta(activeForm.value).description);
 const activeFormFields = computed(() => formMeta(activeForm.value).fields);
+const quickSearchVariables = QUICK_SEARCH_TEMPLATE_VARIABLES.map((variable) => ({
+  label: variable.label,
+  value: variable.placeholder
+}));
+const auditActionGroups = computed(() => {
+  const groups = new Map<string, AnyRecord[]>();
+  auditActions.value.forEach((action) => {
+    const group = String(action.group || '其他操作');
+    groups.set(group, [...(groups.get(group) ?? []), action]);
+  });
+  return [...groups.entries()].map(([group, actions]) => ({ group, actions }));
+});
+const datasourceColumnStatusLabel = computed(() => {
+  if (!datasourceColumnStatus.value) return '尚未识别';
+  const status = String(datasourceColumnStatus.value.fetchStatus ?? '').toUpperCase();
+  if (status === 'OK') return datasourceColumnStatus.value.fallback ? '已从现有映射补全' : '已获取真实表格列名';
+  if (status === 'UNAVAILABLE') return '真实表格暂不可用';
+  return '等待识别';
+});
+const datasourceColumnStatusDetail = computed(() => {
+  const status = datasourceColumnStatus.value;
+  if (!status) return '点击“识别列名”后会显示取样来源和失败原因。';
+  if (status.fetchError) return `取样失败：${status.fetchError}。系统已保留现有映射列名作为兜底。`;
+  if (status.fallback) return `当前列名来自 ${status.source || '现有映射'}，未能直接从企微表格取样。`;
+  return `来源：${status.source || 'SHEET_SAMPLE'}，共识别 ${datasourceColumns.value.length} 个列名。`;
+});
+const mappingDiffGroups = computed(() => {
+  const diff = (mappingCompare.value?.diff ?? {}) as AnyRecord;
+  return [
+    { key: 'added', label: '新增映射', items: listFrom(diff, 'added') },
+    { key: 'removed', label: '移除映射', items: listFrom(diff, 'removed') },
+    { key: 'changed', label: '变更映射', items: listFrom(diff, 'changed') },
+    { key: 'unchanged', label: '未变化', items: listFrom(diff, 'unchanged') }
+  ];
+});
+const csvImportErrors = computed(() => listFrom(csvImportResult.value ?? {}, 'errors'));
+const csvImportSummary = computed(() => {
+  const result = csvImportResult.value;
+  if (!result) return '尚未导入';
+  return `总行数 ${result.totalRows ?? 0}，新增 ${result.created ?? 0}，更新 ${result.updated ?? 0}，跳过 ${result.skipped ?? 0}`;
+});
 
 onMounted(() => {
+  void loadRuntimeModeStatus();
   void refreshActiveSection();
-  healthTimer = window.setInterval(() => {
-    if (activeSectionKey.value === 'insight-ops' && !document.hidden) {
-      void loadHealth();
-    }
-  }, 30000);
+  scheduleHealthRefresh();
+  scheduleAnalyticsRefresh();
 });
 
 onBeforeUnmount(() => {
-  if (healthTimer !== null) {
-    window.clearInterval(healthTimer);
-  }
+  stopHealthRefresh();
+  stopAnalyticsRefresh();
+  stopAuditExportPolling();
 });
 
 function selectSection(section: SectionKey) {
@@ -946,27 +2314,39 @@ function selectSection(section: SectionKey) {
 }
 
 async function refreshActiveSection() {
-  if (activeSectionKey.value === 'skill-ai') await loadSkillAi();
-  if (activeSectionKey.value === 'data-content') await loadDataContent();
-  if (activeSectionKey.value === 'org-rules-tags') await loadOrgRulesTags();
-  if (activeSectionKey.value === 'insight-ops') await loadInsightOps();
+  if (activeSection.value.groupKey === 'config-center') await loadSkillAi();
+  if (activeSection.value.groupKey === 'data-content') await loadDataContent();
+  if (activeSection.value.groupKey === 'org-rules-tags') await loadOrgRulesTags();
+  if (activeSection.value.groupKey === 'insight-ops') await loadInsightOps();
 }
 
 function startPrimaryAction() {
-  if (activeSectionKey.value === 'skill-ai') openForm('skill');
-  if (activeSectionKey.value === 'data-content') openForm('datasource');
-  if (activeSectionKey.value === 'org-rules-tags') openForm('account');
-  if (activeSectionKey.value === 'insight-ops') openForm('notice');
+  if (activeSectionKey.value === 'skill-scenes') openForm('skill');
+  if (activeSectionKey.value === 'configuration-center') openForm('skillEnv');
+  if (activeSectionKey.value === 'data-integration') openForm('datasource');
+  if (activeSectionKey.value === 'quick-search-content') openForm('quickSearch');
+  if (activeSectionKey.value === 'account-permissions') openForm('account');
+  if (activeSectionKey.value === 'followup-rules') openForm('rule');
+  if (activeSectionKey.value === 'customer-tags') openForm('tagCategory');
+  if (activeSectionKey.value === 'analytics-dashboard') downloadAnalyticsCsv();
+  if (activeSectionKey.value === 'version-management') openForm('version');
+  if (activeSectionKey.value === 'system-notices') openForm('notice');
+  if (activeSectionKey.value === 'audit-logs') void exportAuditLogs();
+  if (activeSectionKey.value === 'system-health') void loadHealth(true);
 }
 
 async function loadSkillAi() {
   await runWithNotice(async () => {
-    const [skillList, availableSkillList, skillCallAnalytics, skillEnvList, imageEnvList, configList] = await Promise.all([
+    const [skillList, availableSkillList, skillCallAnalytics, skillEnvList, imageEnvList, llmEnvList, llmRouteList, llmSceneList, llmCallAnalytics, configList] = await Promise.all([
       getJson<unknown>(withQuery('/admin/api/v1/skills', { scene: skillSceneFilter.value, leadType: skillLeadTypeFilter.value })),
       getJson<unknown>('/admin/api/v1/skills/available'),
       getJson<unknown>(withQuery('/admin/api/v1/analytics/skill-calls', { days: skillAnalyticsDays.value, scene: skillSceneFilter.value, leadType: skillLeadTypeFilter.value })),
       getJson<unknown>('/admin/api/v1/skill-environments'),
       getJson<unknown>('/admin/api/v1/image-environments'),
+      getJson<unknown>('/admin/api/v1/llm-environments'),
+      getJson<unknown>('/admin/api/v1/llm-routes'),
+      getJson<unknown>('/admin/api/v1/llm-routes/scenes'),
+      getJson<unknown>(withQuery('/admin/api/v1/analytics/llm-calls', { days: llmAnalyticsDays.value })),
       getJson<unknown>('/admin/api/v1/configs')
     ]);
     skillBindings.value = listFromResponse(skillList);
@@ -974,9 +2354,13 @@ async function loadSkillAi() {
     skillAnalytics.value = recordFromResponse(skillCallAnalytics);
     skillEnvironments.value = listFromResponse(skillEnvList);
     imageEnvironments.value = listFromResponse(imageEnvList);
+    llmEnvironments.value = listFromResponse(llmEnvList);
+    llmRoutes.value = listFromResponse(llmRouteList);
+    llmRouteScenes.value = listFromResponse(llmSceneList).map((item) => String(item.value ?? item.name ?? item.scene ?? item)).filter(Boolean);
+    llmAnalytics.value = recordFromResponse(llmCallAnalytics);
     configs.value = configEntries(configList);
     hydratePromptDraft();
-  }, 'AI 配置已刷新');
+  }, '配置中心已刷新');
 }
 
 async function loadSkillAnalytics() {
@@ -989,20 +2373,30 @@ async function loadSkillAnalytics() {
   }, 'Skill 调用监控已刷新');
 }
 
+async function loadLlmAnalytics() {
+  await runWithNotice(async () => {
+    llmAnalytics.value = recordFromResponse(await getJson<unknown>(withQuery('/admin/api/v1/analytics/llm-calls', {
+      days: llmAnalyticsDays.value
+    })));
+  }, 'LLM 调用统计已刷新');
+}
+
 async function loadDataContent() {
   await runWithNotice(async () => {
-    const [dsList, fieldList, syncList, importList, quickList] = await Promise.all([
+    const [dsList, fieldList, syncList, importList, customerList, quickList] = await Promise.all([
       getJson<unknown>('/admin/api/v1/datasources'),
       getJson<unknown>('/admin/api/v1/customer-fields'),
       getJson<unknown>('/admin/api/v1/datasources/sync-status'),
       getJson<unknown>('/admin/api/v1/datasources/import-logs'),
-      getJson<unknown>('/admin/api/v1/quick-search/items')
+      getJson<unknown>(customerSearchListPath()),
+      getJson<unknown>(quickSearchListPath())
     ]);
     datasources.value = listFromResponse(dsList);
     customerFields.value = normalizeCustomerFields(fieldList);
     syncStatuses.value = listFromResponse(syncList);
     importLogs.value = listFromResponse(importList);
-    quickSearchItems.value = listFromResponse(quickList);
+    applyCustomerSearchList(customerList);
+    applyQuickSearchList(quickList);
     if (!selectedDatasource.value && datasources.value.length) {
       selectDatasource(datasources.value[0]);
     }
@@ -1012,57 +2406,93 @@ async function loadDataContent() {
 async function loadOrgRulesTags() {
   await runWithNotice(async () => {
     const [accountList, ruleList, tagList] = await Promise.all([
-      getJson<unknown>(withQuery('/admin/api/v1/accounts', {
-        keyword: accountKeyword.value,
-        role: accountRoleFilter.value,
-        is_enabled: accountEnabledFilter.value,
-        page_size: 100
-      })),
-      getJson<unknown>(withQuery('/admin/api/v1/rules', { keyword: ruleKeyword.value, actionType: ruleActionType.value, page: 1, size: 100 })),
+      getJson<unknown>(accountListPath()),
+      getJson<unknown>(ruleListPath()),
       getJson<unknown>('/admin/api/v1/tags/categories')
     ]);
-    accounts.value = listFromResponse(accountList);
-    rules.value = listFromResponse(ruleList);
+    applyAccountList(accountList);
+    if (activeSectionKey.value === 'account-permissions') {
+      void loadLeaderAccounts();
+    }
+    applyRuleList(ruleList);
     tagCategories.value = listFromResponse(tagList);
+    try {
+      customerFields.value = normalizeCustomerFields(await getJson<unknown>('/admin/api/v1/customer-fields'));
+    } catch {
+      customerFields.value = normalizeCustomerFields({ success: true, data: { items: customerFields.value }, errorCode: null, message: null });
+    }
   }, '组织与规则已刷新');
 }
 
 async function loadInsightOps() {
   await runWithNotice(async () => {
-    const analyticsQuery = { days: skillAnalyticsDays.value, leadType: skillLeadTypeFilter.value };
-    const [overview, funnels, staff, sources, stages, analyticsHealth, lifecycle, risks, contentRanking, versionList, noticeList, auditList, actionList, healthPayload] = await Promise.all([
-      getJson<unknown>(withQuery('/admin/api/v1/analytics/overview', analyticsQuery)),
-      getJson<unknown>(withQuery('/admin/api/v1/analytics/funnels', analyticsQuery)),
-      getJson<unknown>(withQuery('/admin/api/v1/analytics/staff', analyticsQuery)),
-      getJson<unknown>(withQuery('/admin/api/v1/analytics/sources', analyticsQuery)),
-      getJson<unknown>(withQuery('/admin/api/v1/analytics/stages', analyticsQuery)),
-      getJson<unknown>(withQuery('/admin/api/v1/analytics/health', analyticsQuery)),
-      getJson<unknown>(withQuery('/admin/api/v1/analytics/lifecycle', analyticsQuery)),
-      getJson<unknown>(withQuery('/admin/api/v1/analytics/risks', analyticsQuery)),
-      getJson<unknown>(withQuery('/admin/api/v1/analytics/content-ranking', analyticsQuery)),
-      getJson<unknown>(withQuery('/admin/api/v1/versions', { status: versionStatusFilter.value, platform: versionPlatformFilter.value, page: 1, size: 100 })),
-      getJson<unknown>(withQuery('/admin/api/v1/notices', { status: noticeStatusFilter.value, level: noticeLevelFilter.value, page: 1, size: 100 })),
+    const [accountList, versionList, noticeList, auditList, actionList, healthPayload] = await Promise.all([
+      getJson<unknown>(withQuery('/admin/api/v1/accounts', { page: 1, page_size: 50 })),
+      getJson<unknown>(versionListPath()),
+      getJson<unknown>(noticeListPath()),
       getJson<unknown>(auditLogPath()),
       getJson<unknown>('/admin/api/v1/audit-logs/actions'),
       getJson<unknown>('/admin/api/v1/health')
     ]);
-    analytics.overview = recordFromResponse(overview);
-    analytics.funnels = recordFromResponse(funnels);
-    analytics.staff = recordFromResponse(staff);
-    analytics.sources = recordFromResponse(sources);
-    analytics.stages = recordFromResponse(stages);
-    analytics.health = recordFromResponse(analyticsHealth);
-    analytics.lifecycle = recordFromResponse(lifecycle);
-    analytics.risks = recordFromResponse(risks);
-    analytics.contentRanking = recordFromResponse(contentRanking);
-    versions.value = listFromResponse(versionList);
-    notices.value = listFromResponse(noticeList);
-    auditLogs.value = listFromResponse(auditList);
-    auditActions.value = listFromResponse(actionList).map((item) => String(item.action ?? item.name ?? item));
+    analyticsAccounts.value = listFromResponse(accountList);
+    applyVersionList(versionList);
+    applyNoticeList(noticeList);
+    applyAuditList(auditList);
+    applyAuditDictionary(actionList);
     health.value = dataFromResponse(healthPayload) as AnyRecord;
+    applyHealthMetadata();
     healthLastRefreshAt.value = formatDate((health.value as AnyRecord)?.timestamp ?? new Date().toISOString());
     healthConsecutiveFailures.value = 0;
+    await loadAnalyticsDashboard({ silent: true });
   }, '分析与系统运营已刷新');
+}
+
+async function loadAnalyticsDashboard(options: { silent?: boolean } = {}) {
+  const analyticsQuery = { days: skillAnalyticsDays.value, leadType: analyticsLeadType(), caller: analyticsCallerFilter.value };
+  const contentRankingQuery = { days: skillAnalyticsDays.value, caller: analyticsCallerFilter.value };
+  const endpoints: Array<{ key: AnalyticsKey; path: string; query: Record<string, unknown> }> = [
+    { key: 'overview', path: '/admin/api/v1/analytics/overview', query: analyticsQuery },
+    { key: 'funnels', path: '/admin/api/v1/analytics/funnels', query: analyticsQuery },
+    { key: 'staff', path: '/admin/api/v1/analytics/staff', query: analyticsQuery },
+    { key: 'sources', path: '/admin/api/v1/analytics/sources', query: analyticsQuery },
+    { key: 'stages', path: '/admin/api/v1/analytics/stages', query: analyticsQuery },
+    { key: 'health', path: '/admin/api/v1/analytics/health', query: analyticsQuery },
+    { key: 'lifecycle', path: '/admin/api/v1/analytics/lifecycle', query: analyticsQuery },
+    { key: 'risks', path: '/admin/api/v1/analytics/risks', query: analyticsQuery },
+    { key: 'contentRanking', path: '/admin/api/v1/analytics/content-ranking', query: contentRankingQuery }
+  ];
+  const run = async () => {
+    endpoints.forEach(({ key }) => {
+      analyticsStatus[key].loading = true;
+      analyticsStatus[key].error = '';
+    });
+    const results = await Promise.allSettled(endpoints.map(({ path, query }) => getJson<unknown>(withQuery(path, query))));
+    results.forEach((result, index) => {
+      const key = endpoints[index].key;
+      analyticsStatus[key].loading = false;
+      if (result.status === 'fulfilled') {
+        analytics[key] = recordFromResponse(result.value);
+      } else {
+        analyticsStatus[key].error = errorText(result.reason);
+      }
+    });
+  };
+  if (options.silent) {
+    await run();
+    return;
+  }
+  await runWithNotice(run, analyticsFailedSections.value.length ? '分析看板已部分刷新' : '分析看板已刷新');
+}
+
+async function loadRuntimeModeStatus() {
+  try {
+    health.value = dataFromResponse(await getJson<unknown>('/admin/api/v1/health')) as AnyRecord;
+    applyHealthMetadata();
+    healthLastRefreshAt.value = formatDate((health.value as AnyRecord)?.timestamp ?? new Date().toISOString());
+    healthConsecutiveFailures.value = 0;
+  } catch {
+    // The active page refresh will surface health errors when the user enters system monitoring.
+  }
 }
 
 async function loadHealth(force = false) {
@@ -1075,6 +2505,7 @@ async function loadHealth(force = false) {
   await runWithNotice(async () => {
     try {
       health.value = dataFromResponse(await getJson<unknown>('/admin/api/v1/health')) as AnyRecord;
+      applyHealthMetadata();
       healthLastRefreshAt.value = formatDate((health.value as AnyRecord)?.timestamp ?? new Date().toISOString());
       healthConsecutiveFailures.value = 0;
     } catch (error) {
@@ -1086,14 +2517,248 @@ async function loadHealth(force = false) {
 
 async function loadAuditLogs() {
   await runWithNotice(async () => {
-    auditLogs.value = listFromResponse(await getJson<unknown>(auditLogPath()));
+    applyAuditList(await getJson<unknown>(auditLogPath()));
   }, '审计日志已刷新');
 }
 
+async function resetAuditPageAndLoad() {
+  auditPageInfo.page = 1;
+  await loadAuditLogs();
+}
+
+function clearAuditActions() {
+  if (!auditActionsSelected.value.length) return;
+  auditActionsSelected.value = [];
+  void resetAuditPageAndLoad();
+}
+
+async function changeAuditPage(delta: number) {
+  const nextPage = Math.min(auditTotalPages.value, Math.max(1, auditPageInfo.page + delta));
+  if (nextPage === auditPageInfo.page) return;
+  auditPageInfo.page = nextPage;
+  await loadAuditLogs();
+}
+
+function applyAuditList(response: ApiResponse<unknown>) {
+  const data = recordFromResponse(response);
+  auditLogs.value = listFrom(data);
+  auditPageInfo.total = Number(data.total ?? auditLogs.value.length);
+  auditPageInfo.page = Number(data.page ?? auditPageInfo.page ?? 1);
+  auditPageInfo.size = Number(data.size ?? data.pageSize ?? auditPageInfo.size ?? 20);
+  auditPageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(auditPageInfo.total / Math.max(1, auditPageInfo.size)) || 1));
+  auditPageInfo.retentionDays = Number(data.retentionDays ?? 0);
+  auditPageInfo.earliestCreatedAt = String(data.earliestCreatedAt ?? '');
+}
+
+async function loadLeaderAccounts() {
+  const response = await getJson<unknown>(withQuery('/admin/api/v1/accounts', {
+    role: 'LEADER',
+    is_enabled: 1,
+    page: 1,
+    page_size: 50
+  }));
+  leaderAccounts.value = listFromResponse(response);
+}
+
+async function resetAccountPageAndLoad() {
+  accountPageInfo.page = 1;
+  await loadOrgRulesTags();
+}
+
+async function resetCustomerSearchPageAndLoad() {
+  customerSearchPageInfo.page = 1;
+  selectedAdminCustomer.value = null;
+  await loadDataContent();
+}
+
+async function changeCustomerSearchPage(delta: number) {
+  const nextPage = Math.min(customerSearchTotalPages.value, Math.max(1, customerSearchPageInfo.page + delta));
+  if (nextPage === customerSearchPageInfo.page) return;
+  customerSearchPageInfo.page = nextPage;
+  selectedAdminCustomer.value = null;
+  await loadDataContent();
+}
+
+function toggleAdminCustomerDetail(customer: AnyRecord) {
+  selectedAdminCustomer.value = selectedAdminCustomer.value?.phone === customer.phone ? null : customer;
+}
+
+async function changeAccountPage(delta: number) {
+  const nextPage = Math.min(accountTotalPages.value, Math.max(1, accountPageInfo.page + delta));
+  if (nextPage === accountPageInfo.page) return;
+  accountPageInfo.page = nextPage;
+  await loadOrgRulesTags();
+}
+
+async function resetRulePageAndLoad() {
+  rulePageInfo.page = 1;
+  await loadOrgRulesTags();
+}
+
+async function changeRulePage(delta: number) {
+  const nextPage = Math.min(ruleTotalPages.value, Math.max(1, rulePageInfo.page + delta));
+  if (nextPage === rulePageInfo.page) return;
+  rulePageInfo.page = nextPage;
+  await loadOrgRulesTags();
+}
+
+async function resetQuickSearchPageAndLoad() {
+  quickSearchPageInfo.page = 1;
+  await loadDataContent();
+}
+
+async function changeQuickSearchPage(delta: number) {
+  const nextPage = Math.min(quickSearchTotalPages.value, Math.max(1, quickSearchPageInfo.page + delta));
+  if (nextPage === quickSearchPageInfo.page) return;
+  quickSearchPageInfo.page = nextPage;
+  await loadDataContent();
+}
+
+async function resetVersionPageAndLoad() {
+  versionPageInfo.page = 1;
+  await loadInsightOps();
+}
+
+async function changeVersionPage(delta: number) {
+  const nextPage = Math.min(versionTotalPages.value, Math.max(1, versionPageInfo.page + delta));
+  if (nextPage === versionPageInfo.page) return;
+  versionPageInfo.page = nextPage;
+  await loadInsightOps();
+}
+
+async function resetNoticePageAndLoad() {
+  noticePageInfo.page = 1;
+  await loadInsightOps();
+}
+
+async function changeNoticePage(delta: number) {
+  const nextPage = Math.min(noticeTotalPages.value, Math.max(1, noticePageInfo.page + delta));
+  if (nextPage === noticePageInfo.page) return;
+  noticePageInfo.page = nextPage;
+  await loadInsightOps();
+}
+
+function applyAccountList(response: ApiResponse<unknown>) {
+  const data = recordFromResponse(response);
+  accounts.value = listFrom(data);
+  accountPageInfo.total = Number(data.total ?? accounts.value.length);
+  accountPageInfo.page = Number(data.page ?? accountPageInfo.page ?? 1);
+  accountPageInfo.size = Number(data.pageSize ?? data.size ?? accountPageInfo.size ?? 20);
+  accountPageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(accountPageInfo.total / Math.max(1, accountPageInfo.size)) || 1));
+}
+
+function applyCustomerSearchList(response: ApiResponse<unknown>) {
+  const data = recordFromResponse(response);
+  customerSearchItems.value = listFrom(data);
+  customerSearchPageInfo.total = Number(data.total ?? customerSearchItems.value.length);
+  customerSearchPageInfo.page = Number(data.page ?? customerSearchPageInfo.page ?? 1);
+  customerSearchPageInfo.size = Number(data.size ?? data.pageSize ?? customerSearchPageInfo.size ?? 20);
+  customerSearchPageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(customerSearchPageInfo.total / Math.max(1, customerSearchPageInfo.size)) || 1));
+}
+
+function applyRuleList(response: ApiResponse<unknown>) {
+  const data = recordFromResponse(response);
+  rules.value = listFrom(data);
+  ruleSelectedIds.value = ruleSelectedIds.value.filter((id) => rules.value.some((rule) => rule.id === id));
+  rulePageInfo.total = Number(data.total ?? rules.value.length);
+  rulePageInfo.page = Number(data.page ?? rulePageInfo.page ?? 1);
+  rulePageInfo.size = Number(data.size ?? data.pageSize ?? rulePageInfo.size ?? 20);
+  rulePageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(rulePageInfo.total / Math.max(1, rulePageInfo.size)) || 1));
+}
+
+function applyQuickSearchList(response: ApiResponse<unknown>) {
+  const data = recordFromResponse(response);
+  quickSearchItems.value = listFrom(data);
+  quickSearchSelectedIds.value = quickSearchSelectedIds.value.filter((id) => quickSearchItems.value.some((item) => item.id === id));
+  quickSearchPageInfo.total = Number(data.total ?? quickSearchItems.value.length);
+  quickSearchPageInfo.page = Number(data.page ?? quickSearchPageInfo.page ?? 1);
+  quickSearchPageInfo.size = Number(data.size ?? data.pageSize ?? quickSearchPageInfo.size ?? 20);
+  quickSearchPageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(quickSearchPageInfo.total / Math.max(1, quickSearchPageInfo.size)) || 1));
+}
+
+function applyVersionList(response: ApiResponse<unknown>) {
+  const data = recordFromResponse(response);
+  versions.value = listFrom(data);
+  versionPageInfo.total = Number(data.total ?? versions.value.length);
+  versionPageInfo.page = Number(data.page ?? versionPageInfo.page ?? 1);
+  versionPageInfo.size = Number(data.size ?? data.pageSize ?? versionPageInfo.size ?? 20);
+  versionPageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(versionPageInfo.total / Math.max(1, versionPageInfo.size)) || 1));
+}
+
+function applyNoticeList(response: ApiResponse<unknown>) {
+  const data = recordFromResponse(response);
+  notices.value = listFrom(data);
+  noticePageInfo.total = Number(data.total ?? notices.value.length);
+  noticePageInfo.page = Number(data.page ?? noticePageInfo.page ?? 1);
+  noticePageInfo.size = Number(data.size ?? data.pageSize ?? noticePageInfo.size ?? 20);
+  noticePageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(noticePageInfo.total / Math.max(1, noticePageInfo.size)) || 1));
+}
+
+function applyAuditDictionary(response: ApiResponse<unknown>) {
+  const data = recordFromResponse(response);
+  const actions = listFrom(data, 'actions');
+  auditActions.value = actions.map((item) => typeof item === 'string' ? { action: item, label: item, group: '其他' } : {
+    action: String(item.action ?? item.name ?? ''),
+    label: String(item.label ?? item.action ?? item.name ?? ''),
+    group: String(item.group ?? '其他')
+  }).filter((item) => item.action);
+  auditTargetTypes.value = listFrom(data, 'targetTypes').map((item) => typeof item === 'string' ? { type: item, label: item } : {
+    type: String(item.type ?? item.value ?? ''),
+    label: String(item.label ?? item.type ?? item.value ?? '')
+  }).filter((item) => item.type);
+}
+
+function applyHealthMetadata() {
+  const seconds = Number(health.value?.refreshIntervalS);
+  if (Number.isFinite(seconds) && seconds >= 15 && seconds <= 120 && seconds !== healthRefreshIntervalS.value) {
+    healthRefreshIntervalS.value = seconds;
+    scheduleHealthRefresh();
+  }
+}
+
+function scheduleHealthRefresh() {
+  stopHealthRefresh();
+  healthTimer = window.setInterval(() => {
+    if (activeSectionKey.value === 'system-health' && !document.hidden) {
+      void loadHealth();
+    }
+  }, healthRefreshIntervalS.value * 1000);
+}
+
+function stopHealthRefresh() {
+  if (healthTimer !== null) {
+    window.clearInterval(healthTimer);
+    healthTimer = null;
+  }
+}
+
+function scheduleAnalyticsRefresh() {
+  stopAnalyticsRefresh();
+  analyticsTimer = window.setInterval(() => {
+    if (activeSectionKey.value === 'analytics-dashboard' && !document.hidden) {
+      void loadAnalyticsDashboard({ silent: true });
+    }
+  }, 5 * 60 * 1000);
+}
+
+function stopAnalyticsRefresh() {
+  if (analyticsTimer !== null) {
+    window.clearInterval(analyticsTimer);
+    analyticsTimer = null;
+  }
+}
+
 function openForm(kind: FormKind, item?: AnyRecord) {
+  if (kind === 'account' && !leaderAccounts.value.length) {
+    void loadLeaderAccounts();
+  }
   activeForm.value = kind;
   editingItem.value = item ?? null;
   formError.value = '';
+  if (kind === 'version') {
+    versionUploadState.kind = 'idle';
+    versionUploadState.message = item?.downloadUrl ? '已加载当前版本安装包地址。' : '';
+  }
   Object.keys(formDraft).forEach((key) => delete formDraft[key]);
   Object.assign(formDraft, initialDraft(kind, item));
 }
@@ -1102,6 +2767,8 @@ function closeForm() {
   activeForm.value = null;
   editingItem.value = null;
   formError.value = '';
+  versionUploadState.kind = 'idle';
+  versionUploadState.message = '';
 }
 
 async function submitActiveForm() {
@@ -1113,7 +2780,7 @@ async function submitActiveForm() {
     closeForm();
     await refreshActiveSection();
   } catch (error) {
-    formError.value = error instanceof Error ? error.message : String(error);
+    formError.value = humanizeError(error);
   }
 }
 
@@ -1128,6 +2795,10 @@ async function submitForm(kind: FormKind) {
       await submitEnvironment('skill');
     } else if (kind === 'imageEnv') {
       await submitEnvironment('image');
+    } else if (kind === 'llmEnv') {
+      await submitEnvironment('llm');
+    } else if (kind === 'llmRoute') {
+      await submitLlmRoute();
     } else if (kind === 'datasource') {
       const payload = pickDraft(['name', 'sheetId', 'sourceTable', 'description']);
       if (editingItem.value?.id) await putJson(`/admin/api/v1/datasources/${editingItem.value.id}`, payload);
@@ -1135,34 +2806,47 @@ async function submitForm(kind: FormKind) {
     } else if (kind === 'quickSearch') {
       const payload = pickDraft(['contentType', 'leadType', 'title', 'shortcutCode', 'content', 'imageUrl', 'sortOrder', 'enabled']);
       if (editingItem.value?.id) await putJson(`/admin/api/v1/quick-search/items/${editingItem.value.id}`, payload);
-      else await postJson('/admin/api/v1/quick-search/items', payload);
+      else {
+        await postJson('/admin/api/v1/quick-search/items', payload);
+        quickSearchPageInfo.page = 1;
+      }
     } else if (kind === 'account') {
-      const payload = pickDraft(['phone', 'password', 'displayName', 'role', 'leaderId']);
-      if (editingItem.value?.id) await putJson(`/admin/api/v1/accounts/${editingItem.value.id}`, payload);
-      else await postJson('/admin/api/v1/accounts', payload);
+      if (editingItem.value?.id) await putJson(`/admin/api/v1/accounts/${editingItem.value.id}`, accountUpdatePayload());
+      else {
+        await postJson('/admin/api/v1/accounts', accountCreatePayload());
+        accountPageInfo.page = 1;
+      }
     } else if (kind === 'rule') {
       const payload = buildRulePayload();
       if (editingItem.value?.id) await putJson(`/admin/api/v1/rules/${editingItem.value.id}`, payload);
       else await postJson('/admin/api/v1/rules', payload);
     } else if (kind === 'tagCategory') {
-      const payload = pickDraft(['categoryName', 'categoryKey', 'boundField', 'isEnabled']);
+      const payload = pickDraft(editingItem.value?.id ? ['categoryName', 'isEnabled'] : ['categoryName', 'boundField', 'isEnabled']);
       if (editingItem.value?.id) await putJson(`/admin/api/v1/tags/categories/${editingItem.value.id}`, payload);
       else await postJson('/admin/api/v1/tags/categories', payload);
     } else if (kind === 'tagValue') {
-      const payload = pickDraft(['categoryId', 'tagValue', 'displayName', 'sortOrder', 'isEnabled']);
+      const payload = pickDraft(editingItem.value?.id ? ['displayName', 'sortOrder', 'isEnabled'] : ['categoryId', 'tagValue', 'displayName', 'sortOrder', 'isEnabled']);
       if (editingItem.value?.id) await putJson(`/admin/api/v1/tags/values/${editingItem.value.id}`, payload);
       else await postJson('/admin/api/v1/tags/values', payload);
     } else if (kind === 'version') {
       const payload = pickDraft(['version', 'platform', 'downloadUrl', 'changelog', 'updateStrategy', 'gradualPercent', 'fileSize']);
       if (editingItem.value?.id) await putJson(`/admin/api/v1/versions/${editingItem.value.id}`, payload);
-      else await postJson('/admin/api/v1/versions', payload);
+      else {
+        await postJson('/admin/api/v1/versions', payload);
+        versionPageInfo.page = 1;
+      }
     } else if (kind === 'revokeVersion') {
       if (!editingItem.value?.id) throw new Error('请选择要撤回的版本');
       await putJson(`/admin/api/v1/versions/${editingItem.value.id}/revoke`, pickDraft(['reason', 'alternativeVersion']));
+      if (versionStatusFilter.value === 'PUBLISHED' && versions.value.length <= 1 && versionPageInfo.page > 1) {
+        versionPageInfo.page -= 1;
+      }
     } else if (kind === 'notice') {
-      const payload = pickDraft(['title', 'content', 'level', 'publishType', 'publishAt', 'expireDays']);
-      if (editingItem.value?.id) await putJson(`/admin/api/v1/notices/${editingItem.value.id}`, payload);
-      else await postJson('/admin/api/v1/notices', payload);
+      if (editingItem.value?.id) await putJson(`/admin/api/v1/notices/${editingItem.value.id}`, noticeUpdatePayload());
+      else {
+        await postJson('/admin/api/v1/notices', noticeCreatePayload());
+        noticePageInfo.page = 1;
+      }
     }
     noticeKind.value = 'info';
     notice.value = '保存成功';
@@ -1171,11 +2855,54 @@ async function submitForm(kind: FormKind) {
   }
 }
 
-async function submitEnvironment(kind: 'skill' | 'image') {
-  const prefix = kind === 'skill' ? 'skill-environments' : 'image-environments';
-  const payload = pickDraft(['envName', 'baseUrl', 'apiKey']);
+async function uploadVersionPackage(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  versionUploadState.kind = 'loading';
+  versionUploadState.message = '正在上传安装包...';
+  try {
+    const body = new FormData();
+    body.append('file', file);
+    body.append('platform', String(formDraft.platform || 'WINDOWS'));
+    const uploaded = recordFromResponse(await postForm<unknown>(
+      '/admin/api/v1/versions/upload',
+      body,
+      Math.max(loadDesktopConfig().requestTotalTimeoutMs, 120000)
+    ));
+    if (!uploaded.downloadUrl) {
+      throw new Error('安装包上传成功但后端未返回下载地址');
+    }
+    formDraft.downloadUrl = uploaded.downloadUrl;
+    formDraft.fileSize = uploaded.fileSize ?? file.size;
+    versionUploadState.kind = 'success';
+    versionUploadState.message = `上传完成：${formatFileSize(formDraft.fileSize)}`;
+  } catch (error) {
+    versionUploadState.kind = 'error';
+    versionUploadState.message = humanizeError(error);
+  }
+}
+
+async function submitEnvironment(kind: 'skill' | 'image' | 'llm') {
+  const prefix = environmentPrefix(kind);
+  const payload = kind === 'llm'
+    ? pickDraft(['envName', 'baseUrl', 'apiKey', 'model', 'protocol', 'timeoutMs', 'temperature', 'maxTokens'])
+    : pickDraft(['envName', 'baseUrl', 'apiKey']);
   if (editingItem.value?.id) await putJson(`/admin/api/v1/${prefix}/${editingItem.value.id}`, payload);
   else await postJson(`/admin/api/v1/${prefix}`, payload);
+}
+
+async function submitLlmRoute() {
+  const payload = {
+    scene: formDraft.scene,
+    leadType: formDraft.leadType ?? '',
+    environmentId: Number(formDraft.environmentId),
+    priority: Number(formDraft.priority ?? 0),
+    enabled: formDraft.enabled !== false
+  };
+  if (editingItem.value?.id) await putJson(`/admin/api/v1/llm-routes/${editingItem.value.id}`, payload);
+  else await postJson('/admin/api/v1/llm-routes', payload);
 }
 
 function pickDraft(keys: string[]) {
@@ -1185,13 +2912,67 @@ function pickDraft(keys: string[]) {
   }, {});
 }
 
+function accountCreatePayload() {
+  return normalizeAccountPayload(pickDraft(['phone', 'password', 'displayName', 'role', 'leaderId']));
+}
+
+function accountUpdatePayload() {
+  return normalizeAccountPayload(pickDraft(['displayName', 'role', 'leaderId', 'isEnabled']));
+}
+
+function normalizeAccountPayload(payload: AnyRecord) {
+  const next = { ...payload };
+  if (next.role !== 'KEEPER') {
+    next.leaderId = null;
+  } else if (next.leaderId !== undefined && next.leaderId !== null && next.leaderId !== '') {
+    next.leaderId = Number(next.leaderId);
+  } else {
+    throw new Error('管家账号必须选择直属组长');
+  }
+  if (next.isEnabled !== undefined) {
+    next.isEnabled = next.isEnabled !== false;
+  }
+  return next;
+}
+
+function environmentPrefix(kind: 'skill' | 'image' | 'llm') {
+  if (kind === 'skill') return 'skill-environments';
+  if (kind === 'image') return 'image-environments';
+  return 'llm-environments';
+}
+
+function noticeCreatePayload() {
+  return pickDraft(['title', 'content', 'level', 'publishType', 'publishAt', 'expireDays']);
+}
+
+function noticeUpdatePayload() {
+  return pickDraft(['title', 'content', 'level', 'publishAt', 'expireDays']);
+}
+
 function initialDraft(kind: FormKind, item?: AnyRecord): AnyRecord {
   const suffix = Date.now().toString().slice(-6);
-  if (kind === 'skill') return { skillId: item?.skillId ?? '', skillName: item?.skillName ?? '', scene: item?.scene ?? 'OPENING', leadType: item?.leadType ?? 'PENDING', priority: item?.priority ?? 90 };
+  if (kind === 'skill') return { skillId: item?.skillId ?? '', skillName: item?.skillName ?? '', scene: item?.scene ?? 'OPENING', leadType: item?.leadType ?? 'GENERAL', priority: item?.priority ?? 90 };
   if (kind === 'skillEnv' || kind === 'imageEnv') return { envName: item?.envName ?? '', baseUrl: item?.baseUrl ?? '', apiKey: '' };
+  if (kind === 'llmEnv') return {
+    envName: item?.envName ?? '',
+    baseUrl: item?.baseUrl ?? '',
+    apiKey: '',
+    model: item?.model ?? '',
+    protocol: item?.protocol ?? 'OPENAI_COMPATIBLE',
+    timeoutMs: item?.timeoutMs ?? 10000,
+    temperature: item?.temperature ?? 0.2,
+    maxTokens: item?.maxTokens ?? 1024
+  };
+  if (kind === 'llmRoute') return {
+    scene: item?.scene ?? (llmRouteScenes.value[0] ?? 'REPLY_GENERATION'),
+    leadType: item?.leadType ?? '',
+    environmentId: item?.environmentId ?? llmEnvironments.value[0]?.id ?? '',
+    priority: item?.priority ?? 0,
+    enabled: item?.enabled ?? true
+  };
   if (kind === 'datasource') return { name: item?.name ?? '', sheetId: item?.sheetId ?? '', sourceTable: item?.sourceTable ?? '', description: item?.description ?? '' };
   if (kind === 'quickSearch') return { contentType: item?.contentType ?? 'TEMPLATE', leadType: item?.leadType ?? 'GENERAL', title: item?.title ?? '', shortcutCode: item?.shortcutCode ?? '', content: item?.content ?? '', imageUrl: item?.imageUrl ?? '', sortOrder: item?.sortOrder ?? 99, enabled: item?.enabled ?? true };
-  if (kind === 'account') return { phone: item?.phone ?? item?.username ?? '', password: '', displayName: item?.displayName ?? '', role: item?.role ?? 'KEEPER', leaderId: item?.leaderId ?? null };
+  if (kind === 'account') return { phone: item?.phone ?? item?.username ?? '', password: '', displayName: item?.displayName ?? '', role: item?.role ?? 'KEEPER', leaderId: item?.leaderId ?? '', isEnabled: item?.isEnabled ?? true };
   if (kind === 'rule') return ruleDraft(item);
   if (kind === 'tagCategory') return { categoryName: item?.categoryName ?? item?.name ?? '', categoryKey: item?.categoryKey ?? `custom_${suffix}`, boundField: item?.boundField ?? '', isEnabled: item?.isEnabled ?? true };
   if (kind === 'tagValue') return { categoryId: item?.categoryId ?? item?.id ?? '', tagValue: item?.tagValue ?? `TAG_${suffix}`, displayName: item?.displayName ?? '', sortOrder: item?.sortOrder ?? 99, isEnabled: item?.isEnabled ?? true };
@@ -1201,24 +2982,52 @@ function initialDraft(kind: FormKind, item?: AnyRecord): AnyRecord {
   return {};
 }
 
+function quickSearchContentMeta() {
+  const type = String(formDraft.contentType || 'TEMPLATE');
+  return QUICK_SEARCH_CONTENT_META[type] ?? QUICK_SEARCH_CONTENT_META.TEMPLATE;
+}
+
+function insertQuickSearchVariable(variable: string) {
+  const current = String(formDraft.content ?? '');
+  const spacer = !current || current.endsWith(' ') || current.endsWith('\n') ? '' : ' ';
+  formDraft.content = `${current}${spacer}${variable}`;
+}
+
 function formMeta(kind: FormKind | null): { title: string; description: string; fields: FormField[] } {
   const commonOptions = {
-    scene: [{ label: '开场白', value: 'OPENING' }, { label: '主动回复', value: 'ACTIVE_REPLY' }, { label: '换一组', value: 'REGENERATE' }],
-    leadType: [{ label: '通用', value: 'GENERAL' }, { label: '团购客资', value: 'TUAN_GOU' }, { label: '线索客资', value: 'XIAN_SUO' }, { label: '待确认', value: 'PENDING' }]
+    scene: SKILL_SCENE_OPTIONS,
+    leadType: LEAD_TYPE_OPTIONS
   };
   if (kind === 'skill') return { title: 'Skill 场景绑定', description: '选择场景、线索类型和技能，保存后立即用于对应业务场景。', fields: [
     { key: 'scene', label: '场景', type: 'select', options: commonOptions.scene },
-    { key: 'leadType', label: '线索类型', type: 'select', options: commonOptions.leadType },
+    { key: 'leadType', label: '线索类型', type: 'select', options: commonOptions.leadType, help: '选“全部客资”时作为兜底绑定；具体线索类型优先于全部客资。' },
     availableSkills.value.length
       ? { key: 'skillId', label: '技能', type: 'select', options: availableSkills.value.map((skill) => ({ label: skill.skillName || skill.skillId, value: skill.skillId })) }
       : { key: 'skillId', label: '技能标识', type: 'text', placeholder: '选择或填写已登记的技能标识' },
     { key: 'skillName', label: '显示名称', type: 'text' },
-    { key: 'priority', label: '优先级', type: 'number' }
+    { key: 'priority', label: '优先级（数字越小越先尝试）', type: 'number', min: 0, max: 999, step: 1, help: '建议主用 10，备用 20，测试 90。相同场景和线索类型会先用数字最小的启用项。' }
   ] };
   if (kind === 'skillEnv' || kind === 'imageEnv') return { title: kind === 'skillEnv' ? 'Skill 环境' : '识图环境', description: 'API Key 保存后只展示脱敏信息。', fields: [
     { key: 'envName', label: '环境名称', type: 'text', placeholder: '生产环境 / 备份环境' },
     { key: 'baseUrl', label: '服务地址', type: 'text', placeholder: 'https://api.example.com' },
     { key: 'apiKey', label: 'API Key', type: 'password' }
+  ] };
+  if (kind === 'llmEnv') return { title: 'LLM 思考环境', description: '每个环境可绑定一个模型和一组推理参数，API Key 保存后只展示脱敏信息。', fields: [
+    { key: 'envName', label: '环境名称', type: 'text', placeholder: 'OpenAI 主模型 / 本地模型网关' },
+    { key: 'baseUrl', label: '服务地址', type: 'text', placeholder: 'https://api.example.com' },
+    { key: 'apiKey', label: 'API Key', type: 'password' },
+    { key: 'model', label: '模型名称', type: 'text', placeholder: 'gpt-4.1-mini / qwen-plus' },
+    { key: 'protocol', label: '协议', type: 'select', options: [{ label: 'OpenAI Compatible', value: 'OPENAI_COMPATIBLE' }] },
+    { key: 'timeoutMs', label: '超时（毫秒）', type: 'number', min: 1000, max: 60000, step: 1000 },
+    { key: 'temperature', label: '温度', type: 'number', min: 0, max: 2, step: 0.1 },
+    { key: 'maxTokens', label: '最大 Tokens', type: 'number', min: 1, max: 32000, step: 1 }
+  ] };
+  if (kind === 'llmRoute') return { title: 'LLM 场景路由', description: '为特定业务场景指定 LLM 环境；线索类型为空时作为通用兜底路由。', fields: [
+    { key: 'scene', label: '场景', type: 'select', options: llmSceneOptions() },
+    { key: 'leadType', label: '线索类型', type: 'select', options: [{ label: '通用', value: '' }, ...commonOptions.leadType.filter((option) => option.value !== 'GENERAL')] },
+    { key: 'environmentId', label: 'LLM 环境', type: 'select', options: llmEnvironments.value.map((env) => ({ label: `${env.envName || `#${env.id}`} · ${env.model || '未填写模型'}`, value: env.id })) },
+    { key: 'priority', label: '优先级（数字越小越先尝试）', type: 'number', min: 0, max: 999, step: 1, help: '同一场景可配置多个 LLM，数字小的先调用，失败后再尝试后面的路由。' },
+    { key: 'enabled', label: '启用', type: 'checkbox' }
   ] };
   if (kind === 'datasource') return { title: '数据源', description: '配置企微智能表格来源。', fields: [
     { key: 'name', label: '数据源名称', type: 'text' },
@@ -1226,40 +3035,51 @@ function formMeta(kind: FormKind | null): { title: string; description: string; 
     { key: 'sourceTable', label: '来源表标识', type: 'text' },
     { key: 'description', label: '说明', type: 'textarea' }
   ] };
-  if (kind === 'quickSearch') return { title: '速搜内容', description: '同事在桌面端看到的内容会同步预览。', fields: [
+  if (kind === 'quickSearch') {
+    const meta = quickSearchContentMeta();
+    return { title: '速搜内容', description: meta.help, fields: [
     { key: 'contentType', label: '内容类型', type: 'select', options: [{ label: '话术模板', value: 'TEMPLATE' }, { label: '知识片段', value: 'KNOWLEDGE' }, { label: '门店定位', value: 'LOCATION' }, { label: '图片素材', value: 'IMAGE' }, { label: '小程序引导', value: 'MINI_PROGRAM' }] },
     { key: 'leadType', label: '线索类型', type: 'select', options: commonOptions.leadType },
-    { key: 'title', label: '标题', type: 'text' },
-    { key: 'shortcutCode', label: '快线码', type: 'text' },
-    { key: 'content', label: '正文', type: 'textarea' },
-    { key: 'imageUrl', label: '图片地址', type: 'text' },
-    { key: 'sortOrder', label: '排序', type: 'number' },
+    { key: 'title', label: '标题', type: 'text', placeholder: '如：产后修复开场白' },
+    { key: 'shortcutCode', label: '快线码', type: 'text', placeholder: '2-20 位字母或数字，如 hi01' },
+    { key: 'content', label: meta.contentLabel, type: 'textarea', placeholder: meta.contentPlaceholder, help: '变量会在侧边栏按客户档案替换，例如 {{客户昵称}}、{{意向门店}}。旧模板中的英文变量仍可继续使用。' },
+    { key: 'imageUrl', label: meta.imageLabel, type: 'text', placeholder: meta.imagePlaceholder },
+    { key: 'sortOrder', label: '排序（数字越小越靠前）', type: 'number', min: 0, max: 999, step: 1 },
     { key: 'enabled', label: '启用', type: 'checkbox' }
   ] };
-  if (kind === 'account') return { title: '账号', description: '角色决定后台和桌面端权限。', fields: [
-    { key: 'phone', label: '手机号', type: 'text' },
-    { key: 'password', label: '初始密码', type: 'password' },
+  }
+  if (kind === 'account') {
+    const creating = !editingItem.value?.id;
+    return { title: creating ? '新增账号' : '编辑账号', description: creating ? '手机号和初始密码只在创建时设置；后续改密码请使用列表里的重置密码。' : '手机号不可在编辑中修改；改密码请使用列表里的重置密码。', fields: [
+    ...(creating ? [
+      { key: 'phone', label: '手机号', type: 'text' as const },
+      { key: 'password', label: '初始密码', type: 'password' as const }
+    ] : []),
     { key: 'displayName', label: '姓名', type: 'text' },
     { key: 'role', label: '角色', type: 'select', options: [{ label: '管理员', value: 'ADMIN' }, { label: '组长', value: 'LEADER' }, { label: '管家', value: 'KEEPER' }] },
-    { key: 'leaderId', label: '直属组长', type: 'number' }
+    { key: 'leaderId', label: '直属组长', type: 'select', options: leaderOptions(), disabled: formDraft.role !== 'KEEPER', help: formDraft.role === 'KEEPER' ? '管家必须绑定直属组长，用于客户数据隔离和组长通知。' : '只有管家角色需要选择直属组长。' },
+    { key: 'isEnabled', label: '启用', type: 'checkbox' }
   ] };
+  }
   if (kind === 'rule') return { title: '跟进规则', description: '用业务字段构建条件，系统自动生成规则配置。', fields: [
     { key: 'name', label: '规则名称', type: 'text' },
-    { key: 'leadType', label: '线索类型', type: 'select', options: commonOptions.leadType.filter((item) => item.value !== 'GENERAL') },
-    { key: 'thresholdHours', label: '超过多少小时未跟进', type: 'number' },
-    { key: 'actionType', label: '动作', type: 'select', options: [{ label: '提醒/告警', value: 'ALERT' }, { label: '标签建议', value: 'TAG_SUGGESTION' }, { label: '通知组长', value: 'NOTIFY_LEADER' }] },
-    { key: 'priority', label: '优先级', type: 'number' },
+    { key: 'leadType', label: '线索类型', type: 'select', options: commonOptions.leadType, help: '选择全部客资时，不限制客户线索类型。' },
+    { key: 'thresholdHours', label: '超过多少小时未跟进', type: 'number', min: 1, max: 720, step: 1 },
+    { key: 'actionType', label: '动作', type: 'select', options: [{ label: '提醒/告警', value: 'ALERT' }, { label: '标签建议', value: 'TAG_CHANGE' }, { label: '通知组长', value: 'NOTIFY_LEADER' }] },
+    { key: 'alertLevel', label: '提醒级别', type: 'select', options: [{ label: '普通', value: 'NORMAL' }, { label: '提醒', value: 'WARN' }, { label: '紧急', value: 'HIGH' }] },
+    { key: 'reminderType', label: '提醒类型', type: 'select', options: [{ label: '逾期跟进', value: 'OVERDUE' }, { label: '标签建议', value: 'TAG_SUGGESTION' }] },
+    { key: 'tagName', label: '建议标签', type: 'text', placeholder: '如：高意向待跟进' },
+    { key: 'priority', label: '优先级（数字越大越先执行）', type: 'number', min: 1, max: 100, step: 1, help: '跟进规则当前按数字从大到小执行。建议紧急提醒 90，普通提醒 60，观察类 30。' },
     { key: 'enabled', label: '启用', type: 'checkbox' }
   ] };
-  if (kind === 'tagCategory') return { title: '标签分类', description: '分类绑定客户档案字段。', fields: [
-    { key: 'categoryName', label: '分类名称', type: 'text' },
-    { key: 'categoryKey', label: '代码值', type: 'text' },
-    { key: 'boundField', label: '绑定字段', type: 'text' },
+  if (kind === 'tagCategory') return { title: '标签分类', description: '分类绑定客户档案字段，用于筛选、分层和 AI 更新建议。', fields: [
+    { key: 'categoryName', label: '分类名称', type: 'text', placeholder: '如：意向度 / 客户阶段 / 体型关注' },
+    { key: 'boundField', label: '绑定客户档案字段', type: 'select', options: tagBoundFieldOptions(), disabled: Boolean(editingItem.value?.id), help: '绑定后，该分类的标签值会写入对应客户档案字段。已创建分类暂不修改绑定字段。' },
     { key: 'isEnabled', label: '启用', type: 'checkbox' }
   ] };
   if (kind === 'tagValue') return { title: '标签值', description: '展示名可调整，代码值用于系统判断。', fields: [
-    { key: 'categoryId', label: '分类', type: 'number' },
-    { key: 'tagValue', label: '代码值', type: 'text' },
+    { key: 'categoryId', label: '分类', type: 'select', options: tagCategoryOptions(), disabled: Boolean(editingItem.value?.id) },
+    { key: 'tagValue', label: '代码值', type: 'text', disabled: Boolean(editingItem.value?.id) },
     { key: 'displayName', label: '展示名', type: 'text' },
     { key: 'sortOrder', label: '排序', type: 'number' },
     { key: 'isEnabled', label: '启用', type: 'checkbox' }
@@ -1297,10 +3117,101 @@ async function runWithNotice(task: () => Promise<void>, success: string) {
     notice.value = success;
   } catch (error) {
     noticeKind.value = 'error';
-    notice.value = error instanceof Error ? error.message : String(error);
+    notice.value = humanizeError(error);
   } finally {
     loading.value = false;
   }
+}
+
+function errorText(error: unknown) {
+  return humanizeError(error);
+}
+
+function humanizeError(error: unknown): string {
+  if (error instanceof Error) return humanizeMessage(error.message);
+  return humanizeMessage(String(error || '请求失败'));
+}
+
+function humanizeMessage(message: string): string {
+  const text = String(message || '').trim();
+  const lower = text.toLowerCase();
+  const exact: Record<string, string> = {
+    'keeper must specify leaderId': '管家账号必须选择直属组长',
+    'password length must be at least 6': '密码至少需要 6 位',
+    'username or password is invalid': '手机号或密码不正确',
+    'permission denied': '当前账号没有权限执行此操作',
+    'account disabled': '账号已停用，请联系管理员',
+    'request parameter invalid': '请求参数不正确，请检查后重试',
+    'system internal error': '系统内部异常，请稍后重试',
+    'Failed to fetch': '网络连接失败，请确认本地后端服务已启动'
+  };
+  if (exact[text]) return exact[text];
+  if (lower.includes('failed to fetch')) return '网络连接失败，请确认本地后端服务已启动';
+  if (lower.includes('timeout') || lower.includes('timed out')) return '请求超时，请稍后重试';
+  if (lower.includes('leader has') && lower.includes('enabled keepers')) return '该组长名下还有启用中的管家，请先调整直属关系';
+  if (lower.includes('phone format')) return '手机号格式不正确';
+  if (lower.includes('phone already')) return '该手机号已注册';
+  if (lower.includes('displayname')) return '姓名长度需要 2-20 个字符';
+  if (lower.includes('not found')) return '数据不存在或已被删除';
+  if (/^[A-Z0-9_-]+$/.test(text)) return '请求失败，请检查配置后重试';
+  return text || '请求失败，请稍后重试';
+}
+
+function assertApiSuccess<T>(response: ApiResponse<T>): T {
+  if (!response.success) {
+    throw new Error(humanizeMessage(response.message || response.errorCode || '请求失败'));
+  }
+  return response.data as T;
+}
+
+async function getJson<T>(path: string, timeoutMs?: number, signal?: AbortSignal): Promise<ApiResponse<T>> {
+  const response = signal !== undefined
+    ? await requestGetJson<T>(path, timeoutMs, signal)
+    : timeoutMs !== undefined
+      ? await requestGetJson<T>(path, timeoutMs)
+      : await requestGetJson<T>(path);
+  assertApiSuccess(response);
+  return response;
+}
+
+async function postJson<T>(path: string, body: unknown, timeoutMs?: number, signal?: AbortSignal): Promise<ApiResponse<T>> {
+  const response = signal !== undefined
+    ? await requestPostJson<T>(path, body, timeoutMs, signal)
+    : timeoutMs !== undefined
+      ? await requestPostJson<T>(path, body, timeoutMs)
+      : await requestPostJson<T>(path, body);
+  assertApiSuccess(response);
+  return response;
+}
+
+async function putJson<T>(path: string, body: unknown, timeoutMs?: number, signal?: AbortSignal): Promise<ApiResponse<T>> {
+  const response = signal !== undefined
+    ? await requestPutJson<T>(path, body, timeoutMs, signal)
+    : timeoutMs !== undefined
+      ? await requestPutJson<T>(path, body, timeoutMs)
+      : await requestPutJson<T>(path, body);
+  assertApiSuccess(response);
+  return response;
+}
+
+async function deleteJson<T>(path: string, timeoutMs?: number, signal?: AbortSignal): Promise<ApiResponse<T>> {
+  const response = signal !== undefined
+    ? await requestDeleteJson<T>(path, timeoutMs, signal)
+    : timeoutMs !== undefined
+      ? await requestDeleteJson<T>(path, timeoutMs)
+      : await requestDeleteJson<T>(path);
+  assertApiSuccess(response);
+  return response;
+}
+
+async function postForm<T>(path: string, body: FormData, timeoutMs?: number, signal?: AbortSignal): Promise<ApiResponse<T>> {
+  const response = signal !== undefined
+    ? await requestPostForm<T>(path, body, timeoutMs, signal)
+    : timeoutMs !== undefined
+      ? await requestPostForm<T>(path, body, timeoutMs)
+      : await requestPostForm<T>(path, body);
+  assertApiSuccess(response);
+  return response;
 }
 
 function hydratePromptDraft() {
@@ -1308,6 +3219,9 @@ function hydratePromptDraft() {
   promptDraft.redLinesText = parseTextList(configValue('skill.system_prompt_red_lines')).join('\n');
   promptDraft.tagRemovalRulesText = parseTextList(configValue('match.tag_removal_rules')).join('\n');
   promptDraft.fallbackReply = configValue('skill.fallback_reply');
+  promptDraft.imageRecognitionPrompt = configValue('image.recognition_prompt');
+  promptDraft.regenerateMaxCount = Number(configValue('skill.regenerate_max_count') || 0);
+  hydrateRuntimeDrafts();
 }
 
 async function savePromptSettings() {
@@ -1316,9 +3230,196 @@ async function savePromptSettings() {
       putJson('/admin/api/v1/configs/skill.system_prompt_format', { value: promptDraft.format }),
       putJson('/admin/api/v1/configs/skill.system_prompt_red_lines', { value: JSON.stringify(linesFrom(promptDraft.redLinesText)) }),
       putJson('/admin/api/v1/configs/match.tag_removal_rules', { value: JSON.stringify(linesFrom(promptDraft.tagRemovalRulesText)) }),
-      putJson('/admin/api/v1/configs/skill.fallback_reply', { value: promptDraft.fallbackReply })
+      putJson('/admin/api/v1/configs/skill.fallback_reply', { value: promptDraft.fallbackReply }),
+      putJson('/admin/api/v1/configs/image.recognition_prompt', { value: promptDraft.imageRecognitionPrompt }),
+      putJson('/admin/api/v1/configs/skill.regenerate_max_count', { value: String(promptDraft.regenerateMaxCount || 0) })
     ]);
   }, 'Prompt 配置已保存');
+}
+
+function hydrateRuntimeDrafts() {
+  skillRuntimeDraft.timeoutMs = intConfigValue('skill.timeout_ms', 10000);
+  skillRuntimeDraft.circuitBreakerWindowS = intConfigValue('skill.circuit_breaker_window_s', 30);
+  skillRuntimeDraft.circuitBreakerFailureRate = numberConfigValue('skill.circuit_breaker_failure_rate', 0.5);
+  skillRuntimeDraft.circuitBreakerMinCalls = intConfigValue('skill.circuit_breaker_min_calls', 5);
+  skillRuntimeDraft.circuitBreakerOpenS = intConfigValue('skill.circuit_breaker_open_s', 30);
+  skillRuntimeDraft.alertFailureRate = numberConfigValue('skill.alert_failure_rate', 0.3);
+  skillRuntimeDraft.alertFailureDurationMinutes = intConfigValue('skill.alert_failure_duration_minutes', 15);
+  skillRuntimeDraft.profileExtractTimeoutMs = intConfigValue('profile.extract_timeout_ms', 8000);
+
+  imageRuntimeDraft.model = configValue('image.model') || 'qwen3-vl-plus';
+  imageRuntimeDraft.timeoutMs = intConfigValue('image.timeout_ms', 5000);
+  imageRuntimeDraft.maxSizeBytes = intConfigValue('image.max_size_bytes', 5242880);
+  imageRuntimeDraft.maxDimensionPx = intConfigValue('image.max_dimension_px', 1920);
+  imageRuntimeDraft.compressQuality = intConfigValue('image.compress_quality', 85);
+  imageRuntimeDraft.consecutiveFailuresAlert = intConfigValue('image.consecutive_failures_alert', 3);
+  imageRuntimeDraft.clipboardScreenshotConfirmPromptS = intConfigValue('desktop.clipboard_screenshot_confirm_prompt_s', 10);
+
+  llmReplyDraft.enabled = boolConfigValue('llm.reply_generation.enabled', false);
+  llmReplyDraft.fallbackToSkill = boolConfigValue('llm.reply_generation.fallback_to_skill', true);
+  llmReplyDraft.temperature = configValue('llm.reply_generation.temperature');
+  llmReplyDraft.maxTokens = intConfigValue('llm.reply_generation.max_tokens', 900);
+  llmReplyDraft.systemPrompt = configValue('llm.reply_generation.system_prompt');
+  llmProfileDraft.enabled = boolConfigValue('llm.profile_extraction.enabled', false);
+  llmProfileDraft.fallbackToSkill = boolConfigValue('llm.profile_extraction.fallback_to_skill', true);
+  llmProfileDraft.temperature = configValue('llm.profile_extraction.temperature');
+  llmProfileDraft.maxTokens = intConfigValue('llm.profile_extraction.max_tokens', 700);
+  llmProfileDraft.systemPrompt = configValue('llm.profile_extraction.system_prompt');
+  llmFollowupDraft.enabled = boolConfigValue('llm.followup_suggestion.enabled', false);
+  llmFollowupDraft.temperature = configValue('llm.followup_suggestion.temperature');
+  llmFollowupDraft.maxTokens = intConfigValue('llm.followup_suggestion.max_tokens', 500);
+  llmFollowupDraft.systemPrompt = configValue('llm.followup_suggestion.system_prompt');
+  llmAbnormalDraft.enabled = boolConfigValue('llm.abnormal_detection.enabled', false);
+  llmAbnormalDraft.temperature = configValue('llm.abnormal_detection.temperature');
+  llmAbnormalDraft.maxTokens = intConfigValue('llm.abnormal_detection.max_tokens', 500);
+  llmAbnormalDraft.systemPrompt = configValue('llm.abnormal_detection.system_prompt');
+  llmSummaryDraft.enabled = boolConfigValue('llm.summary.enabled', false);
+  llmSummaryDraft.temperature = configValue('llm.summary.temperature');
+  llmSummaryDraft.maxTokens = intConfigValue('llm.summary.max_tokens', 500);
+  llmSummaryDraft.systemPrompt = configValue('llm.summary.system_prompt');
+
+  tableRuntimeDraft.apiBaseUrl = configValue('table.api_base_url');
+  tableRuntimeDraft.apiKey = '';
+  tableRuntimeDraft.writeTimeoutMs = intConfigValue('table.write_timeout_ms', 10000);
+  tableRuntimeDraft.retryMaxCount = intConfigValue('table.retry_max_count', 5);
+  tableRuntimeDraft.retryIntervalS = intConfigValue('table.retry_interval_s', 60);
+  tableRuntimeDraft.alertFailureHours = intConfigValue('table.alert_failure_hours', 1);
+  tableRuntimeDraft.alertNotifyTarget = configValue('table.alert_notify_target') || 'ADMIN';
+  tableRuntimeDraft.queueWarnThreshold = intConfigValue('table.queue_warn_threshold', 100);
+  tableRuntimeDraft.queueAlertThreshold = intConfigValue('table.queue_alert_threshold', 1000);
+
+  datasourceRuntimeDraft.syncCron = configValue('cache.sync_cron') || '0 */30 * * * *';
+  datasourceRuntimeDraft.ttlSeconds = intConfigValue('cache.ttl_seconds', 900);
+  datasourceRuntimeDraft.syncTimeoutMs = intConfigValue('cache.sync_timeout_ms', 10000);
+  datasourceRuntimeDraft.mappingVersionMax = intConfigValue('datasource.mapping_version_max', 50);
+  datasourceRuntimeDraft.importMaxRows = intConfigValue('datasource.import_max_rows', 5000);
+  datasourceRuntimeDraft.manualSyncTimeoutS = intConfigValue('datasource.manual_sync_timeout_s', 60);
+  datasourceRuntimeDraft.syncStatusRefreshS = intConfigValue('datasource.sync_status_refresh_s', 30);
+}
+
+async function saveSkillRuntimeSettings() {
+  await saveConfigGroup([
+    ['skill.timeout_ms', skillRuntimeDraft.timeoutMs],
+    ['skill.circuit_breaker_window_s', skillRuntimeDraft.circuitBreakerWindowS],
+    ['skill.circuit_breaker_failure_rate', skillRuntimeDraft.circuitBreakerFailureRate],
+    ['skill.circuit_breaker_min_calls', skillRuntimeDraft.circuitBreakerMinCalls],
+    ['skill.circuit_breaker_open_s', skillRuntimeDraft.circuitBreakerOpenS],
+    ['skill.alert_failure_rate', skillRuntimeDraft.alertFailureRate],
+    ['skill.alert_failure_duration_minutes', skillRuntimeDraft.alertFailureDurationMinutes],
+    ['profile.extract_timeout_ms', skillRuntimeDraft.profileExtractTimeoutMs]
+  ], 'Skill 运行参数已保存');
+}
+
+async function saveImageRuntimeSettings() {
+  if (!isValidClipboardScreenshotConfirmPromptSeconds(imageRuntimeDraft.clipboardScreenshotConfirmPromptS)) {
+    noticeKind.value = 'error';
+    notice.value = '截图确认提示停留必须为 0 或 3-60 秒。0 表示不自动忽略。';
+    return;
+  }
+  await saveConfigGroup([
+    ['image.model', imageRuntimeDraft.model],
+    ['image.timeout_ms', imageRuntimeDraft.timeoutMs],
+    ['image.max_size_bytes', imageRuntimeDraft.maxSizeBytes],
+    ['image.max_dimension_px', imageRuntimeDraft.maxDimensionPx],
+    ['image.compress_quality', imageRuntimeDraft.compressQuality],
+    ['image.consecutive_failures_alert', imageRuntimeDraft.consecutiveFailuresAlert],
+    ['desktop.clipboard_screenshot_confirm_prompt_s', imageRuntimeDraft.clipboardScreenshotConfirmPromptS]
+  ], '识图运行参数已保存');
+}
+
+async function saveLlmReplySettings() {
+  await saveConfigGroup([
+    ['llm.reply_generation.enabled', llmReplyDraft.enabled ? 'true' : 'false'],
+    ['llm.reply_generation.fallback_to_skill', llmReplyDraft.fallbackToSkill ? 'true' : 'false'],
+    ['llm.reply_generation.temperature', llmReplyDraft.temperature],
+    ['llm.reply_generation.max_tokens', llmReplyDraft.maxTokens],
+    ['llm.reply_generation.system_prompt', llmReplyDraft.systemPrompt]
+  ], 'LLM 回复生成配置已保存');
+}
+
+async function saveLlmProfileSettings() {
+  await saveConfigGroup([
+    ['llm.profile_extraction.enabled', llmProfileDraft.enabled ? 'true' : 'false'],
+    ['llm.profile_extraction.fallback_to_skill', llmProfileDraft.fallbackToSkill ? 'true' : 'false'],
+    ['llm.profile_extraction.temperature', llmProfileDraft.temperature],
+    ['llm.profile_extraction.max_tokens', llmProfileDraft.maxTokens],
+    ['llm.profile_extraction.system_prompt', llmProfileDraft.systemPrompt]
+  ], 'LLM 档案提取配置已保存');
+}
+
+async function saveLlmFollowupSettings() {
+  await saveConfigGroup([
+    ['llm.followup_suggestion.enabled', llmFollowupDraft.enabled ? 'true' : 'false'],
+    ['llm.followup_suggestion.temperature', llmFollowupDraft.temperature],
+    ['llm.followup_suggestion.max_tokens', llmFollowupDraft.maxTokens],
+    ['llm.followup_suggestion.system_prompt', llmFollowupDraft.systemPrompt]
+  ], 'LLM 跟进建议配置已保存');
+}
+
+async function saveLlmAbnormalSettings() {
+  await saveConfigGroup([
+    ['llm.abnormal_detection.enabled', llmAbnormalDraft.enabled ? 'true' : 'false'],
+    ['llm.abnormal_detection.temperature', llmAbnormalDraft.temperature],
+    ['llm.abnormal_detection.max_tokens', llmAbnormalDraft.maxTokens],
+    ['llm.abnormal_detection.system_prompt', llmAbnormalDraft.systemPrompt]
+  ], 'LLM 异常识别配置已保存');
+}
+
+async function saveLlmSummarySettings() {
+  await saveConfigGroup([
+    ['llm.summary.enabled', llmSummaryDraft.enabled ? 'true' : 'false'],
+    ['llm.summary.temperature', llmSummaryDraft.temperature],
+    ['llm.summary.max_tokens', llmSummaryDraft.maxTokens],
+    ['llm.summary.system_prompt', llmSummaryDraft.systemPrompt]
+  ], 'LLM 总结补位配置已保存');
+}
+
+function isValidClipboardScreenshotConfirmPromptSeconds(value: unknown): boolean {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return false;
+  }
+  const integer = Math.trunc(parsed);
+  return parsed === integer && (integer === 0 || (integer >= 3 && integer <= 60));
+}
+
+async function saveTableRuntimeSettings() {
+  const entries: Array<[string, string | number]> = [
+    ['table.api_base_url', tableRuntimeDraft.apiBaseUrl],
+    ['table.write_timeout_ms', tableRuntimeDraft.writeTimeoutMs],
+    ['table.retry_max_count', tableRuntimeDraft.retryMaxCount],
+    ['table.retry_interval_s', tableRuntimeDraft.retryIntervalS],
+    ['table.alert_failure_hours', tableRuntimeDraft.alertFailureHours],
+    ['table.alert_notify_target', tableRuntimeDraft.alertNotifyTarget],
+    ['table.queue_warn_threshold', tableRuntimeDraft.queueWarnThreshold],
+    ['table.queue_alert_threshold', tableRuntimeDraft.queueAlertThreshold]
+  ];
+  if (tableRuntimeDraft.apiKey.trim()) {
+    entries.push(['table.api_key', tableRuntimeDraft.apiKey.trim()]);
+  }
+  await saveConfigGroup(entries, '企微表格网关参数已保存');
+  tableRuntimeDraft.apiKey = '';
+}
+
+async function saveDatasourceRuntimeSettings() {
+  await saveConfigGroup([
+    ['cache.sync_cron', datasourceRuntimeDraft.syncCron],
+    ['cache.ttl_seconds', datasourceRuntimeDraft.ttlSeconds],
+    ['cache.sync_timeout_ms', datasourceRuntimeDraft.syncTimeoutMs],
+    ['datasource.mapping_version_max', datasourceRuntimeDraft.mappingVersionMax],
+    ['datasource.import_max_rows', datasourceRuntimeDraft.importMaxRows],
+    ['datasource.manual_sync_timeout_s', datasourceRuntimeDraft.manualSyncTimeoutS],
+    ['datasource.sync_status_refresh_s', datasourceRuntimeDraft.syncStatusRefreshS]
+  ], '数据同步策略已保存');
+}
+
+async function saveConfigGroup(entries: Array<[string, string | number]>, success: string) {
+  await runWithNotice(async () => {
+    await Promise.all(entries.map(([key, value]) => putJson(`/admin/api/v1/configs/${key}`, { value: String(value ?? '') })));
+    const configList = await getJson<unknown>('/admin/api/v1/configs');
+    configs.value = configEntries(configList);
+    hydrateRuntimeDrafts();
+  }, success);
 }
 
 async function loadPromptVersions() {
@@ -1363,20 +3464,46 @@ function confirmDeleteSkill(item: AnyRecord) {
   }
 }
 
-function confirmActivateEnvironment(kind: 'skill' | 'image', env: AnyRecord) {
+function confirmToggleLlmRoute(route: AnyRecord) {
+  const enabled = route.enabled !== false;
+  const message = enabled ? `确认停用「${llmRouteTitle(route)}」？` : `确认启用「${llmRouteTitle(route)}」？`;
+  if (window.confirm(message)) {
+    void runWithNotice(async () => {
+      await putJson(`/admin/api/v1/llm-routes/${route.id}/toggle`, { enabled: !enabled });
+      await loadSkillAi();
+    }, enabled ? 'LLM 路由已停用' : 'LLM 路由已启用');
+  }
+}
+
+function confirmDeleteLlmRoute(route: AnyRecord) {
+  if (window.confirm(`确认删除「${llmRouteTitle(route)}」？删除后该场景会回退到默认 LLM 环境。`)) {
+    void runWithNotice(async () => {
+      await deleteJson(`/admin/api/v1/llm-routes/${route.id}`);
+      await loadSkillAi();
+    }, 'LLM 路由已删除');
+  }
+}
+
+function confirmActivateEnvironment(kind: 'skill' | 'image' | 'llm', env: AnyRecord) {
   if (window.confirm(`将切换至「${env.envName}」，此修改会影响线上能力，确认切换？`)) {
     void runWithNotice(async () => {
-      await putJson(`/admin/api/v1/${kind === 'skill' ? 'skill-environments' : 'image-environments'}/${env.id}/activate`, {});
+      await putJson(`/admin/api/v1/${environmentPrefix(kind)}/${env.id}/activate`, {});
       await loadSkillAi();
     }, '环境已切换');
   }
 }
 
-function confirmDeleteEnvironment(kind: 'skill' | 'image', env: AnyRecord) {
-  if (isActiveEnvironment(env)) return;
+function confirmDeleteEnvironment(kind: 'skill' | 'image' | 'llm', env: AnyRecord) {
+  if (!canDeleteEnvironment(kind, env)) {
+    noticeKind.value = 'error';
+    notice.value = isActiveEnvironment(env)
+      ? '当前启用环境不能删除，请先切换到其他环境。'
+      : '至少保留一个环境作为线上或备用配置。';
+    return;
+  }
   if (window.confirm(`确认删除「${env.envName}」？删除后不能继续作为备用环境。`)) {
     void runWithNotice(async () => {
-      await deleteJson(`/admin/api/v1/${kind === 'skill' ? 'skill-environments' : 'image-environments'}/${env.id}`);
+      await deleteJson(`/admin/api/v1/${environmentPrefix(kind)}/${env.id}`);
       await loadSkillAi();
     }, '环境已删除');
   }
@@ -1389,12 +3516,21 @@ async function testImageEnvironment(env: AnyRecord) {
   }, '测试完成');
 }
 
+async function testLlmEnvironment(env: AnyRecord) {
+  await runWithNotice(async () => {
+    await postJson(`/admin/api/v1/llm-environments/${env.id}/test`, {});
+    await loadSkillAi();
+  }, 'LLM 测试完成');
+}
+
 async function selectDatasource(item: AnyRecord) {
   selectedDatasource.value = item;
   mappingVersions.value = [];
   datasourceColumns.value = [];
+  datasourceColumnStatus.value = null;
   mappingCompare.value = null;
   Object.keys(mappingDraft).forEach((key) => delete mappingDraft[key]);
+  Object.keys(mappingEnabledDraft).forEach((key) => delete mappingEnabledDraft[key]);
   await runWithNotice(async () => {
     const payload = await getJson<unknown>(`/admin/api/v1/datasources/${item.id}/mappings`);
     mappings.value = listFromResponse(payload);
@@ -1402,6 +3538,10 @@ async function selectDatasource(item: AnyRecord) {
       const target = mapping.targetField ?? mapping.fieldName;
       const source = mapping.sourceField ?? mapping.sourceColumn;
       if (target) mappingDraft[target] = source ?? '';
+      if (target) mappingEnabledDraft[target] = mapping.enabled !== false;
+    }
+    for (const field of customerFields.value) {
+      if (field.key && mappingEnabledDraft[field.key] === undefined) mappingEnabledDraft[field.key] = true;
     }
   }, '字段映射已加载');
 }
@@ -1411,6 +3551,7 @@ async function loadDatasourceColumns() {
   if (!datasource) return;
   await runWithNotice(async () => {
     const payload = recordFromResponse(await getJson<unknown>(`/admin/api/v1/datasources/${datasource.id}/columns`));
+    datasourceColumnStatus.value = payload;
     datasourceColumns.value = listFrom(payload, 'columns');
     if (!datasourceColumns.value.length) {
       throw new Error(payload.fetchError || '没有识别到可用列名，请检查数据源连接或先保存字段映射');
@@ -1464,7 +3605,7 @@ async function saveMappings() {
     const payload = {
       mappings: Object.entries(mappingDraft)
         .filter(([, sourceField]) => sourceField.trim())
-        .map(([targetField, sourceField]) => ({ targetField, sourceField, enabled: true }))
+        .map(([targetField, sourceField]) => ({ targetField, sourceField, enabled: mappingEnabledDraft[targetField] !== false }))
     };
     await putJson(`/admin/api/v1/datasources/${datasource.id}/mappings`, payload);
     await selectDatasource(datasource);
@@ -1550,10 +3691,14 @@ async function batchToggleQuickSearch(enabled: boolean) {
 
 function batchDeleteQuickSearch() {
   if (!quickSearchSelectedIds.value.length) return;
+  const selectedCount = quickSearchSelectedIds.value.length;
   if (window.confirm(`确认删除选中的 ${quickSearchSelectedIds.value.length} 条速搜内容？`)) {
     void runWithNotice(async () => {
       for (const id of quickSearchSelectedIds.value) await deleteJson(`/admin/api/v1/quick-search/items/${id}`);
       quickSearchSelectedIds.value = [];
+      if (quickSearchItems.value.length <= selectedCount && quickSearchPageInfo.page > 1) {
+        quickSearchPageInfo.page -= 1;
+      }
       await loadDataContent();
     }, '已批量删除速搜内容');
   }
@@ -1570,6 +3715,9 @@ function confirmDeleteQuickSearchItem(item: AnyRecord) {
   if (window.confirm(`确认删除「${item.title}」？删除后桌面端将无法搜索到。`)) {
     void runWithNotice(async () => {
       await deleteJson(`/admin/api/v1/quick-search/items/${item.id}`);
+      if (quickSearchItems.value.length <= 1 && quickSearchPageInfo.page > 1) {
+        quickSearchPageInfo.page -= 1;
+      }
       await loadDataContent();
     }, '速搜内容已删除');
   }
@@ -1580,7 +3728,8 @@ async function resetAccountPassword(account: AnyRecord) {
   if (!newPassword) return;
   await runWithNotice(async () => {
     await putJson(`/admin/api/v1/accounts/${account.id}/reset-password`, { newPassword });
-  }, '密码已重置');
+    await refreshAccountsAfterMutation();
+  }, '密码已重置，旧登录已失效');
 }
 
 function confirmToggleAccount(account: AnyRecord) {
@@ -1597,7 +3746,7 @@ function confirmToggleAccount(account: AnyRecord) {
 async function toggleAccount(account: AnyRecord) {
   await runWithNotice(async () => {
     await putJson(`/admin/api/v1/accounts/${account.id}/toggle`, { isEnabled: account.isEnabled === false });
-    await loadOrgRulesTags();
+    await refreshAccountsAfterMutation();
   }, '账号状态已更新');
 }
 
@@ -1610,20 +3759,40 @@ function confirmDeleteAccount(account: AnyRecord) {
   if (window.confirm(`确认删除账号「${account.displayName || account.username}」？删除后该账号无法登录。`)) {
     void runWithNotice(async () => {
       await deleteJson(`/admin/api/v1/accounts/${account.id}`);
-      await loadOrgRulesTags();
+      if (accounts.value.length <= 1 && accountPageInfo.page > 1) {
+        accountPageInfo.page -= 1;
+      }
+      await refreshAccountsAfterMutation();
     }, '账号已删除');
   }
 }
 
+async function refreshAccountsAfterMutation() {
+  await loadOrgRulesTags();
+}
+
 function buildRulePayload() {
+  const conditions: AnyRecord[] = [
+    { field: 'lastFollowupHours', op: 'GT', value: Number(formDraft.thresholdHours) }
+  ];
+  if (formDraft.leadType && formDraft.leadType !== 'GENERAL') {
+    conditions.unshift({ field: 'leadType', op: 'EQ', value: formDraft.leadType });
+  }
   const conditionJson = JSON.stringify({
-    conditions: [{ field: 'leadType', operator: 'EQ', value: formDraft.leadType }, { field: 'hoursSinceLastFollowup', operator: 'GT', value: formDraft.thresholdHours }]
+    operator: 'AND',
+    conditions
   });
+  const actionConfig = {
+    alertLevel: formDraft.alertLevel || (formDraft.actionType === 'ALERT' ? 'WARN' : 'NORMAL'),
+    reminderType: formDraft.reminderType || (formDraft.actionType === 'TAG_CHANGE' ? 'TAG_SUGGESTION' : 'OVERDUE'),
+    ...(formDraft.actionType === 'TAG_CHANGE' ? { tagName: formDraft.tagName || '系统标签建议' } : {}),
+    ...(formDraft.actionType === 'NOTIFY_LEADER' ? { reason: formDraft.reason || '跟进规则触发' } : {})
+  };
   return {
     name: formDraft.name,
     conditionJson,
     actionType: formDraft.actionType,
-    actionConfig: JSON.stringify({ level: formDraft.actionType === 'ALERT' ? 'WARN' : 'INFO' }),
+    actionConfig: JSON.stringify(actionConfig),
     priority: formDraft.priority,
     enabled: formDraft.enabled
   };
@@ -1642,13 +3811,43 @@ async function toggleRule(rule: AnyRecord) {
   }, '规则状态已更新');
 }
 
+async function batchToggleRules(enabled: boolean) {
+  const selected = rules.value.filter((rule) => ruleSelectedIds.value.includes(rule.id));
+  if (!selected.length) return;
+  if (window.confirm(`确认批量${enabled ? '启用' : '停用'} ${selected.length} 条规则？`)) {
+    await runWithNotice(async () => {
+      await Promise.all(selected.map((rule) => putJson(`/admin/api/v1/rules/${rule.id}/toggle`, { enabled })));
+      ruleSelectedIds.value = [];
+      await loadOrgRulesTags();
+    }, enabled ? '规则已批量启用' : '规则已批量停用');
+  }
+}
+
 function confirmDeleteRule(rule: AnyRecord) {
-  if (rule.isBuiltin) return;
+  if (isBuiltinRule(rule)) return;
   if (window.confirm(`确认删除「${rule.name}」？建议优先选择停用。`)) {
     void runWithNotice(async () => {
       await deleteJson(`/admin/api/v1/rules/${rule.id}`);
+      if (rules.value.length <= 1 && rulePageInfo.page > 1) {
+        rulePageInfo.page -= 1;
+      }
       await loadOrgRulesTags();
     }, '规则已删除');
+  }
+}
+
+async function batchDeleteRules() {
+  const selected = deletableSelectedRules.value;
+  if (!selected.length) return;
+  if (window.confirm(`确认删除 ${selected.length} 条自定义规则？内置规则不会被删除，建议优先停用。`)) {
+    await runWithNotice(async () => {
+      await Promise.all(selected.map((rule) => deleteJson(`/admin/api/v1/rules/${rule.id}`)));
+      ruleSelectedIds.value = [];
+      if (rules.value.length <= selected.length && rulePageInfo.page > 1) {
+        rulePageInfo.page -= 1;
+      }
+      await loadOrgRulesTags();
+    }, '规则已批量删除');
   }
 }
 
@@ -1658,7 +3857,7 @@ function tagDraft(category: AnyRecord, tag: AnyRecord) {
 
 async function toggleTagValue(category: AnyRecord, tag: AnyRecord) {
   await runWithNotice(async () => {
-    await putJson(`/admin/api/v1/tags/values/${tag.id}`, { ...tagValuePayload(category, tag), isEnabled: tag.isEnabled === false });
+    await putJson(`/admin/api/v1/tags/values/${tag.id}/toggle`, { isEnabled: tag.isEnabled === false });
     await loadOrgRulesTags();
   }, '标签值状态已更新');
 }
@@ -1673,7 +3872,7 @@ function confirmDeleteTagValue(category: AnyRecord, tag: AnyRecord) {
 }
 
 function confirmDeleteTagCategory(category: AnyRecord) {
-  if (category.isBuiltin) return;
+  if (isBuiltinTagCategory(category)) return;
   if (window.confirm(`确认删除标签分类「${category.categoryName || category.name}」？分类下标签也将不可用。`)) {
     void runWithNotice(async () => {
       await deleteJson(`/admin/api/v1/tags/categories/${category.id}`);
@@ -1691,6 +3890,9 @@ function confirmPublishVersion(version: AnyRecord) {
 async function publishVersion(version: AnyRecord) {
   await runWithNotice(async () => {
     await putJson(`/admin/api/v1/versions/${version.id}/publish`, {});
+    if (versionStatusFilter.value === 'DRAFT' && versions.value.length <= 1 && versionPageInfo.page > 1) {
+      versionPageInfo.page -= 1;
+    }
     await loadInsightOps();
   }, '版本已发布');
 }
@@ -1699,6 +3901,9 @@ function confirmDeleteVersion(version: AnyRecord) {
   if (window.confirm(`确认删除桌面版本 ${version.version}？仅应删除未发布草稿。`)) {
     void runWithNotice(async () => {
       await deleteJson(`/admin/api/v1/versions/${version.id}`);
+      if (versions.value.length <= 1 && versionPageInfo.page > 1) {
+        versionPageInfo.page -= 1;
+      }
       await loadInsightOps();
     }, '版本已删除');
   }
@@ -1713,6 +3918,9 @@ function confirmStopNotice(item: AnyRecord) {
 async function stopNotice(item: AnyRecord) {
   await runWithNotice(async () => {
     await putJson(`/admin/api/v1/notices/${item.id}/stop`, {});
+    if (noticeStatusFilter.value && noticeStatusFilter.value !== 'STOPPED' && notices.value.length <= 1 && noticePageInfo.page > 1) {
+      noticePageInfo.page -= 1;
+    }
     await loadInsightOps();
   }, '公告已停止');
 }
@@ -1721,6 +3929,9 @@ function confirmDeleteNotice(item: AnyRecord) {
   if (window.confirm(`确认删除公告「${item.title}」？删除后无法恢复。`)) {
     void runWithNotice(async () => {
       await deleteJson(`/admin/api/v1/notices/${item.id}`);
+      if (notices.value.length <= 1 && noticePageInfo.page > 1) {
+        noticePageInfo.page -= 1;
+      }
       await loadInsightOps();
     }, '公告已删除');
   }
@@ -1729,6 +3940,7 @@ function confirmDeleteNotice(item: AnyRecord) {
 async function exportAuditLogs() {
   await runWithNotice(async () => {
     auditExportJob.value = recordFromResponse(await postJson<unknown>('/admin/api/v1/audit-logs/export', auditFilterPayload()));
+    startAuditExportPolling();
   }, '审计导出任务已创建');
 }
 
@@ -1737,7 +3949,65 @@ async function refreshAuditExportStatus() {
   if (!exportId) return;
   await runWithNotice(async () => {
     auditExportJob.value = recordFromResponse(await getJson<unknown>(`/admin/api/v1/audit-logs/export/${exportId}`));
+    if (isAuditExportFinal(auditExportJob.value)) {
+      stopAuditExportPolling();
+    }
   }, '导出状态已刷新');
+}
+
+async function pollAuditExportStatus() {
+  const exportId = auditExportJob.value?.exportId;
+  if (!exportId) return;
+  try {
+    auditExportJob.value = recordFromResponse(await getJson<unknown>(`/admin/api/v1/audit-logs/export/${exportId}`));
+    if (isAuditExportFinal(auditExportJob.value)) {
+      stopAuditExportPolling();
+    }
+  } catch {
+    stopAuditExportPolling();
+  }
+}
+
+function startAuditExportPolling() {
+  stopAuditExportPolling();
+  auditExportPollTimer.value = window.setInterval(() => {
+    const status = String(auditExportJob.value?.status ?? '').toUpperCase();
+    if (!auditExportJob.value?.exportId || ['DONE', 'COMPLETED', 'FAILED'].includes(status)) {
+      stopAuditExportPolling();
+      return;
+    }
+    void pollAuditExportStatus();
+  }, 3000);
+}
+
+function stopAuditExportPolling() {
+  if (auditExportPollTimer.value !== null) {
+    window.clearInterval(auditExportPollTimer.value);
+    auditExportPollTimer.value = null;
+  }
+}
+
+function isAuditExportFinal(job: AnyRecord | null) {
+  const status = String(job?.status ?? '').toUpperCase();
+  return ['DONE', 'COMPLETED', 'FAILED'].includes(status);
+}
+
+async function downloadAuditExport() {
+  const url = auditDownloadUrl.value;
+  if (!url) return;
+  await runWithNotice(async () => {
+    const config = loadDesktopConfig();
+    const response = await fetch(apiUrl(url), {
+      headers: {
+        ...(config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : {})
+      }
+    });
+    if (!response.ok) {
+      throw new Error(`审计文件下载失败：${response.status}`);
+    }
+    const blob = await response.blob();
+    downloadBlob(`${auditExportJob.value?.exportId ?? 'audit-logs'}.csv`, blob);
+  }, '审计 CSV 已开始下载');
 }
 
 function toggleAuditDetail(log: AnyRecord) {
@@ -1750,8 +4020,15 @@ function toggleHealthAlert(alert: AnyRecord) {
 }
 
 function downloadAnalyticsCsv() {
-  const rows = analyticsBlocks.value.map((block) => `${csvCell(block.title)},${csvCell(block.summary)}`).join('\n');
-  downloadTextFile(`analytics-${new Date().toISOString().slice(0, 10)}.csv`, `模块,摘要\n${rows}`);
+  const sections = [
+    `模块,摘要\n${analyticsBlocks.value.map((block) => `${csvCell(block.title)},${csvCell(block.summary)}`).join('\n')}`,
+    ...analyticsDetailSections.value.map((section) => {
+      const header = section.columns.map((column) => csvCell(column.label)).join(',');
+      const rows = section.rows.map((row) => section.columns.map((column) => csvCell(analyticsCell(row, column.key))).join(',')).join('\n');
+      return `${section.title}\n${header}${rows ? `\n${rows}` : ''}`;
+    })
+  ];
+  downloadTextFile(`analytics-${new Date().toISOString().slice(0, 10)}.csv`, sections.join('\n\n'));
 }
 
 function listFromResponse(response: ApiResponse<unknown>): AnyRecord[] {
@@ -1771,7 +4048,7 @@ function configEntries(response: ApiResponse<unknown>): AnyRecord[] {
 }
 
 function dataFromResponse(response: ApiResponse<unknown>): unknown {
-  return response.data ?? {};
+  return assertApiSuccess(response) ?? {};
 }
 
 function recordFromResponse(response: ApiResponse<unknown>): AnyRecord {
@@ -1783,7 +4060,7 @@ function listFrom(value: unknown, preferredKey?: string): AnyRecord[] {
   const data = value as AnyRecord;
   if (Array.isArray(value)) return value as AnyRecord[];
   if (preferredKey && Array.isArray(data?.[preferredKey])) return data[preferredKey];
-  for (const key of ['items', 'list', 'records', 'datasources', 'fields', 'logs', 'rules', 'categories', 'versions', 'notices', 'staff', 'sources', 'stages', 'ranking', 'actions', 'columns', 'recentAlerts', 'systemAlerts']) {
+  for (const key of ['items', 'list', 'records', 'datasources', 'fields', 'mappings', 'logs', 'rules', 'categories', 'versions', 'notices', 'staff', 'sources', 'stages', 'ranking', 'actions', 'columns', 'recentAlerts', 'systemAlerts']) {
     if (Array.isArray(data?.[key])) return data[key];
   }
   return [];
@@ -1799,29 +4076,97 @@ function withQuery(path: string, query: Record<string, unknown>) {
   return text ? `${path}?${text}` : path;
 }
 
+function apiUrl(pathOrUrl: string) {
+  if (/^https?:\/\//i.test(pathOrUrl)) {
+    return pathOrUrl;
+  }
+  return `${loadDesktopConfig().apiBaseUrl}${pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`}`;
+}
+
 function auditLogPath() {
   return withQuery('/admin/api/v1/audit-logs', {
-    action: auditAction.value,
-    operator: auditKeyword.value,
+    action: auditActionParam(),
     keyword: auditKeyword.value,
     targetType: auditTargetType.value,
+    targetId: auditTargetId.value,
     startDate: auditStartDate.value,
     endDate: auditEndDate.value,
-    page: 1,
-    size: 100
+    page: auditPageInfo.page,
+    size: auditPageInfo.size
+  });
+}
+
+function accountListPath() {
+  return withQuery('/admin/api/v1/accounts', {
+    keyword: accountKeyword.value,
+    role: accountRoleFilter.value,
+    is_enabled: accountEnabledFilter.value,
+    page: accountPageInfo.page,
+    page_size: accountPageInfo.size
+  });
+}
+
+function customerSearchListPath() {
+  return withQuery('/admin/api/v1/customers/search', {
+    q: customerSearchKeyword.value,
+    page: customerSearchPageInfo.page,
+    page_size: customerSearchPageInfo.size
+  });
+}
+
+function ruleListPath() {
+  return withQuery('/admin/api/v1/rules', {
+    keyword: ruleKeyword.value,
+    actionType: ruleActionType.value,
+    enabled: ruleEnabledFilter.value === '' ? '' : ruleEnabledFilter.value === '1',
+    page: rulePageInfo.page,
+    size: rulePageInfo.size
+  });
+}
+
+function quickSearchListPath() {
+  return withQuery('/admin/api/v1/quick-search/items', {
+    keyword: quickSearchKeyword.value,
+    contentType: quickSearchType.value,
+    enabled: quickSearchEnabledFilter.value === '' ? '' : quickSearchEnabledFilter.value === '1',
+    page: quickSearchPageInfo.page,
+    size: quickSearchPageInfo.size
+  });
+}
+
+function versionListPath() {
+  return withQuery('/admin/api/v1/versions', {
+    status: versionStatusFilter.value,
+    platform: versionPlatformFilter.value,
+    page: versionPageInfo.page,
+    size: versionPageInfo.size
+  });
+}
+
+function noticeListPath() {
+  return withQuery('/admin/api/v1/notices', {
+    status: noticeStatusFilter.value,
+    level: noticeLevelFilter.value,
+    source: noticeSourceFilter.value,
+    page: noticePageInfo.page,
+    size: noticePageInfo.size
   });
 }
 
 function auditFilterPayload() {
   return {
-    action: auditAction.value || null,
-    operator: auditKeyword.value || null,
+    action: auditActionParam() || null,
+    operator: null,
     keyword: auditKeyword.value || null,
     targetType: auditTargetType.value || null,
-    targetId: null,
+    targetId: auditTargetId.value || null,
     startDate: auditStartDate.value || null,
     endDate: auditEndDate.value || null
   };
+}
+
+function auditActionParam() {
+  return auditActionsSelected.value.join(',');
 }
 
 function quickSearchPayload(item: AnyRecord) {
@@ -1840,11 +4185,54 @@ function quickSearchPayload(item: AnyRecord) {
 function tagValuePayload(category: AnyRecord, tag: AnyRecord) {
   return {
     categoryId: category.id ?? tag.categoryId,
-    tagValue: tag.tagValue,
     displayName: tag.displayName,
     sortOrder: tag.sortOrder ?? 99,
     isEnabled: tag.isEnabled !== false
   };
+}
+
+function tagCategoryOptions() {
+  return tagCategories.value.map((category) => ({
+    label: tagCategoryOptionLabel(category),
+    value: Number(category.id)
+  })).filter((option) => Number.isFinite(option.value));
+}
+
+function tagBoundFieldOptions() {
+  const boundFields = new Set(
+    tagCategories.value
+      .filter((category) => !editingItem.value?.id || category.id !== editingItem.value?.id)
+      .map((category) => String(category.boundField || category.fieldName || ''))
+      .filter(Boolean)
+  );
+  return customerFields.value
+    .filter((field) => field.key && (!boundFields.has(String(field.key)) || String(field.key) === String(formDraft.boundField ?? '')))
+    .map((field) => ({ label: String(field.label || customerFieldLabel(field.key)), value: String(field.key) }));
+}
+
+function tagCategoryFieldText(category: AnyRecord) {
+  const field = category.boundField || category.fieldName;
+  return field ? `写入客户档案：${customerFieldLabel(field)}` : '未绑定客户档案字段';
+}
+
+function tagCategoryOptionLabel(category: AnyRecord) {
+  const field = category.boundField || category.fieldName;
+  return field ? `${tagCategoryName(category)}（${customerFieldLabel(field)}）` : tagCategoryName(category);
+}
+
+function tagCategoryName(category: AnyRecord) {
+  const raw = String(category.categoryName || category.name || category.categoryKey || category.id || '');
+  return TAG_CATEGORY_LABELS[raw] ?? customerFieldLabel(raw) ?? raw;
+}
+
+function tagDisplayName(tag: AnyRecord) {
+  const raw = String(tag.displayName || tag.tagValue || '');
+  const code = String(tag.tagValue || '').toUpperCase();
+  return TAG_VALUE_LABELS[raw] ?? TAG_VALUE_LABELS[code] ?? translateValue(raw);
+}
+
+function isBuiltinTagCategory(category: AnyRecord) {
+  return category.isBuiltin === true || category.builtin === true;
 }
 
 function isCurrentAccount(account: AnyRecord) {
@@ -1853,17 +4241,124 @@ function isCurrentAccount(account: AnyRecord) {
   return [account.username, account.phone, account.displayName].some((value) => String(value ?? '') === current);
 }
 
+function leaderOptions() {
+  const options = leaderAccounts.value
+    .filter((account) => account.role === 'LEADER' && account.isEnabled !== false)
+    .map((account) => ({ label: account.displayName || account.phone || account.username || `#${account.id}`, value: account.id }));
+  return [{ label: '不指定', value: '' }, ...options];
+}
+
 function isActiveEnvironment(env: AnyRecord) {
   return env.isActive === true || env.active === true;
 }
 
+function canDeleteEnvironment(kind: 'skill' | 'image' | 'llm', env: AnyRecord) {
+  const list = kind === 'skill'
+    ? skillEnvironments.value
+    : kind === 'image'
+      ? imageEnvironments.value
+      : llmEnvironments.value;
+  return !isActiveEnvironment(env) && list.length > 1;
+}
+
+function isBuiltinRule(rule: AnyRecord) {
+  return rule.builtin === true || rule.isBuiltin === true;
+}
+
+function versionStatus(version: AnyRecord) {
+  return String(version.status ?? 'DRAFT').toUpperCase();
+}
+
+function canEditVersion(version: AnyRecord) {
+  return versionStatus(version) === 'DRAFT';
+}
+
+function canPublishVersion(version: AnyRecord) {
+  return versionStatus(version) === 'DRAFT';
+}
+
+function canRevokeVersion(version: AnyRecord) {
+  return versionStatus(version) === 'PUBLISHED';
+}
+
+function canDeleteVersion(version: AnyRecord) {
+  return versionStatus(version) === 'DRAFT';
+}
+
+function versionActionReason(version: AnyRecord, action: 'edit' | 'publish' | 'revoke' | 'delete') {
+  const status = versionStatus(version);
+  if (action === 'revoke') return status === 'PUBLISHED' ? '撤回已发布版本' : '只有已发布版本可以撤回';
+  if (action === 'publish') return status === 'DRAFT' ? '发布草稿版本' : '只有草稿版本可以发布';
+  if (action === 'delete') return status === 'DRAFT' ? '删除未发布草稿' : '只有草稿版本可以删除';
+  return status === 'DRAFT' ? '编辑草稿版本' : '已发布或已撤回版本不能编辑';
+}
+
+function versionStatusLabel(value: unknown) {
+  return ({ DRAFT: '草稿', PUBLISHED: '已发布', REVOKED: '已撤回' } as Record<string, string>)[String(value ?? 'DRAFT').toUpperCase()] ?? String(value ?? '草稿');
+}
+
+function versionStatusClass(version: AnyRecord) {
+  const status = versionStatus(version);
+  return status === 'PUBLISHED' ? 'ok-text' : status === 'REVOKED' ? 'warn-text' : '';
+}
+
+function isStoppedNotice(item: AnyRecord) {
+  return item.isStopped === true || item.stopped === true || item.status === 'STOPPED';
+}
+
+function isAutoNotice(item: AnyRecord) {
+  return String(item.source ?? '').toUpperCase() === 'AUTO';
+}
+
+function noticeStatus(item: AnyRecord) {
+  if (isStoppedNotice(item)) return 'STOPPED';
+  return String(item.status ?? '').toUpperCase();
+}
+
+function canEditNotice(item: AnyRecord) {
+  return !isAutoNotice(item) && !isStoppedNotice(item) && noticeStatus(item) === 'SCHEDULED';
+}
+
+function canStopNotice(item: AnyRecord) {
+  return !isStoppedNotice(item);
+}
+
+function canDeleteNotice(item: AnyRecord) {
+  return isStoppedNotice(item);
+}
+
+function noticeActionReason(item: AnyRecord, action: 'edit' | 'stop' | 'delete') {
+  if (isAutoNotice(item) && action === 'edit') return '系统自动公告只读';
+  if (action === 'edit') return canEditNotice(item) ? '编辑未发布定时公告' : '只有未停止的定时公告可以编辑';
+  if (action === 'stop') return canStopNotice(item) ? '停止后桌面端不再展示' : '公告已停止';
+  return canDeleteNotice(item) ? '删除已停止公告' : '只有已停止公告可以删除';
+}
+
+function noticeStatusLabel(item: AnyRecord) {
+  const status = noticeStatus(item);
+  return ({ PUBLISHED: '已发布', SCHEDULED: '待发布', STOPPED: '已停止' } as Record<string, string>)[status] ?? (status || '未知状态');
+}
+
+function noticeSourceLabel(value: unknown) {
+  return ({ MANUAL: '人工公告', AUTO: '系统自动' } as Record<string, string>)[String(value ?? '').toUpperCase()] ?? String(value ?? '未知来源');
+}
+
+function noticeLevelLabel(value: unknown) {
+  return ({ INFO: '普通', WARN: '提醒', ERROR: '故障' } as Record<string, string>)[String(value ?? '').toUpperCase()] ?? String(value ?? '-');
+}
+
 function ruleDraft(item?: AnyRecord) {
   const parsed = parseRuleCondition(item?.conditionJson);
+  const action = parseRuleAction(item?.actionConfig);
   return {
     name: item?.name ?? '',
-    leadType: parsed.leadType ?? 'PENDING',
+    leadType: parsed.leadType ?? 'GENERAL',
     actionType: item?.actionType ?? 'ALERT',
     thresholdHours: parsed.thresholdHours ?? 24,
+    alertLevel: action.alertLevel ?? 'WARN',
+    reminderType: action.reminderType ?? (item?.actionType === 'TAG_CHANGE' ? 'TAG_SUGGESTION' : 'OVERDUE'),
+    tagName: action.tagName ?? '',
+    reason: action.reason ?? '',
     priority: item?.priority ?? 90,
     enabled: item?.enabled ?? true
   };
@@ -1875,11 +4370,21 @@ function parseRuleCondition(value: unknown) {
   try {
     const parsed = JSON.parse(String(value));
     const conditions = Array.isArray(parsed.conditions) ? parsed.conditions : [];
-    const leadType = conditions.find((item: AnyRecord) => item.field === 'leadType')?.value;
+    const leadType = conditions.find((item: AnyRecord) => item.field === 'leadType')?.value ?? 'GENERAL';
     const threshold = conditions.find((item: AnyRecord) => ['hoursSinceLastFollowup', 'lastFollowupHours'].includes(item.field))?.value;
     return { leadType, thresholdHours: Number(threshold) || undefined };
   } catch {
     return fallback;
+  }
+}
+
+function parseRuleAction(value: unknown) {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' ? parsed as AnyRecord : {};
+  } catch {
+    return {};
   }
 }
 
@@ -1899,6 +4404,29 @@ function configValue(key: string): string {
   return String(config?.value ?? '');
 }
 
+function intConfigValue(key: string, fallback: number): number {
+  const parsed = Number.parseInt(configValue(key), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function numberConfigValue(key: string, fallback: number): number {
+  const parsed = Number.parseFloat(configValue(key));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function boolConfigValue(key: string, fallback: boolean): boolean {
+  const raw = configValue(key).trim().toLowerCase();
+  if (!raw) return fallback;
+  if (['true', '1', 'yes', 'on'].includes(raw)) return true;
+  if (['false', '0', 'no', 'off'].includes(raw)) return false;
+  return fallback;
+}
+
+function configSecretStatus(key: string): string {
+  const value = configValue(key);
+  return value ? value : '未配置';
+}
+
 function parseTextList(value: string): string[] {
   if (!value) return [];
   try {
@@ -1915,11 +4443,23 @@ function linesFrom(value: string) {
 }
 
 function sceneLabel(value: string) {
-  return ({ OPENING: '开场白', ACTIVE_REPLY: '主动回复', REGENERATE: '换一组' } as Record<string, string>)[value] ?? value ?? '-';
+  return SKILL_SCENE_OPTIONS.find((option) => option.value === value)?.label ?? value ?? '-';
+}
+
+function llmSceneLabel(value: unknown) {
+  const scene = String(value ?? '');
+  return (LLM_SCENE_LABELS[scene] ?? scene) || '-';
+}
+
+function llmSceneOptions() {
+  const scenes = llmRouteScenes.value.length ? llmRouteScenes.value : Object.keys(LLM_SCENE_LABELS);
+  return scenes.map((scene) => ({ label: llmSceneLabel(scene), value: scene }));
 }
 
 function leadTypeLabel(value: string) {
-  return ({ GENERAL: '通用', TUAN_GOU: '团购客资', XIAN_SUO: '线索客资', PENDING: '待确认' } as Record<string, string>)[value] ?? value ?? '-';
+  const text = String(value ?? '');
+  if (!text) return '全部客资';
+  return ({ GENERAL: '全部客资', TUAN_GOU: '团购客资', XIAN_SUO: '线索客资', PENDING: '待确认' } as Record<string, string>)[text] ?? text;
 }
 
 function contentTypeLabel(value: string) {
@@ -1931,16 +4471,34 @@ function roleLabel(value: string) {
 }
 
 function actionTypeLabel(value: string) {
-  return ({ ALERT: '提醒/告警', TAG_SUGGESTION: '标签建议', NOTIFY_LEADER: '通知组长' } as Record<string, string>)[value] ?? value ?? '-';
+  return ({ ALERT: '提醒/告警', TAG_CHANGE: '标签建议', TAG_SUGGESTION: '标签建议', NOTIFY_LEADER: '通知组长' } as Record<string, string>)[value] ?? value ?? '-';
+}
+
+function actionLabel(value: unknown) {
+  const action = String(value ?? '');
+  return auditActions.value.find((item) => item.action === action)?.label ?? action;
+}
+
+function targetTypeLabel(value: unknown) {
+  const type = String(value ?? '');
+  return auditTargetTypes.value.find((item) => item.type === type)?.label ?? type;
 }
 
 function updateStrategyLabel(value: string) {
   return ({ OPTIONAL: '可选升级', FORCED: '强制升级', FORCE: '强制升级', GRADUAL: '灰度发布' } as Record<string, string>)[value] ?? value ?? '-';
 }
 
+function formatFileSize(value: unknown) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return '大小未知';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function leaderName(leaderId: unknown) {
   if (!leaderId) return '-';
-  const leader = accounts.value.find((account) => String(account.id) === String(leaderId));
+  const leader = [...accounts.value, ...leaderAccounts.value].find((account) => String(account.id) === String(leaderId));
   return leader?.displayName || leader?.username || `#${leaderId}`;
 }
 
@@ -1958,10 +4516,100 @@ function columnName(column: AnyRecord | string) {
   return typeof column === 'string' ? column : String(column.name ?? column.columnName ?? '');
 }
 
+function columnMapped(column: AnyRecord | string) {
+  return typeof column !== 'string' && column.mapped === true;
+}
+
+function columnTarget(column: AnyRecord | string) {
+  return typeof column === 'string' ? '' : String(column.targetField ?? '');
+}
+
+function customerFieldLabel(fieldKey: unknown) {
+  const key = String(fieldKey ?? '');
+  return customerFields.value.find((field) => field.key === key)?.label ?? CUSTOMER_FIELD_LABELS[key] ?? key;
+}
+
+function mappingDiffKey(item: AnyRecord) {
+  return item.id ?? item.sourceField ?? item.before?.sourceField ?? item.after?.sourceField ?? JSON.stringify(item);
+}
+
+function mappingDiffText(item: AnyRecord) {
+  if (item.before || item.after) {
+    const before = item.before ?? {};
+    const after = item.after ?? {};
+    return `${before.sourceField ?? after.sourceField ?? '-'}：${before.targetField ?? '-'} -> ${after.targetField ?? '-'}${after.enabled === false ? '（停用）' : ''}`;
+  }
+  return `${item.sourceField ?? '-'} -> ${item.targetField ?? '-'}${item.enabled === false ? '（停用）' : ''}`;
+}
+
+function importLogSummary(log: AnyRecord) {
+  return `总 ${log.totalRows ?? 0}，新增 ${log.created ?? 0}，更新 ${log.updated ?? 0}，跳过 ${log.skipped ?? 0}`;
+}
+
+function analyticsLeadType() {
+  return skillLeadTypeFilter.value === 'GENERAL' ? '' : skillLeadTypeFilter.value;
+}
+
+function analyticsCell(row: AnyRecord, key: string) {
+  const value = row?.[key];
+  if (key === 'phone') return value ? String(value).replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2') : '-';
+  if (key === 'leadType') return leadTypeLabel(String(value ?? ''));
+  if (key === 'customerStage') return translateValue(value);
+  if (String(key).endsWith('At') || key === 'date') return formatDate(value);
+  if (value === undefined || value === null || value === '') return '-';
+  if (typeof value === 'object') return summarizeObject(value);
+  return translateValue(value);
+}
+
 function imageTestLabel(env: AnyRecord) {
   if (env.lastTestOk === true || env.lastTestOk === 1) return `连接正常 · ${formatDate(env.lastTestAt)}`;
   if (env.lastTestOk === false || env.lastTestOk === 0) return `测试失败 · ${formatDate(env.lastTestAt)}`;
   return '未完成连接测试';
+}
+
+function llmEnvironmentLabel(env: AnyRecord) {
+  const model = env.model || '未填写模型';
+  const protocol = env.protocol || 'OPENAI_COMPATIBLE';
+  const timeout = env.timeoutMs ? `${env.timeoutMs}ms` : '默认超时';
+  return `${model} · ${protocol} · ${timeout} · ${imageTestLabel(env)}`;
+}
+
+function llmEnvironmentName(id: unknown) {
+  if (id === undefined || id === null || id === '') return '-';
+  const env = llmEnvironments.value.find((item) => String(item.id) === String(id));
+  return env?.envName || `#${id}`;
+}
+
+function llmRouteTitle(route: AnyRecord) {
+  return `${llmSceneLabel(route.scene)} / ${route.leadType ? leadTypeLabel(route.leadType) : '通用'} / ${route.environmentName || llmEnvironmentName(route.environmentId)}`;
+}
+
+function percentLabel(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return '0%';
+  const percent = parsed <= 1 ? parsed * 100 : parsed;
+  return `${Math.round(percent * 10) / 10}%`;
+}
+
+function healthAlertTitle(alert: AnyRecord) {
+  return alert.title || alert.alertType || alert.type || alert.sourceModule || alert.component || '系统告警';
+}
+
+function healthAlertStatusLabel(alert: AnyRecord) {
+  const status = String(alert.status ?? 'OPEN').toUpperCase();
+  return ({ OPEN: '未恢复', RESOLVED: '已恢复', RECOVERED: '已恢复' } as Record<string, string>)[status] ?? status;
+}
+
+function healthAlertDuration(alert: AnyRecord) {
+  const start = dateTime(alert.occurredAt || alert.createdAt || alert.lastSeenAt);
+  const end = dateTime(alert.resolvedAt) ?? new Date();
+  if (!start) return '-';
+  const seconds = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} 小时 ${minutes % 60} 分钟`;
 }
 
 function rulePreview(rule: AnyRecord) {
@@ -1977,8 +4625,32 @@ function activeEnvironmentName(items: AnyRecord[]) {
 }
 
 function summarizeObject(value: unknown) {
-  if (!value || typeof value !== 'object') return '暂无数据';
-  return Object.entries(value as AnyRecord).slice(0, 3).map(([key, item]) => `${key}: ${item}`).join(' · ') || '暂无数据';
+  if (value === undefined || value === null || value === '') return '暂无数据';
+  if (Array.isArray(value)) return value.length ? `${value.length} 条记录` : '暂无数据';
+  if (typeof value !== 'object') return translateValue(value);
+  const entries = Object.entries(value as AnyRecord)
+    .filter(([, item]) => item !== undefined && item !== null && item !== '')
+    .slice(0, 4)
+    .map(([key, item]) => `${analyticsKeyLabel(key)}：${summarizeValue(item)}`);
+  return entries.join(' · ') || '暂无数据';
+}
+
+function summarizeValue(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '-';
+  if (Array.isArray(value)) return `${value.length} 条`;
+  if (typeof value === 'object') return summarizeObject(value);
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0 && value < 1) return percentLabel(value);
+  return translateValue(value);
+}
+
+function analyticsKeyLabel(key: string) {
+  return ANALYTICS_KEY_LABELS[key] ?? customerFieldLabel(key);
+}
+
+function translateValue(value: unknown): string {
+  const text = String(value ?? '');
+  if (!text) return '-';
+  return TRANSLATED_VALUE_LABELS[text] ?? text;
 }
 
 function summarizeSkillTest(value: AnyRecord) {
@@ -2011,6 +4683,10 @@ function csvCell(value: unknown) {
 
 function downloadTextFile(filename: string, content: string) {
   const blob = new Blob([`\ufeff${content}`], { type: 'text/csv;charset=utf-8' });
+  downloadBlob(filename, blob);
+}
+
+function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -2026,7 +4702,13 @@ function isOkStatus(value: unknown) {
 
 function formatDate(value: unknown) {
   if (!value) return '-';
+  const date = dateTime(value);
+  return date ? date.toLocaleString('zh-CN') : String(value);
+}
+
+function dateTime(value: unknown) {
+  if (!value) return null;
   const date = new Date(String(value));
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN');
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 </script>

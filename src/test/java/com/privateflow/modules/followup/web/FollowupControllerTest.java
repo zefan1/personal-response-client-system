@@ -63,7 +63,8 @@ class FollowupControllerTest {
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.keeperId").value("keeper-1"))
         .andExpect(jsonPath("$.data.totalCount").value(1))
-        .andExpect(jsonPath("$.data.items[0].phone").value("13800000000"));
+        .andExpect(jsonPath("$.data.items[0].phone").value("138****0000"))
+        .andExpect(jsonPath("$.data.items[0].phoneFull").value("13800000000"));
 
     verify(todayService).today("keeper-1");
   }
@@ -169,6 +170,7 @@ class FollowupControllerTest {
   private FollowupItem followupItem() {
     LocalDateTime now = LocalDateTime.of(2026, 7, 3, 12, 0);
     return new FollowupItem(
+        "138****0000",
         "13800000000",
         "Alice",
         "TUAN_GOU",

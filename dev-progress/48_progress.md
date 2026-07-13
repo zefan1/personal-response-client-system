@@ -24,11 +24,12 @@
 - [x] Gradual release uses a stable clientId hash bucket.
 - [x] Revoke validates that an alternative version, when supplied, exists and is PUBLISHED.
 - [x] Version report uses `INSERT ... ON DUPLICATE KEY UPDATE`.
-- [x] Config keys added: `version.max_file_size_mb`, `version.cos_upload_timeout_s`, `version.report_interval_hours`.
+- [x] Config keys added: `version.max_file_size_mb`, `version.cos_upload_timeout_s`, `version.report_interval_hours`, `version.storage.root`, `version.storage.public_base_url`.
 
 ## Implementation Notes
-- The upload endpoint follows the existing quick-search COS placeholder convention and returns `cos://desktop-releases/...`; admins can still provide an external `downloadUrl`.
-- Real COS SDK integration remains an environment/configuration concern and is not mocked as a successful network upload.
+- The upload endpoint now writes the installer to a real server-side storage directory and returns a downloadable `/downloads/desktop-releases/...` URL.
+- `version.storage.root` should point to a persistent server volume in production. `version.storage.public_base_url` can later point to a CDN/COS public base URL without changing the version table or frontend contract.
+- Admins can still provide an external `downloadUrl` as the manual backup channel.
 - Publish/revoke actions write `VERSION_PUBLISH` and `VERSION_REVOKE` audit logs.
 
 ## Validation Commands

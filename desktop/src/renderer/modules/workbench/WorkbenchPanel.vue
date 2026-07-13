@@ -1,36 +1,79 @@
 <template>
   <section class="workbench-panel">
-    <header class="panel-header">
-      <div>
-        <h2>工作台</h2>
-        <p>{{ state.lastFetchAt ? `上次同步 ${formatDateTime(state.lastFetchAt)}` : '今日事项总览' }}</p>
-      </div>
-      <button class="secondary small" :disabled="state.loading" @click="loadWorkbenchFollowups(true)">
-        {{ state.loading ? '加载中...' : '刷新' }}
+    <header class="panel-header workbench-hero">
+      <p class="workbench-sync-status">{{ state.lastFetchAt ? `上次同步 ${formatDateTime(state.lastFetchAt)}` : '先处理待跟进和新客资' }}</p>
+      <button
+        class="secondary small workbench-refresh-button"
+        type="button"
+        :disabled="state.loading"
+        aria-label="刷新"
+        title="刷新"
+        @click="loadWorkbenchFollowups(true)"
+      >
+        {{ state.loading ? '...' : '↻' }}
       </button>
     </header>
 
-    <p v-if="state.stale || state.toast" class="banner">
-      {{ state.toast || '当前数据可能不是最新' }}
-    </p>
+    <div v-if="state.stale || state.toast" class="banner workbench-status-banner">
+      <span>{{ state.toast || '当前数据可能不是最新' }}</span>
+      <button
+        class="secondary small"
+        type="button"
+        :disabled="state.loading"
+        @click="loadWorkbenchFollowups(true)"
+      >
+        重试
+      </button>
+    </div>
 
-    <div v-if="visibleWorkbenchNotices.length" class="workbench-notices">
+    <div v-if="visibleWorkbenchNotices.length" class="workbench-notices" aria-label="系统公告">
       <article
         v-for="notice in visibleWorkbenchNotices"
         :key="notice.noticeId"
         :class="['workbench-notice', `level-${notice.level.toLowerCase()}`]"
       >
-        <span><strong>{{ notice.title }}</strong> {{ notice.content }}</span>
-        <button class="secondary small" @click="dismissWorkbenchNotice(notice.noticeId)">关闭</button>
+        <div>
+          <strong>{{ notice.title }}</strong>
+          <p>{{ notice.content }}</p>
+          <small>{{ noticeLevelLabel(notice.level) }} · 有效至 {{ formatNoticeTime(notice.expireAt) }}</small>
+        </div>
+        <button class="secondary small" type="button" @click="dismissWorkbenchNotice(notice.noticeId)">知道了</button>
       </article>
     </div>
 
     <div class="metric-grid">
-      <article v-for="card in metricCards" :key="card.key" class="metric-card">
-        <span>{{ card.label }}</span>
-        <strong>{{ card.metric.total }}</strong>
-        <small>团 {{ card.metric.tuanGou }} · 线 {{ card.metric.xianSuo }}</small>
-      </article>
+      <button v-for="card in metricCards" :key="card.key" class="metric-card" type="button" @click="openMetricQueue(card.key)">
+        <span class="metric-icon" aria-hidden="true">{{ card.icon }}</span>
+        <span class="metric-copy">
+          <span>{{ card.label }}</span>
+          <strong>{{ card.metric.total }}</strong>
+          <small>团 {{ card.metric.tuanGou }} · 线 {{ card.metric.xianSuo }}</small>
+        </span>
+      </button>
+    </div>
+
+    <div class="workbench-actions" aria-label="工作台快捷入口">
+      <button class="workbench-action" type="button" @click="startWorkbenchCapture">
+        <span class="workbench-action-icon" aria-hidden="true">识</span>
+        <span>
+          <strong>识别聊天</strong>
+          <small>截图生成回复</small>
+        </span>
+      </button>
+      <button class="workbench-action" type="button" @click="openWorkbenchQuickSearch">
+        <span class="workbench-action-icon" aria-hidden="true">模</span>
+        <span>
+          <strong>速搜模板</strong>
+          <small>话术和素材</small>
+        </span>
+      </button>
+      <button class="workbench-action" type="button" @click="startWorkbenchBatchTemplate">
+        <span class="workbench-action-icon" aria-hidden="true">批</span>
+        <span>
+          <strong>批量待办</strong>
+          <small>选择客户发送</small>
+        </span>
+      </button>
     </div>
 
     <div class="workbench-columns">
@@ -55,7 +98,7 @@
           </button>
           <button class="secondary small" @click="openWorkbenchCustomer(item.phoneFull ?? item.phone, item.leadType)">查看</button>
         </article>
-        <p v-else class="empty-panel">今天没有待跟进客户</p>
+        <p v-else class="empty-panel visual-empty">今天没有待跟进客户</p>
       </section>
 
       <section class="workbench-section">
@@ -74,15 +117,9 @@
           </button>
           <button class="secondary small" @click="openWorkbenchCustomer(lead.phoneFull ?? lead.phone, lead.leadType)">查看</button>
         </article>
-        <p v-if="recentNewLeads.length === 0" class="empty-panel">暂无新客资</p>
+        <p v-if="recentNewLeads.length === 0" class="empty-panel visual-empty">暂无新客资</p>
       </section>
     </div>
-
-    <nav class="quick-actions">
-      <button class="primary" @click="startWorkbenchCapture">识别聊天</button>
-      <button class="secondary" @click="openWorkbenchQuickSearch">快线模板</button>
-      <button class="secondary" @click="startWorkbenchBatchTemplate">批量发模板</button>
-    </nav>
   </section>
 </template>
 
@@ -90,12 +127,14 @@
 import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { eventBus } from '../../shared/eventBus';
 import {
-  dismissWorkbenchNotice,
   handleWorkbenchFollowupReminder,
   handleWorkbenchNewLead,
   handleWorkbenchNotice,
   loadWorkbenchFollowups,
+  loadWorkbenchNotices,
   markWorkbenchDirty,
+  dismissWorkbenchNotice,
+  noticeLevelLabel,
   openAllFollowups,
   openAllNewLeads,
   openWorkbenchCustomer,
@@ -112,16 +151,17 @@ import {
 import type { FollowupReminderPayload, NewLeadAlertPayload, WorkbenchNoticePayload } from './types';
 import type { WorkbenchMetricKey } from './types';
 
-const metricCards = computed<Array<{ key: WorkbenchMetricKey; label: string; metric: { total: number; tuanGou: number; xianSuo: number } }>>(() => [
-  { key: 'pendingFollowup', label: '待跟进', metric: workbenchMetrics.value.pendingFollowup },
-  { key: 'appointment', label: '今日预约', metric: workbenchMetrics.value.appointment },
-  { key: 'newLead', label: '新客资', metric: workbenchMetrics.value.newLead }
+const metricCards = computed<Array<{ key: WorkbenchMetricKey; label: string; icon: string; metric: { total: number; tuanGou: number; xianSuo: number } }>>(() => [
+  { key: 'pendingFollowup', label: '待跟进', icon: '跟', metric: workbenchMetrics.value.pendingFollowup },
+  { key: 'appointment', label: '今日预约', icon: '约', metric: workbenchMetrics.value.appointment },
+  { key: 'newLead', label: '新客资', icon: '新', metric: workbenchMetrics.value.newLead }
 ]);
 
 const disposers: Array<() => void> = [];
 
 onMounted(() => {
   void loadWorkbenchFollowups();
+  void loadWorkbenchNotices();
   disposers.push(eventBus.on<FollowupReminderPayload>('FOLLOWUP_REMIND', handleWorkbenchFollowupReminder));
   disposers.push(eventBus.on<NewLeadAlertPayload>('NEW_LEAD_ALERT', handleWorkbenchNewLead));
   disposers.push(eventBus.on<WorkbenchNoticePayload>('SYSTEM_NOTICE', handleWorkbenchNotice));
@@ -156,5 +196,21 @@ function maskPhone(phone: string): string {
 
 function formatDateTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatNoticeTime(value: string): string {
+  return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function openMetricQueue(key: WorkbenchMetricKey): void {
+  if (key === 'newLead') {
+    openAllNewLeads();
+    return;
+  }
+  if (key === 'appointment') {
+    eventBus.emit('followup:switch-tab', { tab: 'APPOINTMENT' });
+    return;
+  }
+  openAllFollowups();
 }
 </script>

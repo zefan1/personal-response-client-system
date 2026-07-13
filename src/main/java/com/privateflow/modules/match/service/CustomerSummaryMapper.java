@@ -12,6 +12,7 @@ public class CustomerSummaryMapper {
   public CustomerSummary toSummary(Customer customer, Confidence confidence) {
     return new CustomerSummary(
         PhoneUtils.mask(customer.getPhone()),
+        customer.getPhone(),
         customer.getNickname(),
         customer.getLeadType(),
         customer.getAssignedKeeper(),

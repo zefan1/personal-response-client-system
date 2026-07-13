@@ -2,12 +2,12 @@ package com.privateflow.modules.customer.sync;
 
 import com.privateflow.common.events.NewLeadEvent;
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.admin.DatasourceAdminRepository;
 import com.privateflow.modules.customer.config.CustomerCacheProperties;
 import com.privateflow.modules.customer.infra.CustomerCacheManager;
 import com.privateflow.modules.customer.infra.CustomerRepository;
 import com.privateflow.modules.customer.service.CustomerMergeEngine;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -23,9 +23,10 @@ import org.springframework.stereotype.Component;
 public class CustomerSyncScheduler {
 
   private static final Logger log = LoggerFactory.getLogger(CustomerSyncScheduler.class);
-  private static final List<String> TABLE_ORDER = List.of("推广组客资登记表", "私域客资管理表", "新客管理衔接表");
   private final ReentrantLock lock = new ReentrantLock();
+  private final Map<Long, Boolean> runningSources = new ConcurrentHashMap<>();
   private final Map<String, LocalDateTime> lastSyncTimes = new ConcurrentHashMap<>();
+  private final DatasourceAdminRepository datasourceRepository;
   private final SheetClient sheetClient;
   private final FieldMappingResolver mappingResolver;
   private final CustomerRepository customerRepository;
@@ -36,6 +37,7 @@ public class CustomerSyncScheduler {
   private final ApplicationEventPublisher eventPublisher;
 
   public CustomerSyncScheduler(
+      DatasourceAdminRepository datasourceRepository,
       SheetClient sheetClient,
       FieldMappingResolver mappingResolver,
       CustomerRepository customerRepository,
@@ -44,6 +46,7 @@ public class CustomerSyncScheduler {
       SyncFailureRepository failureRepository,
       CustomerCacheProperties properties,
       ApplicationEventPublisher eventPublisher) {
+    this.datasourceRepository = datasourceRepository;
     this.sheetClient = sheetClient;
     this.mappingResolver = mappingResolver;
     this.customerRepository = customerRepository;
@@ -66,19 +69,64 @@ public class CustomerSyncScheduler {
       return;
     }
     try {
-      for (String table : TABLE_ORDER) {
-        syncTable(table);
+      for (SheetSource source : datasourceRepository.enabledSources()) {
+        syncSource(source);
       }
     } finally {
       lock.unlock();
     }
   }
 
-  private void syncTable(String sourceTable) {
+  public boolean runOne(SheetSource source) {
+    if (runningSources.putIfAbsent(source.datasourceId(), Boolean.TRUE) != null) {
+      log.info("customer sync skipped because datasource is already running, datasourceId={}", source.datasourceId());
+      return false;
+    }
+    try {
+      if (!lock.tryLock()) {
+        log.info("customer sync skipped because previous round is still running");
+        return false;
+      }
+      try {
+        syncSource(source);
+        return true;
+      } finally {
+        lock.unlock();
+      }
+    } finally {
+      runningSources.remove(source.datasourceId());
+    }
+  }
+
+  public boolean tryStartOneAsync(SheetSource source) {
+    if (runningSources.putIfAbsent(source.datasourceId(), Boolean.TRUE) != null) {
+      log.info("customer sync start rejected because datasource is already running, datasourceId={}", source.datasourceId());
+      return false;
+    }
+    java.util.concurrent.CompletableFuture.runAsync(() -> {
+      try {
+        if (!lock.tryLock()) {
+          log.info("customer sync skipped because previous round is still running");
+          return;
+        }
+        try {
+          syncSource(source);
+        } finally {
+          lock.unlock();
+        }
+      } finally {
+        runningSources.remove(source.datasourceId());
+      }
+    });
+    return true;
+  }
+
+  private void syncSource(SheetSource source) {
     LocalDateTime roundStartedAt = LocalDateTime.now();
+    String sourceTable = source.sourceTable();
     try {
       LocalDateTime modifiedAfter = lastSyncTimes.getOrDefault(sourceTable, LocalDateTime.now().minusDays(1));
-      List<SheetRow> rows = sheetClient.fetchIncrementalRows(sourceTable, modifiedAfter, properties.getMaxSyncRowsPerRound());
+      java.util.List<SheetRow> rows = sheetClient.fetchIncrementalRows(source, modifiedAfter, properties.getMaxSyncRowsPerRound());
       for (SheetRow row : rows) {
         processRow(sourceTable, row);
       }

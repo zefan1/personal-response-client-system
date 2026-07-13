@@ -18,6 +18,7 @@ public record SkillConfig(
     String redLines,
     double alertFailureRate,
     int alertFailureDurationMinutes,
-    int profileExtractTimeoutMs
+    int profileExtractTimeoutMs,
+    int regenerateMaxCount
 ) {
 }

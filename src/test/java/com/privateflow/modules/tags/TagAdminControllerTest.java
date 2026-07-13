@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.ApiErrorCodes;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -114,6 +115,17 @@ class TagAdminControllerTest {
     verify(service).updateValue(eq(9L), any());
     verify(service).toggleValue(9L, false);
     verify(service).deleteValue(9L);
+  }
+
+  @Test
+  void toggleValueRequiresExplicitEnabledState() throws Exception {
+    mockMvc.perform(put("/admin/api/v1/tags/values/9/toggle")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.success").value(false))
+        .andExpect(jsonPath("$.errorCode").value(ApiErrorCodes.BAD_REQUEST))
+        .andExpect(jsonPath("$.message").value("请明确选择启用或停用"));
   }
 
   @Test

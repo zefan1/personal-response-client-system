@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.common.events.ConfigChangedEvent;
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.ws.WsMessage;
 import com.privateflow.modules.api.ws.WsPushService;
@@ -13,6 +14,7 @@ import com.privateflow.modules.customer.infra.CustomerRepository;
 import com.privateflow.modules.customer.sync.CustomerSyncScheduler;
 import com.privateflow.modules.customer.sync.SheetClient;
 import com.privateflow.modules.customer.sync.SheetRow;
+import com.privateflow.modules.customer.sync.SheetSource;
 import java.beans.Introspector;
 import java.beans.PropertyDescriptor;
 import java.io.BufferedReader;
@@ -26,7 +28,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +47,7 @@ public class DatasourceAdminService {
   private final ApplicationEventPublisher eventPublisher;
   private final WsPushService wsPushService;
   private final ObjectMapper objectMapper;
+  private final AuditLogger auditLogger;
 
   public DatasourceAdminService(
       DatasourceAdminRepository repository,
@@ -54,7 +56,8 @@ public class DatasourceAdminService {
       SheetClient sheetClient,
       ApplicationEventPublisher eventPublisher,
       WsPushService wsPushService,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      AuditLogger auditLogger) {
     this.repository = repository;
     this.customerRepository = customerRepository;
     this.syncScheduler = syncScheduler;
@@ -62,6 +65,7 @@ public class DatasourceAdminService {
     this.eventPublisher = eventPublisher;
     this.wsPushService = wsPushService;
     this.objectMapper = objectMapper;
+    this.auditLogger = auditLogger;
   }
 
   public Map<String, Object> list() {
@@ -73,15 +77,22 @@ public class DatasourceAdminService {
     validateDatasource(request, true, null);
     long id = repository.create(request, AuthContext.username());
     publish(CONNECTIONS_CONFIG_KEY);
-    return repository.find(id).orElseThrow();
+    Datasource saved = repository.find(id).orElseThrow();
+    audit("DATASOURCE_CREATE", saved, datasourceDetail(saved));
+    return saved;
   }
 
   public Datasource update(long id, DatasourceRequest request) {
-    repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
+    Datasource existing = repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
     validateDatasource(request, false, id);
     repository.update(id, request);
     publish(CONNECTIONS_CONFIG_KEY);
-    return repository.find(id).orElseThrow();
+    Datasource saved = repository.find(id).orElseThrow();
+    Map<String, Object> detail = datasourceDetail(saved);
+    detail.put("previousSheetId", existing.sheetId());
+    detail.put("previousSourceTable", existing.sourceTable());
+    audit("DATASOURCE_UPDATE", saved, detail);
+    return saved;
   }
 
   @Transactional
@@ -91,14 +102,22 @@ public class DatasourceAdminService {
     repository.delete(id);
     publish(CONNECTIONS_CONFIG_KEY);
     publish(FIELD_MAPPING_CONFIG_KEY);
+    Map<String, Object> detail = datasourceDetail(datasource);
+    detail.put("deletedMappings", deletedMappings);
+    audit("DATASOURCE_DELETE", datasource, detail);
     return Map.of("deletedMappings", deletedMappings);
   }
 
   public Datasource toggle(long id, boolean enabled) {
-    repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
+    Datasource existing = repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
     repository.toggle(id, enabled);
     publish(CONNECTIONS_CONFIG_KEY);
-    return repository.find(id).orElseThrow();
+    Datasource saved = repository.find(id).orElseThrow();
+    Map<String, Object> detail = datasourceDetail(saved);
+    detail.put("enabledBefore", existing.enabled());
+    detail.put("enabledAfter", enabled);
+    audit("DATASOURCE_TOGGLE", saved, detail);
+    return saved;
   }
 
   public Map<String, Object> replace(long id, DatasourceReplaceRequest request) {
@@ -108,6 +127,9 @@ public class DatasourceAdminService {
     repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
     String oldSheetId = repository.replace(id, request.sheetId().trim());
     publish(CONNECTIONS_CONFIG_KEY);
+    Datasource datasource = repository.find(id).orElse(null);
+    audit("DATASOURCE_REPLACE_SHEET", datasource == null ? new Datasource(id, "", request.sheetId().trim(), "", "", true, 0, null, "", AuthContext.username(), null, null) : datasource,
+        Map.of("oldSheetId", oldSheetId, "newSheetId", request.sheetId().trim(), "mappingPreserved", true));
     return Map.of("oldSheetId", oldSheetId, "newSheetId", request.sheetId().trim(), "mappingPreserved", true);
   }
 
@@ -127,6 +149,11 @@ public class DatasourceAdminService {
     repository.replaceMappings(datasource.sourceTable(), mappings);
     int version = repository.createMappingVersion(id, toJson(mappings), mappings.size(), "replace mappings: " + mappings.size(), AuthContext.username());
     publish(FIELD_MAPPING_CONFIG_KEY);
+    audit("DATASOURCE_MAPPING_SAVE", datasource, Map.of(
+        "datasourceId", datasource.id(),
+        "sourceTable", datasource.sourceTable(),
+        "mappingCount", mappings.size(),
+        "version", version));
     return Map.of("mappingCount", mappings.size(), "version", version);
   }
 
@@ -187,6 +214,12 @@ public class DatasourceAdminService {
     repository.replaceMappings(datasource.sourceTable(), mappings);
     int newVersion = repository.createMappingVersion(id, toJson(mappings), mappings.size(), "restore from version " + request.version(), AuthContext.username());
     publish(FIELD_MAPPING_CONFIG_KEY);
+    audit("DATASOURCE_MAPPING_RESTORE", datasource, Map.of(
+        "datasourceId", datasource.id(),
+        "sourceTable", datasource.sourceTable(),
+        "restoredVersion", request.version(),
+        "newVersion", newVersion,
+        "mappingCount", mappings.size()));
     return Map.of("restoredVersion", request.version(), "newVersion", newVersion, "mappingCount", mappings.size());
   }
 
@@ -197,7 +230,7 @@ public class DatasourceAdminService {
     String fetchStatus = "NOT_ATTEMPTED";
     String fetchError = null;
     try {
-      List<SheetRow> rows = sheetClient.fetchIncrementalRows(datasource.sourceTable(), LocalDateTime.of(1970, 1, 1, 0, 0), 20);
+      List<SheetRow> rows = sheetClient.fetchIncrementalRows(sheetSource(datasource), LocalDateTime.of(1970, 1, 1, 0, 0), 20);
       for (SheetRow row : rows) {
         columnNames.addAll(row.values().keySet());
       }
@@ -280,8 +313,15 @@ public class DatasourceAdminService {
     if (!datasource.enabled()) {
       throw new ApiException(ApiErrorCodes.CONFLICT, "datasource is disabled");
     }
-    CompletableFuture.runAsync(syncScheduler::runOnce);
+    if (!syncScheduler.tryStartOneAsync(sheetSource(datasource))) {
+      throw new ApiException(ApiErrorCodes.CONFLICT, "datasource sync already running");
+    }
+    audit("DATASOURCE_SYNC_START", datasource, Map.of("datasourceId", id, "sourceTable", datasource.sourceTable()));
     return Map.of("accepted", true, "datasourceId", id, "sourceTable", datasource.sourceTable());
+  }
+
+  private SheetSource sheetSource(Datasource datasource) {
+    return new SheetSource(datasource.id(), datasource.sheetId(), datasource.sourceTable());
   }
 
   public CsvImportResult importCsv(MultipartFile file) {
@@ -290,6 +330,12 @@ public class DatasourceAdminService {
     }
     CsvImportResult result = parseCsv(file);
     repository.logImport(file.getOriginalFilename(), result, AuthContext.username());
+    auditLogger.log("DATASOURCE_CSV_IMPORT", AuthContext.username(), "datasource", "CSV_IMPORT", toJson(Map.of(
+        "fileName", file.getOriginalFilename(),
+        "totalRows", result.totalRows(),
+        "created", result.created(),
+        "updated", result.updated(),
+        "skipped", result.skipped())));
     return result;
   }
 
@@ -433,6 +479,14 @@ public class DatasourceAdminService {
     }
   }
 
+  private String toJson(Object value) {
+    try {
+      return objectMapper.writeValueAsString(value);
+    } catch (Exception ex) {
+      return "{}";
+    }
+  }
+
   private List<FieldMappingDto> fromJson(String json) {
     try {
       return objectMapper.readValue(json, new TypeReference<List<FieldMappingDto>>() {});
@@ -446,15 +500,57 @@ public class DatasourceAdminService {
     wsPushService.broadcastWs(WsMessage.unsaved("CONFIG_REFRESH", Map.of("configKey", key)));
   }
 
+  private Map<String, Object> datasourceDetail(Datasource datasource) {
+    Map<String, Object> detail = new LinkedHashMap<>();
+    detail.put("id", datasource.id());
+    detail.put("name", datasource.name());
+    detail.put("sheetId", datasource.sheetId());
+    detail.put("sourceTable", datasource.sourceTable());
+    detail.put("enabled", datasource.enabled());
+    return detail;
+  }
+
+  private void audit(String action, Datasource datasource, Map<String, Object> detail) {
+    auditLogger.log(action, AuthContext.username(), "datasource", String.valueOf(datasource.id()), toJson(detail));
+  }
+
   private String label(String field) {
     return switch (field) {
       case "phone" -> "手机号";
       case "nickname" -> "客户昵称";
+      case "sourceChannel" -> "来源渠道";
       case "leadType" -> "线索类型";
+      case "personalityType" -> "性格类型";
       case "assignedKeeper" -> "分配管家";
       case "intendedStore" -> "意向门店";
       case "intendedProject" -> "意向项目";
+      case "purchasedProject" -> "已购项目";
+      case "postpartumMonths" -> "产后月份";
+      case "parity" -> "胎次";
+      case "deliveryMethod" -> "分娩方式";
+      case "breastfeeding" -> "哺乳情况";
+      case "lochiaPeriod" -> "恶露/月经情况";
+      case "pregnancyWeight" -> "孕期增重";
+      case "currentWeight" -> "当前体重";
+      case "bodyConcerns" -> "身体关注点";
+      case "diastasisRecti" -> "腹直肌分离";
+      case "urineLeakage" -> "漏尿情况";
+      case "pubicLumbago" -> "耻骨/腰痛";
+      case "prevRepairExp" -> "既往修复经历";
+      case "postpartumCheck" -> "产后检查";
+      case "exerciseHabits" -> "运动习惯";
+      case "intentLevel" -> "意向等级";
+      case "worries" -> "客户顾虑";
       case "customerStage" -> "客户阶段";
+      case "lastFollowupAt" -> "最近跟进时间";
+      case "followupNotes" -> "跟进记录";
+      case "nextFollowupAt" -> "下次跟进时间";
+      case "nextFollowupDir" -> "下次跟进方向";
+      case "appointmentDate" -> "预约日期";
+      case "appointmentStore" -> "预约门店";
+      case "appointmentItem" -> "预约项目";
+      case "arrived" -> "是否到店";
+      case "sourceTable" -> "数据来源表";
       default -> field;
     };
   }

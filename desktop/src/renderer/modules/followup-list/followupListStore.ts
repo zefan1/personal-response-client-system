@@ -21,6 +21,7 @@ export const followupListState = reactive({
   selectedPhones: new Set<string>(),
   newReminderCount: 0,
   newReminderTab: 'OVERDUE' as FollowupTab,
+  lastLoadedAt: 0,
   error: '',
   stale: false
 });
@@ -51,6 +52,7 @@ export async function loadTodayFollowups(): Promise<void> {
       }
     });
     followupListState.loaded = true;
+    followupListState.lastLoadedAt = Date.now();
     followupListState.stale = false;
   } catch {
     followupListState.error = '加载失败，请检查网络后重试';
@@ -70,11 +72,13 @@ export function handleFollowupReminder(payload: FollowupReminderPayload): void {
     return;
   }
   const tab = normalizeTab(primaryReminder.reminderType) ?? 'OVERDUE';
-  const existing = findItem(payload.phone);
+  const phone = payload.phoneFull ?? payload.phone;
+  const existing = findItem(phone);
   const flashUntil = Date.now() + loadDesktopConfig().newReminderFlashMs;
   const nextItem: FollowupItem = {
     ...(existing?.item ?? {}),
     phone: payload.phone,
+    phoneFull: payload.phoneFull,
     nickname: existing?.item.nickname ?? `客户 ${payload.phone.slice(-4)}`,
     reminderType: tab,
     overdueHours: primaryReminder.overdueHours ?? existing?.item.overdueHours ?? null,
@@ -83,12 +87,12 @@ export function handleFollowupReminder(payload: FollowupReminderPayload): void {
     flashUntil
   };
   if (existing) {
-    followupListState.groups[existing.tab] = followupListState.groups[existing.tab].filter((item) => item.phone !== payload.phone);
+    followupListState.groups[existing.tab] = followupListState.groups[existing.tab].filter((item) => (item.phoneFull ?? item.phone) !== phone);
   }
   followupListState.groups[tab].unshift(nextItem);
   followupListState.newReminderCount += 1;
   followupListState.newReminderTab = tab;
-  scheduleFlashCleanup(tab, nextItem.phone, flashUntil);
+  scheduleFlashCleanup(tab, phone, flashUntil);
 }
 
 export function handleNewLeadAlert(payload: NewLeadAlertPayload): void {
@@ -106,9 +110,9 @@ export function handleNewLeadAlert(payload: NewLeadAlertPayload): void {
     arrivedAt: payload.arrivedAt,
     flashUntil
   });
-  if (followupListState.activeTab === 'NEW_LEAD') {
-    scheduleFlashCleanup('NEW_LEAD', phone, flashUntil);
-  }
+  followupListState.newReminderCount += 1;
+  followupListState.newReminderTab = 'NEW_LEAD';
+  scheduleFlashCleanup('NEW_LEAD', phone, flashUntil);
 }
 
 export function openFollowupCustomer(item: FollowupItem): void {

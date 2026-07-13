@@ -45,8 +45,11 @@ describe('copyBackfillStore', () => {
     expect(store.copyBackfillState.toast).toBeTruthy();
   });
 
-  it('copies selected reply text and silently sends confirmation with fallback direction mapping', async () => {
+  it('copies selected reply text, sends confirmation, and refreshes the active profile', async () => {
     const store = await freshStore();
+    const { eventBus } = await import('../../shared/eventBus');
+    const confirmed: unknown[] = [];
+    eventBus.on('reply:send-confirmed', (payload) => confirmed.push(payload));
     writeClipboardTextMock.mockResolvedValue({ success: true });
     postJsonMock.mockResolvedValue({ success: true, data: {} });
 
@@ -54,6 +57,8 @@ describe('copyBackfillStore', () => {
     await vi.runAllTimersAsync();
 
     expect(writeClipboardTextMock).toHaveBeenCalledWith('hello');
+    expect(store.copyBackfillState.toast).toBe('已复制并记录发送，档案正在刷新');
+    expect(confirmed).toEqual([{ phone: '18800001111' }]);
     expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/send-confirm', {
       phone: '18800001111',
       conversationSummary: '',
@@ -77,6 +82,32 @@ describe('copyBackfillStore', () => {
 
     expect(writeClipboardTextMock).toHaveBeenCalledWith('copied only');
     expect(postJsonMock).not.toHaveBeenCalled();
+    expect(store.copyBackfillState.toast).toBe('已复制到剪贴板，请粘贴到微信发送');
+  });
+
+  it('keeps copied text usable when send-confirm fails and surfaces the degraded state', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+    postJsonMock.mockResolvedValue({ success: false, errorCode: 'BAD_REQUEST', message: 'phone and sentText are required' });
+
+    await store.handleReplySelected(reply({ text: 'hello' }));
+    await vi.runAllTimersAsync();
+
+    expect(writeClipboardTextMock).toHaveBeenCalledWith('hello');
+    expect(store.copyBackfillState.toast).toBe('已复制，但发送记录失败，请稍后刷新档案确认');
+  });
+
+  it('uses the full phone for send-confirm even when a masked display phone is present', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+    postJsonMock.mockResolvedValue({ success: true, data: {} });
+
+    await store.handleReplySelected(reply({ phone: '18800001111', displayPhone: '****1111' }));
+    await vi.runAllTimersAsync();
+
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/send-confirm', expect.objectContaining({
+      phone: '18800001111'
+    }), undefined, expect.any(AbortSignal));
   });
 
   it('aborts the previous pending send-confirm when a newer reply is selected', async () => {
@@ -96,19 +127,14 @@ describe('copyBackfillStore', () => {
     expect(signals[1].aborted).toBe(false);
   });
 
-  it('shows suggestion toast, auto collapses unresolved suggestions, and can reopen or close it', async () => {
+  it('stores incoming suggestions collapsed until the inline panel expands them', async () => {
     const store = await freshStore();
 
     store.handleSuggestionShow({ phone: '18800001111', suggestions: [suggestion(1), suggestion(2, { resolved: true })] });
 
-    expect(store.copyBackfillState.suggestionToastVisible).toBe(true);
-    expect(store.copyBackfillState.suggestionToastCollapsed).toBe(false);
-    expect(store.copyBackfillState.suggestionToastSuggestions.map((item) => item.resolved)).toEqual([false, true]);
-
-    vi.advanceTimersByTime(15000);
-
     expect(store.copyBackfillState.suggestionToastVisible).toBe(false);
     expect(store.copyBackfillState.suggestionToastCollapsed).toBe(true);
+    expect(store.copyBackfillState.suggestionToastSuggestions.map((item) => item.resolved)).toEqual([false, true]);
 
     store.reopenSuggestionToast();
     expect(store.copyBackfillState.suggestionToastVisible).toBe(true);
@@ -117,10 +143,11 @@ describe('copyBackfillStore', () => {
     expect(store.copyBackfillState.suggestionToastCollapsed).toBe(true);
   });
 
-  it('resolves a single toast suggestion and keeps toast open when unresolved suggestions remain', async () => {
+  it('resolves a single inline suggestion and keeps the expanded panel open when unresolved suggestions remain', async () => {
     const store = await freshStore();
     postJsonMock.mockResolvedValue({ success: true, data: {} });
     store.handleSuggestionShow({ phone: '18800001111', suggestions: [suggestion(1), suggestion(2)] });
+    store.reopenSuggestionToast();
 
     await store.resolveToastSuggestion('CONFIRM', store.copyBackfillState.suggestionToastSuggestions[0]);
 
@@ -141,6 +168,7 @@ describe('copyBackfillStore', () => {
     const store = await freshStore();
     postJsonMock.mockResolvedValue({ success: true, data: {} });
     store.handleSuggestionShow({ phone: '18800001111', suggestions: [suggestion(1), suggestion(2)] });
+    store.reopenSuggestionToast();
 
     await store.resolveToastSuggestion('REJECT');
 
@@ -153,18 +181,17 @@ describe('copyBackfillStore', () => {
     expect(store.copyBackfillState.suggestionToastCollapsed).toBe(false);
   });
 
-  it('restores resolving state and reschedules collapse after suggestion resolve failure', async () => {
+  it('restores resolving state after inline suggestion resolve failure', async () => {
     const store = await freshStore();
     postJsonMock.mockRejectedValue(new Error('network down'));
     store.handleSuggestionShow({ phone: '18800001111', suggestions: [suggestion(1)] });
+    store.reopenSuggestionToast();
 
     await store.resolveToastSuggestion('CONFIRM');
 
     expect(store.copyBackfillState.suggestionToastSuggestions[0].resolving).toBe(false);
     expect(store.copyBackfillState.toast).toBeTruthy();
-
-    vi.advanceTimersByTime(15000);
-    expect(store.copyBackfillState.suggestionToastCollapsed).toBe(true);
+    expect(store.copyBackfillState.suggestionToastVisible).toBe(true);
   });
 });
 

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AbnormalAlert } from './types';
 
 const mocks = vi.hoisted(() => ({
+  clearAllAlertHistory: vi.fn(),
   closeAlertDatabase: vi.fn(),
   deleteExpiredAlerts: vi.fn(),
   getAlertsByPhone: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('./alertHistoryDb', () => ({
+  clearAllAlertHistory: mocks.clearAllAlertHistory,
   closeAlertDatabase: mocks.closeAlertDatabase,
   deleteExpiredAlerts: mocks.deleteExpiredAlerts,
   getAlertsByPhone: mocks.getAlertsByPhone,
@@ -19,6 +21,21 @@ vi.mock('./alertHistoryDb', () => ({
   insertAlertHistory: mocks.insertAlertHistory,
   updateAlertAcknowledged: mocks.updateAlertAcknowledged
 }));
+
+vi.mock('../../shared/config', () => {
+  const config = {
+    alertBellRefreshIntervalS: 86400,
+    alertHistoryMaxCount: 50,
+    alertHistoryRetentionDays: 7,
+    clipboardScreenshotConfirmPromptS: 10,
+    offlineWsDisconnectWaitS: 15,
+    workbenchMaxNotices: 3
+  };
+  return {
+    loadDesktopConfig: vi.fn(() => config),
+    saveDesktopConfig: vi.fn((patch: Partial<typeof config>) => Object.assign(config, patch))
+  };
+});
 
 type MountedBell = {
   app: App<Element>;
@@ -59,6 +76,14 @@ describe('AlertBell', () => {
     resetMocks();
   });
 
+  it('hides the reminder entry when there is no actionable alert', async () => {
+    const { app, host } = await mountBell();
+
+    expect(host.querySelector('.alert-bell')).toBeFalsy();
+    expect(host.querySelector('.alert-panel')).toBeFalsy();
+    app.unmount();
+  });
+
   it('renders the unconfirmed badge, alert rows, and acknowledges alerts from the panel button', async () => {
     const { app, host, alerts } = await mountBell();
     alerts.alertStore.set('18800001111', [alert({ alertId: 'alert-a', message: 'High churn risk' })]);
@@ -72,6 +97,7 @@ describe('AlertBell', () => {
     expect(host.querySelector('.alert-panel')).toBeTruthy();
     expect(host.textContent).toContain('High churn risk');
     expect(host.textContent).toContain('188****1111');
+    expect(host.textContent).toContain('客户异常 · 提醒 · 待处理');
 
     const acknowledge = host.querySelector('.alert-row .secondary') as HTMLButtonElement | null;
     acknowledge?.click();
@@ -88,7 +114,9 @@ describe('AlertBell', () => {
 
   it('loads and renders full history from the rendered history link', async () => {
     mocks.getRecentAlerts.mockResolvedValue([alert({ alertId: 'history-a', message: 'Past complaint', acknowledged: true })]);
-    const { app, host } = await mountBell();
+    const { app, host, alerts } = await mountBell();
+    alerts.alertStore.set('18800001111', [alert({ alertId: 'alert-a' })]);
+    await flushUi();
 
     (host.querySelector('.alert-bell') as HTMLButtonElement | null)?.click();
     await flushUi();
@@ -101,18 +129,64 @@ describe('AlertBell', () => {
     app.unmount();
   });
 
-  it('shows an empty panel and can close the panel through the rendered close button', async () => {
-    const { app, host } = await mountBell();
+  it('clears persisted history without clearing active reminders', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mocks.getRecentAlerts.mockResolvedValue([alert({ alertId: 'history-a', message: 'Past complaint', acknowledged: true })]);
+    const { app, host, alerts } = await mountBell();
+    alerts.alertStore.set('18800001111', [alert({ alertId: 'alert-a' })]);
+    await flushUi();
+
+    (host.querySelector('.alert-bell') as HTMLButtonElement).click();
+    await flushUi();
+    (host.querySelector('.alert-history-link') as HTMLButtonElement).click();
+    await flushUi();
+    const clearButton = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('清空历史')) as HTMLButtonElement;
+    clearButton.click();
+    await flushUi();
+
+    expect(mocks.clearAllAlertHistory).toHaveBeenCalled();
+    expect(alerts.alertStore.get('18800001111')).toHaveLength(1);
+    expect(host.textContent).toContain('暂无历史提醒');
+    app.unmount();
+  });
+
+  it('can close the panel through the rendered close button', async () => {
+    const { app, host, alerts } = await mountBell();
+    alerts.alertStore.set('18800001111', [alert({ alertId: 'alert-a' })]);
+    await flushUi();
 
     (host.querySelector('.alert-bell') as HTMLButtonElement | null)?.click();
     await flushUi();
 
-    expect(host.querySelector('.empty-panel')).toBeTruthy();
+    expect(host.querySelector('.alert-panel')).toBeTruthy();
 
-    (host.querySelector('.alert-panel-head .secondary') as HTMLButtonElement | null)?.click();
+    (host.querySelector('.alert-panel-head .icon-close-button') as HTMLButtonElement | null)?.click();
     await flushUi();
 
     expect(host.querySelector('.alert-panel')).toBeFalsy();
+    app.unmount();
+  });
+
+  it('renders LLM configuration warnings from desktop status', async () => {
+    const { app, host } = await mountBell();
+    const { applyDesktopStatus } = await import('../../shared/desktopStatusStore');
+    applyDesktopStatus({
+      llmStatus: {
+        status: 'WARN',
+        label: 'LLM 配置不完整',
+        detail: '已启用 LLM 回复生成，但 API 地址、密钥或模型未配置完整。',
+        replyGenerationEnabled: true
+      }
+    });
+    await flushUi();
+
+    expect(host.querySelector('.bell-badge')?.textContent).toBe('1');
+
+    (host.querySelector('.alert-bell') as HTMLButtonElement | null)?.click();
+    await flushUi();
+
+    expect(host.textContent).toContain('LLM 配置需处理');
+    expect(host.textContent).toContain('已启用 LLM 回复生成');
     app.unmount();
   });
 });
@@ -120,6 +194,7 @@ describe('AlertBell', () => {
 function resetMocks(): void {
   Object.values(mocks).forEach((mock) => mock.mockReset());
   mocks.deleteExpiredAlerts.mockResolvedValue(undefined);
+  mocks.clearAllAlertHistory.mockResolvedValue(undefined);
   mocks.getAlertsByPhone.mockResolvedValue([]);
   mocks.getRecentAlerts.mockResolvedValue([]);
   mocks.insertAlertHistory.mockResolvedValue(undefined);

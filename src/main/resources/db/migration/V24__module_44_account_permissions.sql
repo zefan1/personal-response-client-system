@@ -1,6 +1,6 @@
 ALTER TABLE accounts
-  ADD COLUMN IF NOT EXISTS phone VARCHAR(20) NULL COMMENT 'phone login credential' AFTER id,
-  ADD COLUMN IF NOT EXISTS last_login_at DATETIME DEFAULT NULL COMMENT 'last login time' AFTER is_enabled;
+  ADD COLUMN phone VARCHAR(20) NULL COMMENT 'phone login credential' AFTER id,
+  ADD COLUMN last_login_at DATETIME DEFAULT NULL COMMENT 'last login time' AFTER is_enabled;
 
 UPDATE accounts SET phone = username WHERE phone IS NULL OR phone = '';
 
@@ -13,4 +13,4 @@ VALUES
   ('system.captcha_provider', '', 'login captcha provider'),
   ('system.captcha_app_id', '', 'login captcha app id'),
   ('system.captcha_secret', '', 'login captcha secret')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

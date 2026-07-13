@@ -19,6 +19,8 @@ required_files = [
     "src/main/java/com/privateflow/modules/versions/VersionRevokeRequest.java",
     "src/main/java/com/privateflow/modules/versions/VersionReportRequest.java",
     "src/main/java/com/privateflow/modules/versions/VersionUploadResponse.java",
+    "src/main/java/com/privateflow/modules/versions/DesktopVersionPackageStorage.java",
+    "src/main/java/com/privateflow/modules/versions/DesktopVersionDownloadResourceConfig.java",
     "src/main/java/com/privateflow/modules/versions/DesktopPlatform.java",
     "src/main/java/com/privateflow/modules/versions/VersionStatus.java",
     "src/main/java/com/privateflow/modules/versions/UpdateStrategy.java",
@@ -64,7 +66,7 @@ for token in [
     "alternative.status() != VersionStatus.PUBLISHED",
     "version.report_interval_hours",
     "version.max_file_size_mb",
-    "cos://desktop-releases/",
+    "packageStorage.store",
 ]:
     if token not in service:
         errors.append(f"DesktopVersionService missing {token}")
@@ -94,6 +96,36 @@ for token in [
     if token not in migration:
         errors.append(f"migration missing {token}")
 
+storage_migration = read("src/main/resources/db/migration/V57__desktop_release_storage_configs.sql")
+for token in [
+    "version.storage.root",
+    "uploads/desktop-releases",
+    "version.storage.public_base_url",
+    "/downloads/desktop-releases",
+]:
+    if token not in storage_migration:
+        errors.append(f"storage migration missing {token}")
+
+storage = read("src/main/java/com/privateflow/modules/versions/DesktopVersionPackageStorage.java")
+for token in [
+    "Files.copy",
+    "StandardCopyOption.REPLACE_EXISTING",
+    "version.storage.root",
+    "version.storage.public_base_url",
+    "/downloads/desktop-releases",
+]:
+    if token not in storage:
+        errors.append(f"DesktopVersionPackageStorage missing {token}")
+
+resource_config = read("src/main/java/com/privateflow/modules/versions/DesktopVersionDownloadResourceConfig.java")
+for token in [
+    "/downloads/desktop-releases/**",
+    "addResourceLocations",
+    "version.storage.root",
+]:
+    if token not in resource_config:
+        errors.append(f"DesktopVersionDownloadResourceConfig missing {token}")
+
 codes = read("src/main/java/com/privateflow/modules/api/ApiErrorCodes.java")
 for token in ["VERSION_EXISTS", "80-10010", "VERSION_STATUS_INVALID", "80-10011", "VERSION_PACKAGE_MISSING", "80-10012", "VERSION_UPLOAD_FAILED", "80-10013"]:
     if token not in codes:
@@ -105,6 +137,8 @@ for token in [
     '"version.max_file_size_mb"',
     '"version.cos_upload_timeout_s"',
     '"version.report_interval_hours"',
+    "validateStorageRoot",
+    "validatePublicBaseUrl",
 ]:
     if token not in config:
         errors.append(f"ConfigAdminService missing {token}")

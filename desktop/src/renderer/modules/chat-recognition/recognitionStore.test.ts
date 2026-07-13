@@ -46,12 +46,28 @@ describe('recognitionStore', () => {
       customerIdentifier: 'Alice',
       source: 'CLIPBOARD_TEXT'
     });
-    expect(seen).toEqual([
-      { event: 'recognize:start', payload: { source: 'CLIPBOARD_TEXT' } },
-      { event: 'recognize:result', payload: { source: 'CLIPBOARD_TEXT', response: response('EXACT') } }
-    ]);
+    expect(seen[0]).toMatchObject({ event: 'recognize:start', payload: { source: 'CLIPBOARD_TEXT' } });
+    expect(seen[1]).toMatchObject({ event: 'recognize:result', payload: { source: 'CLIPBOARD_TEXT', response: response('EXACT') } });
+    expect((seen[0].payload as { sessionId?: string }).sessionId).toBeTruthy();
+    expect((seen[1].payload as { sessionId?: string }).sessionId).toBe((seen[0].payload as { sessionId?: string }).sessionId);
     expect(recognition.recognitionState.isRecognizePending).toBe(false);
     expect(recognition.recognitionState.isTwoBoxMode).toBe(false);
+  });
+
+  it('submits the shared text channel fields through the recognition API', async () => {
+    const { recognition } = await freshStore();
+    postJsonMock.mockResolvedValue({ success: true, data: response('EXACT') });
+    recognition.recognitionState.customerIdentityInput = 'Alice';
+    recognition.recognitionState.chatContentInput = 'customer asks for appointment';
+
+    await recognition.submitTextRecognition();
+
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/recognize', {
+      imageBase64: undefined,
+      textMessage: 'customer asks for appointment',
+      customerIdentifier: 'Alice',
+      source: 'CLIPBOARD_TEXT'
+    });
   });
 
   it('emits multiple-match candidates instead of a direct result', async () => {
@@ -62,10 +78,11 @@ describe('recognitionStore', () => {
 
     await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'base64' });
 
-    expect(multiple).toEqual([{
+    expect(multiple[0]).toMatchObject({
       candidates: [{ phone: '18800001111' }],
       matchInfo: { matchType: 'MULTIPLE', customers: [{ phone: '18800001111' }], matchCount: 1 }
-    }]);
+    });
+    expect((multiple[0] as { sessionId?: string }).sessionId).toBeTruthy();
     expect(recognition.recognitionState.lastRequestSource).toBeNull();
   });
 
@@ -84,20 +101,26 @@ describe('recognitionStore', () => {
     expect(postJsonMock).toHaveBeenCalledTimes(2);
   });
 
-  it('blocks concurrent recognition except manual button override of clipboard screenshot', async () => {
+  it('allows concurrent recognition requests and tracks pending count', async () => {
     const { recognition } = await freshStore();
-    postJsonMock.mockResolvedValue({ success: true, data: response('EXACT') });
-    recognition.recognitionState.isRecognizePending = true;
-    recognition.recognitionState.lastRequestSource = 'CLIPBOARD_TEXT';
+    let resolveFirst: (value: unknown) => void = () => undefined;
+    postJsonMock
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ success: true, data: response('EXACT') });
 
-    await recognition.triggerRecognize('CLIPBOARD_TEXT', { textMessage: 'blocked' });
-    expect(postJsonMock).not.toHaveBeenCalled();
-    expect(recognition.recognitionState.toast).toBeTruthy();
+    const first = recognition.triggerRecognize('CLIPBOARD_TEXT', { textMessage: 'first' });
+    await Promise.resolve();
+    expect(recognition.recognitionState.isRecognizePending).toBe(true);
+    expect(recognition.recognitionState.pendingCount).toBe(1);
 
-    recognition.recognitionState.isRecognizePending = true;
-    recognition.recognitionState.lastRequestSource = 'CLIPBOARD_SCREENSHOT';
-    await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'manual' });
-    expect(postJsonMock).toHaveBeenCalledTimes(1);
+    await recognition.triggerRecognize('CLIPBOARD_TEXT', { textMessage: 'second' });
+    expect(postJsonMock).toHaveBeenCalledTimes(2);
+    expect(recognition.recognitionState.pendingCount).toBe(1);
+
+    resolveFirst({ success: true, data: response('EXACT') });
+    await first;
+    expect(recognition.recognitionState.pendingCount).toBe(0);
+    expect(recognition.recognitionState.isRecognizePending).toBe(false);
   });
 
   it('routes image service DOWN status to text mode while still allowing text recognition', async () => {
@@ -118,37 +141,80 @@ describe('recognitionStore', () => {
     expect(recognition.recognitionState.imageServiceStatus).toBe('UP');
   });
 
-  it('ignores clipboard images while busy or image recognition is down', async () => {
+  it('keeps clipboard screenshots pending until the user confirms recognition', async () => {
     const { recognition } = await freshStore();
     postJsonMock.mockResolvedValue({ success: true, data: response('EXACT') });
 
     recognition.recognitionState.isRecognizePending = true;
     await recognition.recognizeClipboardImage({ imageBase64: 'busy', md5: 'a', width: 300, height: 300 });
     expect(postJsonMock).not.toHaveBeenCalled();
+    expect(recognition.recognitionState.pendingClipboardImage?.imageBase64).toBe('busy');
+
+    await recognition.recognizePendingClipboardImage();
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/recognize', {
+      imageBase64: 'busy',
+      textMessage: undefined,
+      customerIdentifier: undefined,
+      source: 'CLIPBOARD_SCREENSHOT'
+    });
+    expect(recognition.recognitionState.pendingClipboardImage).toBeNull();
+  });
+
+  it('drops pending clipboard screenshots when dismissed or image recognition is down', async () => {
+    const { recognition } = await freshStore();
+
+    await recognition.recognizeClipboardImage({ imageBase64: 'pending', md5: 'a', width: 300, height: 300 });
+    expect(recognition.recognitionState.pendingClipboardImage?.imageBase64).toBe('pending');
+
+    recognition.dismissPendingClipboardImage();
+    expect(recognition.recognitionState.pendingClipboardImage).toBeNull();
+    expect(postJsonMock).not.toHaveBeenCalled();
 
     recognition.recognitionState.isRecognizePending = false;
     recognition.recognitionState.imageServiceStatus = 'DOWN';
     await recognition.recognizeClipboardImage({ imageBase64: 'down', md5: 'b', width: 300, height: 300 });
     expect(postJsonMock).not.toHaveBeenCalled();
+    expect(recognition.recognitionState.pendingClipboardImage).toBeNull();
+    expect(recognition.recognitionState.isTwoBoxMode).toBe(true);
   });
 
   it('maps business and network failures to fallback events and user-visible state', async () => {
     const { recognition, eventBus } = await freshStore();
-    const events: string[] = [];
-    eventBus.on('recognize:image-failed', () => events.push('image-failed'));
-    eventBus.on('recognize:timeout', () => events.push('timeout'));
+    const events: Array<{ event: string; payload: unknown }> = [];
+    eventBus.on('recognize:image-failed', (payload) => events.push({ event: 'image-failed', payload }));
+    eventBus.on('recognize:timeout', (payload) => events.push({ event: 'timeout', payload }));
     postJsonMock.mockResolvedValueOnce({ success: false, errorCode: '30-10001' });
 
     await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'bad-image' });
 
     expect(recognition.recognitionState.isTwoBoxMode).toBe(true);
-    expect(events).toEqual(['image-failed']);
+    expect(events[0]).toMatchObject({
+      event: 'image-failed',
+      payload: { errorCode: '30-10001' }
+    });
+    expect((events[0].payload as { sessionId?: string }).sessionId).toBeTruthy();
 
     postJsonMock.mockRejectedValueOnce(new Error('network down'));
     await recognition.triggerRecognize('CLIPBOARD_TEXT', { textMessage: 'network' });
 
-    expect(events).toEqual(['image-failed', 'timeout']);
+    expect(events[1]).toMatchObject({ event: 'timeout' });
+    expect((events[1].payload as { sessionId?: string }).sessionId).toBeTruthy();
     expect(recognition.recognitionState.isRecognizePending).toBe(false);
+  });
+
+  it('emits a failed event with the matching session id for non-image business errors', async () => {
+    const { recognition, eventBus } = await freshStore();
+    const events: unknown[] = [];
+    eventBus.on('recognize:failed', (payload) => events.push(payload));
+    postJsonMock.mockResolvedValueOnce({ success: false, errorCode: '30-10002' });
+
+    await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'bad-format' });
+
+    expect(events[0]).toMatchObject({
+      errorCode: '30-10002',
+      message: '图片格式不支持，请使用 PNG/JPG 截图'
+    });
+    expect((events[0] as { sessionId?: string }).sessionId).toBeTruthy();
   });
 });
 

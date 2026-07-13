@@ -81,6 +81,22 @@ public class WsPushService {
         wsBroadcastExecutor.execute(() -> pushWsMessage(username, WsMessage.unsaved(message.type(), message.payload()))));
   }
 
+  public void invalidateActiveSession(String username, String message) {
+    WsSessionContext context = sessions.remove(username);
+    if (context == null || !context.session().isOpen()) {
+      return;
+    }
+    try {
+      context.session().sendMessage(new TextMessage(objectMapper.writeValueAsString(
+          WsMessage.unsaved("AUTH_INVALIDATED", Map.of(
+              "message", message == null || message.isBlank() ? "登录状态已失效，请重新登录" : message)))));
+    } catch (IOException ex) {
+      log.debug("ignore session invalidation send failure username={}", username, ex);
+    } finally {
+      closeQuietly(context.session());
+    }
+  }
+
   public void replay(String username, long afterMessageId) {
     int limit = configProvider.get().wsReplayQueueSize();
     offlineRepository.replay(username, afterMessageId, limit).forEach(message -> {

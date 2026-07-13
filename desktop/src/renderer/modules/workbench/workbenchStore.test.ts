@@ -241,7 +241,7 @@ describe('workbenchStore', () => {
       { event: 'quick-search:show', payload: {} },
       { event: 'followup:switch-tab', payload: { tab: 'OVERDUE' } }
     ]);
-    expect(workbench.workbenchState.toast).toContain('今日跟进');
+    expect(workbench.workbenchState.toast).toContain('待办队列');
   });
 });
 

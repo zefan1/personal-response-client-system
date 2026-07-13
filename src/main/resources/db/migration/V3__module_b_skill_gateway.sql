@@ -67,4 +67,4 @@ VALUES
   ('skill.alert_failure_rate', '0.3', '健康告警失败率阈值'),
   ('skill.alert_failure_duration_minutes', '15', '失败率持续 N 分钟后触发告警'),
   ('profile.extract_timeout_ms', '8000', 'B.extractProfile 调用超时毫秒')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

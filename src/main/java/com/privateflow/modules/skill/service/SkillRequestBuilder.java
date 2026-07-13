@@ -16,6 +16,8 @@ import java.time.temporal.TemporalAccessor;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -24,20 +26,24 @@ import org.springframework.stereotype.Component;
 public class SkillRequestBuilder {
 
   private static final Logger log = LoggerFactory.getLogger(SkillRequestBuilder.class);
+  private static final Pattern CUSTOMER_PLACEHOLDER = Pattern.compile("\\{\\{([A-Za-z][A-Za-z0-9_]*)}}");
   private final SkillConfigProvider configProvider;
   private final CustomerQueryService customerQueryService;
   private final TagCacheService tagCacheService;
   private final ObjectMapper objectMapper;
+  private final SkillRuntimeRouter runtimeRouter;
 
   public SkillRequestBuilder(
       SkillConfigProvider configProvider,
       CustomerQueryService customerQueryService,
       TagCacheService tagCacheService,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      SkillRuntimeRouter runtimeRouter) {
     this.configProvider = configProvider;
     this.customerQueryService = customerQueryService;
     this.tagCacheService = tagCacheService;
     this.objectMapper = objectMapper;
+    this.runtimeRouter = runtimeRouter;
   }
 
   public Map<String, Object> build(SkillRequest request) {
@@ -65,9 +71,12 @@ public class SkillRequestBuilder {
     payload.put("client_message", request.clientMessage());
     payload.put("chat_context", sanitizeChatContext(request.chatContext()));
     payload.put("customer", customer);
-    payload.put("system_prompt", buildSystemPrompt(request.scene(), config));
+    payload.put("system_prompt", buildSystemPrompt(request.scene(), config, customer));
     payload.put("previous_suggestions", request.previousSuggestions());
-    payload.put("skill_group_id", selectSkillGroup(request.leadType(), config));
+    runtimeRouter.route(request.scene(), request.leadType(), config).ifPresent(skillId -> {
+      payload.put("skill_id", skillId);
+      payload.put("skill_group_id", skillId);
+    });
     return payload;
   }
 
@@ -80,7 +89,7 @@ public class SkillRequestBuilder {
     payload.put("chat_context", List.of());
     payload.put("customer", request.existingProfile() == null ? Map.of() : request.existingProfile());
     payload.put("target_fields", request.targetFields() == null ? List.of() : request.targetFields());
-    payload.put("system_prompt", buildSystemPrompt(Scene.PROFILE_EXTRACT, config));
+    payload.put("system_prompt", buildSystemPrompt(Scene.PROFILE_EXTRACT, config, request.existingProfile() == null ? Map.of() : request.existingProfile()));
     payload.put("skill_group_id", config.defaultSkillId());
     return payload;
   }
@@ -101,28 +110,44 @@ public class SkillRequestBuilder {
         : null;
   }
 
-  private String selectSkillGroup(String leadType, SkillConfig config) {
-    String normalized = normalizeLeadType(leadType);
-    if (LeadTypes.TUAN_GOU.equals(normalized)) {
-      return config.tuanSkillGroupId();
-    }
-    if (LeadTypes.XIAN_SUO.equals(normalized)) {
-      return config.xiansuoSkillGroupId();
-    }
-    return config.defaultSkillId();
-  }
-
-  private String buildSystemPrompt(Scene scene, SkillConfig config) {
+  private String buildSystemPrompt(Scene scene, SkillConfig config, Map<String, Object> customer) {
     String template = config.systemPromptTemplate();
     for (String placeholder : List.of("{{red_lines}}", "{{available_tags}}", "{{scene}}")) {
       if (!template.contains(placeholder)) {
         log.warn("skill system prompt template missing placeholder {}", placeholder);
       }
     }
-    return template
+    String prompt = template
         .replace("{{red_lines}}", config.redLines() == null ? "" : config.redLines())
         .replace("{{available_tags}}", availableTags())
         .replace("{{scene}}", scene.name());
+    return replaceCustomerPlaceholders(prompt, customer);
+  }
+
+  private String replaceCustomerPlaceholders(String prompt, Map<String, Object> customer) {
+    Matcher matcher = CUSTOMER_PLACEHOLDER.matcher(prompt);
+    StringBuffer buffer = new StringBuffer();
+    while (matcher.find()) {
+      String key = matcher.group(1);
+      if (List.of("red_lines", "available_tags", "scene").contains(key)) {
+        matcher.appendReplacement(buffer, "");
+        continue;
+      }
+      Object value = firstPresent(customer, key);
+      matcher.appendReplacement(buffer, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
+    }
+    matcher.appendTail(buffer);
+    return buffer.toString();
+  }
+
+  private Object firstPresent(Map<String, Object> customer, String key) {
+    if (customer == null || customer.isEmpty()) {
+      return null;
+    }
+    if (customer.containsKey(key)) {
+      return customer.get(key);
+    }
+    return customer.get(toSnakeCase(key));
   }
 
   private String availableTags() {

@@ -103,6 +103,12 @@ describe('HelpModeAgent', () => {
     }, 5000);
     expect(pending).toEqual([{ helpId: 'help-a', phone: '18800001111' }]);
     expect(host.querySelector('.help-dialog')).toBeFalsy();
+    expect(host.querySelector('.help-status-notice')?.textContent ?? '').toContain('已向Leader A发送求助');
+    expect(host.querySelector('.help-status-notice')?.textContent ?? '').toContain('收到回复后');
+
+    (host.querySelector('.help-status-notice .icon-close-button') as HTMLButtonElement | null)?.click();
+    await flushUi();
+    expect(host.querySelector('.help-status-notice')).toBeFalsy();
     app.unmount();
   });
 
@@ -149,6 +155,7 @@ describe('HelpModeAgent', () => {
     await flushUi();
 
     expect(host.querySelector('.help-response-panel')).toBeTruthy();
+    expect(host.querySelector('.help-status-notice')?.textContent ?? '').toContain('组长已回复你的求助');
     (host.querySelector('.help-alert.green') as HTMLButtonElement | null)?.click();
     await flushUi();
 
@@ -163,6 +170,7 @@ describe('HelpModeAgent', () => {
       phone: '18800001111',
       isFallback: false
     }]);
+    expect(host.querySelector('.help-status-notice')?.textContent ?? '').toContain('组长回复已复制');
     app.unmount();
   });
 });

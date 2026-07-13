@@ -6,7 +6,9 @@
           <h2>求助组长</h2>
           <p>把当前上下文发给组长判断</p>
         </div>
-        <button class="secondary small" @click="closeHelpRequest">关闭</button>
+        <button class="icon-close-button" type="button" aria-label="关闭求助" title="关闭求助" @click="closeHelpRequest">
+          <span aria-hidden="true">×</span>
+        </button>
       </header>
       <blockquote>{{ state.activeRequest?.clientMessage || '当前客户最近消息未记录' }}</blockquote>
       <div class="help-suggestions">
@@ -21,6 +23,16 @@
       </button>
       <p v-if="state.toast" class="toast">{{ state.toast }}</p>
     </div>
+  </section>
+
+  <section v-if="state.statusNotice" :class="['help-status-notice', `level-${state.statusNotice.level}`]">
+    <div>
+      <strong>{{ state.statusNotice.message }}</strong>
+      <span v-if="state.statusNotice.detail">{{ state.statusNotice.detail }}</span>
+    </div>
+    <button class="icon-close-button" type="button" aria-label="关闭求助状态" title="关闭求助状态" @click="dismissHelpStatusNotice">
+      <span aria-hidden="true">×</span>
+    </button>
   </section>
 
   <section v-if="state.helperQueue.length" class="help-leader-panel">
@@ -89,6 +101,7 @@ import {
   closeHelpResponse,
   copyHelperReply,
   currentHelperRequest,
+  dismissHelpStatusNotice,
   handleHelpOfflineReplay,
   handleHelpRequest,
   handleHelpResponse,

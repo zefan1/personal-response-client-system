@@ -8,6 +8,7 @@ public record ImageConfig(
     int maxDimensionPx,
     int compressQuality,
     String recognitionPrompt,
+    String model,
     int consecutiveFailuresAlert
 ) {
   public float jpegQuality() {

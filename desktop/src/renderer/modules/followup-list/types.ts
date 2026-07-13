@@ -39,6 +39,7 @@ export type FollowupTodayResponse = {
 
 export type FollowupReminderPayload = {
   phone: string;
+  phoneFull?: string;
   reminders: Array<{
     ruleId?: number;
     ruleName?: string;

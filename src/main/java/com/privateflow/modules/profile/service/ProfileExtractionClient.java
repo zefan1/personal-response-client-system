@@ -1,6 +1,7 @@
 package com.privateflow.modules.profile.service;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.llm.LlmProfileExtractionService;
 import com.privateflow.modules.profile.config.ProfileConfigProvider;
 import com.privateflow.modules.profile.infra.ProfileFieldRegistry;
 import com.privateflow.modules.skill.ProfileExtractRequest;
@@ -18,14 +19,17 @@ public class ProfileExtractionClient {
   private final SkillGatewayService skillGatewayService;
   private final ProfileFieldRegistry fieldRegistry;
   private final ProfileConfigProvider configProvider;
+  private final LlmProfileExtractionService llmProfileExtractionService;
 
   public ProfileExtractionClient(
       SkillGatewayService skillGatewayService,
       ProfileFieldRegistry fieldRegistry,
-      ProfileConfigProvider configProvider) {
+      ProfileConfigProvider configProvider,
+      LlmProfileExtractionService llmProfileExtractionService) {
     this.skillGatewayService = skillGatewayService;
     this.fieldRegistry = fieldRegistry;
     this.configProvider = configProvider;
+    this.llmProfileExtractionService = llmProfileExtractionService;
   }
 
   public ProfileUpdates extract(String conversationText, Customer customer, String caller) {
@@ -36,6 +40,13 @@ public class ProfileExtractionClient {
           fieldRegistry.toProfileMap(customer),
           targetFields,
           caller);
+      java.util.Optional<ProfileUpdates> llmUpdates = llmProfileExtractionService.tryExtract(request);
+      if (llmUpdates.isPresent()) {
+        return llmUpdates.orElseThrow();
+      }
+      if (!llmProfileExtractionService.fallbackToSkill()) {
+        return ProfileUpdates.empty();
+      }
       return skillGatewayService.extractProfile(request);
     } catch (RuntimeException ex) {
       log.warn("profile extract degraded to empty updates, phone={}", customer == null ? null : customer.getPhone());

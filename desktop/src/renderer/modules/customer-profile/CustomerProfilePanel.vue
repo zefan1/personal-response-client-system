@@ -5,7 +5,16 @@
         <h2>客户档案</h2>
         <p>{{ state.profile ? summaryText : '搜索或从候选列表选择客户' }}</p>
       </div>
-      <button class="secondary small" :disabled="!state.profile || state.profileLoading" @click="refreshCurrent">刷新</button>
+      <button
+        class="secondary small icon-refresh-button"
+        type="button"
+        :disabled="!state.profile || state.profileLoading"
+        aria-label="刷新客户档案"
+        title="刷新"
+        @click="refreshCurrent"
+      >
+        ↻
+      </button>
     </header>
 
     <div class="search-row">
@@ -20,9 +29,12 @@
       </button>
     </div>
 
-    <p v-if="state.searchMessage" class="hint">{{ state.searchMessage }}</p>
+    <div v-if="state.searchMessage" class="empty-panel customer-search-state">
+      <strong>{{ state.searchMessage }}</strong>
+      <p v-if="!state.searchLoading">可换手机号后四位、昵称或微信备注再试</p>
+    </div>
     <div v-if="state.searchResults.length" class="search-results">
-      <button v-for="customer in state.searchResults" :key="customer.phone" class="result-row" @click="openProfile(customer.phone, 'SEARCH')">
+      <button v-for="customer in state.searchResults" :key="customer.phoneFull || customer.phone" class="result-row" @click="openProfile(customer.phoneFull || customer.phone, 'SEARCH')">
         <span>{{ customer.nickname || '-' }}</span>
         <span>{{ maskPhone(customer.phone) }}</span>
         <span>{{ leadTypeLabel(customer.leadType) }}</span>
@@ -40,7 +52,9 @@
             <h2>选择客户</h2>
             <p>匹配到多个候选，请选中一个继续</p>
           </div>
-          <button class="secondary small" @click="dismissCandidates">关闭</button>
+          <button class="icon-close-button" type="button" aria-label="关闭候选客户" title="关闭候选客户" @click="dismissCandidates">
+            <span aria-hidden="true">×</span>
+          </button>
         </header>
         <button v-for="candidate in state.candidates" :key="candidate.phone" class="result-row" @click="chooseCandidate(candidate)">
           <span>{{ candidate.nickname || '-' }}</span>
@@ -57,11 +71,16 @@
       {{ state.offline ? '离线数据' : '缓存数据' }}，上次缓存于 {{ formatDate(state.cachedAt) }}
     </p>
     <p v-if="state.pendingSaveBanner" class="banner">{{ state.pendingSaveBanner }}</p>
+    <div v-if="state.tableSyncStatus" :class="['profile-table-sync-status', `level-${state.tableSyncStatus.level}`]">
+      <strong>{{ state.tableSyncStatus.message }}</strong>
+      <span v-if="state.tableSyncStatus.detail">{{ state.tableSyncStatus.detail }}</span>
+    </div>
     <p v-if="state.profileAlert" :class="['profile-alert-banner', `level-${state.profileAlert.level.toLowerCase()}`]">
       {{ state.profileAlert.message }}
     </p>
 
     <article v-if="state.profile" class="profile-card">
+      <p v-if="state.editMode" class="profile-edit-banner">正在编辑档案，保存后会自动刷新最新资料。</p>
       <div class="profile-summary">
         <div>
           <strong>{{ customer.nickname || '-' }}</strong>
@@ -127,7 +146,7 @@
       </ProfileSection>
     </article>
 
-    <div v-if="state.tableSyncPrompt" class="toast table-sync-toast">
+    <div v-if="state.tableSyncPrompt" class="toast table-sync-toast profile-sync-toast">
       <span>{{ state.toast }}</span>
       <button class="primary small" @click="confirmTableSync">同步</button>
       <button class="secondary small" @click="skipTableSync">暂不</button>
@@ -161,7 +180,7 @@ import {
   skipTableSync,
   showCandidates
 } from './customerProfileStore';
-import type { AbnormalAlertPayload, Customer, ProfileSuggestion, RecognizeMultiplePayload, StageSuggestPayload } from './types';
+import type { AbnormalAlertPayload, Customer, ProfileSuggestion, RecognizeMultiplePayload, SourceFrom, StageSuggestPayload } from './types';
 
 const customer = computed(() => state.profile?.customer ?? {} as Customer);
 const summaryText = computed(() => `${customer.value.nickname || '-'} · ${maskPhone(customer.value.phone || '')} · ${customer.value.customerStage || '-'}`);
@@ -197,6 +216,7 @@ const disposers: Array<() => void> = [];
 let skipNextInput = false;
 
 onMounted(() => {
+  disposers.push(eventBus.on<CustomerSelectedPayload>('customer:selected', openSelectedCustomerProfile));
   disposers.push(eventBus.on<RecognizeMultiplePayload>('recognize:multiple', showCandidates));
   disposers.push(eventBus.on<{ phone?: string; suggestions?: ProfileSuggestion[] }>('suggestion:show', appendProfileSuggestions));
   disposers.push(eventBus.on<StageSuggestPayload>('stage:suggest', appendStageSuggestion));
@@ -227,9 +247,34 @@ function onInput() {
 }
 
 function refreshCurrent() {
-  if (customer.value.phone) {
-    void openProfile(customer.value.phone, 'PROFILE_CARD');
+  const phone = state.profile?.phoneFull || customer.value.phoneFull || customer.value.phone;
+  if (phone) {
+    void openProfile(phone, 'PROFILE_CARD');
   }
+}
+
+type CustomerSelectedPayload = {
+  phone?: string;
+  sourceFrom?: SourceFrom;
+  sessionId?: string;
+};
+
+function openSelectedCustomerProfile(payload: CustomerSelectedPayload) {
+  const phone = payload.phone?.trim();
+  if (!phone) {
+    return;
+  }
+  if (!shouldOpenProfileFromSelectedEvent(payload.sourceFrom)) {
+    return;
+  }
+  if (state.profileLoading && (state.profile?.phoneFull || state.profile?.customer.phoneFull || state.profile?.customer.phone) === phone) {
+    return;
+  }
+  void openProfile(phone, payload.sourceFrom ?? 'PROFILE_CARD', payload.sessionId ?? '');
+}
+
+function shouldOpenProfileFromSelectedEvent(sourceFrom?: SourceFrom): boolean {
+  return !sourceFrom || ['DASHBOARD', 'FOLLOWUP_LIST', 'NEW_LEAD', 'CANDIDATE_LIST'].includes(sourceFrom);
 }
 
 function editField(key: keyof Customer): unknown {

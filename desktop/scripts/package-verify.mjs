@@ -33,43 +33,59 @@ function presentEnv(name) {
 
 function signingConfiguration() {
   if (process.platform === 'win32') {
+    const hasCertificateFile = presentEnv('WINDOWS_CERTIFICATE_FILE') && presentEnv('WINDOWS_CERTIFICATE_PASSWORD');
+    const hasCustomParams = presentEnv('WINDOWS_SIGN_WITH_PARAMS');
+    const hasHookModule = presentEnv('WINDOWS_SIGN_HOOK_MODULE_PATH');
     const configuredKeys = [
-      'CSC_LINK',
-      'CSC_KEY_PASSWORD',
-      'WIN_CSC_LINK',
-      'WIN_CSC_KEY_PASSWORD',
       'WINDOWS_CERTIFICATE_FILE',
       'WINDOWS_CERTIFICATE_PASSWORD',
-      'AZURE_TENANT_ID',
-      'AZURE_CLIENT_ID',
-      'AZURE_CLIENT_SECRET',
-      'AZURE_KEY_VAULT_URI',
-      'AZURE_KEY_VAULT_CERTIFICATE_NAME'
+      'WINDOWS_SIGNTOOL_PATH',
+      'WINDOWS_SIGN_WITH_PARAMS',
+      'WINDOWS_SIGN_HOOK_MODULE_PATH',
+      'WINDOWS_TIMESTAMP_SERVER',
+      'WINDOWS_SIGN_DESCRIPTION',
+      'WINDOWS_SIGN_WEBSITE'
     ].filter(presentEnv);
-    const certificateConfigured = (
-      (presentEnv('CSC_LINK') && presentEnv('CSC_KEY_PASSWORD')) ||
-      (presentEnv('WIN_CSC_LINK') && presentEnv('WIN_CSC_KEY_PASSWORD')) ||
-      (presentEnv('WINDOWS_CERTIFICATE_FILE') && presentEnv('WINDOWS_CERTIFICATE_PASSWORD')) ||
-      (presentEnv('AZURE_TENANT_ID') && presentEnv('AZURE_CLIENT_ID') && presentEnv('AZURE_CLIENT_SECRET') &&
-        presentEnv('AZURE_KEY_VAULT_URI') && presentEnv('AZURE_KEY_VAULT_CERTIFICATE_NAME'))
-    );
-    return { certificateConfigured, configuredKeys };
-  }
-  if (process.platform === 'darwin') {
-    const configuredKeys = [
-      'CSC_LINK',
-      'CSC_KEY_PASSWORD',
-      'APPLE_ID',
-      'APPLE_APP_SPECIFIC_PASSWORD',
-      'APPLE_TEAM_ID'
-    ].filter(presentEnv);
+    const certificateConfigured = hasCertificateFile || hasCustomParams || hasHookModule;
     return {
-      certificateConfigured: presentEnv('CSC_LINK') && presentEnv('CSC_KEY_PASSWORD'),
-      notarizationConfigured: presentEnv('APPLE_ID') && presentEnv('APPLE_APP_SPECIFIC_PASSWORD') && presentEnv('APPLE_TEAM_ID'),
-      configuredKeys
+      certificateConfigured,
+      configuredKeys,
+      packagerSigningSupported: true,
+      signingProvider: hasHookModule ? 'windows-hook' : hasCustomParams ? 'windows-sign-with-params' : hasCertificateFile ? 'windows-pfx' : null
     };
   }
-  return { certificateConfigured: false, configuredKeys: [] };
+  if (process.platform === 'darwin') {
+    const certificateConfigured = presentEnv('PDA_MAC_CODESIGN_IDENTITY') || presentEnv('MAC_CODESIGN_IDENTITY');
+    const passwordNotarizationConfigured = presentEnv('APPLE_ID') &&
+      presentEnv('APPLE_APP_SPECIFIC_PASSWORD') &&
+      (presentEnv('APPLE_TEAM_ID') || presentEnv('TEAM_ID'));
+    const apiKeyNotarizationConfigured = presentEnv('APPLE_API_KEY') &&
+      presentEnv('APPLE_API_KEY_ID') &&
+      presentEnv('APPLE_API_ISSUER');
+    const keychainNotarizationConfigured = presentEnv('APPLE_KEYCHAIN_PROFILE');
+    const configuredKeys = [
+      'PDA_MAC_CODESIGN_IDENTITY',
+      'MAC_CODESIGN_IDENTITY',
+      'PDA_MAC_ENTITLEMENTS',
+      'PDA_MAC_ENTITLEMENTS_INHERIT',
+      'APPLE_ID',
+      'APPLE_APP_SPECIFIC_PASSWORD',
+      'APPLE_TEAM_ID',
+      'TEAM_ID',
+      'APPLE_API_KEY',
+      'APPLE_API_KEY_ID',
+      'APPLE_API_ISSUER',
+      'APPLE_KEYCHAIN_PROFILE'
+    ].filter(presentEnv);
+    return {
+      certificateConfigured,
+      notarizationConfigured: passwordNotarizationConfigured || apiKeyNotarizationConfigured || keychainNotarizationConfigured,
+      configuredKeys,
+      packagerSigningSupported: true,
+      signingProvider: certificateConfigured ? 'macos-codesign-identity' : null
+    };
+  }
+  return { certificateConfigured: false, configuredKeys: [], packagerSigningSupported: false, signingProvider: null };
 }
 
 function windowsAuthenticodeStatus(path) {

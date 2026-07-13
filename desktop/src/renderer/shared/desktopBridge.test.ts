@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { openAdminConsole } from './desktopBridge';
+import { getAlwaysOnTop, openAdminConsole, toggleAlwaysOnTop } from './desktopBridge';
 
 describe('desktopBridge admin console launcher', () => {
   const originalUserAgent = navigator.userAgent;
@@ -20,8 +20,8 @@ describe('desktopBridge admin console launcher', () => {
       openAdminConsole: openAdminConsoleMock
     };
 
-    await expect(openAdminConsole('http://127.0.0.1:5173/#/admin')).resolves.toMatchObject({ success: true });
-    expect(openAdminConsoleMock).toHaveBeenCalledTimes(1);
+    await expect(openAdminConsole('https://ops.example.com/#/admin')).resolves.toMatchObject({ success: true });
+    expect(openAdminConsoleMock).toHaveBeenCalledWith('https://ops.example.com/#/admin');
   });
 
   it('does not open an Electron child window when the preload bridge is stale', async () => {
@@ -54,5 +54,37 @@ describe('desktopBridge admin console launcher', () => {
 
     await expect(openAdminConsole('http://127.0.0.1:5173/#/admin')).resolves.toMatchObject({ success: true });
     expect(windowOpenSpy).toHaveBeenCalledWith('http://127.0.0.1:5173/#/admin', '_blank', 'noopener,noreferrer');
+  });
+
+  it('uses the controlled Electron bridge for always-on-top state', async () => {
+    const getAlwaysOnTopMock = vi.fn(async () => ({ success: true, alwaysOnTop: false }));
+    const toggleAlwaysOnTopMock = vi.fn(async () => ({ success: true, alwaysOnTop: true }));
+    (window as unknown as {
+      desktopBridge: {
+        getAlwaysOnTop: typeof getAlwaysOnTopMock;
+        toggleAlwaysOnTop: typeof toggleAlwaysOnTopMock;
+      };
+    }).desktopBridge = {
+      getAlwaysOnTop: getAlwaysOnTopMock,
+      toggleAlwaysOnTop: toggleAlwaysOnTopMock
+    };
+
+    await expect(getAlwaysOnTop()).resolves.toEqual({ success: true, alwaysOnTop: false });
+    await expect(toggleAlwaysOnTop()).resolves.toEqual({ success: true, alwaysOnTop: true });
+    expect(getAlwaysOnTopMock).toHaveBeenCalledTimes(1);
+    expect(toggleAlwaysOnTopMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports always-on-top as unavailable in the browser preview', async () => {
+    await expect(getAlwaysOnTop()).resolves.toMatchObject({
+      success: false,
+      alwaysOnTop: false,
+      error: 'DESKTOP_BRIDGE_UNAVAILABLE'
+    });
+    await expect(toggleAlwaysOnTop()).resolves.toMatchObject({
+      success: false,
+      alwaysOnTop: false,
+      error: 'DESKTOP_BRIDGE_UNAVAILABLE'
+    });
   });
 });

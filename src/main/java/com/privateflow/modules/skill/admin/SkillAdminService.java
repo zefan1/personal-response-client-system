@@ -1,15 +1,19 @@
 package com.privateflow.modules.skill.admin;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.common.events.ConfigChangedEvent;
+import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.ws.WsMessage;
 import com.privateflow.modules.api.ws.WsPushService;
+import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.client.SkillHttpClient;
 import com.privateflow.modules.skill.parser.SkillResponseParser;
 import com.privateflow.modules.skill.service.SkillRequestBuilder;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.context.ApplicationEventPublisher;
@@ -18,7 +22,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class SkillAdminService {
 
-  private static final List<String> LEAD_TYPES = List.of("TUAN_GOU", "XIAN_SUO", "PENDING");
+  private static final List<String> LEAD_TYPES = List.of("GENERAL", "TUAN_GOU", "XIAN_SUO", "PENDING");
   private static final String BAD_REQUEST_CODE = "80-10001";
   private static final List<Scene> SCENES = List.of(
       Scene.CHAT_RECOGNIZE,
@@ -26,14 +30,17 @@ public class SkillAdminService {
       Scene.REGENERATE,
       Scene.PROFILE_EXTRACT,
       Scene.OPENING);
-  private static final int TEST_MESSAGE_MAX_CHARS = 2000;
-  private static final int TEST_TIMEOUT_MS = 12000;
+  private static final int DEFAULT_TEST_MESSAGE_MAX_CHARS = 2000;
+  private static final int DEFAULT_TEST_TIMEOUT_MS = 12000;
   private final SkillSceneBindingRepository bindingRepository;
   private final SkillRequestBuilder requestBuilder;
   private final SkillHttpClient skillHttpClient;
   private final SkillResponseParser responseParser;
   private final ApplicationEventPublisher eventPublisher;
   private final WsPushService wsPushService;
+  private final SystemConfigRepository configRepository;
+  private final AuditLogger auditLogger;
+  private final ObjectMapper objectMapper;
 
   public SkillAdminService(
       SkillSceneBindingRepository bindingRepository,
@@ -41,13 +48,19 @@ public class SkillAdminService {
       SkillHttpClient skillHttpClient,
       SkillResponseParser responseParser,
       ApplicationEventPublisher eventPublisher,
-      WsPushService wsPushService) {
+      WsPushService wsPushService,
+      SystemConfigRepository configRepository,
+      AuditLogger auditLogger,
+      ObjectMapper objectMapper) {
     this.bindingRepository = bindingRepository;
     this.requestBuilder = requestBuilder;
     this.skillHttpClient = skillHttpClient;
     this.responseParser = responseParser;
     this.eventPublisher = eventPublisher;
     this.wsPushService = wsPushService;
+    this.configRepository = configRepository;
+    this.auditLogger = auditLogger;
+    this.objectMapper = objectMapper;
   }
 
   public List<SkillSceneBinding> list(Scene scene, String leadType) {
@@ -58,16 +71,24 @@ public class SkillAdminService {
     validate(request, null);
     long id = bindingRepository.create(request);
     publishRefresh("skill_scene_bindings");
-    return bindingRepository.findById(id).orElseThrow();
+    SkillSceneBinding saved = bindingRepository.findById(id).orElseThrow();
+    audit("SKILL_BINDING_CREATE", saved, bindingDetail(saved));
+    return saved;
   }
 
   public SkillSceneBinding update(long id, SkillBindingRequest request) {
-    bindingRepository.findById(id)
+    SkillSceneBinding existing = bindingRepository.findById(id)
         .orElseThrow(() -> new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "Skill 绑定不存在"));
     validate(request, id);
     bindingRepository.update(id, request);
     publishRefresh("skill_scene_bindings");
-    return bindingRepository.findById(id).orElseThrow();
+    SkillSceneBinding saved = bindingRepository.findById(id).orElseThrow();
+    Map<String, Object> detail = bindingDetail(saved);
+    detail.put("previousSkillId", existing.skillId());
+    detail.put("previousScene", existing.scene().name());
+    detail.put("previousLeadType", existing.leadType());
+    audit("SKILL_BINDING_UPDATE", saved, detail);
+    return saved;
   }
 
   public void delete(long id) {
@@ -75,6 +96,7 @@ public class SkillAdminService {
         .orElseThrow(() -> new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "Skill 绑定不存在"));
     bindingRepository.delete(existing.id());
     publishRefresh("skill_scene_bindings");
+    audit("SKILL_BINDING_DELETE", existing, bindingDetail(existing));
   }
 
   public SkillToggleResponse toggle(long id, boolean enabled) {
@@ -86,6 +108,10 @@ public class SkillAdminService {
     }
     bindingRepository.toggle(id, enabled);
     publishRefresh("skill_scene_bindings");
+    Map<String, Object> detail = bindingDetail(existing);
+    detail.put("enabledBefore", existing.enabled());
+    detail.put("enabledAfter", enabled);
+    audit("SKILL_BINDING_TOGGLE", existing, detail);
     return new SkillToggleResponse(id, enabled, warning);
   }
 
@@ -99,8 +125,9 @@ public class SkillAdminService {
   public SkillTestResponse test(long id, SkillTestRequest request) {
     SkillSceneBinding binding = bindingRepository.findById(id)
         .orElseThrow(() -> new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "Skill 绑定不存在"));
-    if (request.testMessage() == null || request.testMessage().isBlank() || request.testMessage().length() > TEST_MESSAGE_MAX_CHARS) {
-      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "testMessage 必填且不能超过 2000 字符");
+    int maxChars = testMessageMaxChars();
+    if (request.testMessage() == null || request.testMessage().isBlank() || request.testMessage().length() > maxChars) {
+      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "testMessage 必填且不能超过 " + maxChars + " 字符");
     }
     long start = System.currentTimeMillis();
     SkillRequest skillRequest = new SkillRequest(
@@ -115,11 +142,32 @@ public class SkillAdminService {
         AuthContext.username() + ":ADMIN_TEST");
     Map<String, Object> payload = requestBuilder.build(skillRequest);
     payload.put("skill_id", binding.skillId());
-    String raw = skillHttpClient.call(payload, TEST_TIMEOUT_MS);
+    String raw = skillHttpClient.call(payload, testTimeoutMs());
     SkillResponse response = responseParser.parseReplies(raw);
     long elapsed = System.currentTimeMillis() - start;
     bindingRepository.markTested(id);
     return new SkillTestResponse(response.suggestions(), elapsed, response);
+  }
+
+  private int testMessageMaxChars() {
+    return integerConfig("skill.admin.test_message_max_chars", DEFAULT_TEST_MESSAGE_MAX_CHARS, 100, 20000);
+  }
+
+  private int testTimeoutMs() {
+    return integerConfig("skill.admin.test_timeout_ms", DEFAULT_TEST_TIMEOUT_MS, 1000, 60000);
+  }
+
+  private int integerConfig(String key, int fallback, int min, int max) {
+    return configRepository.findValue(key)
+        .map(value -> {
+          try {
+            int parsed = Integer.parseInt(value.trim());
+            return Math.max(min, Math.min(max, parsed));
+          } catch (NumberFormatException ex) {
+            return fallback;
+          }
+        })
+        .orElse(fallback);
   }
 
   private void validate(SkillBindingRequest request, Long existingId) {
@@ -140,15 +188,41 @@ public class SkillAdminService {
     }
     String leadType = request.leadType() == null ? "" : request.leadType().trim();
     if (!LEAD_TYPES.contains(leadType)) {
-      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "leadType 必须是 TUAN_GOU / XIAN_SUO / PENDING");
+      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "线索类型必须是全部客资、团购客资、线索客资或待确认");
     }
     if (bindingRepository.existsInGroup(request.skillId().trim(), request.scene(), leadType, existingId)) {
-      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "same scene+leadType 下 skillId 不能重复");
+      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "同一场景和线索类型下不能重复绑定同一个 Skill");
     }
   }
 
   private void publishRefresh(String key) {
     eventPublisher.publishEvent(new ConfigChangedEvent(key));
     wsPushService.broadcastWs(WsMessage.unsaved("CONFIG_REFRESH", Map.of("configKey", key)));
+  }
+
+  private Map<String, Object> bindingDetail(SkillSceneBinding binding) {
+    Map<String, Object> detail = new LinkedHashMap<>();
+    detail.put("id", binding.id());
+    detail.put("skillId", binding.skillId());
+    detail.put("skillName", binding.skillName());
+    detail.put("scene", binding.scene().name());
+    detail.put("leadType", binding.leadType());
+    detail.put("priority", binding.priority());
+    detail.put("enabled", binding.enabled());
+    return detail;
+  }
+
+  private void audit(String action, SkillSceneBinding binding, Map<String, Object> detail) {
+    String fallbackDetail = "skill binding " + binding.id() + " changed";
+    try {
+      auditLogger.log(
+          action,
+          AuthContext.username(),
+          "skill",
+          String.valueOf(binding.id()),
+          objectMapper.writeValueAsString(detail));
+    } catch (Exception ex) {
+      auditLogger.log(action, AuthContext.username(), "skill", String.valueOf(binding.id()), fallbackDetail);
+    }
   }
 }

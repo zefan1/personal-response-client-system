@@ -4,6 +4,7 @@ import com.privateflow.common.events.ProfileSuggestionsReadyEvent;
 import com.privateflow.common.events.ProfileUpdatedEvent;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
+import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.profile.BatchResolveRequest;
 import com.privateflow.modules.profile.BatchResolveResult;
 import com.privateflow.modules.profile.ProfileErrorCodes;
@@ -35,6 +36,7 @@ public class SuggestionQueueManager {
   private final ProfileConfigProvider configProvider;
   private final ApplicationEventPublisher eventPublisher;
   private final AuditLogRepository auditLogRepository;
+  private final CustomerAccessService customerAccessService;
 
   public SuggestionQueueManager(
       SuggestionRepository suggestionRepository,
@@ -43,7 +45,8 @@ public class SuggestionQueueManager {
       ProfileWriter profileWriter,
       ProfileConfigProvider configProvider,
       ApplicationEventPublisher eventPublisher,
-      AuditLogRepository auditLogRepository) {
+      AuditLogRepository auditLogRepository,
+      CustomerAccessService customerAccessService) {
     this.suggestionRepository = suggestionRepository;
     this.customerQueryService = customerQueryService;
     this.fieldRegistry = fieldRegistry;
@@ -51,6 +54,7 @@ public class SuggestionQueueManager {
     this.configProvider = configProvider;
     this.eventPublisher = eventPublisher;
     this.auditLogRepository = auditLogRepository;
+    this.customerAccessService = customerAccessService;
   }
 
   public List<ProfileSuggestion> listPending(String phone) {
@@ -78,6 +82,13 @@ public class SuggestionQueueManager {
     if (request == null || request.action() == null) {
       throw new ProfileUpdateException(ProfileErrorCodes.BAD_REQUEST, "action 参数不合法");
     }
+    Customer customer = customerQueryService.getByPhone(phone);
+    if (customer == null) {
+      throw new ProfileUpdateException(ProfileErrorCodes.BAD_REQUEST, "客户不存在");
+    }
+    if (!customerAccessService.canAccess(customer)) {
+      throw new ProfileUpdateException(ProfileErrorCodes.BAD_REQUEST, "该客户不在你的负责范围内");
+    }
     try {
       List<ProfileSuggestion> pending = suggestionRepository.findPending(
           phone,
@@ -94,7 +105,7 @@ public class SuggestionQueueManager {
       if (request.action() != ResolveAction.CONFIRM) {
         throw new ProfileUpdateException(ProfileErrorCodes.BAD_REQUEST, "action 参数不合法");
       }
-      return confirm(phone, pending, request.operator());
+      return confirm(phone, pending, request.operator(), customer);
     } catch (ProfileUpdateException ex) {
       throw ex;
     } catch (RuntimeException ex) {
@@ -102,11 +113,7 @@ public class SuggestionQueueManager {
     }
   }
 
-  private BatchResolveResult confirm(String phone, List<ProfileSuggestion> pending, String operator) {
-    Customer customer = customerQueryService.getByPhone(phone);
-    if (customer == null) {
-      throw new ProfileUpdateException(ProfileErrorCodes.BAD_REQUEST, "客户不存在");
-    }
+  private BatchResolveResult confirm(String phone, List<ProfileSuggestion> pending, String operator, Customer customer) {
     Map<String, Object> updates = new LinkedHashMap<>();
     List<Long> confirmedIds = new ArrayList<>();
     List<Long> skippedIds = new ArrayList<>();

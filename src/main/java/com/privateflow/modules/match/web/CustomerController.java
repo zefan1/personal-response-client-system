@@ -144,7 +144,7 @@ public class CustomerController {
   @ExceptionHandler(TableWriteException.class)
   public ResponseEntity<ApiResponse<Void>> handleTableWrite(TableWriteException ex) {
     HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
-    if (TableWriteErrorCodes.BAD_REQUEST.equals(ex.getErrorCode())) {
+    if (TableWriteErrorCodes.BAD_REQUEST.equals(ex.getErrorCode()) || TableWriteErrorCodes.CONFIG_MISSING.equals(ex.getErrorCode())) {
       status = HttpStatus.BAD_REQUEST;
     } else if (TableWriteErrorCodes.TABLE_WRITE_QUEUE_FULL.equals(ex.getErrorCode())) {
       status = HttpStatus.TOO_MANY_REQUESTS;

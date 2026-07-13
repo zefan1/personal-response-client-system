@@ -44,7 +44,7 @@ INSERT INTO system_configs (config_key, config_value, description)
 VALUES
   ('skill.system_prompt_format', '你是私域客户服务助手。请根据客户信息生成 3 条不同方向的回复建议，并严格返回 JSON。客户类型：{{leadType}}，客户阶段：{{customerStage}}。', 'Skill system prompt format section'),
   ('skill.system_prompt_red_lines', '[]', 'Skill system prompt red-line list as JSON array'),
-  ('skill.regenerate_max_count', '0', 'Regenerate max count, 0 means unlimited'),
+  ('skill.regenerate_max_count', '3', 'Regenerate max count before leader-help warning, 0 means no warning'),
   ('skill.prompt_version_max', '50', 'Prompt version retention max count'),
   ('image.api_base_url', '', 'Image recognition API base URL'),
   ('image.api_key', '', 'Image recognition API key'),
@@ -55,4 +55,36 @@ VALUES
   ('image.recognition_prompt', '请识别聊天截图中的昵称、手机号、消息列表和时间，并严格返回 JSON。', 'Image recognition prompt'),
   ('image.consecutive_failures_alert', '3', 'Image consecutive failures alert threshold'),
   ('match.tag_removal_rules', '[]', 'Customer tag removal prefixes as JSON array')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);
+
+INSERT INTO skill_environments (env_name, provider, base_url, api_key, api_key_last4, is_active)
+SELECT
+  '当前 Skill 配置',
+  'skill',
+  base_url.config_value,
+  api_key.config_value,
+  RIGHT(api_key.config_value, 4),
+  1
+FROM system_configs base_url
+JOIN system_configs api_key ON api_key.config_key = 'skill.api_key'
+WHERE base_url.config_key = 'skill.api_base_url'
+  AND base_url.config_value <> ''
+  AND api_key.config_value <> ''
+  AND NOT EXISTS (SELECT 1 FROM skill_environments)
+ON DUPLICATE KEY UPDATE env_name = env_name;
+
+INSERT INTO image_environments (env_name, provider, base_url, api_key, api_key_last4, is_active)
+SELECT
+  '当前识图配置',
+  'image',
+  base_url.config_value,
+  api_key.config_value,
+  RIGHT(api_key.config_value, 4),
+  1
+FROM system_configs base_url
+JOIN system_configs api_key ON api_key.config_key = 'image.api_key'
+WHERE base_url.config_key = 'image.api_base_url'
+  AND base_url.config_value <> ''
+  AND api_key.config_value <> ''
+  AND NOT EXISTS (SELECT 1 FROM image_environments)
+ON DUPLICATE KEY UPDATE env_name = env_name;

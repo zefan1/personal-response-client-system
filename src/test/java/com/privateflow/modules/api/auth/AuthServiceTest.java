@@ -14,6 +14,7 @@ import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.Role;
 import com.privateflow.modules.api.config.SystemConfig;
 import com.privateflow.modules.api.config.SystemConfigProvider;
+import com.privateflow.modules.runtime.ProductionSafetyService;
 import java.time.Duration;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +34,8 @@ class AuthServiceTest {
   private LoginRateLimiter rateLimiter;
   @Mock
   private SystemConfigProvider configProvider;
+  @Mock
+  private ProductionSafetyService productionSafetyService;
 
   private AuthService authService;
 
@@ -40,7 +43,7 @@ class AuthServiceTest {
   void setUp() {
     MockitoAnnotations.openMocks(this);
     when(configProvider.get()).thenReturn(config());
-    authService = new AuthService(accountRepository, jwtService, refreshTokenStore, rateLimiter, configProvider);
+    authService = new AuthService(accountRepository, jwtService, refreshTokenStore, rateLimiter, configProvider, productionSafetyService);
   }
 
   @Test
@@ -61,11 +64,11 @@ class AuthServiceTest {
   }
 
   @Test
-  void adminLoginRejectsKeeperRole() {
-    Account account = new Account(2L, "keeper", "{plain}keeper123", "Keeper", Role.KEEPER, null, true);
-    when(accountRepository.findByPhone("keeper")).thenReturn(Optional.of(account));
+  void adminLoginRejectsNonAdminRole() {
+    Account account = new Account(2L, "leader", "{plain}leader123", "Leader", Role.LEADER, null, true);
+    when(accountRepository.findByPhone("leader")).thenReturn(Optional.of(account));
 
-    assertThatThrownBy(() -> authService.login(new LoginRequest("keeper", "keeper123", null, null, null), "127.0.0.1", true))
+    assertThatThrownBy(() -> authService.login(new LoginRequest("leader", "leader123", null, null, null), "127.0.0.1", true))
         .isInstanceOf(ApiException.class)
         .extracting(ex -> ((ApiException) ex).getErrorCode())
         .isEqualTo(ApiErrorCodes.FORBIDDEN);
@@ -97,6 +100,20 @@ class AuthServiceTest {
         .isEqualTo(ApiErrorCodes.AUTH_FAILED);
 
     verify(rateLimiter).recordFailure("127.0.0.1");
+    verify(jwtService, never()).issue(any());
+  }
+
+  @Test
+  void productionRejectsLegacyPlainPasswords() {
+    Account account = new Account(5L, "admin", "{plain}admin123", "Admin", Role.ADMIN, null, true);
+    when(accountRepository.findByPhone("admin")).thenReturn(Optional.of(account));
+    when(productionSafetyService.isProduction()).thenReturn(true);
+
+    assertThatThrownBy(() -> authService.login(new LoginRequest("admin", "admin123", null, null, null), "127.0.0.1", false))
+        .isInstanceOf(ApiException.class)
+        .extracting(ex -> ((ApiException) ex).getErrorCode())
+        .isEqualTo(ApiErrorCodes.AUTH_FAILED);
+
     verify(jwtService, never()).issue(any());
   }
 

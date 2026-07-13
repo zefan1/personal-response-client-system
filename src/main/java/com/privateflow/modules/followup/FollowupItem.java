@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 
 public record FollowupItem(
     String phone,
+    String phoneFull,
     String nickname,
     String leadType,
     LocalDateTime lastFollowupAt,

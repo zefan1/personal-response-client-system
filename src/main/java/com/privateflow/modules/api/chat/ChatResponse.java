@@ -9,6 +9,7 @@ public record ChatResponse(
     boolean needsCustomerIdentifier,
     MatchResult match,
     SkillResponse skill,
-    String warning
+    String warning,
+    ChatReplySource replySource
 ) {
 }

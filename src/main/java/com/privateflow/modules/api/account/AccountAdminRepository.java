@@ -102,11 +102,15 @@ public class AccountAdminRepository {
   }
 
   public void toggle(long id, boolean enabled) {
-    jdbcTemplate.update("UPDATE accounts SET is_enabled = ?, updated_at = NOW() WHERE id = ?", enabled ? 1 : 0, id);
+    jdbcTemplate.update("UPDATE accounts SET is_enabled = ?, token_version = token_version + 1, updated_at = NOW() WHERE id = ?", enabled ? 1 : 0, id);
   }
 
   public void resetPassword(long id, String passwordHash) {
-    jdbcTemplate.update("UPDATE accounts SET password_hash = ?, updated_at = NOW() WHERE id = ?", passwordHash, id);
+    jdbcTemplate.update("UPDATE accounts SET password_hash = ?, token_version = token_version + 1, updated_at = NOW() WHERE id = ?", passwordHash, id);
+  }
+
+  public void bumpTokenVersion(long id) {
+    jdbcTemplate.update("UPDATE accounts SET token_version = token_version + 1, updated_at = NOW() WHERE id = ?", id);
   }
 
   public int delete(long id) {

@@ -22,6 +22,9 @@ REQUIRED_ENV = [
     "PDA_LIVE_SKILL_API_KEY",
     "PDA_LIVE_IMAGE_BASE_URL",
     "PDA_LIVE_IMAGE_API_KEY",
+    "PDA_LIVE_LLM_BASE_URL",
+    "PDA_LIVE_LLM_API_KEY",
+    "PDA_LIVE_LLM_MODEL",
     "PDA_LIVE_TABLE_BASE_URL",
     "PDA_LIVE_TABLE_API_KEY",
 ]
@@ -42,6 +45,9 @@ def configure_live_external(api: Api, env: dict[str, str]):
         "skill.api_key": env["PDA_LIVE_SKILL_API_KEY"],
         "image.api_base_url": env["PDA_LIVE_IMAGE_BASE_URL"],
         "image.api_key": env["PDA_LIVE_IMAGE_API_KEY"],
+        "llm.api_base_url": env["PDA_LIVE_LLM_BASE_URL"],
+        "llm.api_key": env["PDA_LIVE_LLM_API_KEY"],
+        "llm.model": env["PDA_LIVE_LLM_MODEL"],
         "table.api_base_url": env["PDA_LIVE_TABLE_BASE_URL"],
         "table.api_key": env["PDA_LIVE_TABLE_API_KEY"],
     }
@@ -52,16 +58,25 @@ def configure_live_external(api: Api, env: dict[str, str]):
 
 def ensure_live_environment(api: Api, kind: str, base_url: str, api_key: str):
     path = f"/admin/api/v1/{kind}-environments"
+    body = {
+        "envName": f"live-acceptance-{kind}",
+        "baseUrl": base_url,
+        "apiKey": api_key,
+        "remark": "live external acceptance",
+    }
+    if kind == "llm":
+      body.update({
+          "model": os.environ["PDA_LIVE_LLM_MODEL"],
+          "protocol": os.environ.get("PDA_LIVE_LLM_PROTOCOL", "OPENAI_COMPATIBLE"),
+          "timeoutMs": int(os.environ.get("PDA_LIVE_LLM_TIMEOUT_MS", "15000")),
+          "temperature": float(os.environ.get("PDA_LIVE_LLM_TEMPERATURE", "0.2")),
+          "maxTokens": int(os.environ.get("PDA_LIVE_LLM_MAX_TOKENS", "1024")),
+      })
     created = api.request(
         f"create live {kind} environment",
         "POST",
         path,
-        {
-            "envName": f"live-acceptance-{kind}",
-            "baseUrl": base_url,
-            "apiKey": api_key,
-            "remark": "live external acceptance",
-        },
+        body,
     )
     env_id = (created.get("data") or {})["id"]
     api.request(f"activate live {kind} environment", "PUT", f"{path}/{env_id}/activate", {})
@@ -89,6 +104,12 @@ def run_live_acceptance(api: Api, env: dict[str, str]):
     image_data = image_test.get("data") or {}
     if not image_data.get("success"):
         raise AssertionError(f"live image environment test not successful: {image_data}")
+
+    llm_id = ensure_live_environment(api, "llm", env["PDA_LIVE_LLM_BASE_URL"], env["PDA_LIVE_LLM_API_KEY"])
+    llm_test = api.request("live LLM provider test", "POST", f"/admin/api/v1/llm-environments/{llm_id}/test", {})
+    llm_data = llm_test.get("data") or {}
+    if not llm_data.get("success"):
+        raise AssertionError(f"live LLM environment test not successful: {llm_data}")
 
     datasource_id = ensure_datasource(api)
     columns = api.request("live wecom sheet columns", "GET", f"/admin/api/v1/datasources/{datasource_id}/columns")

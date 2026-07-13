@@ -67,4 +67,4 @@ VALUES
   ('followup.tag_suggestion_dedup_days', '7', '标签建议去重天数，范围 3-30'),
   ('followup.cursor_ttl_s', '3600', '扫描断点 Redis TTL 秒，范围 600-7200'),
   ('followup.keeper_overdue_leader_hours', '48', '管家逾期未处理通知组长小时，范围 24-168')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

@@ -65,22 +65,20 @@ describe('AdminDevConsole', () => {
     app.unmount();
   });
 
-  it('emits route switch events without touching production admin code', async () => {
+  it('emits admin and logout events without exposing the web desktop route', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const onSwitchAdmin = vi.fn();
-    const onSwitchDesktop = vi.fn();
     const onLogout = vi.fn();
     const app = createApp({
       components: { AdminDevConsole },
       setup() {
-        return { onSwitchAdmin, onSwitchDesktop, onLogout };
+        return { onSwitchAdmin, onLogout };
       },
       template: `
         <AdminDevConsole
           account-name="admin"
           @switch-admin="onSwitchAdmin"
-          @switch-desktop="onSwitchDesktop"
           @logout="onLogout"
         />
       `
@@ -89,12 +87,10 @@ describe('AdminDevConsole', () => {
     await flushUi();
 
     const buttons = [...host.querySelectorAll('.admin-toolbar-actions button')] as HTMLButtonElement[];
-    expect(buttons.map((button) => button.textContent)).toEqual(['正式后台', '工作台', '退出']);
+    expect(buttons.map((button) => button.textContent)).toEqual(['正式后台', '退出']);
     buttons[0].click();
     buttons[1].click();
-    buttons[2].click();
     expect(onSwitchAdmin).toHaveBeenCalledTimes(1);
-    expect(onSwitchDesktop).toHaveBeenCalledTimes(1);
     expect(onLogout).toHaveBeenCalledTimes(1);
 
     app.unmount();

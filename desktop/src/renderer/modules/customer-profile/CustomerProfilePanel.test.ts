@@ -152,6 +152,74 @@ describe('CustomerProfilePanel', () => {
     app.unmount();
   });
 
+  it('shows a helpful empty state when search has no result', async () => {
+    const { app, host } = await mountPanel();
+    mocks.getJson.mockResolvedValueOnce({
+      success: true,
+      data: { total: 0, customers: [] }
+    });
+
+    const input = host.querySelector('.search-row input') as HTMLInputElement | null;
+    const searchButton = host.querySelector('.search-row button') as HTMLButtonElement | null;
+    setValue(input as HTMLInputElement, 'not-found');
+    searchButton?.click();
+    await flushUi();
+
+    expect(host.querySelector('.customer-search-state')?.textContent ?? '').toContain('未找到客户');
+    expect(host.querySelector('.customer-search-state')?.textContent ?? '').toContain('手机号后四位');
+    app.unmount();
+  });
+
+  it('opens a profile when a customer is selected from another panel', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    mocks.getJson.mockResolvedValue({ success: true, data: view('18800001111', 'Workbench Lead') });
+
+    eventBus.emit('customer:selected', {
+      phone: '18800001111',
+      scene: 'ACTIVE_REPLY',
+      leadType: 'TUAN_GOU',
+      sourceFrom: 'DASHBOARD'
+    });
+    await flushUi();
+
+    expect(mocks.getJson).toHaveBeenCalledTimes(1);
+    expect(mocks.getJson).toHaveBeenCalledWith('/api/v1/customers/18800001111', 5000, expect.any(AbortSignal));
+    expect(host.querySelector('.profile-card')?.textContent ?? '').toContain('Workbench Lead');
+    app.unmount();
+  });
+
+  it('uses phoneFull from masked search results when opening a profile', async () => {
+    const { app, host } = await mountPanel();
+    mocks.getJson
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          total: 2,
+          customers: [
+            { ...summary('188****1111', 'Masked Lead'), phoneFull: '18800001111' },
+            { ...summary('188****2222', 'Other Lead'), phoneFull: '18800002222' }
+          ]
+        }
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: view('188****1111', 'Masked Lead', { phoneFull: '18800001111' })
+      });
+
+    const input = host.querySelector('.search-row input') as HTMLInputElement | null;
+    const searchButton = host.querySelector('.search-row button') as HTMLButtonElement | null;
+    setValue(input as HTMLInputElement, 'Lead');
+    searchButton?.click();
+    await flushUi();
+
+    (host.querySelector('.search-results .result-row') as HTMLButtonElement | null)?.click();
+    await flushUi();
+
+    expect(mocks.getJson).toHaveBeenCalledWith('/api/v1/customers/18800001111', 5000, expect.any(AbortSignal));
+    expect(host.querySelector('.profile-card')?.textContent ?? '').toContain('Masked Lead');
+    app.unmount();
+  });
+
   it('shows candidate modal from recognition events and opens the chosen candidate', async () => {
     const { app, host, eventBus } = await mountPanel();
     mocks.getJson.mockResolvedValue({ success: true, data: view('18800000003', 'Candidate C') });
@@ -200,11 +268,178 @@ describe('CustomerProfilePanel', () => {
       clientMessage: ''
     });
     expect(selected.at(-1)).toMatchObject({ phone: '18800000005', scene: 'ACTIVE_REPLY', sourceFrom: 'PROFILE_CARD' });
-    expect(recognized.at(-1)).toMatchObject({ phone: '18800000005' });
+    expect(recognized.at(-1)).toMatchObject({
+      source: 'PROFILE_CARD',
+      response: { phone: '18800000005' }
+    });
 
     actionButtons[1].click();
     await flushUi();
     expect(host.querySelectorAll('.field-grid input').length).toBeGreaterThan(0);
+    expect(host.querySelector('.profile-edit-banner')?.textContent ?? '').toContain('正在编辑档案');
+    app.unmount();
+  });
+
+  it('keeps the table sync prompt visually prominent after profile saves', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    mocks.getJson
+      .mockResolvedValueOnce({
+        success: true,
+        data: view('18800001111', 'Sync Lead', {
+          customer: {
+            phone: '18800001111',
+            sourceTable: 'sheet-a',
+            sourceRowId: 'row-a',
+            nickname: 'Sync Lead',
+            intendedStore: 'Store A'
+          }
+        })
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: view('18800001111', 'Sync Lead Updated', {
+          customer: {
+            phone: '18800001111',
+            sourceTable: 'sheet-a',
+            sourceRowId: 'row-a',
+            nickname: 'Sync Lead Updated',
+            intendedStore: 'Store B'
+          }
+        })
+      });
+    mocks.saveProfile.mockResolvedValueOnce({
+      status: 'OK',
+      message: '档案已保存。是否同步到企微表格？',
+      needRefresh: true,
+      askTableSync: true
+    });
+
+    eventBus.emit('customer:selected', {
+      phone: '18800001111',
+      scene: 'ACTIVE_REPLY',
+      leadType: 'TUAN_GOU',
+      sourceFrom: 'DASHBOARD'
+    });
+    await flushUi();
+
+    const editButton = [...host.querySelectorAll('.profile-actions button')]
+      .find((button) => button.textContent?.includes('编辑档案')) as HTMLButtonElement | undefined;
+    editButton?.click();
+    await flushUi();
+    const fieldInputs = [...host.querySelectorAll('.field-grid input')] as HTMLInputElement[];
+    setValue(fieldInputs[1], 'Store B');
+    const saveButton = [...host.querySelectorAll('.profile-actions button')]
+      .find((button) => button.textContent?.includes('保存')) as HTMLButtonElement | undefined;
+    saveButton?.click();
+    await flushUi();
+    await flushUi();
+
+    const prompt = host.querySelector('.profile-sync-toast');
+    expect(prompt?.textContent ?? '').toContain('是否同步到企微表格');
+    expect(prompt?.textContent ?? '').toContain('同步');
+    expect(prompt?.textContent ?? '').toContain('暂不');
+    expect(host.querySelector('.profile-table-sync-status')?.textContent ?? '').toContain('等待同步企微表格');
+    app.unmount();
+  });
+
+  it('shows table sync retry status in the profile body after confirm failures', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    mocks.getJson
+      .mockResolvedValueOnce({
+        success: true,
+        data: view('18800001111', 'Retry Lead', {
+          customer: {
+            phone: '18800001111',
+            sourceTable: 'sheet-a',
+            sourceRowId: 'row-a',
+            nickname: 'Retry Lead',
+            intendedStore: 'Store A'
+          }
+        })
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: view('18800001111', 'Retry Lead Updated', {
+          customer: {
+            phone: '18800001111',
+            sourceTable: 'sheet-a',
+            sourceRowId: 'row-a',
+            nickname: 'Retry Lead Updated',
+            intendedStore: 'Store B'
+          }
+        })
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: view('18800001111', 'Retry Lead Updated', {
+          customer: {
+            phone: '18800001111',
+            sourceTable: 'sheet-a',
+            sourceRowId: 'row-a',
+            nickname: 'Retry Lead Updated',
+            intendedStore: 'Store B'
+          }
+        })
+      });
+    mocks.saveProfile.mockResolvedValueOnce({
+      status: 'OK',
+      message: '档案已保存。是否同步到企微表格？',
+      needRefresh: true,
+      askTableSync: true
+    });
+    mocks.syncProfileToTable.mockResolvedValueOnce({
+      status: 'FAILED_RETRYING',
+      message: '表格同步失败，系统将在后台自动重试',
+      needRefresh: true
+    });
+
+    eventBus.emit('customer:selected', {
+      phone: '18800001111',
+      scene: 'ACTIVE_REPLY',
+      leadType: 'TUAN_GOU',
+      sourceFrom: 'DASHBOARD'
+    });
+    await flushUi();
+
+    const editButton = [...host.querySelectorAll('.profile-actions button')]
+      .find((button) => button.textContent?.includes('编辑档案')) as HTMLButtonElement | undefined;
+    editButton?.click();
+    await flushUi();
+    const fieldInputs = [...host.querySelectorAll('.field-grid input')] as HTMLInputElement[];
+    setValue(fieldInputs[1], 'Store B');
+    const saveButton = [...host.querySelectorAll('.profile-actions button')]
+      .find((button) => button.textContent?.includes('保存')) as HTMLButtonElement | undefined;
+    saveButton?.click();
+    await flushUi();
+    await flushUi();
+
+    (host.querySelector('.profile-sync-toast .primary') as HTMLButtonElement | null)?.click();
+    await flushUi();
+    await flushUi();
+
+    expect(host.querySelector('.profile-table-sync-status')?.textContent ?? '').toContain('表格同步失败');
+    expect(host.querySelector('.profile-table-sync-status')?.textContent ?? '').toContain('无需重复保存');
+    app.unmount();
+  });
+
+  it('uses a compact refresh icon in the header', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    mocks.getJson.mockResolvedValue({ success: true, data: view('18800001111', 'Refresh Lead') });
+
+    eventBus.emit('customer:selected', {
+      phone: '18800001111',
+      scene: 'ACTIVE_REPLY',
+      leadType: 'TUAN_GOU',
+      sourceFrom: 'DASHBOARD'
+    });
+    await flushUi();
+
+    const refreshButton = host.querySelector('.panel-header .icon-refresh-button') as HTMLButtonElement | null;
+    expect(refreshButton).toBeTruthy();
+    expect(refreshButton?.textContent?.trim()).toBe('↻');
+    expect(refreshButton?.getAttribute('aria-label')).toBe('刷新客户档案');
+    expect(refreshButton?.getAttribute('title')).toBe('刷新');
+    expect(refreshButton?.textContent).not.toContain('刷新');
     app.unmount();
   });
 });
@@ -232,7 +467,7 @@ function summary(phone: string, nickname: string): CustomerSummary {
   };
 }
 
-function view(phone: string, nickname: string): CustomerProfileView {
+function view(phone: string, nickname: string, patch: Partial<CustomerProfileView> & { customer?: Partial<CustomerProfileView['customer']> } = {}): CustomerProfileView {
   return {
     customer: {
       phone,
@@ -247,8 +482,10 @@ function view(phone: string, nickname: string): CustomerProfileView {
       intendedProject: 'Repair',
       intentLevel: 'HIGH',
       followupNotes: 'Call tomorrow',
-      nextFollowupAt: '2026-07-04T10:00:00'
+      nextFollowupAt: '2026-07-04T10:00:00',
+      ...patch.customer
     },
-    pendingSuggestions: []
+    phoneFull: patch.phoneFull,
+    pendingSuggestions: patch.pendingSuggestions ?? []
   };
 }

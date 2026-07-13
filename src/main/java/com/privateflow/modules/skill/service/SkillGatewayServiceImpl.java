@@ -4,6 +4,7 @@ import com.privateflow.modules.skill.ProfileExtractRequest;
 import com.privateflow.modules.skill.ProfileUpdates;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillGatewayException;
+import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.skill.SkillGatewayService;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.SkillResponse;
@@ -70,6 +71,9 @@ public class SkillGatewayServiceImpl implements SkillGatewayService {
       }
       healthMonitor.record(false);
       callLogger.logCall(actual.scene(), actual.leadType(), actual.caller(), summary, elapsed(start), false, ex.getErrorCode() + " " + ex.getMessage());
+      if (!ex.isFallbackAllowed()) {
+        throw new ApiException(ex.getErrorCode(), ex.getMessage());
+      }
       return fallbackHandler.fallback();
     } catch (RuntimeException ex) {
       circuitBreaker.recordFailure();

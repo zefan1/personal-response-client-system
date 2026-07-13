@@ -35,12 +35,30 @@ public class ConditionEvaluator {
     }
   }
 
+  public void validateDefinition(JsonNode root) {
+    validateNode(root, 0);
+  }
+
   private boolean evalNode(Customer customer, JsonNode node, int depth) {
     if (depth > 2) {
       throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "条件组合过于复杂，请拆分为多条规则");
     }
     String operator = text(node.path("operator"));
     JsonNode conditions = node.path("conditions");
+    JsonNode orGroups = node.path("orGroups");
+    if (orGroups.isArray()) {
+      boolean mainMatched = conditions.isArray() && evalAndGroup(customer, conditions, depth);
+      if (mainMatched) {
+        return true;
+      }
+      for (JsonNode group : orGroups) {
+        JsonNode groupConditions = group.path("conditions");
+        if (groupConditions.isArray() && evalAndGroup(customer, groupConditions, depth + 1)) {
+          return true;
+        }
+      }
+      return false;
+    }
     if (!conditions.isArray()) {
       return evalLeaf(customer, node);
     }
@@ -55,6 +73,10 @@ public class ConditionEvaluator {
     if (!operator.isBlank() && !"AND".equalsIgnoreCase(operator)) {
       throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "规则组合操作符不合法");
     }
+    return evalAndGroup(customer, conditions, depth);
+  }
+
+  private boolean evalAndGroup(Customer customer, JsonNode conditions, int depth) {
     for (JsonNode child : conditions) {
       if (!evalNode(customer, child, depth + 1)) {
         return false;
@@ -63,12 +85,45 @@ public class ConditionEvaluator {
     return true;
   }
 
-  private boolean evalLeaf(Customer customer, JsonNode node) {
+  private void validateNode(JsonNode node, int depth) {
+    if (node == null || !node.isObject()) {
+      throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "规则条件必须是对象格式");
+    }
+    if (depth > 2) {
+      throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "条件组合过于复杂，请拆分为多条规则");
+    }
+    JsonNode conditions = node.path("conditions");
+    JsonNode orGroups = node.path("orGroups");
+    if (conditions.isArray()) {
+      String operator = text(node.path("operator"));
+      if (!operator.isBlank() && !"AND".equalsIgnoreCase(operator) && !"OR".equalsIgnoreCase(operator)) {
+        throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "规则组合操作符不合法");
+      }
+      for (JsonNode child : conditions) {
+        validateNode(child, depth + 1);
+      }
+      if (orGroups.isArray()) {
+        for (JsonNode group : orGroups) {
+          validateNode(group, depth + 1);
+        }
+      }
+      return;
+    }
+    validateLeaf(node);
+  }
+
+  private void validateLeaf(JsonNode node) {
     String field = text(node.path("field"));
     String op = text(node.path("op"));
     if (!FIELD_WHITELIST.contains(field) || !OP_WHITELIST.contains(op)) {
       throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "规则字段或操作符不合法");
     }
+  }
+
+  private boolean evalLeaf(Customer customer, JsonNode node) {
+    String field = text(node.path("field"));
+    String op = text(node.path("op"));
+    validateLeaf(node);
     Object actual = value(customer, field);
     JsonNode expected = node.path("value");
     return switch (op) {

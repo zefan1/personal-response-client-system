@@ -36,4 +36,4 @@ VALUES
   ('profile.suggestion_max_per_customer', '20', '每客户同时最多 PENDING 建议数，范围 10-50'),
   ('profile.dedup_window_s', '5', '事件去重窗口秒数，范围 3-15'),
   ('profile.fallback_summary_chars', '500', 'AI 摘要失败时文本截取字数上限，范围 200-1000')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

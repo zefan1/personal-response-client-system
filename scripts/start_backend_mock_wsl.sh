@@ -20,6 +20,12 @@ if [[ -f "$PID_FILE" ]]; then
   fi
 fi
 
+if curl -fsS "http://127.0.0.1:${PORT}/api/v1/auth/config" >/tmp/pda_auth_config.json 2>/tmp/pda_curl_err; then
+  echo "backend_already_running pid=unknown url=http://127.0.0.1:${PORT}"
+  echo "auth_config=$(cat /tmp/pda_auth_config.json)"
+  exit 0
+fi
+
 sudo service mariadb start >/dev/null 2>&1 || sudo /etc/init.d/mariadb start >/dev/null 2>&1
 sudo service redis-server start >/dev/null 2>&1 || sudo /etc/init.d/redis-server start >/dev/null 2>&1
 

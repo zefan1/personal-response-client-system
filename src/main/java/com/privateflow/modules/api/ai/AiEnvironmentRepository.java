@@ -2,6 +2,7 @@ package com.privateflow.modules.api.ai;
 
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.security.SecretCipher;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -15,9 +16,11 @@ public class AiEnvironmentRepository {
 
   private static final String ACTIVE_INDEX = "idx_provider_active";
   private final JdbcTemplate jdbcTemplate;
+  private final SecretCipher secretCipher;
 
-  public AiEnvironmentRepository(JdbcTemplate jdbcTemplate) {
+  public AiEnvironmentRepository(JdbcTemplate jdbcTemplate, SecretCipher secretCipher) {
     this.jdbcTemplate = jdbcTemplate;
+    this.secretCipher = secretCipher;
   }
 
   public List<AiEnvironment> list(AiEnvironmentType type) {
@@ -28,7 +31,31 @@ public class AiEnvironmentRepository {
     return jdbcTemplate.query("SELECT * FROM " + table(type) + " WHERE id = ? LIMIT 1", mapper(type), id).stream().findFirst();
   }
 
+  public Optional<AiEnvironment> findActive(AiEnvironmentType type) {
+    return jdbcTemplate.query("SELECT * FROM " + table(type) + " WHERE is_active = 1 ORDER BY updated_at DESC, id DESC LIMIT 1", mapper(type))
+        .stream()
+        .findFirst();
+  }
+
   public long create(AiEnvironmentType type, AiEnvironmentRequest request) {
+    if (type == AiEnvironmentType.LLM) {
+      jdbcTemplate.update("""
+          INSERT INTO llm_environments (env_name, provider, base_url, api_key, api_key_last4, model, protocol, timeout_ms, temperature, max_tokens, is_active)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+          """,
+          request.envName().trim(),
+          type.provider(),
+          request.baseUrl().trim(),
+          secretCipher.encrypt(request.apiKey().trim()),
+          last4(request.apiKey().trim()),
+          request.model().trim(),
+          normalizeProtocol(request.protocol()),
+          request.timeoutMs(),
+          request.temperature(),
+          request.maxTokens());
+      Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+      return id == null ? 0 : id;
+    }
     jdbcTemplate.update("""
         INSERT INTO %s (env_name, provider, base_url, api_key, api_key_last4, is_active)
         VALUES (?, ?, ?, ?, ?, 0)
@@ -36,13 +63,58 @@ public class AiEnvironmentRepository {
         request.envName().trim(),
         type.provider(),
         request.baseUrl().trim(),
-        encrypt(request.apiKey().trim()),
+        secretCipher.encrypt(request.apiKey().trim()),
         last4(request.apiKey().trim()));
     Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     return id == null ? 0 : id;
   }
 
   public void update(AiEnvironmentType type, long id, AiEnvironmentRequest request) {
+    if (type == AiEnvironmentType.LLM) {
+      if (request.apiKey() == null || request.apiKey().isBlank()) {
+        jdbcTemplate.update("""
+            UPDATE llm_environments
+            SET env_name = ?, base_url = ?, model = ?, protocol = ?, timeout_ms = ?, temperature = ?, max_tokens = ?, updated_at = NOW()
+            WHERE id = ?
+            """,
+            request.envName().trim(),
+            request.baseUrl().trim(),
+            request.model().trim(),
+            normalizeProtocol(request.protocol()),
+            request.timeoutMs(),
+            request.temperature(),
+            request.maxTokens(),
+            id);
+        return;
+      }
+      jdbcTemplate.update("""
+          UPDATE llm_environments
+          SET env_name = ?, base_url = ?, api_key = ?, api_key_last4 = ?, model = ?, protocol = ?, timeout_ms = ?, temperature = ?, max_tokens = ?, updated_at = NOW()
+          WHERE id = ?
+          """,
+          request.envName().trim(),
+          request.baseUrl().trim(),
+          secretCipher.encrypt(request.apiKey().trim()),
+          last4(request.apiKey().trim()),
+          request.model().trim(),
+          normalizeProtocol(request.protocol()),
+          request.timeoutMs(),
+          request.temperature(),
+          request.maxTokens(),
+          id);
+      return;
+    }
+    if (request.apiKey() == null || request.apiKey().isBlank()) {
+      jdbcTemplate.update("""
+          UPDATE %s
+          SET env_name = ?, base_url = ?, updated_at = NOW()
+          WHERE id = ?
+          """.formatted(table(type)),
+          request.envName().trim(),
+          request.baseUrl().trim(),
+          id);
+      return;
+    }
     jdbcTemplate.update("""
         UPDATE %s
         SET env_name = ?, base_url = ?, api_key = ?, api_key_last4 = ?, updated_at = NOW()
@@ -50,7 +122,7 @@ public class AiEnvironmentRepository {
         """.formatted(table(type)),
         request.envName().trim(),
         request.baseUrl().trim(),
-        encrypt(request.apiKey().trim()),
+        secretCipher.encrypt(request.apiKey().trim()),
         last4(request.apiKey().trim()),
         id);
   }
@@ -77,6 +149,14 @@ public class AiEnvironmentRepository {
         """, ok ? 1 : 0, id);
   }
 
+  public void markLlmTest(long id, boolean ok) {
+    jdbcTemplate.update("""
+        UPDATE llm_environments
+        SET last_test_at = NOW(), last_test_ok = ?, updated_at = NOW()
+        WHERE id = ?
+        """, ok ? 1 : 0, id);
+  }
+
   public void updateConfig(String key, String value) {
     int updated = jdbcTemplate.update("""
         UPDATE system_configs SET config_value = ?, updated_at = NOW()
@@ -93,8 +173,16 @@ public class AiEnvironmentRepository {
         .orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "environment not found"));
   }
 
+  public String decryptApiKey(AiEnvironmentType type, long id) {
+    return secretCipher.decrypt(encryptedApiKey(type, id));
+  }
+
   private static String table(AiEnvironmentType type) {
-    return type == AiEnvironmentType.SKILL ? "skill_environments" : "image_environments";
+    return switch (type) {
+      case SKILL -> "skill_environments";
+      case IMAGE -> "image_environments";
+      case LLM -> "llm_environments";
+    };
   }
 
   private RowMapper<AiEnvironment> mapper(AiEnvironmentType type) {
@@ -108,10 +196,15 @@ public class AiEnvironmentRepository {
         rs.getString("provider"),
         rs.getString("base_url"),
         rs.getString("api_key_last4"),
+        hasColumn(rs, "model") ? rs.getString("model") : null,
+        hasColumn(rs, "protocol") ? rs.getString("protocol") : null,
+        hasColumn(rs, "timeout_ms") && rs.getObject("timeout_ms") != null ? rs.getInt("timeout_ms") : null,
+        hasColumn(rs, "temperature") && rs.getObject("temperature") != null ? rs.getDouble("temperature") : null,
+        hasColumn(rs, "max_tokens") && rs.getObject("max_tokens") != null ? rs.getInt("max_tokens") : null,
         rs.getInt("is_active") == 1,
-        type == AiEnvironmentType.IMAGE && hasColumn(rs, "last_test_at") && rs.getTimestamp("last_test_at") != null
+        hasColumn(rs, "last_test_at") && rs.getTimestamp("last_test_at") != null
             ? rs.getTimestamp("last_test_at").toLocalDateTime() : null,
-        type == AiEnvironmentType.IMAGE && hasColumn(rs, "last_test_ok") && rs.getObject("last_test_ok") != null
+        hasColumn(rs, "last_test_ok") && rs.getObject("last_test_ok") != null
             ? rs.getInt("last_test_ok") == 1 : null,
         rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime(),
         rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime());
@@ -126,15 +219,11 @@ public class AiEnvironmentRepository {
     }
   }
 
-  static String encrypt(String value) {
-    return "{plain}" + value;
-  }
-
-  static String decrypt(String value) {
-    return value == null ? "" : value.replaceFirst("^\\{plain}", "");
-  }
-
   private static String last4(String value) {
     return value.length() <= 4 ? value : value.substring(value.length() - 4);
+  }
+
+  private static String normalizeProtocol(String value) {
+    return value == null || value.isBlank() ? "OPENAI_COMPATIBLE" : value.trim().toUpperCase();
   }
 }

@@ -21,7 +21,7 @@ public class AccountRepository {
 
   public Optional<Account> findByPhone(String phone) {
     List<Account> rows = jdbcTemplate.query("""
-        SELECT id, COALESCE(phone, username) AS phone, password_hash, display_name, role, leader_id, is_enabled
+        SELECT id, COALESCE(phone, username) AS phone, password_hash, display_name, role, leader_id, is_enabled, token_version
         FROM accounts
         WHERE (phone = ? OR username = ?)
         LIMIT 1
@@ -32,13 +32,14 @@ public class AccountRepository {
         rs.getString("display_name"),
         Role.valueOf(rs.getString("role")),
         rs.getObject("leader_id", Long.class),
-        rs.getInt("is_enabled") == 1), phone, phone);
+        rs.getInt("is_enabled") == 1,
+        rs.getLong("token_version")), phone, phone);
     return rows.stream().findFirst();
   }
 
   public Optional<Account> findById(long id) {
     List<Account> rows = jdbcTemplate.query("""
-        SELECT id, COALESCE(phone, username) AS phone, password_hash, display_name, role, leader_id, is_enabled
+        SELECT id, COALESCE(phone, username) AS phone, password_hash, display_name, role, leader_id, is_enabled, token_version
         FROM accounts
         WHERE id = ? AND is_enabled = 1
         LIMIT 1
@@ -49,13 +50,14 @@ public class AccountRepository {
         rs.getString("display_name"),
         Role.valueOf(rs.getString("role")),
         rs.getObject("leader_id", Long.class),
-        rs.getInt("is_enabled") == 1), id);
+        rs.getInt("is_enabled") == 1,
+        rs.getLong("token_version")), id);
     return rows.stream().findFirst();
   }
 
   public List<Account> findEnabledByRole(Role role) {
     return jdbcTemplate.query("""
-        SELECT id, COALESCE(phone, username) AS phone, password_hash, display_name, role, leader_id, is_enabled
+        SELECT id, COALESCE(phone, username) AS phone, password_hash, display_name, role, leader_id, is_enabled, token_version
         FROM accounts
         WHERE role = ? AND is_enabled = 1
         ORDER BY id ASC
@@ -66,7 +68,17 @@ public class AccountRepository {
         rs.getString("display_name"),
         Role.valueOf(rs.getString("role")),
         rs.getObject("leader_id", Long.class),
-        rs.getInt("is_enabled") == 1), role.name());
+        rs.getInt("is_enabled") == 1,
+        rs.getLong("token_version")), role.name());
+  }
+
+  public List<String> findEnabledKeeperPhonesByLeaderId(long leaderId) {
+    return jdbcTemplate.queryForList("""
+        SELECT COALESCE(phone, username) AS phone
+        FROM accounts
+        WHERE leader_id = ? AND role = 'KEEPER' AND is_enabled = 1
+        ORDER BY id ASC
+        """, String.class, leaderId);
   }
 
   public void updateLastLogin(String phone) {

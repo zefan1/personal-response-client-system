@@ -28,8 +28,12 @@ public class AuditLogService {
       "ASK_FOR_HELP", "RESOLVE_HELP", "UPDATE_CONFIG",
       "CREATE_NOTICE", "STOP_NOTICE", "PUBLISH_NOTICE",
       "VERSION_PUBLISH", "VERSION_REVOKE",
-      "DATASOURCE_CREATE", "DATASOURCE_UPDATE", "DATASOURCE_DELETE",
-      "ACCOUNT_CREATE", "ACCOUNT_UPDATE", "ACCOUNT_DELETE", "ACCOUNT_TOGGLE");
+      "DATASOURCE_CREATE", "DATASOURCE_UPDATE", "DATASOURCE_DELETE", "DATASOURCE_TOGGLE",
+      "DATASOURCE_REPLACE_SHEET", "DATASOURCE_MAPPING_SAVE", "DATASOURCE_MAPPING_RESTORE",
+      "DATASOURCE_SYNC_START", "DATASOURCE_CSV_IMPORT",
+      "QUICK_SEARCH_CREATE", "QUICK_SEARCH_UPDATE", "QUICK_SEARCH_DELETE", "QUICK_SEARCH_TOGGLE", "QUICK_SEARCH_IMAGE_UPLOAD",
+      "SKILL_BINDING_CREATE", "SKILL_BINDING_UPDATE", "SKILL_BINDING_DELETE", "SKILL_BINDING_TOGGLE",
+      "ACCOUNT_CREATE", "ACCOUNT_UPDATE", "ACCOUNT_DELETE", "ACCOUNT_TOGGLE", "ACCOUNT_RESET_PASSWORD");
 
   private final AuditLogRepository repository;
   private final SystemConfigRepository configRepository;
@@ -221,6 +225,8 @@ public class AuditLogService {
         case "UPDATE_PROFILE" -> "更新客户档案：" + value(detail, "fields", "updatedFields");
         case "UPDATE_CONFIG" -> "修改配置：" + value(detail, "key", "configKey") + " " + value(detail, "oldValue", "from") + " -> " + value(detail, "newValue", "to");
         case "CALL_SKILL" -> value(detail, "sceneLabel", "scene") + " · " + value(detail, "success", "status");
+        case "SKILL_BINDING_CREATE", "SKILL_BINDING_UPDATE", "SKILL_BINDING_DELETE", "SKILL_BINDING_TOGGLE" ->
+            value(detail, "skillName", "skillId") + " · " + value(detail, "scene", "leadType");
         case "COPY_REPLY" -> "复制回复：" + value(detail, "direction", "type");
         case "SEND_MESSAGE" -> "发送消息：" + last4(value(detail, "phone", "targetId"));
         case "SAVE_TO_TABLE" -> "保存到表格：" + value(detail, "updatedFields", "fields");
@@ -232,6 +238,16 @@ public class AuditLogService {
         case "PUBLISH_NOTICE" -> "发布公告：" + value(detail, "title", "noticeTitle");
         case "VERSION_PUBLISH" -> "发布版本 " + value(detail, "version", "targetId") + " (" + value(detail, "platform", "targetType") + ")";
         case "VERSION_REVOKE" -> "撤回版本 " + value(detail, "version", "targetId") + " (" + value(detail, "platform", "targetType") + ")";
+        case "DATASOURCE_CREATE", "DATASOURCE_UPDATE", "DATASOURCE_DELETE", "DATASOURCE_TOGGLE", "DATASOURCE_REPLACE_SHEET" ->
+            value(detail, "name", "sourceTable") + " · " + value(detail, "sourceTable", "sheetId");
+        case "DATASOURCE_MAPPING_SAVE", "DATASOURCE_MAPPING_RESTORE" ->
+            value(detail, "sourceTable", "datasourceId") + " · " + value(detail, "mappingCount", "version") + " 条映射";
+        case "DATASOURCE_SYNC_START" -> "手动同步：" + value(detail, "sourceTable", "datasourceId");
+        case "DATASOURCE_CSV_IMPORT" -> "CSV 导入：" + value(detail, "totalRows", "fileName") + " 行";
+        case "QUICK_SEARCH_CREATE", "QUICK_SEARCH_UPDATE", "QUICK_SEARCH_DELETE", "QUICK_SEARCH_TOGGLE" ->
+            value(detail, "title", "shortcutCode") + " · " + value(detail, "contentType", "leadType");
+        case "QUICK_SEARCH_IMAGE_UPLOAD" -> "上传图片素材：" + value(detail, "size", "extension");
+        case "ACCOUNT_RESET_PASSWORD" -> "重置账号密码：" + value(detail, "role", "id");
         default -> fallback(entry.detail());
       };
     }
@@ -276,10 +292,26 @@ public class AuditLogService {
       case "DATASOURCE_CREATE" -> "新增数据源";
       case "DATASOURCE_UPDATE" -> "编辑数据源";
       case "DATASOURCE_DELETE" -> "删除数据源";
+      case "DATASOURCE_TOGGLE" -> "启用/停用数据源";
+      case "DATASOURCE_REPLACE_SHEET" -> "更换数据源表格";
+      case "DATASOURCE_MAPPING_SAVE" -> "保存字段映射";
+      case "DATASOURCE_MAPPING_RESTORE" -> "恢复字段映射";
+      case "DATASOURCE_SYNC_START" -> "启动数据源同步";
+      case "DATASOURCE_CSV_IMPORT" -> "CSV 导入客户数据";
+      case "QUICK_SEARCH_CREATE" -> "新增速搜内容";
+      case "QUICK_SEARCH_UPDATE" -> "编辑速搜内容";
+      case "QUICK_SEARCH_DELETE" -> "删除速搜内容";
+      case "QUICK_SEARCH_TOGGLE" -> "启用/停用速搜内容";
+      case "QUICK_SEARCH_IMAGE_UPLOAD" -> "上传速搜图片";
+      case "SKILL_BINDING_CREATE" -> "新增 Skill 绑定";
+      case "SKILL_BINDING_UPDATE" -> "编辑 Skill 绑定";
+      case "SKILL_BINDING_DELETE" -> "删除 Skill 绑定";
+      case "SKILL_BINDING_TOGGLE" -> "启用/停用 Skill 绑定";
       case "ACCOUNT_CREATE" -> "新增账号";
       case "ACCOUNT_UPDATE" -> "编辑账号";
       case "ACCOUNT_DELETE" -> "删除账号";
       case "ACCOUNT_TOGGLE" -> "启用/停用账号";
+      case "ACCOUNT_RESET_PASSWORD" -> "重置账号密码";
       default -> action;
     };
   }
@@ -293,8 +325,12 @@ public class AuditLogService {
       case "UPDATE_CONFIG" -> "配置操作";
       case "CREATE_NOTICE", "STOP_NOTICE", "PUBLISH_NOTICE" -> "公告操作";
       case "VERSION_PUBLISH", "VERSION_REVOKE" -> "版本操作";
-      case "DATASOURCE_CREATE", "DATASOURCE_UPDATE", "DATASOURCE_DELETE" -> "数据源操作";
-      case "ACCOUNT_CREATE", "ACCOUNT_UPDATE", "ACCOUNT_DELETE", "ACCOUNT_TOGGLE" -> "账号操作";
+      case "DATASOURCE_CREATE", "DATASOURCE_UPDATE", "DATASOURCE_DELETE", "DATASOURCE_TOGGLE",
+          "DATASOURCE_REPLACE_SHEET", "DATASOURCE_MAPPING_SAVE", "DATASOURCE_MAPPING_RESTORE",
+          "DATASOURCE_SYNC_START", "DATASOURCE_CSV_IMPORT" -> "数据源操作";
+      case "QUICK_SEARCH_CREATE", "QUICK_SEARCH_UPDATE", "QUICK_SEARCH_DELETE", "QUICK_SEARCH_TOGGLE", "QUICK_SEARCH_IMAGE_UPLOAD" -> "速搜内容操作";
+      case "SKILL_BINDING_CREATE", "SKILL_BINDING_UPDATE", "SKILL_BINDING_DELETE", "SKILL_BINDING_TOGGLE" -> "Skill 配置操作";
+      case "ACCOUNT_CREATE", "ACCOUNT_UPDATE", "ACCOUNT_DELETE", "ACCOUNT_TOGGLE", "ACCOUNT_RESET_PASSWORD" -> "账号操作";
       default -> "其他";
     };
   }

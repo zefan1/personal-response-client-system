@@ -3,12 +3,14 @@ package com.privateflow.modules.api.auth;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.Role;
 import com.privateflow.modules.match.ApiResponse;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -18,6 +20,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
   private static final Set<String> PUBLIC_POSTS = Set.of("/api/v1/auth/login", "/admin/api/v1/auth/login");
+  private static final Set<String> ALLOWED_CORS_ORIGINS = Set.of(
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+      "http://localhost:5174",
+      "http://127.0.0.1:5174");
   private final JwtService jwtService;
   private final AccountRepository accountRepository;
   private final ObjectMapper objectMapper;
@@ -48,25 +55,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     try {
       String header = request.getHeader("Authorization");
       if (header == null || !header.startsWith("Bearer ")) {
-        writeError(response, HttpServletResponse.SC_UNAUTHORIZED, ApiErrorCodes.AUTH_FAILED, "Token required");
+        writeError(request, response, HttpServletResponse.SC_UNAUTHORIZED, ApiErrorCodes.AUTH_FAILED, "请先登录");
         return;
       }
       user = jwtService.verify(header.substring("Bearer ".length()));
       Account account = accountRepository.findByPhone(user.username())
-          .orElseThrow(() -> new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "account disabled"));
+          .orElseThrow(() -> new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "账号已停用，请联系管理员"));
       if (!account.enabled()) {
-        throw new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "account disabled");
+        throw new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "账号已停用，请联系管理员");
       }
-      user = new AuthUser(account.username(), account.displayName(), account.role(), account.leaderId());
+      if (user.tokenVersion() != account.tokenVersion()) {
+        throw new ApiException(ApiErrorCodes.AUTH_FAILED, "账号权限或密码已变更，请重新登录");
+      }
+      user = new AuthUser(account.username(), account.displayName(), account.role(), account.leaderId(), account.tokenVersion());
     } catch (RuntimeException ex) {
       String code = ex instanceof ApiException apiEx ? apiEx.getErrorCode() : ApiErrorCodes.AUTH_FAILED;
-      writeError(response, HttpServletResponse.SC_UNAUTHORIZED, code, "Token invalid or expired");
+      String message = ex instanceof ApiException apiEx ? apiEx.getMessage() : "登录状态无效，请重新登录";
+      writeError(request, response, HttpServletResponse.SC_UNAUTHORIZED, code, message);
       return;
     }
-    if (request.getRequestURI().startsWith("/admin/api/v1/")
-        && user.role() == com.privateflow.modules.api.Role.KEEPER
-        && !keeperAnalyticsOverview(request)) {
-      writeError(response, HttpServletResponse.SC_FORBIDDEN, ApiErrorCodes.FORBIDDEN, "permission denied");
+    if (request.getRequestURI().startsWith("/admin/api/v1/") && !allowedAdminAccess(request, user)) {
+      writeError(request, response, HttpServletResponse.SC_FORBIDDEN, ApiErrorCodes.FORBIDDEN, "当前账号没有后台权限");
       return;
     }
     try {
@@ -77,14 +86,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
   }
 
-  private void writeError(HttpServletResponse response, int status, String code, String message) throws IOException {
+  private void writeError(HttpServletRequest request, HttpServletResponse response, int status, String code, String message) throws IOException {
+    applyCorsHeaders(request, response);
     response.setStatus(status);
+    response.setCharacterEncoding(StandardCharsets.UTF_8.name());
     response.setContentType(MediaType.APPLICATION_JSON_VALUE);
     objectMapper.writeValue(response.getWriter(), ApiResponse.error(code, message));
   }
 
-  private boolean keeperAnalyticsOverview(HttpServletRequest request) {
-    return "GET".equalsIgnoreCase(request.getMethod())
-        && "/admin/api/v1/analytics/overview".equals(request.getRequestURI());
+  private void applyCorsHeaders(HttpServletRequest request, HttpServletResponse response) {
+    String origin = request.getHeader("Origin");
+    if (origin == null || !ALLOWED_CORS_ORIGINS.contains(origin)) {
+      return;
+    }
+    response.setHeader("Access-Control-Allow-Origin", origin);
+    response.setHeader("Vary", "Origin");
+    response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+    response.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type");
+  }
+
+  private boolean allowedAdminAccess(HttpServletRequest request, AuthUser user) {
+    return user.role() == Role.ADMIN;
   }
 }

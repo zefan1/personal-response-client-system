@@ -1,6 +1,6 @@
 ALTER TABLE quick_search_items
-  ADD COLUMN IF NOT EXISTS created_by VARCHAR(50) NULL AFTER is_enabled,
-  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER created_by;
+  ADD COLUMN created_by VARCHAR(50) NULL AFTER is_enabled,
+  ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER created_by;
 
 CREATE TABLE IF NOT EXISTS cos_cleanup_queue (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -17,4 +17,4 @@ VALUES
   ('quicksearch.admin.page_size', '20', 'Quick search admin list page size'),
   ('quicksearch.admin.image_max_size_mb', '10', 'Quick search admin image max size MB'),
   ('quicksearch.admin.cos_retention_days', '30', 'Quick search old COS object retention days')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

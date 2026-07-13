@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = ROOT / ".tools" / "acceptance"
-DEFAULT_BACKEND_URL = os.environ.get("PDA_BASE_URL", "http://172.19.250.154:8080")
+DEFAULT_BACKEND_URL = os.environ.get("PDA_BASE_URL", "http://localhost:8080")
 
 
 def ps_command(command: str, cwd: Path = ROOT, env: dict[str, str] | None = None, timeout: int = 300):
@@ -118,6 +118,12 @@ def main() -> int:
         run_step("enum contract alignment", "python scripts\\verify_enum_contract_alignment.py", timeout=120),
         run_step("admin product surface", "python scripts\\verify_admin_product_surface.py", timeout=120),
         run_step("real external source readiness", "python scripts\\verify_real_external_readiness.py", timeout=120),
+        run_step(
+            "release signing readiness",
+            "python scripts\\verify_release_signing_readiness.py"
+            + (" --require-ready" if args.require_signed_package else ""),
+            timeout=120,
+        ),
         run_step("desktop typecheck", "npm run typecheck", cwd=ROOT / "desktop", timeout=180),
         run_step("manual test readiness", f"python scripts\\verify_manual_test_readiness.py --frontend-url http://127.0.0.1:5173/ --backend-url {args.backend_url}", timeout=120),
         run_step(

@@ -18,46 +18,47 @@ public class AnalyticsService {
   }
 
   public Map<String, Object> overview(int days, String leadType, String caller) {
+    requireAdmin();
     return repository.overview(safeDays(days), normalizeLeadType(leadType), scope(caller));
   }
 
   public Map<String, Object> funnels(String leadType, String caller) {
-    requireManager();
+    requireAdmin();
     return repository.funnels(normalizeLeadType(leadType), scope(caller));
   }
 
   public Map<String, Object> staff(int days, String leadType, String caller) {
-    requireManager();
+    requireAdmin();
     return repository.staff(safeDays(days), normalizeLeadType(leadType), scope(caller));
   }
 
   public Map<String, Object> sources(int days, String leadType, String caller) {
-    requireManager();
+    requireAdmin();
     return repository.sources(safeDays(days), normalizeLeadType(leadType), scope(caller));
   }
 
   public Map<String, Object> stages(String leadType, String caller) {
-    requireManager();
+    requireAdmin();
     return repository.stages(normalizeLeadType(leadType), scope(caller));
   }
 
   public Map<String, Object> health(int days, String leadType, String caller) {
-    requireManager();
+    requireAdmin();
     return repository.health(safeDays(days), normalizeLeadType(leadType), scope(caller));
   }
 
   public Map<String, Object> lifecycle(String leadType, String caller) {
-    requireManager();
+    requireAdmin();
     return repository.lifecycle(normalizeLeadType(leadType), scope(caller));
   }
 
   public Map<String, Object> risks(int days, String leadType, String caller) {
-    requireManager();
+    requireAdmin();
     return repository.risks(safeDays(days), normalizeLeadType(leadType), scope(caller));
   }
 
   public Map<String, Object> contentRanking(int days, String leadType, String caller) {
-    requireManager();
+    requireAdmin();
     return repository.contentRanking(safeDays(days), normalizeLeadType(leadType), scope(caller));
   }
 
@@ -73,9 +74,9 @@ public class AnalyticsService {
     return new AnalyticsScope(user.role(), user.username(), requestedCaller);
   }
 
-  private void requireManager() {
+  private void requireAdmin() {
     AuthUser user = AuthContext.current();
-    if (user == null || user.role() == Role.KEEPER) {
+    if (user == null || user.role() != Role.ADMIN) {
       throw new ApiException(ApiErrorCodes.FORBIDDEN, "permission denied");
     }
   }

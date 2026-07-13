@@ -140,8 +140,13 @@ public class AuditLogRepository {
       args.add(query.targetId().trim());
     }
     if (query.keyword() != null && !query.keyword().isBlank()) {
-      sql.append(" AND detail LIKE ? ");
-      args.add("%" + query.keyword().trim() + "%");
+      sql.append(" AND (operator LIKE ? OR detail LIKE ? OR target_id LIKE ? OR target_type LIKE ? OR action LIKE ?) ");
+      String like = "%" + query.keyword().trim() + "%";
+      args.add(like);
+      args.add(like);
+      args.add(like);
+      args.add(like);
+      args.add(like);
     }
     return sql.toString();
   }

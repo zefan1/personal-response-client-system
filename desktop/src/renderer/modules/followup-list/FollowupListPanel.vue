@@ -3,10 +3,17 @@
     <header class="panel-header">
       <div>
         <h2>今日跟进</h2>
-        <p>{{ totalCount }} 个待办客户</p>
+        <p>{{ totalCount }} 个待办客户<span v-if="state.lastLoadedAt"> · {{ lastLoadedText }}</span></p>
       </div>
-      <button class="secondary small" :disabled="state.loading" @click="loadTodayFollowups">
-        {{ state.loading ? '加载中...' : '刷新' }}
+      <button
+        class="secondary small icon-refresh-button"
+        type="button"
+        :disabled="state.loading"
+        aria-label="刷新今日跟进"
+        title="刷新"
+        @click="loadTodayFollowups"
+      >
+        {{ state.loading ? '…' : '↻' }}
       </button>
     </header>
 
@@ -106,6 +113,16 @@ const emptyMap = {
 
 const totalCount = computed(() => tabs.reduce((sum, tab) => sum + state.groups[tab.value].length, 0));
 const emptyText = computed(() => emptyMap[state.activeTab]);
+const lastLoadedText = computed(() => {
+  if (!state.lastLoadedAt) {
+    return '';
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(new Date(state.lastLoadedAt));
+});
 const disposers: Array<() => void> = [];
 
 onMounted(() => {

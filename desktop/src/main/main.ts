@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net, shell } from 'electron';
 import crypto from 'node:crypto';
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,12 +21,20 @@ const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
 const isSmoke = process.env.PDA_ELECTRON_SMOKE === '1';
 const smokeAutoQuit = process.env.PDA_ELECTRON_SMOKE_AUTO_QUIT !== '0';
 const rendererSmoke = process.env.PDA_RENDERER_SMOKE === '1';
+const rendererSmokeTarget = process.env.PDA_RENDERER_SMOKE_TARGET ?? 'desktop';
 const rendererSmokeApiBaseUrl = process.env.PDA_SMOKE_API_BASE_URL ?? 'http://localhost:8080';
+const rendererSmokeAccessToken = process.env.PDA_RENDERER_SMOKE_ACCESS_TOKEN ?? '';
+const smokeUserDataDir = process.env.PDA_ELECTRON_SMOKE_USER_DATA_DIR;
 const clipboardImageHistory: ClipboardHistoryItem[] = [];
 let clipboardPollTimer: NodeJS.Timeout | null = null;
 let onlineStatusPollTimer: NodeJS.Timeout | null = null;
 let lastBroadcastOnlineStatus: boolean | null = null;
 let mainWindow: BrowserWindow | null = null;
+
+if (isSmoke && smokeUserDataDir) {
+  mkdirSync(smokeUserDataDir, { recursive: true });
+  app.setPath('userData', smokeUserDataDir);
+}
 
 const DESKTOP_DEFAULTS = {
   clipboardPollIntervalMs: 500,
@@ -44,9 +53,12 @@ function createWindow() {
     minHeight: 560,
     title: '私域辅助系统',
     webPreferences: {
-      preload: path.join(__dirname, '../preload/preload.js'),
+      ...(rendererSmoke && rendererSmokeTarget === 'admin'
+        ? {}
+        : { preload: path.join(__dirname, '../preload/preload.cjs') }),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true
     }
   });
   mainWindow.setMenu(null);
@@ -63,9 +75,9 @@ function createWindow() {
     void mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
   if (isSmoke) {
-    mainWindow.webContents.once('did-finish-load', () => {
+    mainWindow.webContents.on('did-finish-load', () => {
       if (rendererSmoke && mainWindow) {
-        void runRendererSmoke(mainWindow);
+        void (rendererSmokeTarget === 'admin' ? runAdminRendererSmoke(mainWindow) : runRendererSmoke(mainWindow));
         return;
       }
       if (smokeAutoQuit) {
@@ -77,10 +89,12 @@ function createWindow() {
 
 async function runRendererSmoke(window: BrowserWindow) {
   try {
-    await window.webContents.executeJavaScript(`
+    const result = await window.webContents.executeJavaScript(`
       (async () => {
         const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         const findButton = (text) => [...document.querySelectorAll('button')].find((item) => item.textContent.includes(text));
+        const findButtonByLabel = (text) => [...document.querySelectorAll('button')]
+          .find((item) => (item.getAttribute('aria-label') || item.getAttribute('title') || '').includes(text));
         const inputByLabel = (text) => {
           const label = [...document.querySelectorAll('label')].find((item) => item.textContent.includes(text));
           return label ? label.querySelector('input,select,textarea') : null;
@@ -107,32 +121,76 @@ async function runRendererSmoke(window: BrowserWindow) {
           }
           throw new Error('missing selector: ' + selector);
         };
+        const waitForCondition = async (predicate, label, timeout = 15000) => {
+          const started = Date.now();
+          while (Date.now() - started < timeout) {
+            if (await predicate()) return;
+            await delay(100);
+          }
+          throw new Error('condition timeout: ' + label);
+        };
         const clickFirst = async (selector) => {
           const element = await waitForSelector(selector);
           element.click();
           await delay(150);
           return element;
         };
-        const assertActiveFollowupTab = (index) => {
-          const tabs = [...document.querySelectorAll('.followup-panel .tab-button')];
-          if (!tabs[index]?.classList.contains('active')) {
-            throw new Error('followup active tab mismatch: ' + index);
-          }
-        };
-        const assertDesktopSmoke = async () => {
+          const assertActiveFollowupTab = (index) => {
+            const tabs = [...document.querySelectorAll('.followup-panel .tab-button')];
+            if (!tabs[index]?.classList.contains('active')) {
+              throw new Error('followup active tab mismatch: ' + index);
+            }
+          };
+          const assertReplyCurrentTaskLayout = () => {
+            const card = document.querySelector('.reply-current-task');
+            if (!card) return;
+            const copy = card.children[0];
+            const actions = card.querySelector('.reply-current-actions');
+            if (!copy || !actions) {
+              throw new Error('reply current task layout missing copy or actions');
+            }
+            const cardRect = card.getBoundingClientRect();
+            const copyRect = copy.getBoundingClientRect();
+            const actionsRect = actions.getBoundingClientRect();
+            if (copyRect.width < cardRect.width * 0.75) {
+              throw new Error('reply current task copy column is too narrow: ' + JSON.stringify({
+                cardWidth: cardRect.width,
+                copyWidth: copyRect.width
+              }));
+            }
+            if (actionsRect.top < copyRect.bottom - 1) {
+              throw new Error('reply current task actions still share the copy row');
+            }
+          };
+          const assertDesktopSmoke = async () => {
           await waitForSelector('.workbench-panel');
-          await waitForSelector('.recognition');
-          await waitForSelector('.followup-panel');
           await waitForSelector('.customer-panel');
           await waitForSelector('.reply-panel');
-          const refreshButtons = [...document.querySelectorAll('.workbench-panel button, .followup-panel button')]
-            .filter((button) => !button.disabled);
-          if (refreshButtons.length < 2) {
-            throw new Error('desktop panels expose too few enabled buttons');
+          const navLabels = [...document.querySelectorAll('.desktop-nav-button .nav-label')]
+            .map((item) => item.textContent.trim());
+          if (navLabels.join('|') !== '工作台|客户档案|回复助手') {
+            throw new Error('desktop nav labels mismatch: ' + navLabels.join('|'));
           }
-          refreshButtons[0].click();
-          refreshButtons[1].click();
-          await delay(300);
+          if (document.querySelector('.global-recognize-button')) {
+            throw new Error('legacy global recognize button is still rendered');
+          }
+          if (document.querySelector('.global-action-bar')) {
+            throw new Error('legacy global action bar is still rendered');
+          }
+          const actionButtons = [...document.querySelectorAll('.sidebar-quick-actions button')];
+          const actionLabels = [...document.querySelectorAll('.sidebar-quick-actions .action-label')]
+            .map((item) => item.textContent.trim());
+          if (actionLabels.join('|') !== '识别|模板|批量') {
+            throw new Error('sidebar quick actions mismatch: ' + actionLabels.join('|'));
+          }
+          if (document.documentElement.scrollWidth > window.innerWidth + 1) {
+            throw new Error('desktop has horizontal overflow');
+          }
+          actionButtons[2].click();
+          const drawer = await waitForSelector('.task-queue-backdrop');
+          if (getComputedStyle(drawer).display === 'none') {
+            throw new Error('task queue drawer did not open');
+          }
           const followupTabs = [...document.querySelectorAll('.followup-panel .tab-button')];
           if (followupTabs.length !== 4) {
             throw new Error('followup tab count mismatch: ' + followupTabs.length);
@@ -142,19 +200,33 @@ async function runRendererSmoke(window: BrowserWindow) {
             await delay(50);
             assertActiveFollowupTab(index);
           }
-          await clickFirst('.recognition .toolbar .secondary');
-          const textForm = await waitForSelector('.recognition .two-box');
+          const closeDrawer = [...document.querySelectorAll('.task-queue-drawer button')]
+            .find((button) => (button.getAttribute('aria-label') || '').includes('关闭待办队列'));
+          closeDrawer?.click();
+          await delay(150);
+          const replyNav = [...document.querySelectorAll('.desktop-nav-button')]
+            .find((button) => button.textContent.includes('回复'));
+          replyNav.click();
+          await delay(150);
+          const textModeButton = [...document.querySelectorAll('.reply-text-channel button')]
+            .find((button) => button.textContent.includes('文字通道'));
+          textModeButton.click();
+          const textForm = await waitForSelector('.reply-text-channel .two-box');
           if (!textForm.querySelector('input') || !textForm.querySelector('textarea')) {
-            throw new Error('recognition text mode missing inputs');
+            throw new Error('reply assistant text mode missing inputs');
           }
+          const customerNav = [...document.querySelectorAll('.desktop-nav-button')]
+            .find((button) => button.textContent.includes('客户'));
+          customerNav.click();
+          await delay(150);
           const customerSearch = await waitForSelector('.customer-panel .search-row input');
           setValue(customerSearch, '18800001111');
           await clickFirst('.customer-panel .search-row button');
           await delay(500);
-          const quickActionButtons = [...document.querySelectorAll('.workbench-panel .quick-actions button')];
-          if (quickActionButtons.length < 3) {
-            throw new Error('workbench quick action count mismatch: ' + quickActionButtons.length);
-          }
+          const workbenchNav = [...document.querySelectorAll('.desktop-nav-button')]
+            .find((button) => button.textContent.includes('工作台'));
+          workbenchNav.click();
+          await delay(150);
           const linkButtons = [...document.querySelectorAll('.workbench-panel .section-inline-head .link-button')];
           if (linkButtons.length < 2) {
             throw new Error('workbench view-all links missing');
@@ -167,17 +239,34 @@ async function runRendererSmoke(window: BrowserWindow) {
           linkButtons[1].click();
           await delay(150);
           assertActiveFollowupTab(3);
-          quickActionButtons[0].click();
-          await delay(150);
-          await waitForSelector('.recognition .loading-skeleton, .recognition .two-box');
-          quickActionButtons[2].click();
-          await delay(150);
-          const workbenchToast = document.querySelector('.workbench-panel .banner')?.textContent ?? '';
-          if (!workbenchToast.trim()) {
-            throw new Error('batch template quick action did not show guidance');
+          actionButtons[0].click();
+          await waitForCondition(() => {
+            const activeNav = [...document.querySelectorAll('.desktop-nav-button')]
+              .find((button) => button.classList.contains('active'));
+            const activeLabel = activeNav?.querySelector('.nav-label')?.textContent ?? '';
+            return document.body.innerText.includes('屏幕截图失败')
+              || document.body.innerText.includes('截图失败')
+              || document.body.innerText.includes('识别失败')
+              || document.body.innerText.includes('请求超时')
+              || activeLabel.includes('回复助手');
+          }, 'global recognize completed or failed', 22000);
+          const activeNav = [...document.querySelectorAll('.desktop-nav-button')]
+            .find((button) => button.classList.contains('active'));
+          const activeLabel = activeNav?.querySelector('.nav-label')?.textContent ?? '';
+          const hasRecognizeFailure = document.body.innerText.includes('屏幕截图失败')
+            || document.body.innerText.includes('截图失败')
+            || document.body.innerText.includes('识别失败')
+            || document.body.innerText.includes('请求超时');
+          if (!activeLabel.includes('回复助手') && !hasRecognizeFailure) {
+            throw new Error('global screen recognize neither focused reply assistant nor showed a failure');
           }
-          quickActionButtons[1].click();
+          assertReplyCurrentTaskLayout();
+          actionButtons[1].click();
           const quickInput = await waitForSelector('.quick-search-overlay .quick-search-input');
+          const quickDrawer = await waitForSelector('.quick-search-box');
+          if (quickDrawer.getAttribute('aria-label') !== '模板') {
+            throw new Error('quick-search drawer label mismatch: ' + quickDrawer.getAttribute('aria-label'));
+          }
           setValue(quickInput, 'smoke');
           await delay(350);
           const quickFilters = [...document.querySelectorAll('.quick-search-overlay .quick-filter button')];
@@ -192,6 +281,14 @@ async function runRendererSmoke(window: BrowserWindow) {
               throw new Error('quick-search filter did not become active');
             }
           }
+          await delay(3200);
+          if (!document.querySelector('.quick-search-overlay')) {
+            throw new Error('quick-search drawer auto closed unexpectedly');
+          }
+          const closeQuickSearch = [...document.querySelectorAll('.quick-search-box button')]
+            .find((button) => (button.getAttribute('aria-label') || '').includes('关闭模板'));
+          closeQuickSearch?.click();
+          await waitForCondition(() => !document.querySelector('.quick-search-overlay'), 'quick-search drawer closed by icon');
           return true;
         };
         const hasLoginForm = () => Boolean(inputByLabel('API 地址') && inputByLabel('账号') && inputByLabel('密码'));
@@ -204,24 +301,70 @@ async function runRendererSmoke(window: BrowserWindow) {
           await delay(100);
         }
         if (hasLoginForm()) {
-          setValue(inputByLabel('API 地址'), ${JSON.stringify(rendererSmokeApiBaseUrl)});
-          setValue(inputByLabel('账号'), 'admin');
-          setValue(inputByLabel('密码'), 'admin123');
-          const mode = inputByLabel('入口');
-          if (mode) setValue(mode, 'desktop');
-          findButton('登录').click();
+          localStorage.setItem('desktop_config', JSON.stringify({
+            apiBaseUrl: ${JSON.stringify(rendererSmokeApiBaseUrl)},
+            accessToken: ${JSON.stringify(rendererSmokeAccessToken)},
+            accountRole: 'ADMIN',
+            quicksearchResultLimit: 5,
+            quicksearchCacheRefreshOnStartup: false,
+            searchInputDebounceMs: 50
+          }));
+          window.location.hash = '#/desktop';
+          window.location.reload();
+          return 'renderer_smoke_reloaded';
         }
         await waitForSelector('.desktop-sidebar');
         await waitForText('工作台');
         await assertDesktopSmoke();
-        const globalRecognize = await waitForSelector('.global-recognize-button');
-        if (!globalRecognize.textContent.includes('识别聊天')) {
-          throw new Error('global recognize button missing visible label');
+          await waitForSelector('.sidebar-quick-actions');
+          await waitForSelector('.desktop-mode-tools');
+          const alertBell = document.querySelector('.alert-bell');
+          if (alertBell) {
+            alertBell.click();
+            const alertPanel = await waitForSelector('.alert-panel');
+            const sidebarRect = document.querySelector('.desktop-sidebar').getBoundingClientRect();
+            const panelRect = alertPanel.getBoundingClientRect();
+            if (panelRect.left < sidebarRect.right || panelRect.right > window.innerWidth + 1 || panelRect.width < 240) {
+              throw new Error('alert panel geometry invalid: ' + JSON.stringify({
+                sidebarRight: sidebarRect.right,
+                panelLeft: panelRect.left,
+                panelRight: panelRect.right,
+                panelWidth: panelRect.width,
+                viewportWidth: window.innerWidth
+              }));
+            }
+            if (!alertPanel.querySelector('.alert-row') || !alertPanel.textContent.trim()) {
+              throw new Error('alert panel content is not visible');
+            }
+            findButtonByLabel('关闭提醒中心')?.click();
+            await waitForCondition(() => !document.querySelector('.alert-panel'), 'alert panel closed');
+          }
+          const pinButton = document.querySelector('.desktop-mode-bar .pin-window-button');
+        if (!pinButton) {
+          throw new Error('pin window button missing in Electron: ' + JSON.stringify({
+            href: window.location.href,
+            hasBridge: Boolean(window.desktopBridge),
+            bridgeKeys: Object.keys(window.desktopBridge ?? {}),
+            header: document.querySelector('.desktop-mode-bar')?.innerHTML ?? ''
+          }));
+        }
+        if (!window.desktopBridge?.getAlwaysOnTop || !window.desktopBridge?.toggleAlwaysOnTop) {
+          throw new Error('pin window bridge methods missing');
+        }
+        const pinState = await window.desktopBridge.getAlwaysOnTop();
+        if (!pinState.success) {
+          throw new Error('pin window bridge state unavailable: ' + JSON.stringify(pinState));
+        }
+        if (!['true', 'false'].includes(pinButton.getAttribute('aria-pressed') || '')) {
+          throw new Error('pin window button missing pressed state');
+        }
+        if ((pinButton.getAttribute('aria-label') || pinButton.getAttribute('title') || '').length === 0) {
+          throw new Error('pin window button missing accessible label');
         }
         if (document.querySelector('.ops-admin-shell')) {
           throw new Error('Electron desktop rendered admin shell inline');
         }
-        const adminButton = findButton('管理后台');
+        const adminButton = findButton('后台');
         if (!adminButton) {
           throw new Error('admin shortcut missing for admin account');
         }
@@ -235,6 +378,9 @@ async function runRendererSmoke(window: BrowserWindow) {
         return true;
       })();
     `);
+    if (result === 'renderer_smoke_reloaded') {
+      return;
+    }
     console.log('renderer_smoke=passed');
     app.quit();
   } catch (error) {
@@ -243,8 +389,139 @@ async function runRendererSmoke(window: BrowserWindow) {
   }
 }
 
+async function runAdminRendererSmoke(window: BrowserWindow) {
+  try {
+    const result = await window.webContents.executeJavaScript(`
+      (async () => {
+        const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const waitForSelector = async (selector, timeout = 15000) => {
+          const started = Date.now();
+          while (Date.now() - started < timeout) {
+            const element = document.querySelector(selector);
+            if (element) return element;
+            await delay(100);
+          }
+          throw new Error('missing selector: ' + selector);
+        };
+        const waitForCondition = async (predicate, label, timeout = 15000) => {
+          const started = Date.now();
+          while (Date.now() - started < timeout) {
+            if (await predicate()) return;
+            await delay(100);
+          }
+          throw new Error('condition timeout: ' + label);
+        };
+        const setValue = (element, value) => {
+          element.value = value;
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        const buttonByText = (text, root = document) => [...root.querySelectorAll('button')]
+          .find((button) => button.textContent.includes(text));
+        const subnavByText = (text) => [...document.querySelectorAll('.ops-admin-subnav-button')]
+          .find((button) => button.textContent.includes(text));
+        const inputByLabel = (text) => {
+          const label = [...document.querySelectorAll('label')].find((item) => item.textContent.includes(text));
+          return label ? label.querySelector('input,select,textarea') : null;
+        };
+        const hasLoginForm = () => Boolean(inputByLabel('API 地址') && inputByLabel('账号') && inputByLabel('密码'));
+
+        const started = Date.now();
+        while (!hasLoginForm() && !document.querySelector('.ops-admin-shell') && Date.now() - started < 15000) {
+          await delay(100);
+        }
+        if (hasLoginForm()) {
+          localStorage.setItem('desktop_config', JSON.stringify({
+            apiBaseUrl: ${JSON.stringify(rendererSmokeApiBaseUrl)},
+            accessToken: ${JSON.stringify(rendererSmokeAccessToken)},
+            accountRole: 'ADMIN'
+          }));
+          window.location.hash = '#/admin';
+          window.location.reload();
+          return 'renderer_smoke_reloaded';
+        }
+
+        await waitForSelector('.ops-admin-shell');
+
+        subnavByText('客户数据对接')?.click();
+        await waitForSelector('.ops-table-row.customer-search');
+        const customerInput = [...document.querySelectorAll('input')]
+          .find((input) => (input.getAttribute('placeholder') || '').includes('1111'));
+        if (!customerInput) throw new Error('admin customer search input missing');
+        setValue(customerInput, '1111');
+        buttonByText('查询客户')?.click();
+        await waitForCondition(
+          () => [...document.querySelectorAll('.ops-table-row.customer-search:not(.head)')]
+            .some((row) => row.textContent.includes('1111')),
+          'admin customer 1111 search result'
+        );
+        const customerRow = document.querySelector('.ops-table-row.customer-search:not(.head)');
+        buttonByText('查看档案', customerRow)?.click();
+        await waitForSelector('.customer-search-detail');
+
+        subnavByText('账号与权限')?.click();
+        await waitForCondition(() => document.querySelectorAll('.ops-table-row.accounts').length > 1, 'account rows loaded');
+        const accountRow = document.querySelector('.ops-table-row.accounts:not(.head)');
+        const accountCells = [...accountRow.children];
+        if (accountCells.length !== 7 || !accountCells[6].classList.contains('ops-row-actions')) {
+          throw new Error('account table does not have a dedicated seventh action column');
+        }
+        const statusRect = accountCells[5].getBoundingClientRect();
+        const actionRect = accountCells[6].getBoundingClientRect();
+        const verticallyOverlaps = actionRect.top < statusRect.bottom && statusRect.top < actionRect.bottom;
+        if (actionRect.left <= statusRect.left || !verticallyOverlaps) {
+          throw new Error('account action column wrapped below status');
+        }
+
+        subnavByText('速搜内容管理')?.click();
+        await waitForCondition(() => Boolean(buttonByText('新增内容')), 'quick-search admin page loaded');
+        buttonByText('新增内容')?.click();
+        const drawer = await waitForSelector('.ops-drawer');
+        const labels = [...drawer.querySelectorAll('.ops-variable-bar button')]
+          .map((button) => button.textContent.trim());
+        const expected = ['客户昵称', '手机号', '意向门店', '意向项目', '客户阶段', '意向等级', '下次跟进时间', '预约日期', '预约项目', '预约门店', '是否到店', '分配管家'];
+        if (labels.join('|') !== expected.join('|')) {
+          throw new Error('quick-search variable labels mismatch: ' + labels.join('|'));
+        }
+        buttonByText('意向等级', drawer)?.click();
+        await delay(50);
+        if (drawer.querySelector('textarea')?.value !== '{{意向等级}}') {
+          throw new Error('quick-search Chinese placeholder was not inserted');
+        }
+        buttonByText('取消', drawer)?.click();
+
+        subnavByText('客户标签与分层')?.click();
+        await waitForCondition(() => document.querySelectorAll('.ops-tag-card').length >= 4, 'tag categories loaded');
+        const tagText = [...document.querySelectorAll('.ops-tag-card')]
+          .map((card) => card.textContent)
+          .join('|');
+        for (const expectedTag of ['忠诚型', '腹直肌分离', '担心没有效果', '高意向']) {
+          if (!tagText.includes(expectedTag)) {
+            throw new Error('localized tag missing: ' + expectedTag);
+          }
+        }
+        for (const internalText of ['personalityType', 'bodyConcerns', 'intentLevel', 'Loyalist', 'Diastasis Recti', 'Fear No Effect']) {
+          if (tagText.includes(internalText)) {
+            throw new Error('internal English tag text is visible: ' + internalText);
+          }
+        }
+        return true;
+      })();
+    `);
+    if (result === 'renderer_smoke_reloaded') {
+      return;
+    }
+    console.log('renderer_smoke=passed target=admin');
+    app.quit();
+  } catch (error) {
+    console.error('renderer_smoke=failed target=admin', error);
+    app.exit(1);
+  }
+}
+
 app.whenReady().then(() => {
   registerOnlineStatusIpc();
+  registerWindowControlIpc();
   registerAdminOpenExternal();
   registerScreenshotCapture();
   registerClipboardWriteText();
@@ -281,10 +558,26 @@ function registerOnlineStatusIpc() {
   ipcMain.handle('app:get-online-status', () => getOnlineStatus());
 }
 
+function registerWindowControlIpc() {
+  ipcMain.handle('window:get-always-on-top', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    return { success: Boolean(window), alwaysOnTop: window?.isAlwaysOnTop() ?? false };
+  });
+  ipcMain.handle('window:toggle-always-on-top', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) {
+      return { success: false, alwaysOnTop: false, error: 'WINDOW_NOT_FOUND' };
+    }
+    const next = !window.isAlwaysOnTop();
+    window.setAlwaysOnTop(next);
+    return { success: true, alwaysOnTop: window.isAlwaysOnTop() };
+  });
+}
+
 function registerAdminOpenExternal() {
-  ipcMain.handle('admin:open-external', async () => {
+  ipcMain.handle('admin:open-external', async (_event, payload?: { url?: string }) => {
     try {
-      const url = adminConsoleUrl();
+      const url = adminConsoleUrl(payload?.url);
       if (isSmoke) {
         return { success: true, url };
       }
@@ -300,11 +593,18 @@ function registerAdminOpenExternal() {
   });
 }
 
-function adminConsoleUrl(): string {
+function adminConsoleUrl(requestedUrl?: string): string {
   const configured = process.env.PDA_ADMIN_CONSOLE_URL;
-  const base = configured && configured.trim()
+  const base = requestedUrl && requestedUrl.trim()
+    ? requestedUrl.trim()
+    : configured && configured.trim()
     ? configured.trim()
-    : `${process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173'}/#/admin`;
+    : process.env.VITE_DEV_SERVER_URL
+      ? `${process.env.VITE_DEV_SERVER_URL}/#/admin`
+      : '';
+  if (!base) {
+    throw new Error('PDA_ADMIN_CONSOLE_URL is required to open admin console in packaged builds');
+  }
   const url = new URL(base);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('Admin console URL must use http or https');
@@ -361,20 +661,13 @@ function registerScreenshotCapture() {
   ipcMain.handle('screenshot:capture', async () => {
     try {
       const sources = await desktopCapturer.getSources({
-        types: ['window'],
+        types: ['screen'],
         thumbnailSize: { width: 1920, height: 1080 },
-        fetchWindowIcons: true
+        fetchWindowIcons: false
       });
-      const candidates = sources.filter((source) => {
-        const name = source.name.toLowerCase();
-        const size = source.thumbnail.getSize();
-        return (name.includes('wechat') || name.includes('weixin') || name.includes('微信') || name.includes('企业微信') || name.includes('wxwork'))
-          && size.width >= DESKTOP_DEFAULTS.clipboardMinImageDimension
-          && size.height >= DESKTOP_DEFAULTS.clipboardMinImageDimension;
-      });
-      const selected = candidates[0];
+      const selected = sources.find((source) => source.id.startsWith('screen:0:')) ?? sources[0];
       if (!selected) {
-        return { success: false, error: 'NO_WECHAT_WINDOW', message: 'No WeChat or WeCom window detected' };
+        return { success: false, error: 'CAPTURE_FAILED', message: 'No screen source detected' };
       }
       const png = selected.thumbnail.toPNG();
       const size = selected.thumbnail.getSize();
@@ -386,7 +679,7 @@ function registerScreenshotCapture() {
         imageBase64: png.toString('base64'),
         width: size.width,
         height: size.height,
-        windowTitle: selected.name
+        screenTitle: selected.name
       };
     } catch (error) {
       return { success: false, error: 'CAPTURE_FAILED', message: 'Screenshot capture failed' };

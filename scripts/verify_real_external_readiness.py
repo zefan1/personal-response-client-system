@@ -17,7 +17,7 @@ CHECKS = [
     {
         "name": "image_real_http_client",
         "path": "src/main/java/com/privateflow/modules/image/client/HttpImageRecognitionClient.java",
-        "required": ["HttpClient", "Authorization", "multipart/form-data"],
+        "required": ["HttpClient", "Authorization", "application/json", "image_url"],
         "blocking": True,
     },
     {
@@ -32,6 +32,30 @@ CHECKS = [
         "required": ["createRow", "updateRow", "HttpClient", "Authorization"],
         "blocking": True,
     },
+    {
+        "name": "llm_real_http_client",
+        "path": "src/main/java/com/privateflow/modules/llm/HttpLlmClient.java",
+        "required": ["HttpClient", "Authorization", "/v1/chat/completions", "OPENAI_COMPATIBLE"],
+        "blocking": True,
+    },
+    {
+        "name": "llm_scene_routing_runtime",
+        "path": "src/main/java/com/privateflow/modules/llm/LlmRoutingService.java",
+        "required": ["findEnabled", "findActive", "AiEnvironmentType.LLM", "configProvider.get()"],
+        "blocking": True,
+    },
+    {
+        "name": "llm_business_scene_enum",
+        "path": "src/main/java/com/privateflow/modules/llm/LlmScene.java",
+        "required": ["REPLY_GENERATION", "PROFILE_EXTRACTION", "FOLLOWUP_SUGGESTION", "ABNORMAL_DETECTION", "SUMMARY"],
+        "blocking": True,
+    },
+    {
+        "name": "llm_call_logging",
+        "path": "src/main/java/com/privateflow/modules/llm/LlmService.java",
+        "required": ["callLogger.logCall", "routingService.resolve", "client.generate"],
+        "blocking": True,
+    },
 ]
 
 CONFIG_KEYS = {
@@ -41,6 +65,14 @@ CONFIG_KEYS = {
     "image.api_key": ["src/main/java/com/privateflow/modules/image/config/ImageConfigProvider.java", "src/main/resources/db/migration"],
     "table.api_base_url": ["src/main/java/com/privateflow/modules/tablewrite/config/TableConfigProvider.java", "src/main/resources/db/migration"],
     "table.api_key": ["src/main/java/com/privateflow/modules/tablewrite/config/TableConfigProvider.java", "src/main/resources/db/migration"],
+    "llm.api_base_url": ["src/main/java/com/privateflow/modules/llm/LlmConfigProvider.java", "src/main/resources/db/migration"],
+    "llm.api_key": ["src/main/java/com/privateflow/modules/llm/LlmConfigProvider.java", "src/main/resources/db/migration"],
+    "llm.model": ["src/main/java/com/privateflow/modules/llm/LlmConfigProvider.java", "src/main/resources/db/migration"],
+    "llm.reply_generation.enabled": ["src/main/java/com/privateflow/modules/llm/LlmReplyGenerationService.java", "src/main/resources/db/migration"],
+    "llm.profile_extraction.enabled": ["src/main/java/com/privateflow/modules/llm/LlmProfileExtractionService.java", "src/main/resources/db/migration"],
+    "llm.followup_suggestion.enabled": ["src/main/java/com/privateflow/modules/llm/LlmFollowupSuggestionService.java", "src/main/resources/db/migration"],
+    "llm.abnormal_detection.enabled": ["src/main/java/com/privateflow/modules/llm/LlmAbnormalDetectionService.java", "src/main/resources/db/migration"],
+    "llm.summary.enabled": ["src/main/java/com/privateflow/modules/llm/LlmSummaryService.java", "src/main/resources/db/migration"],
 }
 
 FORBIDDEN_PATHS = [

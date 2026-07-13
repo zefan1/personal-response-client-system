@@ -44,7 +44,6 @@ for token in [
 service = read("src/main/java/com/privateflow/modules/notices/NoticeService.java")
 for token in [
     "Role.ADMIN",
-    "Role.LEADER",
     "SYSTEM_NOTICE",
     "CREATE_NOTICE",
     "STOP_NOTICE",
@@ -55,6 +54,7 @@ for token in [
     "PublishType.SCHEDULED",
     "createAutoNotice(String title, String content, String level, Duration ttl)",
     "stopAutoNotice(String contentKeyword)",
+    "requireAdmin()",
     "repository.activeAutoContentExists",
     "notice.max_title_chars",
     "notice.max_content_chars",

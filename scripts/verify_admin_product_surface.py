@@ -27,12 +27,29 @@ FORBIDDEN_PATTERNS = [
 
 REQUIRED_MARKERS = [
     (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "ops-admin-shell"),
-    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "AI 与 Skill 配置"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "配置中心"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "Skill 场景管理"),
     (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "数据源与内容"),
-    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "组织、规则与标签"),
-    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "分析与系统运营"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "客户数据对接"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "速搜内容管理"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "组织与规则"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "账号与权限"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "跟进规则引擎配置"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "客户标签与分层"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "分析与系统"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "运营分析看板"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "版本管理"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "系统公告"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "操作审计日志"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "系统健康监控"),
+    (ROOT / "desktop" / "src" / "renderer" / "modules" / "admin" / "AdminConsole.vue", "runtimeMode"),
     (ROOT / "desktop" / "src" / "renderer" / "App.vue", "#/admin/dev-console"),
     (ROOT / "desktop" / "src" / "renderer" / "App.vue", "#/desktop"),
+    (ROOT / "desktop" / "src" / "renderer" / "App.vue", "isElectronRuntime"),
+    (ROOT / "desktop" / "src" / "renderer" / "App.vue", "return '#/admin'"),
+    (ROOT / "desktop" / "src" / "renderer" / "App.vue", "normalizeInitialHash"),
+    (ROOT / "desktop" / "src" / "renderer" / "App.vue", "hasDesktopBridge()"),
+    (ROOT / "desktop" / "src" / "renderer" / "App.vue", "window.history.replaceState(null, '', '#/admin')"),
 ]
 
 

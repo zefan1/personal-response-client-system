@@ -15,8 +15,8 @@
 - [x] `GET /admin/api/v1/analytics/risks`
 - [x] `GET /admin/api/v1/analytics/content-ranking`
 - [x] Preserved existing `/admin/api/v1/analytics/skill-calls`.
-- [x] KEEPER can access only `GET /admin/api/v1/analytics/overview`; other admin APIs remain forbidden.
-- [x] ADMIN can query all callers; LEADER is scoped to self plus current team keepers; KEEPER overview is forced to self.
+- [x] ADMIN-only operations admin analytics: `/admin/api/v1/analytics/*` is part of the production operations backend and is not exposed to LEADER/KEEPER roles.
+- [x] ADMIN can query all callers. If LEADER/KEEPER need personal/team analytics later, use a dedicated `/api/v1/**` desktop-facing endpoint rather than reusing admin routes.
 - [x] `days` is clamped to `1-90`; `leadType` accepts `TUAN_GOU`, `XIAN_SUO`, `PENDING`, or all.
 
 ## Implementation Notes

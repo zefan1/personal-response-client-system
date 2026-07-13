@@ -79,6 +79,37 @@ public class AiConfigController {
     return ApiResponse.ok(environmentService.testImage(id));
   }
 
+  @GetMapping("/admin/api/v1/llm-environments")
+  public ApiResponse<List<AiEnvironment>> llmEnvironments() {
+    return ApiResponse.ok(environmentService.list(AiEnvironmentType.LLM));
+  }
+
+  @PostMapping("/admin/api/v1/llm-environments")
+  public ApiResponse<AiEnvironment> createLlm(@RequestBody AiEnvironmentRequest request) {
+    return ApiResponse.ok(environmentService.create(AiEnvironmentType.LLM, request));
+  }
+
+  @PutMapping("/admin/api/v1/llm-environments/{id}")
+  public ApiResponse<AiEnvironment> updateLlm(@PathVariable("id") long id, @RequestBody AiEnvironmentRequest request) {
+    return ApiResponse.ok(environmentService.update(AiEnvironmentType.LLM, id, request));
+  }
+
+  @PutMapping("/admin/api/v1/llm-environments/{id}/activate")
+  public ApiResponse<AiEnvironment> activateLlm(@PathVariable("id") long id) {
+    return ApiResponse.ok(environmentService.activate(AiEnvironmentType.LLM, id));
+  }
+
+  @DeleteMapping("/admin/api/v1/llm-environments/{id}")
+  public ApiResponse<Void> deleteLlm(@PathVariable("id") long id) {
+    environmentService.delete(AiEnvironmentType.LLM, id);
+    return ApiResponse.ok(null);
+  }
+
+  @PostMapping("/admin/api/v1/llm-environments/{id}/test")
+  public ApiResponse<ImageEnvironmentTestResponse> testLlm(@PathVariable("id") long id) {
+    return ApiResponse.ok(environmentService.testLlm(id));
+  }
+
   @GetMapping("/admin/api/v1/skill-prompt/{type}/versions")
   public ApiResponse<PromptVersionPage> promptVersions(@PathVariable("type") String type) {
     return ApiResponse.ok(promptVersionService.list(type));

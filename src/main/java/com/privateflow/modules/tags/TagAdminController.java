@@ -1,6 +1,7 @@
 package com.privateflow.modules.tags;
 
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.match.ApiResponse;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -56,7 +57,10 @@ public class TagAdminController {
 
   @PutMapping("/admin/api/v1/tags/values/{id}/toggle")
   public ApiResponse<TagValue> toggleValue(@PathVariable("id") long id, @RequestBody TagValueRequest request) {
-    return ApiResponse.ok(service.toggleValue(id, request != null && Boolean.TRUE.equals(request.isEnabled())));
+    if (request == null || request.isEnabled() == null) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "请明确选择启用或停用");
+    }
+    return ApiResponse.ok(service.toggleValue(id, Boolean.TRUE.equals(request.isEnabled())));
   }
 
   @DeleteMapping("/admin/api/v1/tags/values/{id}")

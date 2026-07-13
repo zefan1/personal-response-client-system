@@ -1,5 +1,8 @@
 package com.privateflow.modules.tablewrite.service;
 
+import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.CustomerQueryService;
+import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.tablewrite.ManualSaveRequest;
 import com.privateflow.modules.tablewrite.ManualSaveResult;
 import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
@@ -16,10 +19,18 @@ public class ManualSaveHandler {
 
   private final WecomTableClient tableClient;
   private final TableConfigProvider configProvider;
+  private final CustomerQueryService customerQueryService;
+  private final CustomerAccessService customerAccessService;
 
-  public ManualSaveHandler(WecomTableClient tableClient, TableConfigProvider configProvider) {
+  public ManualSaveHandler(
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      CustomerQueryService customerQueryService,
+      CustomerAccessService customerAccessService) {
     this.tableClient = tableClient;
     this.configProvider = configProvider;
+    this.customerQueryService = customerQueryService;
+    this.customerAccessService = customerAccessService;
   }
 
   public ManualSaveResult save(String phone, ManualSaveRequest request) {
@@ -30,6 +41,13 @@ public class ManualSaveHandler {
         || request.fields() == null
         || request.fields().isEmpty()) {
       throw new TableWriteException(TableWriteErrorCodes.BAD_REQUEST, "sourceTable, sourceRowId and fields are required");
+    }
+    Customer customer = customerQueryService.getByPhone(phone);
+    if (customer == null) {
+      throw new TableWriteException(TableWriteErrorCodes.BAD_REQUEST, "客户不存在");
+    }
+    if (!customerAccessService.canAccess(customer)) {
+      throw new TableWriteException(TableWriteErrorCodes.BAD_REQUEST, "该客户不在你的负责范围内");
     }
     try {
       tableClient.updateRow(

@@ -9,6 +9,8 @@ public interface CustomerQueryService {
 
   List<Customer> searchByNickname(String nickname, int limit);
 
+  List<Customer> searchByKeyword(String keyword, int limit);
+
   List<Customer> scanActiveCustomers(ScanFilter filter);
 
   void refreshCache(String phone);

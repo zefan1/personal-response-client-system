@@ -49,7 +49,8 @@ class NoticeControllerTest {
         "items", List.of(notice),
         "total", 1,
         "page", 2,
-        "size", 30));
+        "size", 30,
+        "totalPages", 1));
 
     mockMvc.perform(get("/admin/api/v1/notices")
             .param("page", "2")
@@ -60,6 +61,7 @@ class NoticeControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.total").value(1))
+        .andExpect(jsonPath("$.data.totalPages").value(1))
         .andExpect(jsonPath("$.data.items[0].status").value("SCHEDULED"))
         .andExpect(jsonPath("$.data.items[0].level").value("WARN"));
 

@@ -8,6 +8,7 @@ import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import com.privateflow.modules.image.health.ImageServiceHealthMonitor;
+import com.privateflow.modules.runtime.RuntimeModeService;
 import com.privateflow.modules.skill.health.SkillHealthMonitor;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import com.privateflow.modules.tablewrite.infra.PendingTableWriteRepository;
@@ -33,6 +34,7 @@ public class HealthService {
   private final ImageServiceHealthMonitor imageHealthMonitor;
   private final PendingTableWriteRepository tableWriteRepository;
   private final TableConfigProvider tableConfigProvider;
+  private final RuntimeModeService runtimeModeService;
   private final Map<String, String> lastStatuses = new ConcurrentHashMap<>();
   private final Map<String, Instant> statusSince = new ConcurrentHashMap<>();
 
@@ -44,7 +46,8 @@ public class HealthService {
       SkillHealthMonitor skillHealthMonitor,
       ImageServiceHealthMonitor imageHealthMonitor,
       PendingTableWriteRepository tableWriteRepository,
-      TableConfigProvider tableConfigProvider) {
+      TableConfigProvider tableConfigProvider,
+      RuntimeModeService runtimeModeService) {
     this.dataSource = dataSource;
     this.redisTemplate = redisTemplate;
     this.alertRepository = alertRepository;
@@ -53,10 +56,11 @@ public class HealthService {
     this.imageHealthMonitor = imageHealthMonitor;
     this.tableWriteRepository = tableWriteRepository;
     this.tableConfigProvider = tableConfigProvider;
+    this.runtimeModeService = runtimeModeService;
   }
 
   public Map<String, Object> health() {
-    requireManager();
+    requireAdmin();
     Map<String, Object> components = new LinkedHashMap<>();
     components.put("skill", skill());
     components.put("imageRecognition", imageRecognition());
@@ -66,6 +70,7 @@ public class HealthService {
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("status", overallStatus(components));
     result.put("timestamp", LocalDateTime.now());
+    result.put("runtimeMode", runtimeModeService.currentMode());
     result.put("components", components);
     result.put("recentAlerts", alertRepository.recentAlerts(
         intConfig("health.alert_history_days", 7),
@@ -149,9 +154,9 @@ public class HealthService {
     return degraded ? "DEGRADED" : "UP";
   }
 
-  private void requireManager() {
+  private void requireAdmin() {
     AuthUser user = AuthContext.current();
-    if (user == null || (user.role() != Role.ADMIN && user.role() != Role.LEADER)) {
+    if (user == null || user.role() != Role.ADMIN) {
       throw new ApiException(ApiErrorCodes.FORBIDDEN, "permission denied");
     }
   }

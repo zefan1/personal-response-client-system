@@ -15,7 +15,7 @@
     "test": "vitest run",
     "package:dir": "npm run build && node scripts/package-dir.mjs",
     "package:verify": "npm run package:dir && node scripts/package-verify.mjs",
-    "package:verify:signed": "npm run package:dir && node -e \"process.env.PDA_REQUIRE_SIGNED_PACKAGE='1'; import('./scripts/package-verify.mjs')\""
+    "package:verify:signed": "npm run build && node -e \"process.env.PDA_REQUIRE_SIGNED_PACKAGE='1'; import('./scripts/package-dir.mjs')\" && node -e \"process.env.PDA_REQUIRE_SIGNED_PACKAGE='1'; import('./scripts/package-verify.mjs')\""
   },
   "build": {
     "extends": null

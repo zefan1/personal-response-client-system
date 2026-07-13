@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AbnormalAlert } from './types';
 
 const closeAlertDatabaseMock = vi.fn();
+const clearAllAlertHistoryMock = vi.fn();
 const deleteExpiredAlertsMock = vi.fn();
 const getPersistedAlertsByPhoneMock = vi.fn();
 const getPersistedRecentAlertsMock = vi.fn();
@@ -9,6 +10,7 @@ const insertAlertHistoryMock = vi.fn();
 const updateAlertAcknowledgedMock = vi.fn();
 
 vi.mock('./alertHistoryDb', () => ({
+  clearAllAlertHistory: clearAllAlertHistoryMock,
   closeAlertDatabase: closeAlertDatabaseMock,
   deleteExpiredAlerts: deleteExpiredAlertsMock,
   getAlertsByPhone: getPersistedAlertsByPhoneMock,
@@ -173,6 +175,12 @@ describe('alertStore', () => {
     await alerts.showAllHistory();
     expect(alerts.abnormalAlertState.historyOpen).toBe(true);
     expect(alerts.abnormalAlertState.recentHistory.map((item) => item.alertId)).toEqual(['history']);
+
+    alerts.hideAlertHistory();
+    expect(alerts.abnormalAlertState.historyOpen).toBe(false);
+    await alerts.clearAlertHistory();
+    expect(clearAllAlertHistoryMock).toHaveBeenCalled();
+    expect(alerts.abnormalAlertState.recentHistory).toEqual([]);
   });
 
   it('initializes and cleans up router listeners and periodic history cleanup', async () => {
@@ -201,6 +209,7 @@ describe('alertStore', () => {
 });
 
 function resetMocks(): void {
+  clearAllAlertHistoryMock.mockReset();
   closeAlertDatabaseMock.mockReset();
   deleteExpiredAlertsMock.mockReset();
   getPersistedAlertsByPhoneMock.mockReset();
@@ -208,6 +217,7 @@ function resetMocks(): void {
   insertAlertHistoryMock.mockReset();
   updateAlertAcknowledgedMock.mockReset();
   deleteExpiredAlertsMock.mockResolvedValue(undefined);
+  clearAllAlertHistoryMock.mockResolvedValue(undefined);
   getPersistedAlertsByPhoneMock.mockResolvedValue([]);
   getPersistedRecentAlertsMock.mockResolvedValue([]);
   insertAlertHistoryMock.mockResolvedValue(undefined);

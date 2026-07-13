@@ -3,6 +3,7 @@ package com.privateflow.modules.quicksearch.admin;
 import com.privateflow.modules.quicksearch.ContentType;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,13 +22,29 @@ public class QuickSearchAdminRepository {
     this.jdbcTemplate = jdbcTemplate;
   }
 
-  public List<QuickSearchAdminItem> list() {
+  public List<QuickSearchAdminItem> list(QuickSearchAdminListQuery query) {
+    SqlAndArgs filter = filterSql(query);
+    List<Object> args = new ArrayList<>(filter.args());
+    args.add((query.page() - 1) * query.size());
+    args.add(query.size());
     return jdbcTemplate.query("""
         SELECT id, content_type, lead_type, title, shortcut_code, content, image_url,
                sort_order, is_enabled, created_by, created_at, updated_at
         FROM quick_search_items
-        ORDER BY content_type ASC, sort_order ASC, shortcut_code ASC
-        """, this::map);
+        """ + filter.where() + "\n"
+        + "ORDER BY " + orderBy(query) + "\n"
+        + "LIMIT ?, ?",
+        this::map,
+        args.toArray());
+  }
+
+  public long count(QuickSearchAdminListQuery query) {
+    SqlAndArgs filter = filterSql(query);
+    Long count = jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM quick_search_items " + filter.where(),
+        Long.class,
+        filter.args().toArray());
+    return count == null ? 0 : count;
   }
 
   public Optional<QuickSearchAdminItem> find(long id) {
@@ -139,5 +156,51 @@ public class QuickSearchAdminRepository {
 
   private String blankToNull(String value) {
     return value == null || value.isBlank() ? null : value.trim();
+  }
+
+  private SqlAndArgs filterSql(QuickSearchAdminListQuery query) {
+    List<String> conditions = new ArrayList<>();
+    List<Object> args = new ArrayList<>();
+    if (query.contentType() != null) {
+      conditions.add("content_type = ?");
+      args.add(query.contentType().name());
+    }
+    if (query.leadType() != null) {
+      conditions.add("lead_type = ?");
+      args.add(query.leadType());
+    }
+    if (query.enabled() != null) {
+      conditions.add("is_enabled = ?");
+      args.add(query.enabled() ? 1 : 0);
+    }
+    if (query.keyword() != null) {
+      conditions.add("(LOWER(title) LIKE ? OR LOWER(shortcut_code) LIKE ? OR LOWER(content) LIKE ?)");
+      String pattern = "%" + query.keyword().toLowerCase() + "%";
+      args.add(pattern);
+      args.add(pattern);
+      args.add(pattern);
+    }
+    return new SqlAndArgs(conditions.isEmpty() ? "" : "WHERE " + String.join(" AND ", conditions), args);
+  }
+
+  private String orderBy(QuickSearchAdminListQuery query) {
+    if ("default".equals(query.sortBy())) {
+      return "content_type ASC, sort_order ASC, shortcut_code ASC";
+    }
+    String column = switch (query.sortBy()) {
+      case "contentType" -> "content_type";
+      case "leadType" -> "lead_type";
+      case "title" -> "title";
+      case "shortcutCode" -> "shortcut_code";
+      case "sortOrder" -> "sort_order";
+      case "enabled" -> "is_enabled";
+      case "createdAt" -> "created_at";
+      case "updatedAt" -> "updated_at";
+      default -> "content_type";
+    };
+    return column + " " + query.sortDir() + ", id ASC";
+  }
+
+  private record SqlAndArgs(String where, List<Object> args) {
   }
 }

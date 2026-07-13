@@ -24,7 +24,7 @@ def request_json(method: str, url: str, body: dict | None = None, timeout: int =
             payload = json.loads(raw)
         except json.JSONDecodeError:
             payload = None
-        return response.status, payload, raw
+        return response.status, payload, sanitize(raw)
 
 
 def request_text(url: str, timeout: int = 5) -> tuple[int, str]:
@@ -32,10 +32,31 @@ def request_text(url: str, timeout: int = 5) -> tuple[int, str]:
         return response.status, response.read().decode("utf-8", errors="replace")
 
 
+def sanitize(text: str) -> str:
+    try:
+        payload = json.loads(text)
+        redact_json(payload)
+        return json.dumps(payload, ensure_ascii=False)
+    except Exception:
+        return text
+
+
+def redact_json(value: object) -> None:
+    if isinstance(value, dict):
+        for key in list(value.keys()):
+            if key in {"accessToken", "refreshToken", "apiKey", "api_key", "password"}:
+                value[key] = "***"
+            else:
+                redact_json(value[key])
+    elif isinstance(value, list):
+        for item in value:
+            redact_json(item)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--frontend-url", default="http://127.0.0.1:5173/")
-    parser.add_argument("--backend-url", default="http://172.19.250.154:8080")
+    parser.add_argument("--backend-url", default="http://localhost:8080")
     parser.add_argument("--username", default="admin")
     parser.add_argument("--password", default="admin123")
     args = parser.parse_args()

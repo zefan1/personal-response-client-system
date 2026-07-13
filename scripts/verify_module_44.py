@@ -111,9 +111,10 @@ for token in ["system.login_fail_window_s", "system.jwt_access_token_ttl_s", "sy
 
 migration = read("src/main/resources/db/migration/V24__module_44_account_permissions.sql")
 for token in [
-    "ADD COLUMN IF NOT EXISTS phone",
-    "ADD COLUMN IF NOT EXISTS last_login_at",
+    "ADD COLUMN phone",
+    "ADD COLUMN last_login_at",
     "UPDATE accounts SET phone = username",
+    "ON DUPLICATE KEY UPDATE description = VALUES(description)",
     "system.jwt_access_token_ttl_s",
     "system.jwt_refresh_token_ttl_s",
     "system.login_fail_window_s",

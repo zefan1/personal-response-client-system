@@ -104,8 +104,10 @@ describe('QuickSearchOverlay', () => {
 
     expect(mocks.getJson).toHaveBeenCalledWith('/api/v1/quick-search/items', 5000);
     expect(host.querySelector('.quick-search-overlay')).toBeTruthy();
+    expect(host.querySelector('.quick-search-box')?.getAttribute('aria-label')).toBe('模板');
     expect(host.textContent).toContain('Opening template');
     expect(host.textContent).toContain('FAQ answer');
+    expect(host.textContent).not.toContain('KNOWLEDGE');
 
     const input = host.querySelector('.quick-search-input') as HTMLInputElement | null;
     expect(input).toBeTruthy();
@@ -123,8 +125,8 @@ describe('QuickSearchOverlay', () => {
     expect(host.textContent).toContain('FAQ answer');
     expect(host.querySelector('.quick-filter .active')?.textContent ?? '').not.toEqual('');
 
-    const itemButton = host.querySelector('.quick-item') as HTMLButtonElement | null;
-    itemButton?.click();
+    const copyButton = host.querySelector('.quick-item .primary') as HTMLButtonElement | null;
+    copyButton?.click();
     await flushUi();
 
     expect(mocks.writeClipboardText).toHaveBeenCalledWith('FAQ content');
@@ -132,7 +134,7 @@ describe('QuickSearchOverlay', () => {
     app.unmount();
   });
 
-  it('copies the first filtered result with Enter and auto closes after successful copy', async () => {
+  it('copies the first filtered result with Enter and stays open until explicitly closed', async () => {
     const { app, host, eventBus } = await mountOverlay();
 
     eventBus.emit('quick-search:show', {});
@@ -142,14 +144,21 @@ describe('QuickSearchOverlay', () => {
     expect(input).toBeTruthy();
     setValue(input as HTMLInputElement, 'img');
     await vi.advanceTimersByTimeAsync(50);
+    expect(host.querySelector('.quick-item-thumb')).toBeTruthy();
     input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await flushUi();
 
     expect(mocks.writeClipboardImage).toHaveBeenCalledWith('https://example.test/image.png');
+    expect(host.textContent).toContain('图片已复制');
 
-    await vi.advanceTimersByTimeAsync(120);
+    await vi.advanceTimersByTimeAsync(3000);
     await flushUi();
 
+    expect(host.querySelector('.quick-search-overlay')).toBeTruthy();
+    expect(host.textContent).not.toContain('图片已复制');
+
+    (host.querySelector('.icon-close-button') as HTMLButtonElement | null)?.click();
+    await flushUi();
     expect(host.querySelector('.quick-search-overlay')).toBeFalsy();
     app.unmount();
   });
@@ -177,6 +186,30 @@ describe('QuickSearchOverlay', () => {
 
     expect(mocks.getJson).toHaveBeenCalledTimes(4);
     expect(host.textContent).toContain('Recovered answer');
+    app.unmount();
+  });
+
+  it('moves keyboard selection and shows a scoped empty result message', async () => {
+    const { app, host, eventBus } = await mountOverlay();
+
+    eventBus.emit('quick-search:show', {});
+    await flushUi();
+
+    const input = host.querySelector('.quick-search-input') as HTMLInputElement | null;
+    expect(input).toBeTruthy();
+    input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    await flushUi();
+    expect(host.querySelectorAll('.quick-item')[1]?.classList.contains('selected')).toBe(true);
+
+    input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushUi();
+    expect(mocks.writeClipboardText).toHaveBeenCalledWith('FAQ content');
+
+    setValue(input as HTMLInputElement, 'no-match');
+    await vi.advanceTimersByTimeAsync(50);
+    await flushUi();
+    expect(host.textContent).toContain('没有匹配的内容');
+
     app.unmount();
   });
 });

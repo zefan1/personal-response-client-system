@@ -1,15 +1,26 @@
 <template>
-  <section v-if="state.visible" class="quick-search-overlay" @keydown.esc="hideQuickSearch">
-    <div class="quick-search-box">
+  <section v-if="state.visible" class="quick-search-overlay" @click.self="hideQuickSearch" @keydown.esc="hideQuickSearch">
+    <aside class="quick-search-box" aria-label="模板">
+      <header class="quick-search-head">
+        <div>
+          <h2>模板</h2>
+          <p>搜索并复制常用话术、知识片段和素材。</p>
+        </div>
+        <button class="icon-close-button" type="button" aria-label="关闭模板" title="关闭模板" @click="hideQuickSearch">
+          <span aria-hidden="true">×</span>
+        </button>
+      </header>
       <input
         ref="inputRef"
         class="quick-search-input"
-        placeholder="搜索话术、项目介绍、FAQ..."
+        placeholder="搜索标题、内容或模板码"
         @input="onInput"
+        @keydown.down.prevent="moveQuickSearchSelection(1)"
+        @keydown.up.prevent="moveQuickSearchSelection(-1)"
         @keydown.enter.prevent="copySelected"
       />
-      <nav class="quick-filter">
-        <button v-for="filter in filters" :key="filter.value" :class="{ active: state.filter === filter.value }" @click="setQuickSearchFilter(filter.value)">
+      <nav class="quick-filter" aria-label="模板筛选">
+        <button v-for="filter in filters" :key="filter.value" :class="{ active: state.filter === filter.value }" type="button" @click="setQuickSearchFilter(filter.value)">
           {{ filter.label }}
         </button>
       </nav>
@@ -22,23 +33,30 @@
       <div v-else-if="groupedQuickSearchItems.length" class="quick-results">
         <section v-for="group in groupedQuickSearchItems" :key="group.type">
           <h3>{{ contentTypeLabel(group.type) }}</h3>
-          <button v-for="item in group.items" :key="item.id" class="quick-item" @click="copyQuickSearchItem(item)">
-            <span>
+          <article
+            v-for="item in group.items"
+            :key="item.id"
+            :class="['quick-item', { selected: selectedItemId === item.id }]"
+            @mouseenter="selectQuickSearchItem(item)"
+          >
+            <img v-if="item.contentType === 'IMAGE' && item.imageUrl" class="quick-item-thumb" :src="item.imageUrl" :alt="item.title" />
+            <div class="quick-item-copy">
               <strong>{{ item.title }}</strong>
-              <em>{{ item.shortcutCode }} · {{ leadTypeLabel(item.leadType) }} · {{ item.scene || '-' }}</em>
-            </span>
-            <span>{{ item.contentType }}</span>
-          </button>
+              <em>{{ contentTypeLabel(item.contentType) }} · {{ leadTypeLabel(item.leadType) }} · {{ item.scene || item.shortcutCode || '-' }}</em>
+              <p>{{ item.content }}</p>
+            </div>
+            <button class="primary small" type="button" @click="copyQuickSearchItem(item)">复制</button>
+          </article>
         </section>
       </div>
-      <p v-else class="empty-panel">暂无可用内容，请联系管理员配置</p>
+      <p v-else class="empty-panel">{{ emptyText }}</p>
       <p v-if="state.toast" class="toast">{{ state.toast }}</p>
-    </div>
+    </aside>
   </section>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { onQuickSearchHide, onQuickSearchShow } from '../../shared/desktopBridge';
 import { eventBus } from '../../shared/eventBus';
 import {
@@ -51,9 +69,11 @@ import {
   handleQuickSearchOnline,
   hideQuickSearch,
   initializeQuickSearch,
+  moveQuickSearchSelection,
   quickSearchState as state,
   refreshQuickSearchItems,
   scheduleQuickSearchQuery,
+  selectQuickSearchItem,
   setQuickSearchFilter,
   showQuickSearch
 } from './quickSearchStore';
@@ -67,6 +87,16 @@ const filters: Array<{ value: QuickSearchFilter; label: string }> = [
   { value: 'GENERAL', label: '通用' }
 ];
 const disposers: Array<() => void> = [];
+const selectedItemId = computed(() => filteredQuickSearchItems.value[state.selectedIndex]?.id);
+const emptyText = computed(() => {
+  if (state.items.length === 0) {
+    return '暂无可用内容，请联系管理员配置';
+  }
+  if (state.query.trim()) {
+    return '没有匹配的内容，请换个关键词试试';
+  }
+  return '当前分类暂无内容，请切换筛选条件';
+});
 
 onMounted(() => {
   void initializeQuickSearch();

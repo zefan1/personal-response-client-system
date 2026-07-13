@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.customer.sync.SheetClient;
 import com.privateflow.modules.customer.sync.SheetRow;
+import com.privateflow.modules.customer.sync.SheetSource;
 import com.privateflow.modules.tablewrite.config.TableConfig;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import java.io.IOException;
@@ -43,9 +44,9 @@ public class HttpWecomTableClient implements WecomTableClient, SheetClient {
   }
 
   @Override
-  public List<SheetRow> fetchIncrementalRows(String sourceTable, LocalDateTime modifiedAfter, int limit) {
+  public List<SheetRow> fetchIncrementalRows(SheetSource source, LocalDateTime modifiedAfter, int limit) {
     TableConfig config = requireConfig();
-    String path = "/tables/" + encode(sourceTable) + "/rows"
+    String path = "/sheets/" + encode(source.sheetId()) + "/tables/" + encode(source.sourceTable()) + "/rows"
         + "?modifiedAfter=" + encode(modifiedAfter.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
         + "&limit=" + limit;
     JsonNode root = send(config, "GET", path, null, Duration.ofMillis(config.writeTimeoutMs()));

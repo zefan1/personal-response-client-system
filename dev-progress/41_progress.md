@@ -19,7 +19,7 @@
 - [x] `GET /admin/api/v1/skill-prompt/{type}/versions` 返回最多 50 个版本。
 - [x] `POST /admin/api/v1/skill-prompt/{type}/restore`：写回 `system_configs`，产生新版本，发布配置刷新。
 - [x] 新增表：`skill_environments`、`image_environments`、`skill_prompt_versions`。
-- [x] 新增配置默认值：`skill.system_prompt_format`、`skill.system_prompt_red_lines=[]`、`skill.regenerate_max_count=0`、`skill.prompt_version_max=50`、`image.*`、`match.tag_removal_rules=[]`。
+- [x] 新增配置默认值：`skill.system_prompt_format`、`skill.system_prompt_red_lines=[]`、`skill.regenerate_max_count=3`、`skill.prompt_version_max=50`、`image.*`、`match.tag_removal_rules=[]`。
 
 ## 验证命令
 - `python scripts/verify_module_41.py`

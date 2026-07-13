@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import com.privateflow.modules.customer.sync.SheetSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -35,6 +36,22 @@ public class DatasourceAdminRepository {
         FROM datasources d
         ORDER BY d.is_enabled DESC, d.id DESC
         """, this::mapDatasource);
+  }
+
+  public List<SheetSource> enabledSources() {
+    return jdbcTemplate.query("""
+        SELECT id, sheet_id, source_table
+        FROM datasources
+        WHERE is_enabled = 1
+        ORDER BY id ASC
+        """, (rs, rowNum) -> new SheetSource(
+        rs.getLong("id"),
+        rs.getString("sheet_id"),
+        rs.getString("source_table")));
+  }
+
+  public Optional<SheetSource> defaultWriteSource() {
+    return enabledSources().stream().findFirst();
   }
 
   public Optional<Datasource> find(long id) {

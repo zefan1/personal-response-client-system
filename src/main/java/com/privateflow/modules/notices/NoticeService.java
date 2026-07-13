@@ -45,7 +45,7 @@ public class NoticeService {
   }
 
   public Map<String, Object> list(NoticeStatus status, NoticeLevel level, NoticeSource source, String statusFilter, int page, Integer size) {
-    requireManager();
+    requireAdmin();
     Boolean stopped = null;
     NoticeStatus actualStatus = status;
     if ("STOPPED".equalsIgnoreCase(statusFilter)) {
@@ -54,16 +54,18 @@ public class NoticeService {
     }
     int safePage = Math.max(1, page);
     int safeSize = Math.max(10, Math.min(size == null ? intConfig("notice.list_page_size", 20) : size, 50));
+    long total = repository.count(actualStatus, level, source, stopped);
     return Map.of(
         "items", repository.list(actualStatus, level, source, stopped, safePage, safeSize),
-        "total", repository.count(actualStatus, level, source, stopped),
+        "total", total,
         "page", safePage,
-        "size", safeSize);
+        "size", safeSize,
+        "totalPages", Math.max(1, (int) Math.ceil(total / (double) safeSize)));
   }
 
   @Transactional
   public SystemNotice create(NoticeCreateRequest request) {
-    requireManager();
+    requireAdmin();
     NoticeCreateRequest normalized = validateCreate(request);
     LocalDateTime now = LocalDateTime.now();
     boolean immediate = normalized.publishType() == PublishType.IMMEDIATE;
@@ -96,10 +98,10 @@ public class NoticeService {
 
   @Transactional
   public SystemNotice update(long id, NoticeUpdateRequest request) {
-    requireManager();
+    requireAdmin();
     SystemNotice existing = require(id);
     if (existing.status() != NoticeStatus.SCHEDULED || existing.isStopped()) {
-      throw new ApiException(ApiErrorCodes.VERSION_STATUS_INVALID, "only active scheduled notices can be edited");
+      throw new ApiException(ApiErrorCodes.VERSION_STATUS_INVALID, "只有未停止的定时公告可以编辑");
     }
     NoticeUpdateRequest normalized = validateUpdate(request);
     LocalDateTime publishAt = normalized.publishAt() == null ? existing.publishAt() : normalized.publishAt();
@@ -117,14 +119,14 @@ public class NoticeService {
 
   @Transactional
   public SystemNotice stop(long id) {
-    requireManager();
+    requireAdmin();
     SystemNotice existing = require(id);
     if (existing.isStopped()) {
-      throw new ApiException(ApiErrorCodes.VERSION_STATUS_INVALID, "notice is already stopped");
+      throw new ApiException(ApiErrorCodes.VERSION_STATUS_INVALID, "公告已经停止");
     }
     int updated = repository.stop(id);
     if (updated == 0) {
-      throw new ApiException(ApiErrorCodes.VERSION_STATUS_INVALID, "notice cannot be stopped");
+      throw new ApiException(ApiErrorCodes.VERSION_STATUS_INVALID, "当前公告不能停止");
     }
     auditLogger.log("STOP_NOTICE", AuthContext.username(), "system_notices", existing.noticeId(), existing.title());
     return require(id);
@@ -135,7 +137,7 @@ public class NoticeService {
     requireAdmin();
     SystemNotice existing = require(id);
     if (!existing.isStopped()) {
-      throw new ApiException(ApiErrorCodes.VERSION_STATUS_INVALID, "only stopped notices can be deleted");
+      throw new ApiException(ApiErrorCodes.VERSION_STATUS_INVALID, "只有已停止公告可以删除");
     }
     repository.delete(id);
   }
@@ -145,7 +147,7 @@ public class NoticeService {
       return repository.active().stream().map(this::desktopPayload).toList();
     } catch (RuntimeException ex) {
       try {
-        alertRepository.activate("NOTICE_ACTIVE_FETCH_FAILED", "WARN", "active notice fetch failed", "NOTICE", ex.getMessage());
+        alertRepository.activate("NOTICE_ACTIVE_FETCH_FAILED", "WARN", "生效公告读取失败", "NOTICE", ex.getMessage());
       } catch (RuntimeException ignored) {
         // Startup notice fetch is fire-and-forget for desktop clients.
       }
@@ -212,14 +214,14 @@ public class NoticeService {
 
   private NoticeCreateRequest validateCreate(NoticeCreateRequest request) {
     if (request == null || request.level() == null || request.publishType() == null) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "title, content, level and publishType are required");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "请填写公告标题、内容、级别和发布方式");
     }
     String title = required(request.title(), "title");
     String content = required(request.content(), "content");
     validateLength(title, content);
     if (request.publishType() == PublishType.SCHEDULED) {
       if (request.publishAt() == null) {
-        throw new ApiException(ApiErrorCodes.BAD_REQUEST, "publishAt is required for scheduled notice");
+        throw new ApiException(ApiErrorCodes.BAD_REQUEST, "定时公告必须填写发布时间");
       }
       validateScheduleTime(request.publishAt());
     }
@@ -229,7 +231,7 @@ public class NoticeService {
 
   private NoticeUpdateRequest validateUpdate(NoticeUpdateRequest request) {
     if (request == null || request.level() == null) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "title, content and level are required");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "请填写公告标题、内容和级别");
     }
     String title = required(request.title(), "title");
     String content = required(request.content(), "content");
@@ -241,10 +243,10 @@ public class NoticeService {
   private void validateScheduleTime(LocalDateTime publishAt) {
     LocalDateTime now = LocalDateTime.now();
     if (!publishAt.isAfter(now.plusMinutes(1))) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "publishAt must be later than now plus one minute");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "定时发布时间必须晚于当前时间 1 分钟以上");
     }
     if (publishAt.isAfter(now.plusDays(intConfig("notice.max_schedule_days", 30)))) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "publishAt exceeds max schedule days");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "定时发布时间超出允许范围");
     }
   }
 
@@ -253,7 +255,7 @@ public class NoticeService {
       return;
     }
     if (expireDays < 1 || expireDays > 30) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "expireDays range is 1-30");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "有效天数必须在 1-30 天之间");
     }
   }
 
@@ -263,22 +265,22 @@ public class NoticeService {
 
   private void validateLength(String title, String content) {
     if (title.length() > intConfig("notice.max_title_chars", 100)) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "title exceeds max length");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "公告标题过长");
     }
     if (content.length() > intConfig("notice.max_content_chars", 500)) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "content exceeds max length");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "公告内容过长");
     }
   }
 
   private String required(String value, String name) {
     if (value == null || value.trim().isEmpty()) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, name + " is required");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, ("title".equals(name) ? "标题" : "内容") + "不能为空");
     }
     return value.trim();
   }
 
   private SystemNotice require(long id) {
-    return repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "notice not found"));
+    return repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "公告不存在"));
   }
 
   private void broadcast(SystemNotice notice) {
@@ -307,21 +309,14 @@ public class NoticeService {
     try {
       return NoticeLevel.valueOf(level == null ? "INFO" : level.trim().toUpperCase());
     } catch (IllegalArgumentException ex) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "level must be INFO, WARN or ERROR");
-    }
-  }
-
-  private void requireManager() {
-    AuthUser user = AuthContext.current();
-    if (user == null || (user.role() != Role.ADMIN && user.role() != Role.LEADER)) {
-      throw new ApiException(ApiErrorCodes.FORBIDDEN, "permission denied");
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "公告级别必须是普通、提醒或故障");
     }
   }
 
   private void requireAdmin() {
     AuthUser user = AuthContext.current();
     if (user == null || user.role() != Role.ADMIN) {
-      throw new ApiException(ApiErrorCodes.FORBIDDEN, "permission denied");
+      throw new ApiException(ApiErrorCodes.FORBIDDEN, "当前账号没有后台权限");
     }
   }
 

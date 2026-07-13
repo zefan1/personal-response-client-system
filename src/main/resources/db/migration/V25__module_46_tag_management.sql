@@ -68,4 +68,4 @@ INSERT INTO system_configs (config_key, config_value, description)
 VALUES
   ('tag.cache_refresh_interval_s', '300', 'tag cache fallback refresh interval seconds'),
   ('tag.value_max_per_category', '50', 'tag value max count per category')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

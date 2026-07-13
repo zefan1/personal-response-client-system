@@ -42,6 +42,7 @@ class DesktopVersionControllerTest {
         "total", 0,
         "page", 1,
         "size", 20,
+        "totalPages", 1,
         "items", java.util.List.of()));
 
     mockMvc.perform(get("/admin/api/v1/versions")
@@ -49,6 +50,7 @@ class DesktopVersionControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.total").value(0))
+        .andExpect(jsonPath("$.data.totalPages").value(1))
         .andExpect(jsonPath("$.data.items").isArray());
   }
 

@@ -173,6 +173,62 @@ class AiConfigControllerTest {
   }
 
   @Test
+  void llmEnvironmentCrudAndTestUseLlmType() throws Exception {
+    AiEnvironmentRequest request = new AiEnvironmentRequest(
+        "llm-prod",
+        "https://llm.example.com",
+        "key-llm",
+        "gpt-4.1-mini",
+        "OPENAI_COMPATIBLE",
+        10000,
+        0.2,
+        1024);
+    when(environmentService.list(AiEnvironmentType.LLM)).thenReturn(List.of(llmEnvironment(5L, true)));
+    when(environmentService.create(eq(AiEnvironmentType.LLM), any())).thenReturn(llmEnvironment(6L, false));
+    when(environmentService.update(eq(AiEnvironmentType.LLM), eq(6L), any())).thenReturn(llmEnvironment(6L, false));
+    when(environmentService.activate(AiEnvironmentType.LLM, 6L)).thenReturn(llmEnvironment(6L, true));
+    when(environmentService.testLlm(6L)).thenReturn(new ImageEnvironmentTestResponse(
+        true,
+        234L,
+        Map.of("model", "gpt-4.1-mini", "protocol", "OPENAI_COMPATIBLE", "content", "OK"),
+        null,
+        null,
+        null));
+
+    mockMvc.perform(get("/admin/api/v1/llm-environments"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].provider").value("llm"))
+        .andExpect(jsonPath("$.data[0].model").value("gpt-4.1-mini"));
+
+    mockMvc.perform(post("/admin/api/v1/llm-environments")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.id").value(6));
+
+    mockMvc.perform(put("/admin/api/v1/llm-environments/6")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.provider").value("llm"));
+
+    mockMvc.perform(put("/admin/api/v1/llm-environments/6/activate"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.active").value(true));
+
+    mockMvc.perform(post("/admin/api/v1/llm-environments/6/test"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.success").value(true))
+        .andExpect(jsonPath("$.data.result.content").value("OK"));
+
+    verify(environmentService).list(AiEnvironmentType.LLM);
+    verify(environmentService).create(eq(AiEnvironmentType.LLM), any());
+    verify(environmentService).update(eq(AiEnvironmentType.LLM), eq(6L), any());
+    verify(environmentService).activate(AiEnvironmentType.LLM, 6L);
+    verify(environmentService).testLlm(6L);
+  }
+
+  @Test
   void promptVersionsAndRestoreDelegateToPromptService() throws Exception {
     PromptVersion version = new PromptVersion(3, "content", "admin", true, "change", LocalDateTime.of(2026, 7, 3, 12, 0));
     when(promptVersionService.list("format")).thenReturn(new PromptVersionPage("skill.system_prompt_format", 3, List.of(version)));
@@ -209,6 +265,26 @@ class AiConfigControllerTest {
         provider,
         "https://" + provider + ".example.com",
         "1234",
+        active,
+        active ? now : null,
+        active ? Boolean.TRUE : null,
+        now,
+        now);
+  }
+
+  private AiEnvironment llmEnvironment(long id, boolean active) {
+    LocalDateTime now = LocalDateTime.of(2026, 7, 3, 12, 0);
+    return new AiEnvironment(
+        id,
+        "llm-prod",
+        "llm",
+        "https://llm.example.com",
+        "1234",
+        "gpt-4.1-mini",
+        "OPENAI_COMPATIBLE",
+        10000,
+        0.2,
+        1024,
         active,
         active ? now : null,
         active ? Boolean.TRUE : null,

@@ -4,6 +4,7 @@ export type SourceFrom = 'SEARCH' | 'CANDIDATE_LIST' | 'FOLLOWUP_LIST' | 'NEW_LE
 
 export type CustomerSummary = {
   phone: string;
+  phoneFull?: string | null;
   nickname?: string | null;
   leadType?: LeadType | null;
   assignedKeeper?: string | null;
@@ -14,6 +15,7 @@ export type CustomerSummary = {
 
 export type Customer = {
   phone: string;
+  phoneFull?: string | null;
   nickname?: string | null;
   sourceChannel?: string | null;
   leadType?: LeadType | null;
@@ -75,6 +77,7 @@ export type ProfileSuggestion = {
 
 export type CustomerProfileView = {
   customer: Customer;
+  phoneFull?: string | null;
   pendingSuggestions?: ProfileSuggestion[];
 };
 
@@ -84,6 +87,7 @@ export type CustomerSearchResult = {
 };
 
 export type RecognizeMultiplePayload = {
+  sessionId?: string;
   candidates?: CustomerSummary[];
   matchInfo?: {
     customers?: CustomerSummary[];

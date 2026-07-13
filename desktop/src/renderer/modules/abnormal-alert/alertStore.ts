@@ -2,6 +2,7 @@ import { computed, reactive } from 'vue';
 import { loadDesktopConfig } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
 import {
+  clearAllAlertHistory,
   closeAlertDatabase,
   deleteExpiredAlerts,
   getAlertsByPhone as getPersistedAlertsByPhone,
@@ -141,6 +142,24 @@ export function closeAlertPanel(): void {
 export async function showAllHistory(): Promise<void> {
   abnormalAlertState.historyOpen = true;
   await loadRecentAlertHistory();
+}
+
+export function hideAlertHistory(): void {
+  abnormalAlertState.historyOpen = false;
+}
+
+export async function clearAlertHistory(): Promise<void> {
+  abnormalAlertState.historyLoading = true;
+  abnormalAlertState.historyUnavailable = false;
+  try {
+    await clearAllAlertHistory();
+    abnormalAlertState.recentHistory = [];
+  } catch (error) {
+    abnormalAlertState.historyUnavailable = true;
+    warnK('K_INDEXEDDB_CLEAR_FAILED', error);
+  } finally {
+    abnormalAlertState.historyLoading = false;
+  }
 }
 
 function addAlert(alert: AbnormalAlert): void {

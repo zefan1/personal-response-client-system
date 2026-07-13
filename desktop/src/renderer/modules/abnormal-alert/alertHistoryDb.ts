@@ -61,6 +61,13 @@ export async function deleteExpiredAlerts(retentionDays: number): Promise<void> 
   });
 }
 
+export async function clearAllAlertHistory(): Promise<void> {
+  const db = await openAlertDatabase();
+  await runTransaction(db, 'readwrite', async (store) => {
+    store.clear();
+  });
+}
+
 export function closeAlertDatabase(): void {
   void dbPromise?.then((db) => db.close());
   dbPromise = null;

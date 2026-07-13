@@ -2,6 +2,7 @@ package com.privateflow.modules.match.service;
 
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
+import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.match.CustomerMatchErrorCodes;
 import com.privateflow.modules.match.CustomerMatchException;
 import com.privateflow.modules.match.CustomerSearchResult;
@@ -16,10 +17,15 @@ public class CustomerSearchService {
 
   private final CustomerQueryService customerQueryService;
   private final CustomerSummaryMapper summaryMapper;
+  private final CustomerAccessService customerAccessService;
 
-  public CustomerSearchService(CustomerQueryService customerQueryService, CustomerSummaryMapper summaryMapper) {
+  public CustomerSearchService(
+      CustomerQueryService customerQueryService,
+      CustomerSummaryMapper summaryMapper,
+      CustomerAccessService customerAccessService) {
     this.customerQueryService = customerQueryService;
     this.summaryMapper = summaryMapper;
+    this.customerAccessService = customerAccessService;
   }
 
   public CustomerSearchResult search(String q, int limit) {
@@ -36,11 +42,13 @@ public class CustomerSearchService {
         Customer exact = customerQueryService.getByPhone(cleanedPhone);
         customers = exact == null ? List.of() : List.of(exact);
       } else {
-        customers = customerQueryService.searchByNickname(q.trim(), limit).stream()
+        customers = customerQueryService.searchByKeyword(q.trim(), limit).stream()
             .sorted(Comparator.comparing(Customer::getLastFollowupAt, Comparator.nullsLast(Comparator.reverseOrder())))
             .toList();
       }
       List<CustomerSummary> summaries = customers.stream()
+          .filter(customerAccessService::canAccess)
+          .filter(customer -> PhoneUtils.isValid(customer.getPhone()))
           .map(customer -> summaryMapper.toSummary(customer, null))
           .toList();
       return new CustomerSearchResult(summaries, summaries.size());

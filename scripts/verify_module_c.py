@@ -62,7 +62,7 @@ for token in ["client", "keeper", "replaceAll(\"[-\\\\s]\", \"\")", "\\\\d{11}",
         errors.append(f"RecognitionResultParser missing {token}")
 
 client = (ROOT / "src/main/java/com/privateflow/modules/image/client/HttpImageRecognitionClient.java").read_text(encoding="utf-8")
-for token in ["/v1/chat/completions", "multipart/form-data", "Authorization", "HttpTimeoutException"]:
+for token in ["/v1/chat/completions", "application/json", "image_url", "Authorization", "HttpTimeoutException"]:
     if token not in client:
         errors.append(f"HttpImageRecognitionClient missing {token}")
 if "retry" in client.lower():

@@ -26,7 +26,6 @@
         </div>
         <div class="admin-toolbar-actions">
           <button class="secondary" type="button" @click="$emit('switch-admin')">正式后台</button>
-          <button class="secondary" type="button" @click="$emit('switch-desktop')">工作台</button>
           <button class="secondary" type="button" @click="$emit('logout')">退出</button>
         </div>
       </header>
@@ -149,7 +148,6 @@ const props = defineProps<{
 defineEmits<{
   logout: [];
   'switch-admin': [];
-  'switch-desktop': [];
 }>();
 
 const nowSuffix = () => Date.now().toString().slice(-6);
@@ -161,7 +159,7 @@ const sections: AdminSection[] = [
     reads: [
       { name: '健康检查', method: 'GET', path: '/admin/api/v1/health' },
       { name: '配置列表', method: 'GET', path: '/admin/api/v1/configs' },
-      { name: 'Skill 配置', method: 'GET', path: '/admin/api/v1/configs?prefix=skill.' }
+      { name: '配置中心', method: 'GET', path: '/admin/api/v1/configs?prefix=skill.' }
     ],
     actions: [
       {
@@ -203,10 +201,11 @@ const sections: AdminSection[] = [
   {
     key: 'ai',
     title: 'AI 与外部环境',
-    description: '管理 Skill API、图片识别环境和提示词版本。',
+    description: '管理 Skill API、LLM 思考环境、图片识别环境和提示词版本。',
     reads: [
       { name: 'Skill 环境', method: 'GET', path: '/admin/api/v1/skill-environments' },
       { name: '图片环境', method: 'GET', path: '/admin/api/v1/image-environments' },
+      { name: 'LLM 环境', method: 'GET', path: '/admin/api/v1/llm-environments' },
       { name: 'Format Prompt 版本', method: 'GET', path: '/admin/api/v1/skill-prompt/format/versions' }
     ],
     actions: [
@@ -223,7 +222,15 @@ const sections: AdminSection[] = [
         pathTemplate: '/admin/api/v1/image-environments',
         body: { envName: `manual-image-${nowSuffix()}`, baseUrl: 'https://example.com/image', apiKey: 'replace-with-real-key' }
       },
-      { name: '测试图片环境', method: 'POST', pathTemplate: '/admin/api/v1/image-environments/{id}/test', needsId: true }
+      { name: '测试图片环境', method: 'POST', pathTemplate: '/admin/api/v1/image-environments/{id}/test', needsId: true },
+      {
+        name: '创建 LLM 环境',
+        method: 'POST',
+        pathTemplate: '/admin/api/v1/llm-environments',
+        body: { envName: `manual-llm-${nowSuffix()}`, baseUrl: 'https://example.com', apiKey: 'replace-with-real-key', model: 'gpt-4.1-mini', protocol: 'OPENAI_COMPATIBLE', timeoutMs: 10000, temperature: 0.2, maxTokens: 1024 }
+      },
+      { name: '激活 LLM 环境', method: 'PUT', pathTemplate: '/admin/api/v1/llm-environments/{id}/activate', needsId: true },
+      { name: '测试 LLM 环境', method: 'POST', pathTemplate: '/admin/api/v1/llm-environments/{id}/test', needsId: true }
     ]
   },
   {
@@ -546,7 +553,7 @@ function enumOptionsFor(key: string): string[] {
     publishType: ['IMMEDIATE', 'SCHEDULED'],
     platform: ['WINDOWS', 'MAC'],
     updateStrategy: ['OPTIONAL', 'FORCE'],
-    actionType: ['ALERT', 'TAG_SUGGESTION']
+    actionType: ['ALERT', 'TAG_CHANGE', 'NOTIFY_LEADER']
   };
   return options[key] ?? [];
 }

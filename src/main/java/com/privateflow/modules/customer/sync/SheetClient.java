@@ -4,5 +4,5 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public interface SheetClient {
-  List<SheetRow> fetchIncrementalRows(String sourceTable, LocalDateTime modifiedAfter, int limit);
+  List<SheetRow> fetchIncrementalRows(SheetSource source, LocalDateTime modifiedAfter, int limit);
 }

@@ -51,6 +51,8 @@ function loadedItems(): FollowupItem[] {
 
 describe('FollowupListPanel', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-03T12:08:00Z'));
     apiMocks.getJson.mockResolvedValue({
       success: true,
       data: {
@@ -65,6 +67,7 @@ describe('FollowupListPanel', () => {
 
   afterEach(() => {
     document.body.innerHTML = '';
+    vi.useRealTimers();
     apiMocks.getJson.mockReset();
   });
 
@@ -75,6 +78,11 @@ describe('FollowupListPanel', () => {
     expect(host.querySelectorAll('.tab-button')).toHaveLength(4);
     expect(activeTabText(host)).toContain('1');
     expect(host.textContent).toContain('Overdue');
+    expect(host.textContent).toContain('20:08');
+    const refreshButton = host.querySelector('.panel-header .icon-refresh-button') as HTMLButtonElement | null;
+    expect(refreshButton?.textContent?.trim()).toBe('↻');
+    expect(refreshButton?.getAttribute('aria-label')).toBe('刷新今日跟进');
+    expect(refreshButton?.textContent).not.toContain('刷新');
 
     const tabs = [...host.querySelectorAll('.tab-button')] as HTMLButtonElement[];
     tabs[2].click();

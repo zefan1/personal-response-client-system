@@ -141,10 +141,18 @@ describe('customerProfileStore', () => {
     getAlertsByPhoneMock.mockReturnValue([]);
     loadAlertsByPhoneMock.mockResolvedValue([alert('alert-a')]);
     getJsonMock.mockResolvedValue({ success: true, data: view('18800001111', { nickname: 'Online', version: 2 }) });
+    profile.customerProfileState.searchResults = [summary('18800009999')];
+    profile.customerProfileState.searchTotal = 1;
+    profile.customerProfileState.searchTruncated = true;
+    profile.customerProfileState.searchMessage = 'old search';
 
     await profile.openProfile('18800001111', 'FOLLOWUP_LIST');
 
     expect(profile.customerProfileState.profile?.customer.nickname).toBe('Online');
+    expect(profile.customerProfileState.searchResults).toEqual([]);
+    expect(profile.customerProfileState.searchTotal).toBe(0);
+    expect(profile.customerProfileState.searchTruncated).toBe(false);
+    expect(profile.customerProfileState.searchMessage).toBe('');
     expect(profile.customerProfileState.fromCache).toBe(false);
     expect(profile.customerProfileState.profileAlert).toMatchObject({ alertId: 'alert-a' });
     expect(handleCustomerProfileLoadedMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -183,7 +191,7 @@ describe('customerProfileStore', () => {
     getJsonMock.mockResolvedValue({ success: true, data: view('18800002222') });
     loadAlertsByPhoneMock.mockResolvedValue([]);
 
-    profile.showCandidates({ matchInfo: { customers: [summary('18800002222'), summary('18800003333')] } });
+    profile.showCandidates({ sessionId: 'session-a', matchInfo: { customers: [summary('18800002222'), summary('18800003333')] } });
     expect(profile.customerProfileState.candidateVisible).toBe(true);
 
     profile.chooseCandidate(summary('18800002222'));
@@ -191,9 +199,11 @@ describe('customerProfileStore', () => {
     expect(profile.customerProfileState.candidateVisible).toBe(false);
     expect(profile.customerProfileState.profile?.customer.phone).toBe('18800002222');
 
-    profile.showCandidates({ candidates: [summary('18800004444')] });
+    expect(selected.at(-1)).toMatchObject({ sessionId: 'session-a', phone: '18800002222' });
+
+    profile.showCandidates({ sessionId: 'session-b', candidates: [summary('18800004444')] });
     profile.dismissCandidates();
-    expect(selected.at(-1)).toEqual({ phone: '', scene: 'CHAT_RECOGNIZE', sourceFrom: 'CANDIDATE_DISMISSED' });
+    expect(selected.at(-1)).toEqual({ sessionId: 'session-b', phone: '', scene: 'CHAT_RECOGNIZE', sourceFrom: 'CANDIDATE_DISMISSED' });
   });
 
   it('generates replies from the profile and emits recognize results on success', async () => {
@@ -213,8 +223,33 @@ describe('customerProfileStore', () => {
       clientMessage: ''
     });
     expect(selected[0]).toMatchObject({ phone: '18800001111', scene: 'ACTIVE_REPLY', sourceFrom: 'PROFILE_CARD' });
-    expect(recognized[0]).toMatchObject({ phone: '18800001111' });
+    expect(recognized[0]).toMatchObject({ response: { phone: '18800001111' } });
     expect(profile.customerProfileState.generating).toBe(false);
+  });
+
+  it('keeps multiple-match reply generation on the original session', async () => {
+    const { profile, eventBus } = await freshStore();
+    const selected: unknown[] = [];
+    const recognized: unknown[] = [];
+    eventBus.on('customer:selected', (payload) => selected.push(payload));
+    eventBus.on('recognize:result', (payload) => recognized.push(payload));
+    getJsonMock.mockResolvedValue({ success: true, data: view('18800002222') });
+    postJsonMock.mockResolvedValue({ success: true, data: { phone: '18800002222', skill: { suggestions: [] } } });
+
+    profile.showCandidates({ sessionId: 'session-candidate', candidates: [summary('18800002222')] });
+    profile.chooseCandidate(summary('18800002222'));
+    await vi.runAllTimersAsync();
+    await profile.generateReplyFromProfile();
+
+    expect(selected).toContainEqual(expect.objectContaining({
+      sessionId: 'session-candidate',
+      phone: '18800002222',
+      sourceFrom: 'CANDIDATE_LIST'
+    }));
+    expect(recognized[0]).toMatchObject({
+      sessionId: 'session-candidate',
+      response: { phone: '18800002222' }
+    });
   });
 
   it('saves changed profile fields, handles table sync prompts, and refreshes after confirm or skip', async () => {
@@ -229,6 +264,8 @@ describe('customerProfileStore', () => {
     profile.customerProfileState.editFields.nickname = 'After';
     const saveResult: SaveResult = { status: 'OK', message: 'saved', needRefresh: true, askTableSync: true };
     saveProfileMock.mockResolvedValue(saveResult);
+    getJsonMock.mockResolvedValueOnce({ success: true, data: view('18800001111', { nickname: 'After' }) });
+    loadAlertsByPhoneMock.mockResolvedValue([]);
 
     await profile.saveProfileEdits();
 
@@ -241,7 +278,13 @@ describe('customerProfileStore', () => {
       sourceRowId: 'row-1'
     });
     expect(profile.customerProfileState.editMode).toBe(false);
+    expect(profile.customerProfileState.profile?.customer.nickname).toBe('After');
     expect(profile.customerProfileState.tableSyncPrompt).toMatchObject({ phone: '18800001111' });
+    expect(profile.customerProfileState.toast).toBe('saved');
+    expect(profile.customerProfileState.tableSyncStatus).toMatchObject({
+      level: 'pending',
+      message: '档案已保存，等待同步企微表格'
+    });
 
     getJsonMock.mockResolvedValue({ success: true, data: view('18800001111', { nickname: 'Synced' }) });
     syncProfileToTableMock.mockResolvedValue({ status: 'OK', message: 'synced', needRefresh: true });
@@ -250,6 +293,10 @@ describe('customerProfileStore', () => {
 
     expect(syncProfileToTableMock).toHaveBeenCalledWith(expect.objectContaining({ phone: '18800001111' }));
     expect(profile.customerProfileState.profile?.customer.nickname).toBe('Synced');
+    expect(profile.customerProfileState.tableSyncStatus).toMatchObject({
+      level: 'success',
+      message: 'synced'
+    });
 
     profile.customerProfileState.tableSyncPrompt = {
       phone: '18800001111',
@@ -260,6 +307,70 @@ describe('customerProfileStore', () => {
     getJsonMock.mockResolvedValueOnce({ success: true, data: view('18800001111', { nickname: 'Skipped' }) });
     await profile.skipTableSync();
     expect(profile.customerProfileState.profile?.customer.nickname).toBe('Skipped');
+    expect(profile.customerProfileState.tableSyncStatus).toMatchObject({
+      level: 'skipped',
+      message: '已暂不同步企微表格'
+    });
+  });
+
+  it('keeps table sync retry status visible after sync failures and clears it for another customer', async () => {
+    const { profile } = await freshStore();
+    profile.customerProfileState.profile = view('18800001111', {
+      nickname: 'Before',
+      sourceTable: 'sheet-a',
+      sourceRowId: 'row-1',
+      version: 7
+    });
+    profile.customerProfileState.tableSyncPrompt = {
+      phone: '18800001111',
+      editedFields: { nickname: 'After' },
+      version: 7,
+      hasTableRow: true,
+      sourceTable: 'sheet-a',
+      sourceRowId: 'row-1'
+    };
+    syncProfileToTableMock.mockResolvedValueOnce({
+      status: 'FAILED_RETRYING',
+      message: '表格同步失败，系统将在后台自动重试',
+      needRefresh: true
+    });
+    getJsonMock.mockResolvedValueOnce({ success: true, data: view('18800001111', { nickname: 'After' }) });
+    loadAlertsByPhoneMock.mockResolvedValue([]);
+
+    await profile.confirmTableSync();
+
+    expect(profile.customerProfileState.tableSyncStatus).toMatchObject({
+      level: 'retrying',
+      message: '表格同步失败，系统将在后台自动重试'
+    });
+
+    getJsonMock.mockResolvedValueOnce({ success: true, data: view('18800002222', { nickname: 'Other' }) });
+    await profile.openProfile('18800002222', 'PROFILE_CARD');
+
+    expect(profile.customerProfileState.tableSyncStatus).toBeNull();
+  });
+
+  it('shows feedback when saving without changes and keeps saved toast after refresh', async () => {
+    const { profile } = await freshStore();
+    profile.customerProfileState.profile = view('18800001111', { nickname: 'Before', version: 7 });
+    profile.enterEditMode();
+
+    await profile.saveProfileEdits();
+
+    expect(saveProfileMock).not.toHaveBeenCalled();
+    expect(profile.customerProfileState.editMode).toBe(false);
+    expect(profile.customerProfileState.toast).toBe('没有改动需要保存');
+
+    profile.enterEditMode();
+    profile.customerProfileState.editFields.nickname = 'After';
+    saveProfileMock.mockResolvedValueOnce({ status: 'OK', message: '档案已保存', needRefresh: true });
+    getJsonMock.mockResolvedValueOnce({ success: true, data: view('18800001111', { nickname: 'After' }) });
+    loadAlertsByPhoneMock.mockResolvedValue([]);
+
+    await profile.saveProfileEdits();
+
+    expect(profile.customerProfileState.profile?.customer.nickname).toBe('After');
+    expect(profile.customerProfileState.toast).toBe('档案已保存');
   });
 
   it('keeps edit mode on conflicts and shows pending banner for give-up saves', async () => {

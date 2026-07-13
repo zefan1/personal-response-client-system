@@ -85,6 +85,15 @@ public class CustomerQueryServiceImpl implements CustomerQueryService {
   }
 
   @Override
+  public List<Customer> searchByKeyword(String keyword, int limit) {
+    if (keyword == null || keyword.isBlank()) {
+      return List.of();
+    }
+    int actualLimit = Math.max(1, Math.min(limit, 50));
+    return customerRepository.searchByKeyword(keyword.trim(), actualLimit);
+  }
+
+  @Override
   public List<Customer> scanActiveCustomers(ScanFilter filter) {
     ScanFilter actual = filter == null ? new ScanFilter(null, null, null, null, followupScanBatchSize) : filter;
     return customerRepository.scanActiveCustomers(actual, followupScanBatchSize);

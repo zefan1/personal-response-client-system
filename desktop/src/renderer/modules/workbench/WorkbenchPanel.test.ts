@@ -98,7 +98,7 @@ describe('WorkbenchPanel', () => {
     app.unmount();
   });
 
-  it('emits dashboard navigation events from rendered links, rows, and quick actions', async () => {
+  it('emits dashboard navigation events from rendered links, rows, and metric cards', async () => {
     const { app, host, eventBus } = await mountPanel();
     const seen: Array<{ event: string; payload: unknown }> = [];
     eventBus.on('followup:switch-tab', (payload) => seen.push({ event: 'followup:switch-tab', payload }));
@@ -110,30 +110,88 @@ describe('WorkbenchPanel', () => {
     viewAllLinks[0].click();
     viewAllLinks[1].click();
 
+    const metricCards = [...host.querySelectorAll('.metric-card')] as HTMLButtonElement[];
+    metricCards.forEach((button) => button.click());
+
     const firstRow = host.querySelector('.workbench-row-main') as HTMLButtonElement | null;
     expect(firstRow).toBeTruthy();
     firstRow?.click();
 
-    const quickActions = [...host.querySelectorAll('.quick-actions button')] as HTMLButtonElement[];
-    quickActions.forEach((button) => button.click());
+    const actionButtons = [...host.querySelectorAll('.workbench-action')] as HTMLButtonElement[];
+    expect(actionButtons.map((button) => button.querySelector('strong')?.textContent)).toEqual([
+      '识别聊天',
+      '速搜模板',
+      '批量待办'
+    ]);
+    expect(actionButtons.map((button) => button.textContent)).toEqual([
+      '识识别聊天截图生成回复',
+      '模速搜模板话术和素材',
+      '批批量待办选择客户发送'
+    ]);
+    actionButtons.forEach((button) => button.click());
+
     await flushUi();
 
     expect(seen).toContainEqual({ event: 'followup:switch-tab', payload: { tab: 'OVERDUE' } });
     expect(seen).toContainEqual({ event: 'followup:switch-tab', payload: { tab: 'NEW_LEAD' } });
+    expect(seen).toContainEqual({ event: 'followup:switch-tab', payload: { tab: 'APPOINTMENT' } });
+    expect(seen).toContainEqual({ event: 'workbench:capture-chat', payload: {} });
+    expect(seen).toContainEqual({ event: 'quick-search:show', payload: {} });
     expect(seen).toContainEqual({
       event: 'customer:selected',
       payload: { phone: '18800000001', scene: 'ACTIVE_REPLY', leadType: 'TUAN_GOU', sourceFrom: 'DASHBOARD' }
     });
-    expect(seen).toContainEqual({ event: 'workbench:capture-chat', payload: {} });
-    expect(seen).toContainEqual({ event: 'quick-search:show', payload: {} });
-    expect(host.querySelector('.banner')?.textContent ?? '').not.toEqual('');
+    expect(host.querySelector('.quick-actions')).toBeFalsy();
 
     app.unmount();
   });
 
-  it('renders and dismisses realtime notices through the actual notice button', async () => {
+  it('shows a retry action after load failure and reloads manually', async () => {
+    let followupCalls = 0;
+    apiMocks.getJson.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/notices/active') {
+        return { success: true, data: [], errorCode: null, message: null };
+      }
+      followupCalls += 1;
+      if (followupCalls === 1) {
+        throw new Error('timeout');
+      }
+      return {
+        success: true,
+        data: { items: [followup({ phone: '18800000009', nickname: 'Retry Lead', reminderType: 'DUE_TODAY' })] },
+        errorCode: null,
+        message: null
+      };
+    });
+
+    const { app, host } = await mountPanel();
+    expect(host.textContent).toContain('数据加载失败，请检查网络后重试');
+
+    const retryButton = host.querySelector('.workbench-status-banner button') as HTMLButtonElement | null;
+    expect(retryButton).toBeTruthy();
+    retryButton?.click();
+    await flushUi();
+
+    const calledPaths = apiMocks.getJson.mock.calls.map(([path]) => path);
+    expect(calledPaths.filter((path) => path === '/api/v1/followups/today')).toHaveLength(2);
+    expect(calledPaths).toContain('/api/v1/notices/active');
+    expect(host.textContent).toContain('Retry Lead');
+    expect(host.querySelector('.workbench-status-banner')).toBeFalsy();
+
+    app.unmount();
+  });
+
+  it('receives realtime notices and renders one workbench notice banner', async () => {
     const { app, host, eventBus } = await mountPanel();
 
+    eventBus.emit('SYSTEM_NOTICE', {
+      noticeId: 'notice-a',
+      title: 'Ops Notice',
+      content: 'Check datasource mapping',
+      level: 'WARN',
+      createdAt: '2026-07-03T12:00:00Z',
+      expireAt: '2026-07-04T12:00:00Z'
+    });
     eventBus.emit('SYSTEM_NOTICE', {
       noticeId: 'notice-a',
       title: 'Ops Notice',
@@ -145,12 +203,7 @@ describe('WorkbenchPanel', () => {
     await flushUi();
 
     expect(host.textContent).toContain('Ops Notice');
-    const close = host.querySelector('.workbench-notice button') as HTMLButtonElement | null;
-    expect(close).toBeTruthy();
-    close?.click();
-    await flushUi();
-
-    expect(host.textContent).not.toContain('Ops Notice');
+    expect(host.querySelectorAll('.workbench-notice')).toHaveLength(1);
     app.unmount();
   });
 });

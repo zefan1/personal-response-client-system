@@ -1,6 +1,8 @@
 package com.privateflow.modules.api.ws;
 
 import com.privateflow.modules.api.auth.AuthUser;
+import com.privateflow.modules.api.auth.Account;
+import com.privateflow.modules.api.auth.AccountRepository;
 import com.privateflow.modules.api.auth.JwtService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
@@ -15,9 +17,11 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 public class DesktopHandshakeInterceptor implements HandshakeInterceptor {
 
   private final JwtService jwtService;
+  private final AccountRepository accountRepository;
 
-  public DesktopHandshakeInterceptor(JwtService jwtService) {
+  public DesktopHandshakeInterceptor(JwtService jwtService, AccountRepository accountRepository) {
     this.jwtService = jwtService;
+    this.accountRepository = accountRepository;
   }
 
   @Override
@@ -32,6 +36,10 @@ public class DesktopHandshakeInterceptor implements HandshakeInterceptor {
     HttpServletRequest http = servletRequest.getServletRequest();
     String token = http.getParameter("token");
     AuthUser user = jwtService.verify(token);
+    Account account = accountRepository.findByPhone(user.username()).orElse(null);
+    if (account == null || !account.enabled() || account.tokenVersion() != user.tokenVersion()) {
+      return false;
+    }
     attributes.put("username", user.username());
     attributes.put("role", user.role());
     attributes.put("leaderId", user.leaderId());

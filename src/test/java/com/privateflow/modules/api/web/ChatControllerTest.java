@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.chat.ChatOrchestrationService;
+import com.privateflow.modules.api.chat.ChatReplySource;
 import com.privateflow.modules.api.chat.ChatRecognizeRequest;
 import com.privateflow.modules.api.chat.ChatResponse;
 import com.privateflow.modules.api.chat.GenerateRequest;
@@ -50,7 +51,8 @@ class ChatControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.phone").value("13800000000"))
-        .andExpect(jsonPath("$.data.skill.suggestions[0].text").value("Reply A"));
+        .andExpect(jsonPath("$.data.skill.suggestions[0].text").value("Reply A"))
+        .andExpect(jsonPath("$.data.replySource.source").value("SKILL"));
 
     ArgumentCaptor<ChatRecognizeRequest> captor = ArgumentCaptor.forClass(ChatRecognizeRequest.class);
     verify(service).recognize(captor.capture());
@@ -82,7 +84,8 @@ class ChatControllerTest {
         false,
         null,
         new SkillResponse(List.of(new Suggestion("Reply B", "comfort", "retry")), null, null, null),
-        "too many retries"));
+        "too many retries",
+        ChatReplySource.skill()));
 
     mockMvc.perform(post("/api/v1/chat/regenerate")
             .contentType(MediaType.APPLICATION_JSON)
@@ -124,6 +127,19 @@ class ChatControllerTest {
         .andExpect(jsonPath("$.errorCode").value(ApiErrorCodes.BAD_REQUEST));
   }
 
+  @Test
+  void imageRecognitionFailureMapsToStandardClientErrorBody() throws Exception {
+    when(service.recognize(any())).thenThrow(new ApiException("30-10001", "图片识别失败，请使用文字通道后重新生成回复"));
+
+    mockMvc.perform(post("/api/v1/chat/recognize")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"imageBase64\":\"bad-image\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.success").value(false))
+        .andExpect(jsonPath("$.errorCode").value("30-10001"))
+        .andExpect(jsonPath("$.message").value("图片识别失败，请使用文字通道后重新生成回复"));
+  }
+
   private ChatResponse response(String phone, String nickname, boolean needsCustomerIdentifier) {
     return new ChatResponse(
         phone,
@@ -131,6 +147,7 @@ class ChatControllerTest {
         needsCustomerIdentifier,
         null,
         new SkillResponse(List.of(new Suggestion("Reply A", "comfort", "reason")), null, null, null),
-        null);
+        null,
+        ChatReplySource.skill());
   }
 }

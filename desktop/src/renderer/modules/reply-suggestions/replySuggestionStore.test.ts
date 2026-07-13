@@ -74,9 +74,9 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.loadingMode).toBe('FULL');
     expect(replies.replySuggestionState.currentStageIndex).toBe(0);
 
-    vi.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(1200);
     expect(replies.replySuggestionState.currentStageIndex).toBe(1);
-    vi.advanceTimersByTime(2500);
+    vi.advanceTimersByTime(1800);
     expect(replies.replySuggestionState.currentStageIndex).toBe(2);
 
     replies.pauseForMultipleMatch();
@@ -89,7 +89,7 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.suggestions).toEqual([]);
   });
 
-  it('renders recognize results, refreshes current abnormal alert, and emits masked selected replies', async () => {
+  it('renders recognize results, refreshes current abnormal alert, and emits full-phone selected replies', async () => {
     const { replies, eventBus } = await freshStore();
     const selected: unknown[] = [];
     eventBus.on('reply:selected', (payload) => selected.push(payload));
@@ -101,6 +101,7 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.currentPhone).toBe('18800001111');
     expect(replies.replySuggestionState.currentNickname).toBe('Alice');
     expect(replies.replySuggestionState.currentMatchType).toBe('EXACT');
+    expect(replies.replySuggestionState.replySource?.source).toBe('SKILL');
     expect(replies.replySuggestionState.abnormalAlert).toMatchObject({ alertId: 'alert-a' });
 
     replies.selectReply(replies.replySuggestionState.suggestions[0]);
@@ -108,9 +109,128 @@ describe('replySuggestionStore', () => {
       text: 'Use this',
       direction: 'NEXT_STEP',
       reason: 'reason',
-      phone: '****1111',
+      phone: '18800001111',
+      displayPhone: '****1111',
       isFallback: false
     }]);
+  });
+
+  it('keeps multiple customer reply sessions and lets the user switch back to older replies', async () => {
+    const { replies } = await freshStore();
+
+    replies.startRecognizeLoading({ sessionId: 'session-a', source: 'BUTTON_CLICK' });
+    replies.showRecognizeResult({ sessionId: 'session-a', response: response('18800001111', [suggestion('First customer')]) });
+    replies.startRecognizeLoading({ sessionId: 'session-b', source: 'BUTTON_CLICK' });
+    replies.showRecognizeResult({ sessionId: 'session-b', response: response('18800002222', [suggestion('Second customer')]) });
+
+    expect(replies.replySuggestionState.sessions).toHaveLength(2);
+    expect(replies.replySuggestionState.suggestions.map((item) => item.text)).toEqual(['Second customer']);
+
+    replies.activateSession('session-a');
+
+    expect(replies.replySuggestionState.currentPhone).toBe('18800001111');
+    expect(replies.replySuggestionState.suggestions.map((item) => item.text)).toEqual(['First customer']);
+  });
+
+  it('queues a newer recognition task without interrupting the current loading task', async () => {
+    const { replies } = await freshStore();
+
+    replies.startRecognizeLoading({ sessionId: 'session-a', source: 'BUTTON_CLICK' });
+    expect(replies.replySuggestionState.activeSessionId).toBe('session-a');
+
+    replies.startRecognizeLoading({ sessionId: 'session-b', source: 'CLIPBOARD_SCREENSHOT' });
+    expect(replies.replySuggestionState.sessions.map((session) => session.sessionId)).toEqual(['session-b', 'session-a']);
+    expect(replies.replySuggestionState.activeSessionId).toBe('session-a');
+    expect(replies.replySuggestionState.currentStageText).toBe('已获取截图');
+
+    replies.showRecognizeResult({ sessionId: 'session-b', response: response('18800002222', [suggestion('Second customer')]) });
+
+    expect(replies.replySuggestionState.activeSessionId).toBe('session-a');
+    expect(replies.replySuggestionState.currentPhone).toBe('');
+
+    replies.stopForTimeout({ sessionId: 'session-a', message: 'first timed out' });
+    replies.activateSession('session-b');
+
+    expect(replies.replySuggestionState.currentPhone).toBe('18800002222');
+    expect(replies.replySuggestionState.suggestions.map((item) => item.text)).toEqual(['Second customer']);
+  });
+
+  it('updates the matching queue task when recognition fails by session id', async () => {
+    const { replies } = await freshStore();
+
+    replies.startRecognizeLoading({ sessionId: 'session-a', source: 'BUTTON_CLICK' });
+    replies.startRecognizeLoading({ sessionId: 'session-b', source: 'BUTTON_CLICK' });
+    replies.stopForFailure({
+      sessionId: 'session-a',
+      errorCode: '30-10001',
+      message: '图片识别失败，请使用文字通道后重新生成回复'
+    });
+
+    const failed = replies.replySuggestionState.sessions.find((session) => session.sessionId === 'session-a');
+    const loading = replies.replySuggestionState.sessions.find((session) => session.sessionId === 'session-b');
+
+    expect(failed?.status).toBe('FAILED');
+    expect(failed?.failureReason).toContain('图片识别失败');
+    expect(failed?.loadingMode).toBe('NONE');
+    expect(loading?.status).toBe('LOADING');
+  });
+
+  it('does not recreate a removed task when late async events arrive for the same session id', async () => {
+    const { replies } = await freshStore();
+
+    replies.startRecognizeLoading({ sessionId: 'session-removed', source: 'BUTTON_CLICK' });
+    replies.closeReplySession('session-removed');
+
+    expect(replies.replySuggestionState.sessions).toHaveLength(0);
+    expect(replies.replySuggestionState.activeSessionId).toBe('');
+
+    replies.updateRecognizeProgress({ sessionId: 'session-removed', stage: 'GENERATING', message: 'late progress' });
+    replies.stopForFailure({ sessionId: 'session-removed', message: 'late failure' });
+    replies.stopForTimeout({ sessionId: 'session-removed', message: 'late timeout' });
+    replies.stopForImageFailure({ sessionId: 'session-removed', message: 'late image failure' });
+    replies.pauseForMultipleMatch({
+      sessionId: 'session-removed',
+      candidates: [{ phone: '18800003333', nickname: 'Late candidate' }]
+    });
+    replies.showRecognizeResult({ sessionId: 'session-removed', response: response('18800003333', [suggestion('Late reply')]) });
+    replies.startGenerateLoading({ sessionId: 'session-removed', phone: '18800003333', scene: 'CHAT_RECOGNIZE' });
+    replies.startRecognizeLoading({ sessionId: 'session-removed', source: 'BUTTON_CLICK' });
+
+    expect(replies.replySuggestionState.sessions).toHaveLength(0);
+    expect(replies.replySuggestionState.loadingMode).toBe('NONE');
+    expect(replies.replySuggestionState.failureReason).toBe('');
+    expect(replies.replySuggestionState.suggestions).toEqual([]);
+  });
+
+  it('clears removed-session tombstones during cleanup so a fresh mount can reuse an id', async () => {
+    const { replies } = await freshStore();
+
+    replies.startRecognizeLoading({ sessionId: 'session-reusable', source: 'BUTTON_CLICK' });
+    replies.closeReplySession('session-reusable');
+    replies.cleanupReplySuggestionStore();
+    replies.startRecognizeLoading({ sessionId: 'session-reusable', source: 'BUTTON_CLICK' });
+
+    expect(replies.replySuggestionState.sessions).toHaveLength(1);
+    expect(replies.replySuggestionState.activeSessionId).toBe('session-reusable');
+  });
+
+  it('reuses the original multiple-match session when a candidate is selected', async () => {
+    const { replies } = await freshStore();
+
+    replies.startRecognizeLoading({ sessionId: 'session-a', source: 'BUTTON_CLICK' });
+    replies.pauseForMultipleMatch({ sessionId: 'session-a' });
+    replies.startGenerateLoading({
+      sessionId: 'session-a',
+      phone: '18800001111',
+      leadType: 'TUAN_GOU',
+      scene: 'CHAT_RECOGNIZE',
+      sourceFrom: 'CANDIDATE_LIST'
+    });
+
+    expect(replies.replySuggestionState.sessions).toHaveLength(1);
+    expect(replies.replySuggestionState.activeSessionId).toBe('session-a');
+    expect(replies.replySuggestionState.currentPhone).toBe('18800001111');
+    expect(replies.replySuggestionState.progressStage).toBe('GENERATING');
   });
 
   it('enters fallback mode on empty Skill output and automatically recovers with retry', async () => {
@@ -118,6 +238,7 @@ describe('replySuggestionStore', () => {
     replies.showRecognizeResult(response('18800001111', []));
 
     expect(replies.replySuggestionState.isFallbackMode).toBe(true);
+    expect(replies.replySuggestionState.replySource?.source).toBe('FALLBACK');
     expect(replies.replySuggestionState.showRegenerateButton).toBe(false);
     expect(replies.replySuggestionState.suggestions[0].direction).toBe('SYSTEM_FALLBACK');
 
@@ -159,7 +280,7 @@ describe('replySuggestionStore', () => {
     postJsonMock
       .mockResolvedValueOnce({ success: true, data: response('18800001111', [suggestion('New 1')]) })
       .mockResolvedValueOnce({ success: true, data: response('18800001111', [suggestion('New 2')]) })
-      .mockResolvedValueOnce({ success: true, data: response('18800001111', [suggestion('New 3')]) });
+      .mockResolvedValueOnce({ success: true, data: response('18800001111', [suggestion('New 3')], '已连续换 5 次，可以尝试求助组长') });
 
     await replies.regenerateReplies();
     await replies.regenerateReplies();
@@ -173,6 +294,7 @@ describe('replySuggestionStore', () => {
     }, 1000);
     expect(replies.replySuggestionState.regenerateCount).toBe(3);
     expect(replies.replySuggestionState.showHelpHint).toBe(true);
+    expect(replies.replySuggestionState.helpHintMessage).toBe('已连续换 5 次，可以尝试求助组长');
     expect(replies.replySuggestionState.suggestions.map((item) => item.text)).toEqual(['New 3']);
   });
 
@@ -268,12 +390,16 @@ describe('replySuggestionStore', () => {
   });
 });
 
-function response(phone: string, suggestions: ReplySuggestion[]): ChatResponse {
+function response(phone: string, suggestions: ReplySuggestion[], warning?: string): ChatResponse {
   return {
     phone,
     nickname: 'Alice',
     match: { matchType: 'EXACT' },
-    skill: { suggestions }
+    skill: { suggestions },
+    replySource: suggestions[0]?.direction === 'SYSTEM_FALLBACK'
+      ? { source: 'FALLBACK', label: '系统兜底', detail: 'fallback' }
+      : { source: 'SKILL', label: 'Skill 生成', detail: 'skill' },
+    warning
   };
 }
 

@@ -57,7 +57,10 @@ describe('helpModeStore', () => {
 
     help.openHelpRequest(request({ phone: '' }));
     expect(help.helpModeState.requestDialogVisible).toBe(false);
-    expect(help.helpModeState.toast).toBeTruthy();
+    expect(help.helpModeState.statusNotice).toMatchObject({
+      level: 'warning',
+      message: '请先识别聊天或选择客户'
+    });
 
     help.openHelpRequest(request({ phone: '18800001111' }));
     expect(help.helpModeState.requestDialogVisible).toBe(true);
@@ -66,6 +69,10 @@ describe('helpModeStore', () => {
     help.helpModeState.activeHelpId = 'help-a';
     help.openHelpRequest(request({ phone: '18800002222' }));
     expect(help.helpModeState.activeRequest?.phone).toBe('18800001111');
+    expect(help.helpModeState.statusNotice).toMatchObject({
+      level: 'warning',
+      message: '你已有等待中的求助'
+    });
   });
 
   it('submits help requests, truncates keeper notes, and emits pending state', async () => {
@@ -89,6 +96,10 @@ describe('helpModeStore', () => {
     }, 5000);
     expect(help.helpModeState.requestDialogVisible).toBe(false);
     expect(help.helpModeState.activeHelpId).toBe('help-a');
+    expect(help.helpModeState.statusNotice).toMatchObject({
+      level: 'success',
+      message: '已向Leader A发送求助'
+    });
     expect(pending).toEqual([{ helpId: 'help-a', phone: '18800001111' }]);
   });
 
@@ -102,6 +113,10 @@ describe('helpModeStore', () => {
     await help.submitHelpRequest();
 
     expect(help.helpModeState.activeHelpId).toBe('');
+    expect(help.helpModeState.statusNotice).toMatchObject({
+      level: 'warning',
+      message: '暂时没有组长在线'
+    });
     expect(timeouts).toEqual([{ phone: '18800001111', reason: 'NO_LEADER_ONLINE' }]);
   });
 
@@ -193,6 +208,10 @@ describe('helpModeStore', () => {
       phone: '18800001111',
       helperReplies: [helperReply({ text: 'reply text', direction: '' })]
     });
+    expect(help.helpModeState.statusNotice).toMatchObject({
+      level: 'success',
+      message: '组长已回复你的求助'
+    });
     help.copyHelperReply(help.helpModeState.receivedResponse?.helperReplies[0] as HelperReply);
 
     expect(help.helpModeState.activeHelpId).toBe('');
@@ -204,11 +223,18 @@ describe('helpModeStore', () => {
       phone: '18800001111',
       isFallback: false
     }]);
+    expect(help.helpModeState.statusNotice).toMatchObject({
+      level: 'success',
+      message: '组长回复已复制'
+    });
 
     help.toggleHelpResponseExpanded();
     expect(help.helpModeState.responseExpanded).toBe(true);
     help.closeHelpResponse();
     expect(help.helpModeState.responseExpanded).toBe(false);
+
+    help.dismissHelpStatusNotice();
+    expect(help.helpModeState.statusNotice).toBeNull();
   });
 });
 

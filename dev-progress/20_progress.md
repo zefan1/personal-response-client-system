@@ -17,7 +17,7 @@
 - [x] Emits `recognize:multiple`.
 - [x] Emits `recognize:image-failed`.
 - [x] Emits `recognize:timeout`.
-- [x] Handles `NO_WECHAT_WINDOW`, `CAPTURE_FAILED`, `30-10001`, `30-10002`, `80-10002`, and timeout branches.
+- [x] Handles `CAPTURE_FAILED`, no screen source, `30-10001`, `30-10002`, `80-10002`, and timeout branches.
 - [x] Clipboard poll interval default `500`.
 - [x] Clipboard MD5 cache size default `5`.
 - [x] Clipboard minimum image dimension default `200`.

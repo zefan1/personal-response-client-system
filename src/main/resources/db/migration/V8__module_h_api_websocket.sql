@@ -58,7 +58,7 @@ VALUES
   ('system.alert_retention_days', '30', 'resolved alert retention days, range 7-90'),
   ('system.config_change_channel', 'config:change', 'Redis config change pub/sub channel'),
   ('system.ws_push_channel', 'ws:push', 'Redis WS push pub/sub channel')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);
 
 INSERT INTO accounts (username, password_hash, display_name, role, leader_id, is_enabled)
 VALUES ('admin', '{plain}admin123', 'System Admin', 'ADMIN', NULL, 1)

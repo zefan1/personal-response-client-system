@@ -36,4 +36,4 @@ VALUES
   ('audit.export_timeout_seconds', '120', 'audit CSV export timeout seconds, range 60-600'),
   ('audit.list_page_size_default', '20', 'audit list default page size, range 10-100'),
   ('audit.list_max_page_size', '100', 'audit list max page size, range 50-500')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

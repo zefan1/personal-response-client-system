@@ -55,12 +55,15 @@ describe('CopyBackfillAgent', () => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
   });
 
-  it('copies selected replies and posts send-confirm from the event-bus listener', async () => {
-    const { app, eventBus } = await mountAgent();
+  it('copies selected replies, posts send-confirm, and shows success feedback from the event-bus listener', async () => {
+    const { app, host, eventBus } = await mountAgent();
+    const confirmed: unknown[] = [];
+    eventBus.on('reply:send-confirmed', (payload) => confirmed.push(payload));
 
     eventBus.emit('reply:selected', reply({ text: 'Use this reply', direction: 'NEXT_STEP' }));
     await flushUi();
     await vi.runAllTimersAsync();
+    await flushUi();
 
     expect(mocks.writeClipboardText).toHaveBeenCalledWith('Use this reply');
     expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/send-confirm', {
@@ -70,10 +73,12 @@ describe('CopyBackfillAgent', () => {
       sentText: 'Use this reply',
       selectedDirection: 'NEXT_STEP'
     }, undefined, expect.any(AbortSignal));
+    expect(confirmed).toEqual([{ phone: '18800001111' }]);
+    expect(host.textContent).toContain('已复制并记录发送');
     app.unmount();
   });
 
-  it('renders profile suggestion toast and resolves a single suggestion from actual buttons', async () => {
+  it('keeps profile suggestions out of the global floating layer', async () => {
     const { app, host, eventBus } = await mountAgent();
 
     eventBus.emit('suggestion:show', {
@@ -82,25 +87,13 @@ describe('CopyBackfillAgent', () => {
     });
     await flushUi();
 
-    expect(host.querySelector('.suggestion-toast')).toBeTruthy();
-    expect(host.querySelectorAll('.suggestion-item')).toHaveLength(2);
-    expect(host.textContent).toContain('nickname');
-    expect(host.textContent).toContain('intentLevel');
-
-    const firstConfirm = host.querySelector('.suggestion-item .suggestion-actions .secondary') as HTMLButtonElement | null;
-    firstConfirm?.click();
-    await flushUi();
-
-    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/customers/18800001111/suggestions/batch-resolve', {
-      action: 'CONFIRM',
-      suggestionIds: [1],
-      operator: 'desktop'
-    });
-    expect(host.querySelector('.suggestion-toast')).toBeTruthy();
+    expect(host.querySelector('.suggestion-toast')).toBeFalsy();
+    expect(host.querySelector('.suggestion-reopen')).toBeFalsy();
+    expect(host.textContent).not.toContain('AI 更新建议');
     app.unmount();
   });
 
-  it('supports collapse, reopen, batch reject, and recognize-start auto collapse through DOM and events', async () => {
+  it('collapses pending suggestions on recognize-start without rendering a fixed reopen button', async () => {
     const { app, host, eventBus } = await mountAgent();
 
     eventBus.emit('suggestion:show', {
@@ -109,40 +102,13 @@ describe('CopyBackfillAgent', () => {
     });
     await flushUi();
 
-    const close = host.querySelector('.suggestion-toast-header .secondary') as HTMLButtonElement | null;
-    close?.click();
-    await flushUi();
-
     expect(host.querySelector('.suggestion-toast')).toBeFalsy();
-    expect(host.querySelector('.suggestion-reopen')).toBeTruthy();
-
-    (host.querySelector('.suggestion-reopen') as HTMLButtonElement | null)?.click();
-    await flushUi();
-    expect(host.querySelector('.suggestion-toast')).toBeTruthy();
-
-    const rejectAll = [...host.querySelectorAll('.reply-actions .secondary')] as HTMLButtonElement[];
-    rejectAll.at(-1)?.click();
-    await flushUi();
-
-    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/customers/18800002222/suggestions/batch-resolve', {
-      action: 'REJECT',
-      suggestionIds: [11, 12],
-      operator: 'desktop'
-    });
-    expect(host.querySelector('.suggestion-toast')).toBeFalsy();
-
-    eventBus.emit('suggestion:show', {
-      phone: '18800002222',
-      suggestions: [suggestion(13, 'source')]
-    });
-    await flushUi();
-    expect(host.querySelector('.suggestion-toast')).toBeTruthy();
 
     eventBus.emit('recognize:start', {});
     await flushUi();
 
     expect(host.querySelector('.suggestion-toast')).toBeFalsy();
-    expect(host.querySelector('.suggestion-reopen')).toBeTruthy();
+    expect(host.querySelector('.suggestion-reopen')).toBeFalsy();
     app.unmount();
   });
 });

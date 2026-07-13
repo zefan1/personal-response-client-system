@@ -3,6 +3,7 @@ export type ReplySelectedPayload = {
   direction: string;
   reason: string;
   phone: string;
+  displayPhone?: string;
   isFallback: boolean;
 };
 

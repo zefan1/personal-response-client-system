@@ -23,7 +23,7 @@ def assert_not_contains(text: str, needle: str, label: str) -> None:
 def main() -> None:
     package_json = read("desktop/package.json")
     main_ts = read("desktop/src/main/main.ts")
-    preload_ts = read("desktop/src/preload/preload.ts")
+    preload_ts = read("desktop/src/preload/preload.cts")
     config_ts = read("desktop/src/renderer/shared/config.ts")
     api_client_ts = read("desktop/src/renderer/shared/apiClient.ts")
     ws_bus_ts = read("desktop/src/renderer/shared/wsMessageBus.ts")
@@ -49,10 +49,11 @@ def main() -> None:
 
     assert_contains(main_ts, "ipcMain.handle('screenshot:capture'", "screenshot capture IPC handler")
     assert_contains(main_ts, "desktopCapturer.getSources", "Electron desktop capturer")
-    assert_contains(main_ts, "types: ['window']", "window-only capture source")
+    assert_contains(main_ts, "types: ['screen']", "screen capture source")
     assert_contains(main_ts, "thumbnailSize: { width: 1920, height: 1080 }", "capture thumbnail size")
-    assert_contains(main_ts, "NO_WECHAT_WINDOW", "no WeChat window error")
     assert_contains(main_ts, "CAPTURE_FAILED", "capture failed error")
+    assert_contains(main_ts, "No screen source detected", "no screen source error")
+    assert_contains(main_ts, "screenTitle: selected.name", "captured screen title")
     assert_contains(main_ts, "clipboard.readImage()", "clipboard polling")
     assert_contains(main_ts, "clipboardPollIntervalMs: 500", "clipboard poll default")
     assert_contains(main_ts, "clipboardMd5CacheSize: 5", "clipboard MD5 cache default")
@@ -87,7 +88,7 @@ def main() -> None:
 
     for error_code in ["30-10001", "30-10002", "80-10002"]:
         assert_contains(store_ts, error_code, f"backend error branch {error_code}")
-    for error_code in ["NO_WECHAT_WINDOW", "CAPTURE_FAILED"]:
+    for error_code in ["CAPTURE_FAILED"]:
         assert_contains(main_ts + panel_vue, error_code, f"capture error branch {error_code}")
 
     assert_contains(store_ts, "imageServiceStatus === 'DOWN'", "explicit DOWN handling")

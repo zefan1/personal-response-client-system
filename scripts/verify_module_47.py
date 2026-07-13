@@ -42,9 +42,8 @@ for token in [
     '"TUAN_GOU"',
     '"XIAN_SUO"',
     '"PENDING"',
-    "Role.KEEPER",
     "requestedCaller = user.username()",
-    "requireManager()",
+    "requireAdmin()",
     "ApiErrorCodes.FORBIDDEN",
 ]:
     if token not in service:
@@ -73,9 +72,7 @@ for token in [
 
 jwt = read("src/main/java/com/privateflow/modules/api/auth/JwtAuthenticationFilter.java")
 for token in [
-    "keeperAnalyticsOverview",
-    '"/admin/api/v1/analytics/overview"',
-    '"GET".equalsIgnoreCase',
+    "return user.role() == Role.ADMIN",
 ]:
     if token not in jwt:
         errors.append(f"JwtAuthenticationFilter missing {token}")
@@ -92,7 +89,7 @@ progress = read("dev-progress/47_progress.md")
 for token in [
     "No migration or new table was added",
     "python scripts\\verify_module_47.py",
-    "KEEPER can access only",
+    "ADMIN-only operations admin analytics",
 ]:
     if token not in progress:
         errors.append(f"progress missing {token}")

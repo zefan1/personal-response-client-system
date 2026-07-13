@@ -9,7 +9,6 @@ import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,26 +25,31 @@ public class DesktopVersionService {
   private final SystemConfigRepository configRepository;
   private final SystemAlertRepository alertRepository;
   private final AuditLogger auditLogger;
+  private final DesktopVersionPackageStorage packageStorage;
 
   public DesktopVersionService(
       DesktopVersionRepository repository,
       SystemConfigRepository configRepository,
       SystemAlertRepository alertRepository,
-      AuditLogger auditLogger) {
+      AuditLogger auditLogger,
+      DesktopVersionPackageStorage packageStorage) {
     this.repository = repository;
     this.configRepository = configRepository;
     this.alertRepository = alertRepository;
     this.auditLogger = auditLogger;
+    this.packageStorage = packageStorage;
   }
 
   public Map<String, Object> list(VersionStatus status, DesktopPlatform platform, int page, int size) {
     requireAdmin();
     int safePage = Math.max(1, page);
     int safeSize = Math.max(10, Math.min(size, 50));
+    long total = repository.count(status, platform);
     return Map.of(
-        "total", repository.count(status, platform),
+        "total", total,
         "page", safePage,
         "size", safeSize,
+        "totalPages", Math.max(1, (int) Math.ceil(total / (double) safeSize)),
         "items", repository.list(status, platform, safePage, safeSize));
   }
 
@@ -157,11 +161,7 @@ public class DesktopVersionService {
     }
     validateFile(file, platform);
     try {
-      String original = file.getOriginalFilename() == null ? "installer" : file.getOriginalFilename();
-      String ext = extension(original);
-      String safeName = original.replaceAll("[^A-Za-z0-9._-]", "_");
-      String url = "cos://desktop-releases/%s/%s-%s".formatted(LocalDate.now(), platform.name(), safeName);
-      return new VersionUploadResponse(url, file.getSize());
+      return packageStorage.store(file, platform);
     } catch (ApiException ex) {
       throw ex;
     } catch (Exception ex) {

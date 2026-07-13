@@ -413,6 +413,7 @@ def read_flows(api: ApiClient, ctx: Context):
           require_optional_list_enum("contentType", {"TEMPLATE", "KNOWLEDGE", "LOCATION", "IMAGE", "MINI_PROGRAM"}, "items", "list"),
           require_optional_list_enum("leadType", {"GENERAL", "TUAN_GOU", "XIAN_SUO"}, "items", "list"))),
       ("quick search desktop list", "/api/v1/quick-search/items", require_list_container("items", "list")),
+      ("desktop status", "/api/v1/desktop/status", require_data_keys("accountName", "skillStatus", "runtimeMode", "runtimeConfig")),
       ("rules list", "/admin/api/v1/rules", require_optional_list_item_keys({"id", "name", "actionType", "enabled"}, "rules", "items", "list")),
       ("tags list", "/admin/api/v1/tags/categories", require_optional_list_item_keys({"id", "categoryKey", "categoryName", "boundField", "values"}, "categories", "list")),
       ("notices list", "/admin/api/v1/notices", combine_assertions(
@@ -496,7 +497,7 @@ def account_flow(api: ApiClient, ctx: Context):
 
 def customer_flow(api: ApiClient, ctx: Context):
   phone = "137%08d" % (int(ctx.ts[-8:]) % 100000000)
-  known_phone = "13900000001"
+  known_phone = "139%08d" % ((int(ctx.ts[-8:]) + 1) % 100000000)
   api.request("customer profile not found", "GET", f"/api/v1/customers/{phone}", token=ctx.token, expect_success=False, allow_status={404})
   api.request("customer batch empty result", "POST", "/api/v1/customers/batch", {"phones": [phone]}, ctx.token)
   api.request("customer update not found", "PUT", f"/api/v1/customers/{phone}", {
@@ -535,6 +536,9 @@ def customer_flow(api: ApiClient, ctx: Context):
           {"role": "client", "text": "想了解产后恢复", "timestamp": None}
       ]
   }, ctx.token)
+  csv = f"phone,nickname\n{known_phone},acceptance-known\n".encode("utf-8")
+  api.request("customer fixture csv import", "POST", "/admin/api/v1/datasources/import", token=ctx.token,
+      files={"file": ("acceptance-known-customer.csv", "text/csv", csv)})
   api.request("chat generate representative", "POST", "/api/v1/chat/generate", {
       "phone": known_phone,
       "scene": "ACTIVE_REPLY",
@@ -683,7 +687,7 @@ def quick_search_flow(api: ApiClient, ctx: Context):
 def followup_flow(api: ApiClient, ctx: Context):
   condition = json.dumps({
       "conditions": [
-          {"field": "leadType", "operator": "EQ", "value": "PENDING"}
+          {"field": "leadType", "op": "EQ", "value": "PENDING"}
       ]
   }, ensure_ascii=False)
   created = api.request("rule create", "POST", "/admin/api/v1/rules", {

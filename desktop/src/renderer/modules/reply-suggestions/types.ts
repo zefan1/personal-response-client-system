@@ -1,5 +1,5 @@
 export type MatchType = 'EXACT' | 'FUZZY' | 'MULTIPLE' | 'NONE';
-export type ReplyScene = 'CHAT_RECOGNIZE' | 'ACTIVE_REPLY' | 'REGENERATE' | 'OPENING';
+export type ReplyScene = 'CHAT_RECOGNIZE' | 'ACTIVE_REPLY' | 'REGENERATE' | 'OPENING' | 'PROFILE_EXTRACT';
 
 export type ReplySuggestion = {
   text: string;
@@ -23,18 +23,51 @@ export type ChatResponse = {
     profileUpdates?: unknown;
   } | null;
   warning?: string | null;
+  replySource?: ReplySourceInfo | null;
+};
+
+export type ReplySourceInfo = {
+  source?: 'LLM' | 'SKILL' | 'FALLBACK' | string;
+  label?: string;
+  detail?: string;
 };
 
 export type RecognizeResultPayload = ChatResponse | {
+  sessionId?: string;
   source?: string;
   response?: ChatResponse;
 };
 
+export type RecognizeStartPayload = {
+  sessionId?: string;
+  source?: string;
+  stage?: RecognizeProgressStage;
+};
+
+export type RecognizeProgressPayload = RecognizeStartPayload & {
+  message?: string;
+};
+
+export type RecognizeFailurePayload = {
+  sessionId?: string;
+  errorCode?: string | null;
+  message?: string;
+};
+
 export type CustomerSelectedPayload = {
+  sessionId?: string;
   phone?: string;
   scene?: ReplyScene;
   leadType?: string;
   sourceFrom?: string;
+};
+
+export type ReplyCandidate = {
+  phone: string;
+  nickname?: string | null;
+  leadType?: string | null;
+  assignedKeeper?: string | null;
+  intendedStore?: string | null;
 };
 
 export type ProfileSuggestion = {
@@ -70,5 +103,45 @@ export type ReplySelectedPayload = {
   direction: string;
   reason: string;
   phone: string;
+  displayPhone?: string;
   isFallback: boolean;
+};
+
+export type ReplySessionStatus = 'LOADING' | 'READY' | 'FAILED' | 'FALLBACK' | 'COPIED' | 'MULTIPLE';
+export type RecognizeProgressStage = 'CAPTURED' | 'UPLOADING' | 'WAITING_MODEL' | 'GENERATING' | 'DONE' | 'FAILED';
+
+export type ReplySession = {
+  sessionId: string;
+  status: ReplySessionStatus;
+  source?: string;
+  createdAt: number;
+  updatedAt: number;
+  copiedAt?: number;
+  loadingMode: 'NONE' | 'FULL' | 'SIMPLE';
+  currentStageIndex: number;
+  currentStageText: string;
+  progressStage: RecognizeProgressStage;
+  failureReason: string;
+  suggestions: ReplySuggestion[];
+  replySource: ReplySourceInfo | null;
+  candidates: ReplyCandidate[];
+  currentPhone: string;
+  currentNickname: string;
+  currentLeadType: string;
+  currentScene: ReplyScene;
+  currentMatchType: string;
+  regenerating: boolean;
+  regenerateCount: number;
+  isFallbackMode: boolean;
+  fallbackText: string;
+  fallbackBannerText: string;
+  fallbackRetryCount: number;
+  showRegenerateButton: boolean;
+  showHelpHint: boolean;
+  helpHintMessage: string;
+  profileSuggestions: ProfileSuggestion[];
+  profileSuggestionsExpanded: boolean;
+  abnormalAlert: AbnormalAlertPayload | null;
+  activeHelpId: string | number | '';
+  toast: string;
 };

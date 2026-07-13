@@ -96,10 +96,10 @@ describe('ChatRecognitionPanel', () => {
       customerIdentifier: undefined,
       source: 'BUTTON_CLICK'
     });
-    expect(events).toEqual([
-      { event: 'recognize:start', payload: { source: 'BUTTON_CLICK' } },
-      { event: 'recognize:result', payload: { source: 'BUTTON_CLICK', response: response('EXACT') } }
-    ]);
+    expect(events[0]).toMatchObject({ event: 'recognize:start', payload: { source: 'BUTTON_CLICK' } });
+    expect(events[1]).toMatchObject({ event: 'recognize:result', payload: { source: 'BUTTON_CLICK', response: response('EXACT') } });
+    expect((events[0].payload as { sessionId?: string }).sessionId).toBeTruthy();
+    expect((events[1].payload as { sessionId?: string }).sessionId).toBe((events[0].payload as { sessionId?: string }).sessionId);
     app.unmount();
   });
 
@@ -156,6 +156,22 @@ describe('ChatRecognitionPanel', () => {
       customerIdentifier: '',
       source: 'CLIPBOARD_TEXT'
     });
+    app.unmount();
+  });
+
+  it('keeps clipboard screenshots pending without rendering an inline confirmation card', async () => {
+    const { app, host } = await mountPanel();
+    const recognition = await import('./recognitionStore');
+    const clipboardHandler = mocks.onClipboardImage.mock.calls[0]?.[0] as
+      | ((payload: { imageBase64: string; md5: string; width: number; height: number }) => void)
+      | undefined;
+
+    clipboardHandler?.({ imageBase64: 'clipboard-image', md5: 'clip-a', width: 300, height: 300 });
+    await flushUi();
+
+    expect(mocks.postJson).not.toHaveBeenCalled();
+    expect(recognition.recognitionState.pendingClipboardImage?.imageBase64).toBe('clipboard-image');
+    expect(host.querySelector('.clipboard-capture-card')).toBeFalsy();
     app.unmount();
   });
 });

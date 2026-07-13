@@ -34,6 +34,9 @@ export function connectWsMessageBus(): void {
     if (envelope.type === 'IMAGE_SERVICE_STATUS') {
       eventBus.emit('image:status-changed', envelope.payload);
     }
+    if (envelope.type === 'AUTH_INVALIDATED') {
+      eventBus.emit('auth:expired', envelope.payload);
+    }
     eventBus.emit(envelope.type, envelope.payload);
   };
   socket.onclose = () => {

@@ -120,6 +120,20 @@ export async function loadWorkbenchFollowups(manual = false): Promise<void> {
   }
 }
 
+export async function loadWorkbenchNotices(): Promise<void> {
+  try {
+    const response = await getJson<WorkbenchNoticePayload[]>('/api/v1/notices/active', FOLLOWUP_TIMEOUT_MS);
+    if (!response.success || !response.data) {
+      return;
+    }
+    workbenchState.notices = response.data
+      .map(normalizeNotice)
+      .filter((notice): notice is WorkbenchNotice => Boolean(notice));
+  } catch {
+    // 公告失败不阻断工作台主流程，后台健康页会记录服务端异常。
+  }
+}
+
 export function refreshWorkbenchIfNeeded(): void {
   const intervalMs = loadDesktopConfig().workbenchRefreshIntervalS * 1000;
   if (workbenchState.retryOnly) {
@@ -133,12 +147,13 @@ export function refreshWorkbenchIfNeeded(): void {
 export function handleWorkbenchFollowupReminder(payload: FollowupReminderPayload): void {
   const seen = new Set<string>();
   payload.reminders.forEach((reminder) => {
-    const key = `${payload.phone}:${reminder.reminderType}`;
+    const phone = payload.phoneFull ?? payload.phone;
+    const key = `${phone}:${reminder.reminderType}`;
     if (seen.has(key)) {
       return;
     }
     seen.add(key);
-    const existing = findFollowup(payload.phone, reminder.reminderType);
+    const existing = findFollowup(phone, reminder.reminderType);
     if (existing) {
       existing.overdueHours = reminder.overdueHours ?? existing.overdueHours;
       existing.alertLevel = reminder.alertLevel ?? existing.alertLevel;
@@ -146,6 +161,7 @@ export function handleWorkbenchFollowupReminder(payload: FollowupReminderPayload
     }
     workbenchState.followups.unshift({
       phone: payload.phone,
+      phoneFull: payload.phoneFull,
       nickname: `客户 ${payload.phone.slice(-4)}`,
       leadType: 'PENDING',
       reminderType: reminder.reminderType,
@@ -188,6 +204,12 @@ export function dismissWorkbenchNotice(noticeId: string): void {
   workbenchState.dismissedNoticeIds.add(noticeId);
 }
 
+export function noticeLevelLabel(level: string): string {
+  if (level === 'ERROR') return '故障';
+  if (level === 'WARN') return '提醒';
+  return '公告';
+}
+
 export function markWorkbenchDirty(): void {
   workbenchState.followupDataDirty = true;
 }
@@ -220,7 +242,7 @@ export function openWorkbenchQuickSearch(): void {
 
 export function startWorkbenchBatchTemplate(): void {
   openAllFollowups();
-  workbenchState.toast = '请在今日跟进列表中选择客户后点击批量发模板';
+  workbenchState.toast = '请在待办队列中选择客户后点击批量发模板';
 }
 
 function normalizeFollowups(items: FollowupItem[]): FollowupItem[] {

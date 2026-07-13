@@ -43,4 +43,4 @@ VALUES
   ('datasource.import_max_rows', '5000', 'CSV import max rows per upload'),
   ('datasource.manual_sync_timeout_s', '60', 'Manual datasource sync wait timeout seconds'),
   ('datasource.sync_status_refresh_s', '30', 'Datasource sync status refresh interval seconds')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

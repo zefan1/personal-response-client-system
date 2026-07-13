@@ -1,11 +1,15 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const root = process.cwd();
 const mainFile = join(root, 'dist', 'main', 'main.js');
 const rendererFile = join(root, 'dist', 'renderer', 'index.html');
+const smokeUserDataDir = join(tmpdir(), `pda-renderer-smoke-${process.pid}-${Date.now()}`);
+const apiBaseUrl = process.env.PDA_SMOKE_API_BASE_URL ?? 'http://localhost:8080';
+const accessToken = await loginForSmoke(apiBaseUrl);
 
 if (!existsSync(mainFile) || !existsSync(rendererFile)) {
   console.error('renderer smoke requires built dist/main/main.js and dist/renderer/index.html');
@@ -22,13 +26,17 @@ const child = spawn(command, args, {
   cwd: root,
   env: {
     ...process.env,
-    VITE_DEV_SERVER_URL: process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173',
     PDA_ELECTRON_SMOKE: '1',
     PDA_ELECTRON_SMOKE_AUTO_QUIT: '0',
-    PDA_RENDERER_SMOKE: '1'
+    PDA_RENDERER_SMOKE: '1',
+    PDA_RENDERER_SMOKE_ACCESS_TOKEN: accessToken,
+    PDA_SMOKE_API_BASE_URL: apiBaseUrl,
+    PDA_ELECTRON_SMOKE_USER_DATA_DIR: smokeUserDataDir
   },
   stdio: ['ignore', 'pipe', 'pipe']
 });
+
+mkdirSync(smokeUserDataDir, { recursive: true });
 
 let output = '';
 child.stdout.on('data', (chunk) => {
@@ -40,7 +48,7 @@ child.stderr.on('data', (chunk) => {
 
 const timer = setTimeout(() => {
   child.kill();
-}, 45000);
+}, 75000);
 
 const [code] = await once(child, 'exit');
 clearTimeout(timer);
@@ -57,3 +65,20 @@ if (!output.includes('renderer_smoke=passed')) {
 }
 
 console.log('renderer_smoke=passed');
+
+async function loginForSmoke(baseUrl) {
+  const response = await fetch(`${baseUrl}/admin/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: process.env.PDA_SMOKE_ADMIN_USERNAME ?? 'admin',
+      password: process.env.PDA_SMOKE_ADMIN_PASSWORD ?? 'admin123'
+    })
+  });
+  const payload = await response.json();
+  const token = payload?.data?.accessToken;
+  if (!response.ok || !payload?.success || !token) {
+    throw new Error(`renderer smoke login failed: status=${response.status} message=${payload?.message ?? 'unknown'}`);
+  }
+  return token;
+}

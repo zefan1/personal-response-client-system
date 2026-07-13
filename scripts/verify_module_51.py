@@ -24,8 +24,8 @@ for file in required_files:
 health = read("src/main/java/com/privateflow/modules/api/health/HealthService.java")
 for token in [
     "Role.ADMIN",
-    "Role.LEADER",
     "FORBIDDEN",
+    "requireAdmin()",
     '"status"',
     '"timestamp"',
     '"components"',

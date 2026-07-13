@@ -2,6 +2,7 @@ package com.privateflow.modules.match.service;
 
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
+import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.match.CustomerMatchErrorCodes;
 import com.privateflow.modules.match.CustomerMatchException;
 import com.privateflow.modules.match.util.PhoneUtils;
@@ -14,10 +15,15 @@ public class CustomerProfileService {
 
   private final CustomerQueryService customerQueryService;
   private final SuggestionQueueManager suggestionQueueManager;
+  private final CustomerAccessService customerAccessService;
 
-  public CustomerProfileService(CustomerQueryService customerQueryService, SuggestionQueueManager suggestionQueueManager) {
+  public CustomerProfileService(
+      CustomerQueryService customerQueryService,
+      SuggestionQueueManager suggestionQueueManager,
+      CustomerAccessService customerAccessService) {
     this.customerQueryService = customerQueryService;
     this.suggestionQueueManager = suggestionQueueManager;
+    this.customerAccessService = customerAccessService;
   }
 
   public CustomerProfileView getProfile(String rawPhone) {
@@ -30,9 +36,12 @@ public class CustomerProfileService {
       if (customer == null) {
         throw new CustomerMatchException(CustomerMatchErrorCodes.CUSTOMER_NOT_FOUND, "客户未找到（无档案模式）");
       }
+      if (!customerAccessService.canAccess(customer)) {
+        throw new CustomerMatchException(CustomerMatchErrorCodes.CUSTOMER_NOT_FOUND, "客户未找到或不在你的负责范围");
+      }
       Customer copy = copy(customer);
       copy.setPhone(PhoneUtils.mask(customer.getPhone()));
-      return new CustomerProfileView(copy, suggestionQueueManager.listPending(phone));
+      return new CustomerProfileView(copy, phone, suggestionQueueManager.listPending(phone));
     } catch (CustomerMatchException ex) {
       throw ex;
     } catch (RuntimeException ex) {

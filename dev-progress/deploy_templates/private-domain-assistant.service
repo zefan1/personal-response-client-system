@@ -1,0 +1,19 @@
+[Unit]
+Description=Private Domain Assistant Backend
+After=network.target mariadb.service redis-server.service
+
+[Service]
+Type=simple
+User=pda
+Group=pda
+WorkingDirectory=/opt/private-domain-assistant/app
+EnvironmentFile=/opt/private-domain-assistant/config/production.env
+ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/private-domain-assistant/app/private-domain-assistant.jar
+Restart=on-failure
+RestartSec=10
+SuccessExitStatus=143
+StandardOutput=append:/data/private-domain-assistant/logs/app.log
+StandardError=append:/data/private-domain-assistant/logs/app.err.log
+
+[Install]
+WantedBy=multi-user.target

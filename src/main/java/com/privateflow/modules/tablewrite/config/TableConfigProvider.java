@@ -1,6 +1,7 @@
 package com.privateflow.modules.tablewrite.config;
 
 import com.privateflow.common.events.ConfigChangedEvent;
+import com.privateflow.modules.api.security.SecretCipher;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import jakarta.annotation.PostConstruct;
 import java.util.Map;
@@ -15,10 +16,12 @@ public class TableConfigProvider {
 
   private static final Set<String> ALERT_TARGETS = Set.of("ADMIN", "LEADER", "BOTH");
   private final SystemConfigRepository configRepository;
+  private final SecretCipher secretCipher;
   private final AtomicReference<TableConfig> current;
 
   public TableConfigProvider(
       SystemConfigRepository configRepository,
+      SecretCipher secretCipher,
       @Value("${table.write-timeout-ms:10000}") int writeTimeoutMs,
       @Value("${table.retry-max-count:5}") int retryMaxCount,
       @Value("${table.retry-interval-s:60}") int retryIntervalS,
@@ -27,6 +30,7 @@ public class TableConfigProvider {
       @Value("${table.queue-warn-threshold:100}") int queueWarnThreshold,
       @Value("${table.queue-alert-threshold:1000}") int queueAlertThreshold) {
     this.configRepository = configRepository;
+    this.secretCipher = secretCipher;
     this.current = new AtomicReference<>(new TableConfig(
         "",
         "",
@@ -60,7 +64,7 @@ public class TableConfigProvider {
     Map<String, String> values = configRepository.findByPrefix("table.");
     current.set(new TableConfig(
         string(values.get("table.api_base_url"), previous.apiBaseUrl()),
-        string(values.get("table.api_key"), previous.apiKey()),
+        secret(values.get("table.api_key"), previous.apiKey()),
         integer(values.get("table.write_timeout_ms"), previous.writeTimeoutMs(), 5000, 20000),
         integer(values.get("table.retry_max_count"), previous.retryMaxCount(), 3, 10),
         integer(values.get("table.retry_interval_s"), previous.retryIntervalS(), 30, 300),
@@ -72,6 +76,10 @@ public class TableConfigProvider {
 
   private String string(String raw, String fallback) {
     return raw == null ? fallback : raw.trim();
+  }
+
+  private String secret(String raw, String fallback) {
+    return raw == null ? fallback : secretCipher.decrypt(raw).trim();
   }
 
   private int integer(String raw, int fallback, int min, int max) {

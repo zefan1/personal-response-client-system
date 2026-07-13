@@ -43,8 +43,11 @@ def main() -> None:
         "CONFIG_REFRESH",
         "ConfigChangedEvent",
         "shortcutCode already exists",
-        "30-10002",
-        "MAX_IMAGE_BYTES = 10 * 1024 * 1024",
+        "DEFAULT_MAX_IMAGE_MB = 10",
+        "imageMaxSizeMb()",
+        "quicksearch.admin.image_max_size_mb",
+        "ApiErrorCodes.CONFIG_INVALID",
+        "image size exceeds",
         "detectImageExt",
         "COS_UPLOAD_FAILED",
     ])

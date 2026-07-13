@@ -124,7 +124,7 @@ describe('quickSearchStore', () => {
     expect(store.quickSearchState.toast).toContain('图片');
   });
 
-  it('copies text items and auto closes after success', async () => {
+  it('copies text items and keeps the drawer open after success', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
     store.quickSearchState.visible = true;
@@ -133,8 +133,32 @@ describe('quickSearchStore', () => {
     expect(writeClipboardTextMock).toHaveBeenCalledWith('hello');
     expect(store.quickSearchState.toast).toContain('已复制');
 
-    vi.advanceTimersByTime(120);
-    expect(store.quickSearchState.visible).toBe(false);
+    vi.advanceTimersByTime(3000);
+    expect(store.quickSearchState.visible).toBe(true);
+  });
+
+  it('copies templates with both Chinese and legacy English customer variables resolved', async () => {
+    const store = await freshStore();
+    const { customerProfileState } = await import('../customer-profile/customerProfileStore');
+    customerProfileState.profile = {
+      phoneFull: '13800001111',
+      customer: {
+        nickname: '王女士',
+        intendedStore: '万江店',
+        intentLevel: 'HIGH',
+        appointmentItem: '产后修复'
+      }
+    } as typeof customerProfileState.profile;
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+
+    await store.copyQuickSearchItem(item({
+      id: 7,
+      contentType: 'TEMPLATE',
+      content: '{{客户昵称}} {{nickname}} {{意向门店}} {{intentLevel}} {{预约项目}} {{手机号}}'
+    }));
+
+    expect(writeClipboardTextMock).toHaveBeenCalledWith('王女士 王女士 万江店 HIGH 产后修复 13800001111');
+    customerProfileState.profile = null;
   });
 });
 

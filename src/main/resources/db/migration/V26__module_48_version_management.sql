@@ -38,4 +38,4 @@ VALUES
   ('version.max_file_size_mb', '500', 'desktop installer max upload size in MB, range 100-1000'),
   ('version.cos_upload_timeout_s', '120', 'desktop installer COS upload timeout seconds, range 60-600'),
   ('version.report_interval_hours', '24', 'desktop client version report interval hours, range 6-72')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

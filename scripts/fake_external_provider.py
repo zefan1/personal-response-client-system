@@ -75,7 +75,8 @@ class FakeExternalProvider(BaseHTTPRequestHandler):
         body = self.read_body()
         content_type = self.headers.get("Content-Type", "")
         if parsed.path == "/v1/chat/completions":
-            if "multipart/form-data" in content_type:
+            parsed_body = self.parse_json(body)
+            if "multipart/form-data" in content_type or self.is_image_request(parsed_body):
                 self.send_json({"choices": [{"message": {"content": IMAGE_RECOGNITION_TEXT}}]})
             else:
                 self.send_json({"choices": [{"message": {"content": json.dumps(SKILL_RESPONSE, ensure_ascii=False)}}]})
@@ -106,6 +107,19 @@ class FakeExternalProvider(BaseHTTPRequestHandler):
             return json.loads(body.decode("utf-8")) if body else None
         except json.JSONDecodeError:
             return None
+
+    @staticmethod
+    def is_image_request(payload):
+        if not isinstance(payload, dict):
+            return False
+        for message in payload.get("messages", []):
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "image_url":
+                    return True
+        return False
 
     def send_json(self, payload, status=200):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")

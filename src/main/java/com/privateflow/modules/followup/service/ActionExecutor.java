@@ -81,7 +81,7 @@ public class ActionExecutor {
       eventPublisher.publishEvent(new FollowupWsMessageReadyEvent(
           customer.getAssignedKeeper(),
           "FOLLOWUP_REMIND",
-          new FollowupReminderPayload(PhoneUtils.mask(customer.getPhone()), reminders)));
+          new FollowupReminderPayload(PhoneUtils.mask(customer.getPhone()), customer.getPhone(), reminders)));
     }
   }
 

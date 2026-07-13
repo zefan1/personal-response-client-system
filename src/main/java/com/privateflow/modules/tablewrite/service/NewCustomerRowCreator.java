@@ -4,7 +4,10 @@ import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.common.events.ProfileUpdatedEvent;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.LeadTypes;
+import com.privateflow.modules.customer.admin.DatasourceAdminRepository;
 import com.privateflow.modules.customer.infra.CustomerRepository;
+import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
+import com.privateflow.modules.tablewrite.TableWriteException;
 import com.privateflow.modules.tablewrite.client.WecomTableClient;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import com.privateflow.modules.tablewrite.infra.TableFieldMappingResolver;
@@ -23,6 +26,7 @@ public class NewCustomerRowCreator {
   private final TableConfigProvider configProvider;
   private final TableFieldMappingResolver mappingResolver;
   private final CustomerRepository customerRepository;
+  private final DatasourceAdminRepository datasourceRepository;
   private final ApplicationEventPublisher eventPublisher;
 
   public NewCustomerRowCreator(
@@ -30,17 +34,19 @@ public class NewCustomerRowCreator {
       TableConfigProvider configProvider,
       TableFieldMappingResolver mappingResolver,
       CustomerRepository customerRepository,
+      DatasourceAdminRepository datasourceRepository,
       ApplicationEventPublisher eventPublisher) {
     this.tableClient = tableClient;
     this.configProvider = configProvider;
     this.mappingResolver = mappingResolver;
     this.customerRepository = customerRepository;
+    this.datasourceRepository = datasourceRepository;
     this.eventPublisher = eventPublisher;
   }
 
   public void create(CustomerMessageSentEvent event) {
     Map<String, Object> internal = newCustomerFields(event);
-    String sourceTable = fallbackSourceTable(event.sourceTable());
+    String sourceTable = resolveSourceTable(event.sourceTable());
     Map<String, Object> sourceFields = mappingResolver.toSourceFields(sourceTable, internal);
     String rowId = tableClient.createRow(
         sourceTable,
@@ -94,8 +100,17 @@ public class NewCustomerRowCreator {
     eventPublisher.publishEvent(new ProfileUpdatedEvent(phone, List.copyOf(fields.keySet())));
   }
 
-  private String fallbackSourceTable(String sourceTable) {
-    return sourceTable == null || sourceTable.isBlank() ? "default_customer_table" : sourceTable;
+  public String resolveSourceTable(String sourceTable) {
+    if (sourceTable != null && !sourceTable.isBlank()) {
+      return sourceTable.trim();
+    }
+    return datasourceRepository.defaultWriteSource()
+        .map(source -> source.sourceTable())
+        .filter(value -> value != null && !value.isBlank())
+        .map(String::trim)
+        .orElseThrow(() -> new TableWriteException(
+            TableWriteErrorCodes.CONFIG_MISSING,
+            "no enabled datasource is configured for new customer table writes"));
   }
 
   private String asString(Object value) {

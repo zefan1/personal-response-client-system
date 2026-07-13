@@ -5,4 +5,4 @@ VALUES
   ('match.fuzzy_search_timeout_ms', '2000', '匹配查询超时毫秒，范围 1000-5000'),
   ('match.confidence_ratio_threshold', '0.5', 'HIGH 置信度覆盖比阈值，范围 0.3-0.8'),
   ('match.confidence_min_length', '2', '置信度判定最小 cleanedNickname 长度，范围 2-4')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);

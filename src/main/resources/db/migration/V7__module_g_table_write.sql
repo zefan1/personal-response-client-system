@@ -22,4 +22,4 @@ VALUES
   ('table.alert_notify_target', 'ADMIN', 'alert notify target: ADMIN / LEADER / BOTH'),
   ('table.queue_warn_threshold', '100', 'warn when pending queue exceeds this threshold, range 50-500'),
   ('table.queue_alert_threshold', '1000', 'alert when pending queue exceeds this threshold, range 500-5000')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE description = VALUES(description);
