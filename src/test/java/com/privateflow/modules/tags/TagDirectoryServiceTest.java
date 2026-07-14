@@ -7,6 +7,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.privateflow.common.events.ConfigChangedEvent;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,6 +19,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -38,20 +41,27 @@ class TagDirectoryServiceTest {
   }
 
   @Test
-  void initialLoadFailureReturnsEmptyWithoutCachingAndNextReadRetries() {
+  void initialLoadFailureIsSharedWithinShortWindowAndRetriesAfterExpiry() {
     TagRepository repository = mock(TagRepository.class);
     TagConfigProvider configProvider = mock(TagConfigProvider.class);
     when(repository.listTree())
         .thenThrow(new IllegalStateException("database unavailable"))
         .thenReturn(List.of(category(1L, "recovered")));
-    TagDirectoryService service = new TagDirectoryService(repository, configProvider);
+    AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-07-15T00:00:00Z"));
+    TagDirectoryService service = new TagDirectoryService(repository, configProvider, now::get);
 
     TagDirectorySnapshot failed = service.getSnapshot();
-    TagDirectorySnapshot recovered = service.getSnapshot();
+    TagDirectorySnapshot withinWindow = service.getSnapshot();
 
     assertThat(failed).isNotNull();
     assertThat(failed.categories()).isEmpty();
     assertThat(failed.refreshedAt()).isNotNull();
+    assertThat(withinWindow).isSameAs(failed);
+    verify(repository, times(1)).listTree();
+
+    now.updateAndGet(instant -> instant.plus(Duration.ofMillis(500)));
+    TagDirectorySnapshot recovered = service.getSnapshot();
+
     assertThat(recovered.categoriesByKey()).containsKey("recovered");
     verify(repository, times(2)).listTree();
   }
@@ -65,6 +75,7 @@ class TagDirectoryServiceTest {
     AtomicInteger repositoryCalls = new AtomicInteger();
     CountDownLatch firstQueryEntered = new CountDownLatch(1);
     CountDownLatch releaseFirstQuery = new CountDownLatch(1);
+    AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-07-15T00:00:00Z"));
     when(repository.listTree()).thenAnswer(invocation -> {
       if (repositoryCalls.incrementAndGet() == 1) {
         firstQueryEntered.countDown();
@@ -73,7 +84,7 @@ class TagDirectoryServiceTest {
       }
       return List.of(category(1L, "recovered"));
     });
-    TagDirectoryService service = new TagDirectoryService(repository, configProvider);
+    TagDirectoryService service = new TagDirectoryService(repository, configProvider, now::get);
 
     CyclicBarrier start = new CyclicBarrier(callerCount);
     CountDownLatch passedBarrier = new CountDownLatch(callerCount);
@@ -105,6 +116,10 @@ class TagDirectoryServiceTest {
       assertThat(failedSnapshots).allSatisfy(snapshot -> assertThat(snapshot).isSameAs(failedSnapshots.get(0)));
       assertThat(repositoryCalls).hasValue(1);
 
+      assertThat(service.getSnapshot()).isSameAs(failedSnapshots.get(0));
+      assertThat(repositoryCalls).hasValue(1);
+
+      now.updateAndGet(instant -> instant.plus(Duration.ofMillis(500)));
       TagDirectorySnapshot recovered = service.getSnapshot();
       assertThat(recovered.categoriesByKey()).containsKey("recovered");
       assertThat(repositoryCalls).hasValue(2);

@@ -1,6 +1,7 @@
 package com.privateflow.modules.tags;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -242,6 +243,10 @@ class TagSelectionValidatorTest {
         TagCandidatePurpose.MANUAL_ASSIGNMENT, 1L, List.of(11L, 12L), TagSelectionContext.empty());
 
     assertRejected(result, "SINGLE_VALUE_COUNT_INVALID", "单选分类必须且只能选择一个标签值");
+    @SuppressWarnings("unchecked")
+    List<Long> rejectedInput = (List<Long>) result.rejectedInput();
+    assertThatThrownBy(() -> rejectedInput.add(13L))
+        .isInstanceOf(UnsupportedOperationException.class);
   }
 
   @Test
