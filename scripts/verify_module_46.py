@@ -13,7 +13,8 @@ required_files = [
     "src/main/java/com/privateflow/modules/tags/TagAdminController.java",
     "src/main/java/com/privateflow/modules/tags/TagAdminService.java",
     "src/main/java/com/privateflow/modules/tags/TagRepository.java",
-    "src/main/java/com/privateflow/modules/tags/TagCacheService.java",
+    "src/main/java/com/privateflow/modules/tags/TagDirectoryService.java",
+    "src/main/java/com/privateflow/modules/tags/TagCandidateBuilder.java",
     "src/main/java/com/privateflow/modules/tags/TagCategory.java",
     "src/main/java/com/privateflow/modules/tags/TagValue.java",
     "src/main/java/com/privateflow/modules/tags/TagCategoryRequest.java",
@@ -69,11 +70,7 @@ repo = read("src/main/java/com/privateflow/modules/tags/TagRepository.java")
 for token in [
     "tag_categories",
     "tag_values",
-    "findEnabledForPrompt",
-    "personality_type",
-    "body_concerns",
-    "worries",
-    "LIKE CONCAT('%', ?, '%')",
+    "customer_tag_assignments",
     "UPDATE tag_values",
     "display_name = COALESCE",
     "WHERE id = ? AND version = ?",
@@ -81,6 +78,20 @@ for token in [
 ]:
     if token not in repo:
         errors.append(f"TagRepository missing {token}")
+
+for token in ["LIKE CONCAT('%', ?, '%')", "usageCount"]:
+    if token in repo:
+        errors.append(f"TagRepository still contains legacy usage pattern {token}")
+
+directory = read("src/main/java/com/privateflow/modules/tags/TagDirectoryService.java")
+for token in ["class TagDirectoryService", "repository.listTree()", "getSnapshot()"]:
+    if token not in directory:
+        errors.append(f"TagDirectoryService missing {token}")
+
+candidate = read("src/main/java/com/privateflow/modules/tags/TagCandidateBuilder.java")
+for token in ["class TagCandidateBuilder", "TagDirectoryService", "directoryService.getSnapshot()"]:
+    if token not in candidate:
+        errors.append(f"TagCandidateBuilder missing {token}")
 
 merge_repo = read("src/main/java/com/privateflow/modules/tags/TagMergeRepository.java")
 for token in [
@@ -94,28 +105,15 @@ for token in [
     if token not in merge_repo:
         errors.append(f"TagMergeRepository missing {token}")
 
-cache = read("src/main/java/com/privateflow/modules/tags/TagCacheService.java")
-for token in [
-    "getAllEnabledTags",
-    "getTagsByCategory",
-    "refresh()",
-    "@EventListener",
-    "tag_config",
-    "@Scheduled",
-]:
-    if token not in cache:
-        errors.append(f"TagCacheService missing {token}")
-
 builder = read("src/main/java/com/privateflow/modules/skill/service/SkillRequestBuilder.java")
 for token in [
-    "TagCacheService",
-    "getAllEnabledTags",
-    "Available ",
+    "TagCandidateBuilder",
+    "tagCandidateBuilder.build",
     "value.displayName()",
     "value.tagValue()",
 ]:
     if token not in builder:
-        errors.append(f"SkillRequestBuilder missing tag cache integration {token}")
+        errors.append(f"SkillRequestBuilder missing tag candidate integration {token}")
 
 config = read("src/main/java/com/privateflow/modules/api/config/ConfigAdminService.java")
 for token in ["key.startsWith(\"tag.\")", "tag.cache_refresh_interval_s", "tag.value_max_per_category"]:
@@ -151,7 +149,6 @@ for code in ["90-10001", "90-10002", "90-10003", "90-10004", "90-10005", "90-100
 progress = read("dev-progress/46_progress.md")
 for token in [
     "python scripts\\verify_module_46.py",
-    "Skill prompt now reads available tags from `TagCacheService`",
     "Customer data is not modified",
 ]:
     if token not in progress:

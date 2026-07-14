@@ -7,7 +7,6 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -44,8 +43,8 @@ class TagAdminServiceTest {
     configProvider = mock(TagConfigProvider.class);
     ruleReferenceService = mock(TagRuleReferenceService.class);
     when(configProvider.get()).thenReturn(new TagRuntimeConfig(300, 50));
-    when(repository.categoryImpact(anyLong(), nullable(String.class))).thenReturn(TagImpact.empty());
-    when(repository.valueImpact(any(TagValue.class), any(TagCategory.class))).thenReturn(TagImpact.empty());
+    when(repository.categoryImpact(anyLong())).thenReturn(TagImpact.empty());
+    when(repository.valueImpact(any(TagValue.class))).thenReturn(TagImpact.empty());
     when(ruleReferenceService.countReferences(any(), any())).thenReturn(
         new TagRuleReferenceService.ReferenceCounts(Map.of(), Map.of()));
     service = new TagAdminService(
@@ -69,16 +68,33 @@ class TagAdminServiceTest {
   }
 
   @Test
+  void historicalCategoryAssignmentStillBlocksDelete() {
+    when(repository.findCategory(1L)).thenReturn(Optional.of(category(false, List.of())));
+    when(repository.categoryImpact(1L)).thenReturn(new TagImpact(1, 0, 1, 0, 0, 0, 0, 0, 0));
+
+    assertThatThrownBy(() -> service.deleteCategory(1L))
+        .isInstanceOf(ApiException.class)
+        .extracting(ex -> ((ApiException) ex).getErrorCode())
+        .isEqualTo(TagErrorCodes.CATEGORY_IN_USE);
+
+    verify(repository).categoryImpact(1L);
+    verify(repository, never()).deleteCategory(anyLong());
+  }
+
+  @Test
   void usedTagValueDeleteUsesChineseBusinessMessage() {
     TagValue value = value();
     when(repository.findValue(2L)).thenReturn(Optional.of(value));
     when(repository.findCategory(1L)).thenReturn(Optional.of(category(true, List.of(value))));
-    when(repository.valueImpact(eq(value), any(TagCategory.class)))
-        .thenReturn(new TagImpact(3, 0, 3, 3, 0, 0, 0, 0, 0));
+    when(repository.valueImpact(value))
+        .thenReturn(new TagImpact(3, 0, 3, 0, 0, 0, 0, 0, 0));
 
     assertThatThrownBy(() -> service.deleteValue(2L))
         .isInstanceOf(ApiException.class)
         .hasMessage("该标签仍影响 3 位客户、0 条规则和 3 条历史记录，只能停用或合并");
+
+    verify(repository).valueImpact(value);
+    verify(repository, never()).deleteValue(anyLong());
   }
 
   @Test

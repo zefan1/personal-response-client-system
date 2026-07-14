@@ -6,13 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -215,28 +212,26 @@ public class TagRepository {
     return values(categoryId);
   }
 
-  public TagImpact categoryImpact(long categoryId, String boundField) {
+  public TagImpact categoryImpact(long categoryId) {
     Map<String, Object> metrics = jdbcTemplate.queryForMap("""
         SELECT
+          (SELECT COUNT(DISTINCT customer_id) FROM customer_tag_assignments WHERE category_id = ?) AS customer_count,
           (SELECT COUNT(*) FROM customer_tag_assignments WHERE category_id = ?) AS assignment_count,
-          (SELECT COUNT(*) FROM customer_tag_assignments WHERE category_id = ? AND is_active = 1) AS active_assignment_count,
+          (SELECT COUNT(*)
+             FROM customer_tag_assignments a
+             JOIN tag_categories c ON c.id = a.category_id
+             JOIN tag_values v ON v.id = a.tag_value_id AND v.category_id = a.category_id
+            WHERE a.category_id = ? AND a.is_active = 1
+              AND c.is_enabled = 1 AND c.merged_into_id IS NULL
+              AND v.is_enabled = 1 AND v.merged_into_id IS NULL) AS active_assignment_count,
           (SELECT COUNT(*) FROM tag_analysis_results WHERE category_id = ?) AS analysis_count,
           (SELECT COUNT(*) FROM tag_legacy_value_mappings WHERE category_id = ?) AS legacy_mapping_count,
           (SELECT COUNT(*) FROM system_tag_suggestions s JOIN tag_values v ON v.id = s.tag_value_id WHERE v.category_id = ?) AS suggestion_count,
           (SELECT COUNT(*) FROM unmatched_legacy_tag_values WHERE category_id = ?) AS unmatched_count,
           (SELECT COUNT(*) FROM customer_tag_category_locks WHERE category_id = ?) AS lock_count,
           (SELECT COUNT(*) FROM personality_tags p JOIN tag_values v ON v.id = p.canonical_tag_value_id WHERE v.category_id = ?) AS personality_count
-        """, categoryId, categoryId, categoryId, categoryId, categoryId, categoryId, categoryId, categoryId);
-    Set<Long> customerIds = new LinkedHashSet<>(jdbcTemplate.queryForList(
-        "SELECT DISTINCT customer_id FROM customer_tag_assignments WHERE category_id = ?",
-        Long.class,
-        categoryId));
-    String legacyColumn = legacyColumn(boundField);
-    if (legacyColumn != null) {
-      customerIds.addAll(jdbcTemplate.queryForList(
-          "SELECT id FROM customers WHERE " + legacyColumn + " IS NOT NULL AND TRIM(" + legacyColumn + ") <> ''",
-          Long.class));
-    }
+        """, categoryId, categoryId, categoryId, categoryId, categoryId, categoryId, categoryId, categoryId, categoryId);
+    long customers = number(metrics, "customer_count");
     long assignments = number(metrics, "assignment_count");
     long activeAssignments = number(metrics, "active_assignment_count");
     long analysis = number(metrics, "analysis_count");
@@ -246,7 +241,7 @@ public class TagRepository {
     long locks = number(metrics, "lock_count");
     long personality = number(metrics, "personality_count");
     return new TagImpact(
-        customerIds.size(),
+        customers,
         0,
         assignments + analysis + suggestions + mappings + unmatched + locks + personality,
         activeAssignments,
@@ -257,22 +252,25 @@ public class TagRepository {
         locks);
   }
 
-  public TagImpact valueImpact(TagValue value, TagCategory category) {
+  public TagImpact valueImpact(TagValue value) {
     Map<String, Object> metrics = jdbcTemplate.queryForMap("""
         SELECT
+          (SELECT COUNT(DISTINCT customer_id) FROM customer_tag_assignments WHERE tag_value_id = ?) AS customer_count,
           (SELECT COUNT(*) FROM customer_tag_assignments WHERE tag_value_id = ?) AS assignment_count,
-          (SELECT COUNT(*) FROM customer_tag_assignments WHERE tag_value_id = ? AND is_active = 1) AS active_assignment_count,
+          (SELECT COUNT(*)
+             FROM customer_tag_assignments a
+             JOIN tag_categories c ON c.id = a.category_id
+             JOIN tag_values v ON v.id = a.tag_value_id AND v.category_id = a.category_id
+            WHERE a.tag_value_id = ? AND a.is_active = 1
+              AND c.is_enabled = 1 AND c.merged_into_id IS NULL
+              AND v.is_enabled = 1 AND v.merged_into_id IS NULL) AS active_assignment_count,
           (SELECT COUNT(*) FROM tag_analysis_results WHERE tag_value_id = ?) AS analysis_count,
           (SELECT COUNT(*) FROM tag_legacy_value_mappings WHERE tag_value_id = ?) AS legacy_mapping_count,
           (SELECT COUNT(*) FROM system_tag_suggestions WHERE tag_value_id = ?) AS suggestion_count,
           (SELECT COUNT(*) FROM unmatched_legacy_tag_values WHERE mapped_tag_value_id = ?) AS unmatched_count,
           (SELECT COUNT(*) FROM personality_tags WHERE canonical_tag_value_id = ?) AS personality_count
-        """, value.id(), value.id(), value.id(), value.id(), value.id(), value.id(), value.id());
-    Set<Long> customerIds = new LinkedHashSet<>(jdbcTemplate.queryForList(
-        "SELECT DISTINCT customer_id FROM customer_tag_assignments WHERE tag_value_id = ?",
-        Long.class,
-        value.id()));
-    customerIds.addAll(legacyCustomerIds(value, category));
+        """, value.id(), value.id(), value.id(), value.id(), value.id(), value.id(), value.id(), value.id());
+    long customers = number(metrics, "customer_count");
     long assignments = number(metrics, "assignment_count");
     long activeAssignments = number(metrics, "active_assignment_count");
     long analysis = number(metrics, "analysis_count");
@@ -281,7 +279,7 @@ public class TagRepository {
     long unmatched = number(metrics, "unmatched_count");
     long personality = number(metrics, "personality_count");
     return new TagImpact(
-        customerIds.size(),
+        customers,
         0,
         assignments + analysis + suggestions + mappings + unmatched + personality,
         activeAssignments,
@@ -447,30 +445,6 @@ public class TagRepository {
 
   public int deleteValue(long id) {
     return jdbcTemplate.update("DELETE FROM tag_values WHERE id = ?", id);
-  }
-
-  public int usageCount(long tagValueId, String boundField, TagSelectionMode selectionMode, String tagValue) {
-    Integer structured = jdbcTemplate.queryForObject("""
-        SELECT
-          (SELECT COUNT(*) FROM customer_tag_assignments WHERE tag_value_id = ?)
-          + (SELECT COUNT(*) FROM tag_analysis_results WHERE tag_value_id = ?)
-          + (SELECT COUNT(*) FROM tag_legacy_value_mappings WHERE tag_value_id = ?)
-          + (SELECT COUNT(*) FROM system_tag_suggestions WHERE tag_value_id = ?)
-        """, Integer.class, tagValueId, tagValueId, tagValueId, tagValueId);
-    int structuredCount = structured == null ? 0 : structured;
-    if (boundField == null || boundField.isBlank()) {
-      return structuredCount;
-    }
-    String column = toSnakeCase(boundField);
-    if (!List.of("personality_type", "body_concerns", "worries", "intent_level").contains(column)) {
-      return structuredCount;
-    }
-    String operator = selectionMode == TagSelectionMode.MULTI ? " LIKE CONCAT('%', ?, '%')" : " = ?";
-    Integer legacy = jdbcTemplate.queryForObject(
-        "SELECT COUNT(*) FROM customers WHERE " + column + operator,
-        Integer.class,
-        tagValue);
-    return Math.max(structuredCount, legacy == null ? 0 : legacy);
   }
 
   private List<TagValue> values(long categoryId) {
@@ -715,38 +689,4 @@ public class TagRepository {
     return value instanceof Number number ? number.longValue() : 0L;
   }
 
-  private String legacyColumn(String boundField) {
-    if (boundField == null) {
-      return null;
-    }
-    return switch (boundField) {
-      case "personalityType" -> "personality_type";
-      case "bodyConcerns" -> "body_concerns";
-      case "worries" -> "worries";
-      case "intentLevel" -> "intent_level";
-      default -> null;
-    };
-  }
-
-  private Set<Long> legacyCustomerIds(TagValue value, TagCategory category) {
-    String column = legacyColumn(category.boundField());
-    if (column == null) {
-      return Set.of();
-    }
-    Set<String> candidates = new LinkedHashSet<>();
-    candidates.add(value.tagValue());
-    candidates.add(value.displayName());
-    candidates.addAll(value.synonyms());
-    Set<Long> ids = new LinkedHashSet<>();
-    jdbcTemplate.query(
-        "SELECT id, " + column + " AS legacy_value FROM customers WHERE " + column + " IS NOT NULL AND TRIM(" + column + ") <> ''",
-        rs -> {
-          String raw = rs.getString("legacy_value");
-          Set<String> tokens = new LinkedHashSet<>(Arrays.asList(raw.split("[\\s,，、;；|/]+")));
-          if (tokens.stream().map(String::trim).anyMatch(candidates::contains)) {
-            ids.add(rs.getLong("id"));
-          }
-        });
-    return ids;
-  }
 }

@@ -402,7 +402,7 @@ public class TagAdminService {
     TagRuleReferenceService.ReferenceCounts counts = ruleReferenceService.countReferences(categories, values);
     return categories.stream()
         .map(category -> category.withImpact(
-            repository.categoryImpact(category.id(), category.boundField()).withRuleCount(counts.category(category.id()))))
+            repository.categoryImpact(category.id()).withRuleCount(counts.category(category.id()))))
         .toList();
   }
 
@@ -415,7 +415,7 @@ public class TagAdminService {
     TagRuleReferenceService.ReferenceCounts counts = ruleReferenceService.countReferences(
         List.copyOf(categories.values()), values);
     return values.stream()
-        .map(value -> value.withImpact(repository.valueImpact(value, categories.get(value.categoryId()))
+        .map(value -> value.withImpact(repository.valueImpact(value)
             .withRuleCount(counts.value(value.id()))))
         .toList();
   }
@@ -423,13 +423,13 @@ public class TagAdminService {
   private TagImpact categoryImpact(TagCategory category) {
     TagRuleReferenceService.ReferenceCounts counts = ruleReferenceService.countReferences(
         List.of(category), category.values());
-    return repository.categoryImpact(category.id(), category.boundField()).withRuleCount(counts.category(category.id()));
+    return repository.categoryImpact(category.id()).withRuleCount(counts.category(category.id()));
   }
 
   private TagImpact valueImpact(TagValue value) {
     TagCategory category = requireCategory(value.categoryId());
     TagRuleReferenceService.ReferenceCounts counts = ruleReferenceService.countReferences(List.of(category), List.of(value));
-    return repository.valueImpact(value, category).withRuleCount(counts.value(value.id()));
+    return repository.valueImpact(value).withRuleCount(counts.value(value.id()));
   }
 
   private TagCategory requireMergeTargetCategory(TagCategory source, TagMergeRequest request) {

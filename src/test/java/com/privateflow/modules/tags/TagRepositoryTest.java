@@ -25,8 +25,16 @@ class TagRepositoryTest {
         "sa",
         "");
     jdbcTemplate = new JdbcTemplate(dataSource);
+    jdbcTemplate.execute("DROP TABLE IF EXISTS personality_tags");
+    jdbcTemplate.execute("DROP TABLE IF EXISTS customer_tag_category_locks");
+    jdbcTemplate.execute("DROP TABLE IF EXISTS unmatched_legacy_tag_values");
+    jdbcTemplate.execute("DROP TABLE IF EXISTS system_tag_suggestions");
+    jdbcTemplate.execute("DROP TABLE IF EXISTS tag_legacy_value_mappings");
+    jdbcTemplate.execute("DROP TABLE IF EXISTS tag_analysis_results");
+    jdbcTemplate.execute("DROP TABLE IF EXISTS customer_tag_assignments");
     jdbcTemplate.execute("DROP TABLE IF EXISTS tag_values");
     jdbcTemplate.execute("DROP TABLE IF EXISTS tag_categories");
+    jdbcTemplate.execute("DROP TABLE IF EXISTS customers");
     jdbcTemplate.execute("""
         CREATE TABLE tag_categories (
           id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -77,6 +85,7 @@ class TagRepositoryTest {
           updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """);
+    createImpactTables();
     repository = new TagRepository(jdbcTemplate, new ObjectMapper());
   }
 
@@ -204,6 +213,136 @@ class TagRepositoryTest {
     assertThat(updated.displayName()).isEqualTo("安静沟通");
     assertThat(updated.systemSelectable()).isFalse();
     assertThat(updated.version()).isEqualTo(1);
+  }
+
+  @Test
+  void impactsIgnoreMatchingLegacyCustomerColumnsWithoutAssignments() {
+    jdbcTemplate.update("""
+        INSERT INTO tag_categories (id, category_key, category_name, bound_field, sort_order) VALUES
+          (1, 'personality_type', 'Personality', 'personalityType', 1),
+          (2, 'body_concerns', 'Body concerns', 'bodyConcerns', 2),
+          (3, 'worries', 'Worries', 'worries', 3),
+          (4, 'intent_level', 'Intent level', 'intentLevel', 4)
+        """);
+    jdbcTemplate.update("""
+        INSERT INTO tag_values (id, category_id, tag_value, display_name, sort_order) VALUES
+          (11, 1, 'LOYALIST', 'Loyalist', 1),
+          (21, 2, 'DIASTASIS_RECTI', 'Diastasis recti', 1),
+          (31, 3, 'FEAR_EXPENSIVE', 'Price concern', 1),
+          (41, 4, 'HIGH', 'High intent', 1)
+        """);
+    jdbcTemplate.update("""
+        INSERT INTO customers (id, personality_type, body_concerns, worries, intent_level)
+        VALUES (101, 'LOYALIST', 'DIASTASIS_RECTI', 'FEAR_EXPENSIVE', 'HIGH')
+        """);
+
+    for (long categoryId : List.of(1L, 2L, 3L, 4L)) {
+      assertThat(repository.categoryImpact(categoryId).customerCount()).isZero();
+    }
+    for (long valueId : List.of(11L, 21L, 31L, 41L)) {
+      TagValue value = repository.findValue(valueId).orElseThrow();
+      assertThat(repository.valueImpact(value).customerCount()).isZero();
+    }
+  }
+
+  @Test
+  void impactsCountDistinctAssignmentCustomersAndEveryHistoryRow() {
+    TagValue value = insertDirectoryEntry(1L, 11L);
+    jdbcTemplate.update("INSERT INTO customers (id) VALUES (101), (202)");
+    jdbcTemplate.update("""
+        INSERT INTO customer_tag_assignments (customer_id, category_id, tag_value_id, is_active) VALUES
+          (101, 1, 11, 0),
+          (101, 1, 11, 1),
+          (202, 1, 11, 0)
+        """);
+
+    TagImpact categoryImpact = repository.categoryImpact(1L);
+    TagImpact valueImpact = repository.valueImpact(value);
+
+    assertThat(categoryImpact.customerCount()).isEqualTo(2);
+    assertThat(categoryImpact.historyCount()).isEqualTo(3);
+    assertThat(categoryImpact.activeAssignmentCount()).isEqualTo(1);
+    assertThat(valueImpact.customerCount()).isEqualTo(2);
+    assertThat(valueImpact.historyCount()).isEqualTo(3);
+    assertThat(valueImpact.activeAssignmentCount()).isEqualTo(1);
+  }
+
+  @Test
+  void activeAssignmentCountRequiresEnabledUnmergedCategoryAndValue() {
+    TagValue value = insertDirectoryEntry(1L, 11L);
+    jdbcTemplate.update("INSERT INTO customers (id) VALUES (101)");
+    jdbcTemplate.update("""
+        INSERT INTO customer_tag_assignments (customer_id, category_id, tag_value_id, is_active)
+        VALUES (101, 1, 11, 1)
+        """);
+
+    assertThat(repository.categoryImpact(1L).activeAssignmentCount()).isEqualTo(1);
+    assertThat(repository.valueImpact(value).activeAssignmentCount()).isEqualTo(1);
+
+    jdbcTemplate.update("UPDATE tag_values SET is_enabled = 0 WHERE id = 11");
+    assertInactiveHistoryRemains(value);
+
+    jdbcTemplate.update("UPDATE tag_values SET is_enabled = 1 WHERE id = 11");
+    jdbcTemplate.update("UPDATE tag_categories SET is_enabled = 0 WHERE id = 1");
+    assertInactiveHistoryRemains(value);
+
+    jdbcTemplate.update("UPDATE tag_categories SET is_enabled = 1 WHERE id = 1");
+    jdbcTemplate.update("UPDATE tag_values SET merged_into_id = 12 WHERE id = 11");
+    assertInactiveHistoryRemains(value);
+
+    jdbcTemplate.update("UPDATE tag_values SET merged_into_id = NULL WHERE id = 11");
+    jdbcTemplate.update("UPDATE tag_categories SET merged_into_id = 2 WHERE id = 1");
+    assertInactiveHistoryRemains(value);
+  }
+
+  private void createImpactTables() {
+    jdbcTemplate.execute("""
+        CREATE TABLE customers (
+          id BIGINT PRIMARY KEY,
+          personality_type VARCHAR(500),
+          body_concerns VARCHAR(500),
+          worries VARCHAR(500),
+          intent_level VARCHAR(500)
+        )
+        """);
+    jdbcTemplate.execute("""
+        CREATE TABLE customer_tag_assignments (
+          id BIGINT AUTO_INCREMENT PRIMARY KEY,
+          customer_id BIGINT NOT NULL,
+          category_id BIGINT NOT NULL,
+          tag_value_id BIGINT NOT NULL,
+          is_active TINYINT NOT NULL DEFAULT 1
+        )
+        """);
+    jdbcTemplate.execute("CREATE TABLE tag_analysis_results (category_id BIGINT, tag_value_id BIGINT)");
+    jdbcTemplate.execute("CREATE TABLE tag_legacy_value_mappings (category_id BIGINT, tag_value_id BIGINT)");
+    jdbcTemplate.execute("CREATE TABLE system_tag_suggestions (tag_value_id BIGINT)");
+    jdbcTemplate.execute("CREATE TABLE unmatched_legacy_tag_values (category_id BIGINT, mapped_tag_value_id BIGINT)");
+    jdbcTemplate.execute("CREATE TABLE customer_tag_category_locks (category_id BIGINT)");
+    jdbcTemplate.execute("CREATE TABLE personality_tags (canonical_tag_value_id BIGINT)");
+  }
+
+  private TagValue insertDirectoryEntry(long categoryId, long valueId) {
+    jdbcTemplate.update("""
+        INSERT INTO tag_categories (id, category_key, category_name, sort_order)
+        VALUES (?, ?, ?, 1)
+        """, categoryId, "category_" + categoryId, "Category " + categoryId);
+    jdbcTemplate.update("""
+        INSERT INTO tag_values (id, category_id, tag_value, display_name, sort_order)
+        VALUES (?, ?, ?, ?, 1)
+        """, valueId, categoryId, "VALUE_" + valueId, "Value " + valueId);
+    return repository.findValue(valueId).orElseThrow();
+  }
+
+  private void assertInactiveHistoryRemains(TagValue value) {
+    TagImpact categoryImpact = repository.categoryImpact(value.categoryId());
+    TagImpact valueImpact = repository.valueImpact(value);
+    assertThat(categoryImpact.activeAssignmentCount()).isZero();
+    assertThat(categoryImpact.customerCount()).isEqualTo(1);
+    assertThat(categoryImpact.historyCount()).isEqualTo(1);
+    assertThat(valueImpact.activeAssignmentCount()).isZero();
+    assertThat(valueImpact.customerCount()).isEqualTo(1);
+    assertThat(valueImpact.historyCount()).isEqualTo(1);
   }
 
   private static final class CountingJdbcTemplate extends JdbcTemplate {
