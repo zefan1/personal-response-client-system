@@ -10,7 +10,7 @@
 - 接手前完整代码：`2f9f7fd chore: checkpoint current production state`，已推送 `origin/main`。
 - Step 1 审计代码：`a2e12b0 docs: complete tag closed-loop step 1 audit`，已推送 `origin/main`。
 - Step 2 代码恢复点：`1fa6ab1 feat: complete tag foundation migration step 2`，已推送 `origin/main`。
-- Step 3 代码恢复点：本次 `feat: complete tag management step 3` 提交；推送后在本文件后续提交中补充精确哈希。
+- Step 3 代码恢复点：`9176546a1338451cfcc55c305abf938f01d3d94a feat: complete tag management step 3`。
 - V69 前数据库备份：`.tools/backups/private_domain_assistant_smoke_pre_v69_20260714_114738.sql.gz`。
 - V69 前备份 SHA-256：`2377569548EE5227019527A1C73181E5F5DAF68E5AA7BA851FBBCD2C4CF28FC8`。
 
