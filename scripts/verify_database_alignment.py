@@ -60,13 +60,61 @@ REQUIRED_COLUMNS = {
     "audit_logs": {
         "id", "action", "operator", "target_type", "target_id", "detail", "created_at",
     },
+    "personality_tags": {
+        "id", "tag_value", "canonical_tag_value_id", "migration_status", "tag_label",
+        "tag_description", "enabled", "retired_at", "sort_order", "created_at", "updated_at",
+    },
+    "system_tag_suggestions": {
+        "id", "phone", "customer_id", "tag_name", "tag_value_id", "rule_id",
+        "analysis_result_id", "validation_status", "unmatched_legacy_value_id", "status",
+        "created_at", "confirmed_at", "ignored_at",
+    },
     "tag_categories": {
-        "id", "category_key", "category_name", "bound_field", "is_builtin",
-        "is_enabled", "sort_order", "created_at", "updated_at",
+        "id", "category_key", "category_name", "purpose", "bound_field", "selection_mode",
+        "system_inference_enabled", "manual_edit_enabled", "auto_update_mode",
+        "min_confidence", "min_evidence_messages", "cooldown_hours", "uncertain_policy",
+        "use_for_reply", "use_for_filter", "use_for_statistics", "use_for_followup_rules",
+        "is_builtin", "is_enabled", "sort_order", "merged_into_id", "version",
+        "created_at", "updated_at",
     },
     "tag_values": {
-        "id", "category_id", "tag_value", "display_name", "is_enabled",
-        "sort_order", "created_at", "updated_at",
+        "id", "category_id", "tag_value", "display_name", "meaning", "applicable_when",
+        "not_applicable_when", "positive_examples", "negative_examples", "synonyms_json",
+        "system_selectable", "manual_selectable", "is_enabled", "sort_order",
+        "merged_into_id", "version", "created_at", "updated_at",
+    },
+    "tag_analysis_runs": {
+        "id", "analysis_key", "customer_id", "source_type", "status",
+        "effective_message_count", "customer_version", "caller", "skill_id",
+        "llm_environment", "llm_model", "prompt_version", "error_message",
+        "started_at", "finished_at", "created_at",
+    },
+    "tag_analysis_results": {
+        "id", "analysis_run_id", "category_id", "tag_value_id", "result_type",
+        "requested_action", "confidence", "evidence_text", "validation_status",
+        "validation_reason", "created_at",
+    },
+    "customer_tag_assignments": {
+        "id", "customer_id", "category_id", "tag_value_id", "selection_mode",
+        "is_active", "source_type", "confidence", "evidence_text",
+        "evidence_message_count", "analysis_result_id", "skill_id", "llm_environment",
+        "llm_model", "prompt_version", "operator_account", "is_manual_locked",
+        "locked_by", "locked_at", "supersedes_assignment_id", "customer_version",
+        "invalidated_reason", "invalidated_at", "created_at", "updated_at",
+        "active_tag_key", "active_single_category_key",
+    },
+    "customer_tag_category_locks": {
+        "id", "customer_id", "category_id", "is_locked", "locked_by", "lock_reason",
+        "locked_at", "unlocked_by", "unlocked_at", "version", "created_at", "updated_at",
+    },
+    "unmatched_legacy_tag_values": {
+        "id", "customer_id", "source_type", "source_record_id", "legacy_field", "raw_value", "raw_value_hash",
+        "category_id", "mapped_tag_value_id", "status", "resolution_note",
+        "resolved_by", "resolved_at", "created_at", "updated_at",
+    },
+    "tag_legacy_value_mappings": {
+        "id", "source_type", "legacy_category_key", "legacy_value", "category_id",
+        "tag_value_id", "mapping_status", "mapping_note", "created_at", "updated_at",
     },
 }
 
@@ -149,9 +197,92 @@ EXPECTED_COLUMN_PROPERTIES = {
     },
     "system_tag_suggestions": {
         "phone": {"nullable": "NO"},
+        "customer_id": {"nullable": "YES"},
         "tag_name": {"nullable": "NO"},
+        "tag_value_id": {"nullable": "YES"},
         "rule_id": {"nullable": "NO"},
+        "analysis_result_id": {"nullable": "YES"},
+        "validation_status": {"nullable": "NO", "default": "UNVALIDATED_RULE_TEXT"},
+        "unmatched_legacy_value_id": {"nullable": "YES"},
         "status": {"nullable": "NO", "default": "PENDING"},
+    },
+    "tag_categories": {
+        "category_key": {"nullable": "NO"},
+        "category_name": {"nullable": "NO"},
+        "bound_field": {"nullable": "YES"},
+        "selection_mode": {"nullable": "NO", "default": "SINGLE"},
+        "system_inference_enabled": {"nullable": "NO", "default": "0"},
+        "manual_edit_enabled": {"nullable": "NO", "default": "1"},
+        "auto_update_mode": {"nullable": "NO", "default": "RECORD_ONLY"},
+        "min_confidence": {"nullable": "NO", "default": "0.8500"},
+        "min_evidence_messages": {"nullable": "NO", "default": "1"},
+        "cooldown_hours": {"nullable": "NO", "default": "0"},
+        "uncertain_policy": {"nullable": "NO", "default": "KEEP_CURRENT"},
+        "merged_into_id": {"nullable": "YES"},
+        "version": {"nullable": "NO", "default": "0"},
+    },
+    "tag_values": {
+        "category_id": {"nullable": "NO"},
+        "tag_value": {"nullable": "NO"},
+        "display_name": {"nullable": "NO"},
+        "synonyms_json": {"nullable": "NO", "default": "[]"},
+        "system_selectable": {"nullable": "NO", "default": "0"},
+        "manual_selectable": {"nullable": "NO", "default": "1"},
+        "merged_into_id": {"nullable": "YES"},
+        "version": {"nullable": "NO", "default": "0"},
+    },
+    "tag_analysis_runs": {
+        "analysis_key": {"nullable": "NO"},
+        "customer_id": {"nullable": "NO"},
+        "source_type": {"nullable": "NO"},
+        "status": {"nullable": "NO", "default": "RUNNING"},
+        "effective_message_count": {"nullable": "NO", "default": "0"},
+        "customer_version": {"nullable": "NO", "default": "0"},
+    },
+    "tag_analysis_results": {
+        "analysis_run_id": {"nullable": "NO"},
+        "category_id": {"nullable": "NO"},
+        "tag_value_id": {"nullable": "YES"},
+        "result_type": {"nullable": "NO"},
+        "requested_action": {"nullable": "NO", "default": "NONE"},
+        "confidence": {"nullable": "YES"},
+        "validation_status": {"nullable": "NO", "default": "PENDING"},
+    },
+    "customer_tag_assignments": {
+        "customer_id": {"nullable": "NO"},
+        "category_id": {"nullable": "NO"},
+        "tag_value_id": {"nullable": "NO"},
+        "selection_mode": {"nullable": "NO"},
+        "is_active": {"nullable": "NO", "default": "1"},
+        "source_type": {"nullable": "NO"},
+        "confidence": {"nullable": "YES"},
+        "evidence_message_count": {"nullable": "NO", "default": "0"},
+        "is_manual_locked": {"nullable": "NO", "default": "0"},
+        "customer_version": {"nullable": "NO", "default": "0"},
+    },
+    "customer_tag_category_locks": {
+        "customer_id": {"nullable": "NO"},
+        "category_id": {"nullable": "NO"},
+        "is_locked": {"nullable": "NO", "default": "1"},
+        "locked_by": {"nullable": "NO"},
+        "version": {"nullable": "NO", "default": "0"},
+    },
+    "unmatched_legacy_tag_values": {
+        "customer_id": {"nullable": "NO"},
+        "source_type": {"nullable": "NO", "default": "CUSTOMER_FIELD"},
+        "source_record_id": {"nullable": "YES"},
+        "legacy_field": {"nullable": "NO"},
+        "raw_value": {"nullable": "NO"},
+        "raw_value_hash": {"nullable": "NO"},
+        "status": {"nullable": "NO", "default": "PENDING"},
+    },
+    "tag_legacy_value_mappings": {
+        "source_type": {"nullable": "NO"},
+        "legacy_category_key": {"nullable": "NO", "default": ""},
+        "legacy_value": {"nullable": "NO"},
+        "category_id": {"nullable": "YES"},
+        "tag_value_id": {"nullable": "YES"},
+        "mapping_status": {"nullable": "NO", "default": "UNMATCHED"},
     },
     "skill_environments": {
         "env_name": {"nullable": "NO"},
@@ -210,6 +341,18 @@ ENUM_COLUMNS = {
     ("audit_log_exports", "status"): {"PROCESSING", "COMPLETED", "FAILED"},
     ("followup_rules", "action_type"): {"ALERT", "TAG_CHANGE", "TAG_SUGGESTION", "NOTIFY_LEADER", "STATUS_CHANGE"},
     ("system_tag_suggestions", "status"): {"PENDING", "CONFIRMED", "IGNORED"},
+    ("system_tag_suggestions", "validation_status"): {"UNVALIDATED_RULE_TEXT", "VALIDATED", "REJECTED", "UNMATCHED_LEGACY"},
+    ("personality_tags", "migration_status"): {"PENDING", "MAPPED", "UNMATCHED"},
+    ("tag_categories", "selection_mode"): {"SINGLE", "MULTI"},
+    ("tag_categories", "auto_update_mode"): {"ADD_ONLY", "REPLACE", "RECORD_ONLY"},
+    ("tag_categories", "uncertain_policy"): {"KEEP_CURRENT", "SET_PENDING"},
+    ("tag_analysis_runs", "status"): {"RUNNING", "SUCCEEDED", "FAILED", "PARTIAL"},
+    ("tag_analysis_results", "result_type"): {"UPDATE", "CANNOT_DETERMINE", "KEEP_CURRENT"},
+    ("tag_analysis_results", "requested_action"): {"ADD", "REPLACE", "KEEP", "NONE"},
+    ("tag_analysis_results", "validation_status"): {"PENDING", "ACCEPTED", "REJECTED", "APPLY_FAILED"},
+    ("customer_tag_assignments", "selection_mode"): {"SINGLE", "MULTI"},
+    ("unmatched_legacy_tag_values", "status"): {"PENDING", "MAPPED", "IGNORED", "SUPERSEDED"},
+    ("tag_legacy_value_mappings", "mapping_status"): {"MAPPED", "UNMATCHED", "RETIRED"},
     ("pending_table_writes", "action_type"): {"INSERT", "UPDATE"},
     ("pending_table_writes", "status"): {"PENDING", "RESOLVED", "FAILED"},
     ("desktop_client_versions", "platform"): {"WINDOWS", "MAC"},
@@ -329,10 +472,12 @@ def repository_table_references() -> dict[str, list[str]]:
         if "JdbcTemplate" not in text and "jdbcTemplate" not in text:
             continue
         found: set[str] = set()
-        for match in SQL_TABLE_PATTERN.finditer(text):
-            table = match.group(1)
-            if table.lower() not in {word.lower() for word in IGNORED_SQL_WORDS}:
-                found.add(table)
+        for fragment in java_sql_fragments(text):
+            table_sql = re.sub(r"\bON\s+DUPLICATE\s+KEY\s+UPDATE\b.*", "", fragment, flags=re.IGNORECASE | re.DOTALL)
+            for match in SQL_TABLE_PATTERN.finditer(table_sql):
+                table = match.group(1)
+                if table.lower() not in {word.lower() for word in IGNORED_SQL_WORDS}:
+                    found.add(table)
         if found:
             refs[str(path.relative_to(ROOT))] = found
     return {path: sorted(tables) for path, tables in sorted(refs.items())}

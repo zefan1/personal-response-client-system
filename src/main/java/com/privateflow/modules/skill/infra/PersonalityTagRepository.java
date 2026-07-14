@@ -15,10 +15,13 @@ public class PersonalityTagRepository {
 
   public List<PersonalityTag> findEnabled() {
     return jdbcTemplate.query("""
-        SELECT tag_value, tag_label, tag_description
-        FROM personality_tags
-        WHERE enabled = 1
-        ORDER BY sort_order
+        SELECT v.tag_value, v.display_name AS tag_label, v.meaning AS tag_description
+        FROM tag_values v
+        JOIN tag_categories c ON c.id = v.category_id
+        WHERE c.category_key = 'personality_type'
+          AND c.is_enabled = 1 AND c.merged_into_id IS NULL
+          AND v.is_enabled = 1 AND v.merged_into_id IS NULL
+        ORDER BY v.sort_order, v.id
         """,
         (rs, rowNum) -> new PersonalityTag(
             rs.getString("tag_value"),

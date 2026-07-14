@@ -39,9 +39,11 @@ public class TagSuggestionRepository {
       return null;
     }
     jdbcTemplate.update("""
-        INSERT INTO system_tag_suggestions (phone, tag_name, rule_id, status)
-        VALUES (?, ?, ?, 'PENDING')
-        """, phone, tagName, ruleId);
+        INSERT INTO system_tag_suggestions (
+          phone, customer_id, tag_name, rule_id, status, validation_status
+        )
+        VALUES (?, (SELECT id FROM customers WHERE phone = ? LIMIT 1), ?, ?, 'PENDING', 'UNVALIDATED_RULE_TEXT')
+        """, phone, phone, tagName, ruleId);
     return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
   }
 }

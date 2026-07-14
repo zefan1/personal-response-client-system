@@ -1,51 +1,57 @@
 # 本地真机断点 056
 
-时间：2026-07-13  
-状态：055 方案 Step 1 已完成，Step 2 尚未开始  
-对应任务：`dev-progress/tag_skill_llm_tasklist_056.md`  
-审计报告：`dev-progress/tag_skill_llm_step1_audit_056.md`
+时间：2026-07-14
+状态：055 方案 Step 1、Step 2 已完成，Step 3 尚未开始
+对应任务：`dev-progress/tag_skill_llm_tasklist_056.md`
+执行方案：`dev-progress/tag_skill_llm_closed_loop_plan_055.md`
 
-## Git 恢复点
+## Git 和数据库恢复点
 
-- 接手前完整代码：`2f9f7fd chore: checkpoint current production state`。
-- 已推送：`origin/main`，远程仓库 `https://github.com/zefan1/personal-response-client-system.git`。
-- 未纳入版本库：运行时 `uploads/` 和缓存 `scripts/__pycache__/`。
+- 接手前完整代码：`2f9f7fd chore: checkpoint current production state`，已推送 `origin/main`。
+- Step 1 审计代码：`a2e12b0 docs: complete tag closed-loop step 1 audit`，已推送 `origin/main`。
+- Step 2 代码恢复点：包含本文件的后续提交，完成后推送 `origin/main`。
+- V68 前数据库备份：`.tools/backups/private_domain_assistant_smoke_pre_v68_20260714_093354.sql.gz`。
+- 备份大小：53,939 字节；SHA-256：`8cd611cf59b0329b9d828a92ce1fbe5b1cd3cc3fcf97572fa0c9e74da9dcefd9`。
 
-## 本次只读完成
+## Step 2 已完成
 
-1. 核对本机所有现存数据库，确定 `private_domain_assistant_smoke` 是当前本地最新完整基准，Flyway V67、34 张表、6 条客户。
-2. 核对 `tag_categories`、`tag_values` 和 `customers` 四个旧字段真实结构、默认值、索引和外键。
-3. 核对 `personality_tags`、`system_tag_suggestions`、`profile_update_suggestions` 三条旁路。
-4. 统计 4 类 27 个当前标签和全部客户历史旧值。
-5. 确认 12 个非空旧字段值与内部编码、中文展示名均无精确匹配，后续必须保留为未匹配原文，禁止猜测。
-6. 完成数据库、后端、API、管理后台、侧边栏、Skill、直接 LLM、规则、统计、导入导出和自动化测试使用位置清单。
-7. 完成后续每个模块的上下游修改清单和 Tasklist 056。
-8. 未修改客户数据、数据库结构、当前标签、业务代码或 LLM 开关。
+1. 新增 Flyway `V68__unified_customer_tag_foundation.sql`，扩展分类策略和标签语义字段。
+2. 新建统一客户标签分配、分类锁、分析运行、分析结果、历史未匹配和旧字典映射表。
+3. 外键保证客户、分类和值关系真实存在；复合外键保证标签不能跨分类、分配模式不能偏离分类模式。
+4. 生成列和唯一索引保证单选分类最多一个当前值，多选标签当前值不重复。
+5. 27 个内置标签补齐含义、适用/禁止条件、正反例和同义词；`CLOSED/LOST` 禁止系统自动选择。
+6. 历史迁移只接受唯一精确编码或中文名，多值支持逗号、顿号、分号、竖线、换行和制表符，不使用同义词猜测。
+7. `personality_tags` 已停用并保留到统一字典的映射；旧 `system_tag_suggestions` 只进入未匹配历史，不进入正式标签。
+8. 分类和值内部编码由后端生成；自定义分类不再强制绑定 `customers` 旧字段。
+9. `CustomerRepository` 和 `ProfileWriter` 已接入事务内旧字段双写桥接，现有同步、手工档案和 AI 档案写入链路不断。
+10. 标签缓存周期和每分类数量上限读取数据库配置，不再使用业务硬编码。
 
-## 关键现状
+## 当前真实数据库
 
-- 当前存在三套标签数据：正式字典 `tag_categories/tag_values`、旧性格字典 `personality_tags`、规则自由文本建议 `system_tag_suggestions`。
-- `tag_values.category_id` 没有数据库外键。
-- 分类必须绑定 `Customer` 现有字段，无法真正支持动态新增分类。
-- 标签编码由前端运营输入，未由后端自动生成。
-- 标签值数量上限在 Service 写死为 50，数据库配置键未生效。
-- Skill Prompt 有动态候选字典，但回复请求没有当前客户标签。
-- 直接 LLM 回复和档案提取都没有动态标签字典。
-- 标签 HIGH 结果当前作为普通档案字段自动写入，MEDIUM 继续要求员工逐条确认。
-- 客户侧边栏没有显示 `personalityType`，其他三类仍是自由文本输入框。
-- 客户搜索、统计、规则、导入和导出没有接入统一动态标签。
-- 跟进规则的 TAG_CHANGE 使用自由文本，6 条现有建议全部 PENDING，且没有后端确认/忽略闭环。
+- 数据库：`private_domain_assistant_smoke`。
+- Flyway：V68，V68 成功历史记录 1 条。
+- 表数量：40；客户数量：6。
+- 当前统一标签分配：0。当前 12 条非空旧字段无精确匹配，因此没有猜测生成正式标签。
+- 历史未匹配：18，其中客户旧字段 12，旧规则自由文本建议 6。
+- 6 条旧规则建议全部关联客户和未匹配记录；3 条旧性格字典全部关联统一标签后停用。
+- 四个旧字段原文与升级前完全一致。
+- `llm.profile_extraction.enabled=false`，`llm.reply_generation.enabled=false`，未开启 LLM。
 
 ## 验证结果
 
-- 数据库结构对齐：34 张表，933 个 Repository 列引用，0 结构违规。
-- 当前标签字典：4 个分类、27 个值，全部启用。
-- 客户旧值：每个字段 3 空、3 非空；四类精确匹配均 0/3。
-- 直接 LLM 档案提取开关：`false`；失败回落 Skill：`true`。
-- 直接 LLM 回复开关：`false`；失败回落 Skill：`true`。
-- 前端：`http://127.0.0.1:5173` 可访问。
-- 后端：`http://127.0.0.1:8080` 当前不可访问；本次为避免触发后台任务，没有启动服务。
+- Java 全量测试：237 条，0 失败，0 错误；条件式 MariaDB IT 在全量测试中跳过 1 条。
+- MariaDB 空库集成测试单独实际执行：1 条，0 失败，0 跳过；V1-V68 共 36 个迁移文件执行成功，第二次迁移执行数为 0。
+- 历史克隆迁移：`assignments=9 active=8 unmatched=18 constraints=7`。
+- 数据库结构对齐：40 张表，22 张重点表，1,133 个 Repository 列引用，0 结构/列/默认值/枚举违规。
+- 当前库连续启动两次：第二次日志为 `Schema private_domain_assistant_smoke is up to date. No migration necessary.`。
+- 管理员登录和标签只读接口通过：4 个分类、27 个值，新增策略字段可完整返回。
+
+## 当前服务
+
+- 后端：`http://localhost:8080`，当前 PID 文件为 `.tools/runtime/backend.pid`。
+- Windows 当前 WSL 端口转发通过 `localhost` 可访问；`127.0.0.1` 的 IPv4 转发本次未建立。
+- 前端未在 Step 2 修改，Step 3 才开始完整管理功能改造。
 
 ## 下次继续位置
 
-严格从 Tasklist 056 的 Step 2 开始：先设计数据库结构和 Flyway 自动迁移，覆盖统一客户标签记录、系统判断记录、未匹配历史值、人工锁定、合并映射、外键和唯一约束。完成迁移设计前，不进入管理后台、Skill 或 LLM 业务代码修改。
+严格从 Tasklist 056 的 Step 3 开始：完成分类和值的列表、详情、创建、编辑、启停、删除保护、合并、搜索、分页、排序、影响统计、导出和权限。继续保持两个 LLM 主开关为 `false`，不得提前进入自动标签判断。

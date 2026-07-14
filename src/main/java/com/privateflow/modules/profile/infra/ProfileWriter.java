@@ -3,6 +3,7 @@ package com.privateflow.modules.profile.infra;
 import com.privateflow.common.events.ProfileUpdatedEvent;
 import com.privateflow.modules.profile.ProfileErrorCodes;
 import com.privateflow.modules.profile.ProfileUpdateException;
+import com.privateflow.modules.tags.LegacyCustomerTagSynchronizer;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -11,6 +12,7 @@ import java.util.Map;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public class ProfileWriter {
@@ -18,16 +20,20 @@ public class ProfileWriter {
   private final JdbcTemplate jdbcTemplate;
   private final ProfileFieldRegistry fieldRegistry;
   private final ApplicationEventPublisher eventPublisher;
+  private final LegacyCustomerTagSynchronizer tagSynchronizer;
 
   public ProfileWriter(
       JdbcTemplate jdbcTemplate,
       ProfileFieldRegistry fieldRegistry,
-      ApplicationEventPublisher eventPublisher) {
+      ApplicationEventPublisher eventPublisher,
+      LegacyCustomerTagSynchronizer tagSynchronizer) {
     this.jdbcTemplate = jdbcTemplate;
     this.fieldRegistry = fieldRegistry;
     this.eventPublisher = eventPublisher;
+    this.tagSynchronizer = tagSynchronizer;
   }
 
+  @Transactional
   public int write(String phone, Map<String, Object> fields, Integer expectedVersion, boolean publishEvent) {
     Map<String, Object> accepted = acceptedFields(fields);
     if (accepted.isEmpty()) {
@@ -54,6 +60,7 @@ public class ProfileWriter {
     if (updated != 1) {
       throw new ProfileUpdateException(ProfileErrorCodes.VERSION_CONFLICT, "档案已被更新，请刷新后重试");
     }
+    tagSynchronizer.synchronize(phone, accepted);
     int version = currentVersion(phone);
     if (publishEvent) {
       eventPublisher.publishEvent(new ProfileUpdatedEvent(phone, List.copyOf(accepted.keySet())));

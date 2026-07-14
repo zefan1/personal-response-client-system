@@ -10,12 +10,13 @@ import com.privateflow.modules.api.ws.WsPushService;
 import com.privateflow.modules.customer.Customer;
 import java.beans.Introspector;
 import java.beans.PropertyDescriptor;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Random;
+import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Pattern;
+import java.util.UUID;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,24 +24,24 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class TagAdminService {
 
-  private static final int VALUE_MAX_PER_CATEGORY = 50;
-  private static final Pattern TAG_VALUE = Pattern.compile("^[A-Z0-9_]{1,50}$");
   private static final Set<String> SYSTEM_FIELDS = Set.of("class", "id", "version", "createdAt", "updatedAt", "syncedAt", "sourceRowId");
   private final TagRepository repository;
   private final ApplicationEventPublisher eventPublisher;
   private final WsPushService wsPushService;
   private final AuditLogger auditLogger;
-  private final Random random = new Random();
+  private final TagConfigProvider configProvider;
 
   public TagAdminService(
       TagRepository repository,
       ApplicationEventPublisher eventPublisher,
       WsPushService wsPushService,
-      AuditLogger auditLogger) {
+      AuditLogger auditLogger,
+      TagConfigProvider configProvider) {
     this.repository = repository;
     this.eventPublisher = eventPublisher;
     this.wsPushService = wsPushService;
     this.auditLogger = auditLogger;
+    this.configProvider = configProvider;
   }
 
   public Map<String, Object> list() {
@@ -61,12 +62,11 @@ public class TagAdminService {
   public TagCategory updateCategory(long id, TagCategoryRequest request) {
     TagCategory existing = requireCategory(id);
     TagCategoryRequest safeRequest = request == null ? new TagCategoryRequest(null, null, null, null) : request;
-    if (safeRequest.boundField() != null && !safeRequest.boundField().isBlank() && !existing.boundField().equals(safeRequest.boundField())) {
+    if (safeRequest.boundField() != null && !safeRequest.boundField().isBlank()
+        && !Objects.equals(existing.boundField(), safeRequest.boundField().trim())) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "已绑定的客户档案字段不能修改");
     }
-    if (safeRequest.categoryName() != null && (safeRequest.categoryName().isBlank() || safeRequest.categoryName().trim().length() > 30)) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "分类名称长度必须为 1-30 个字符");
-    }
+    validateCategorySettings(safeRequest, false);
     repository.updateCategory(id, safeRequest);
     publish("TAG_CATEGORY_UPDATE", "category " + id);
     return repository.findCategory(id).orElseThrow();
@@ -89,15 +89,14 @@ public class TagAdminService {
   public TagValue createValue(TagValueRequest request) {
     validateValueCreate(request);
     TagCategory category = requireCategory(request.categoryId());
-    if (repository.valueCount(category.id()) >= VALUE_MAX_PER_CATEGORY) {
-      throw new ApiException(TagErrorCodes.VALUE_LIMIT_EXCEEDED, "每个分类最多只能创建 50 个标签值");
+    int maxValues = configProvider.get().valueMaxPerCategory();
+    if (repository.valueCount(category.id()) >= maxValues) {
+      throw new ApiException(TagErrorCodes.VALUE_LIMIT_EXCEEDED, "每个分类最多只能创建 " + maxValues + " 个标签值");
     }
-    if (repository.valueExists(category.id(), request.tagValue().trim())) {
-      throw new ApiException(TagErrorCodes.VALUE_EXISTS, "该分类中已经存在相同的标签编码");
-    }
+    String tagValue = generateTagValue(category.id(), request.displayName());
     int sortOrder = request.sortOrder() == null ? repository.valueCount(category.id()) + 1 : request.sortOrder();
-    long id = repository.createValue(request, sortOrder);
-    publish("TAG_VALUE_CREATE", "value " + request.tagValue());
+    long id = repository.createValue(tagValue, request, sortOrder);
+    publish("TAG_VALUE_CREATE", "value " + tagValue);
     return repository.findValue(id).orElseThrow();
   }
 
@@ -105,9 +104,7 @@ public class TagAdminService {
   public TagValue updateValue(long id, TagValueRequest request) {
     requireValue(id);
     TagValueRequest safeRequest = request == null ? new TagValueRequest(null, null, null, null, null) : request;
-    if (safeRequest.displayName() != null && (safeRequest.displayName().isBlank() || safeRequest.displayName().trim().length() > 30)) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签展示名称长度必须为 1-30 个字符");
-    }
+    validateValueSettings(safeRequest, false);
     repository.updateValue(id, safeRequest);
     publish("TAG_VALUE_UPDATE", "value " + id);
     return repository.findValue(id).orElseThrow();
@@ -125,23 +122,24 @@ public class TagAdminService {
   public void deleteValue(long id) {
     TagValue value = requireValue(id);
     TagCategory category = requireCategory(value.categoryId());
-    int usage = repository.usageCount(category.boundField(), value.tagValue());
+    int usage = repository.usageCount(value.id(), category.boundField(), category.selectionMode(), value.tagValue());
     if (usage > 0) {
-      throw new ApiException(TagErrorCodes.VALUE_IN_USE, "该标签正在被 " + usage + " 个客户使用，请改为停用");
+      throw new ApiException(TagErrorCodes.VALUE_IN_USE, "该标签已有 " + usage + " 条客户或历史记录引用，请改为停用");
     }
     repository.deleteValue(id);
     publish("TAG_VALUE_DELETE", "value " + value.tagValue());
   }
 
   private void validateCategoryCreate(TagCategoryRequest request) {
-    if (request == null || request.categoryName() == null || request.categoryName().isBlank() || request.categoryName().trim().length() > 30) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "分类名称长度必须为 1-30 个字符");
-    }
-    if (request.boundField() == null || request.boundField().isBlank() || !customerFieldExists(request.boundField().trim())) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "请选择有效的客户档案字段");
-    }
-    if (repository.boundFieldExists(request.boundField().trim())) {
-      throw new ApiException(TagErrorCodes.CATEGORY_EXISTS, "该客户档案字段已经绑定了标签分类");
+    validateCategorySettings(request, true);
+    if (request.boundField() != null && !request.boundField().isBlank()) {
+      String boundField = request.boundField().trim();
+      if (!customerFieldExists(boundField)) {
+        throw new ApiException(ApiErrorCodes.BAD_REQUEST, "请选择有效的客户档案字段");
+      }
+      if (repository.boundFieldExists(boundField)) {
+        throw new ApiException(TagErrorCodes.CATEGORY_EXISTS, "该客户档案字段已经绑定了标签分类");
+      }
     }
   }
 
@@ -149,11 +147,56 @@ public class TagAdminService {
     if (request == null || request.categoryId() == null) {
       throw new ApiException(TagErrorCodes.CATEGORY_NOT_FOUND, "标签分类不存在或已被删除");
     }
-    if (request.tagValue() == null || !TAG_VALUE.matcher(request.tagValue().trim()).matches()) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签编码只能包含 1-50 位大写字母、数字或下划线");
+    validateValueSettings(request, true);
+  }
+
+  private void validateCategorySettings(TagCategoryRequest request, boolean create) {
+    if (request == null || (create && request.categoryName() == null)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "分类名称长度必须为 1-100 个字符");
     }
-    if (request.displayName() == null || request.displayName().isBlank() || request.displayName().trim().length() > 30) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签展示名称长度必须为 1-30 个字符");
+    if (request.categoryName() != null && (request.categoryName().isBlank() || request.categoryName().trim().length() > 100)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "分类名称长度必须为 1-100 个字符");
+    }
+    validateOptionalText(request.purpose(), 500, "分类用途不能超过 500 个字符");
+    BigDecimal confidence = request.minConfidence();
+    if (confidence != null && (confidence.compareTo(BigDecimal.ZERO) < 0 || confidence.compareTo(BigDecimal.ONE) > 0)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "最低把握程度必须在 0-1 之间");
+    }
+    if (request.minEvidenceMessages() != null && (request.minEvidenceMessages() < 0 || request.minEvidenceMessages() > 1000)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "最低有效消息数必须在 0-1000 之间");
+    }
+    if (request.cooldownHours() != null && (request.cooldownHours() < 0 || request.cooldownHours() > 87600)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "自动更新冷却时间必须在 0-87600 小时之间");
+    }
+  }
+
+  private void validateValueSettings(TagValueRequest request, boolean create) {
+    if (request == null || (create && request.displayName() == null)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签展示名称长度必须为 1-100 个字符");
+    }
+    if (request.displayName() != null && (request.displayName().isBlank() || request.displayName().trim().length() > 100)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签展示名称长度必须为 1-100 个字符");
+    }
+    validateOptionalText(request.meaning(), 500, "标签含义不能超过 500 个字符");
+    validateOptionalText(request.applicableWhen(), 1000, "标签适用条件不能超过 1000 个字符");
+    validateOptionalText(request.notApplicableWhen(), 1000, "标签禁止条件不能超过 1000 个字符");
+    validateOptionalText(request.positiveExamples(), 1000, "标签正确例子不能超过 1000 个字符");
+    validateOptionalText(request.negativeExamples(), 1000, "标签错误例子不能超过 1000 个字符");
+    if (request.synonyms() != null) {
+      if (request.synonyms().size() > 50
+          || request.synonyms().stream().anyMatch(value -> value == null || value.isBlank() || value.length() > 100)) {
+        throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签同义表达最多 50 个，每个长度必须为 1-100 个字符");
+      }
+      int totalLength = request.synonyms().stream().mapToInt(String::length).sum();
+      if (totalLength > 1500) {
+        throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签同义表达总长度不能超过 1500 个字符");
+      }
+    }
+  }
+
+  private void validateOptionalText(String value, int maxLength, String message) {
+    if (value != null && value.trim().length() > maxLength) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, message);
     }
   }
 
@@ -189,13 +232,34 @@ public class TagAdminService {
       base = "tag";
     }
     base = base.replaceAll("^_+|_+$", "");
+    base = base.substring(0, Math.min(base.length(), 32));
     for (int i = 0; i < 20; i++) {
-      String candidate = base + "_" + Integer.toString(random.nextInt(46656), 36);
+      String candidate = base + "_" + randomSuffix();
       if (!repository.categoryKeyExists(candidate)) {
         return candidate;
       }
     }
-    return base + "_" + System.currentTimeMillis();
+    throw new ApiException(ApiErrorCodes.INTERNAL_ERROR, "生成标签分类系统编号失败，请重试");
+  }
+
+  private String generateTagValue(long categoryId, String displayName) {
+    String base = displayName.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]+", "_");
+    if (base.isBlank() || "_".equals(base)) {
+      base = "TAG";
+    }
+    base = base.replaceAll("^_+|_+$", "");
+    base = base.substring(0, Math.min(base.length(), 32));
+    for (int i = 0; i < 20; i++) {
+      String candidate = base + "_" + randomSuffix().toUpperCase(Locale.ROOT);
+      if (!repository.valueExists(categoryId, candidate)) {
+        return candidate;
+      }
+    }
+    throw new ApiException(ApiErrorCodes.INTERNAL_ERROR, "生成标签系统编号失败，请重试");
+  }
+
+  private String randomSuffix() {
+    return UUID.randomUUID().toString().replace("-", "").substring(0, 12);
   }
 
   private void publish(String source, String detail) {

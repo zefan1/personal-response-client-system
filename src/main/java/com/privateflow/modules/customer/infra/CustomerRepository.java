@@ -3,23 +3,29 @@ package com.privateflow.modules.customer.infra;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.LeadTypes;
 import com.privateflow.modules.customer.ScanFilter;
+import com.privateflow.modules.tags.LegacyCustomerTagSynchronizer;
 import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public class CustomerRepository {
 
   private static final CustomerRowMapper ROW_MAPPER = new CustomerRowMapper();
   private final JdbcTemplate jdbcTemplate;
+  private final LegacyCustomerTagSynchronizer tagSynchronizer;
 
-  public CustomerRepository(JdbcTemplate jdbcTemplate) {
+  public CustomerRepository(JdbcTemplate jdbcTemplate, LegacyCustomerTagSynchronizer tagSynchronizer) {
     this.jdbcTemplate = jdbcTemplate;
+    this.tagSynchronizer = tagSynchronizer;
   }
 
   public Optional<Customer> findByPhone(String phone) {
@@ -86,6 +92,7 @@ public class CustomerRepository {
     return jdbcTemplate.query(sql.toString(), ROW_MAPPER, args.toArray());
   }
 
+  @Transactional
   public boolean upsert(Customer customer) {
     String leadType = LeadTypes.normalize(customer.getLeadType());
     int updated = jdbcTemplate.update("""
@@ -154,6 +161,14 @@ public class CustomerRepository {
         customer.getSourceTable(),
         customer.getSourceRowId(),
         customer.getSyncedAt() == null ? null : Timestamp.valueOf(customer.getSyncedAt()));
+    if (updated > 0) {
+      Map<String, Object> legacyFields = new LinkedHashMap<>();
+      legacyFields.put("personalityType", customer.getPersonalityType());
+      legacyFields.put("bodyConcerns", customer.getBodyConcerns());
+      legacyFields.put("worries", customer.getWorries());
+      legacyFields.put("intentLevel", customer.getIntentLevel());
+      tagSynchronizer.synchronize(customer.getPhone(), legacyFields);
+    }
     return updated > 0;
   }
 
