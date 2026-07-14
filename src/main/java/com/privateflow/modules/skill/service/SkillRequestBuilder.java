@@ -9,7 +9,9 @@ import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.config.SkillConfig;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
-import com.privateflow.modules.tags.TagCacheService;
+import com.privateflow.modules.tags.TagCandidateBuilder;
+import com.privateflow.modules.tags.TagCandidatePurpose;
+import com.privateflow.modules.tags.TagCategory;
 import com.privateflow.modules.tags.TagValue;
 import java.math.BigDecimal;
 import java.time.temporal.TemporalAccessor;
@@ -29,19 +31,19 @@ public class SkillRequestBuilder {
   private static final Pattern CUSTOMER_PLACEHOLDER = Pattern.compile("\\{\\{([A-Za-z][A-Za-z0-9_]*)}}");
   private final SkillConfigProvider configProvider;
   private final CustomerQueryService customerQueryService;
-  private final TagCacheService tagCacheService;
+  private final TagCandidateBuilder tagCandidateBuilder;
   private final ObjectMapper objectMapper;
   private final SkillRuntimeRouter runtimeRouter;
 
   public SkillRequestBuilder(
       SkillConfigProvider configProvider,
       CustomerQueryService customerQueryService,
-      TagCacheService tagCacheService,
+      TagCandidateBuilder tagCandidateBuilder,
       ObjectMapper objectMapper,
       SkillRuntimeRouter runtimeRouter) {
     this.configProvider = configProvider;
     this.customerQueryService = customerQueryService;
-    this.tagCacheService = tagCacheService;
+    this.tagCandidateBuilder = tagCandidateBuilder;
     this.objectMapper = objectMapper;
     this.runtimeRouter = runtimeRouter;
   }
@@ -151,27 +153,23 @@ public class SkillRequestBuilder {
   }
 
   private String availableTags() {
-    try {
-      Map<String, List<TagValue>> tags = tagCacheService.getAllEnabledTags();
-      if (tags.isEmpty()) {
-        return "当前无可用标签";
-      }
-      StringBuilder builder = new StringBuilder();
-      tags.forEach((category, values) -> {
-        builder.append("Available ").append(category).append(" tags: [");
-        for (int i = 0; i < values.size(); i++) {
-          TagValue value = values.get(i);
-          if (i > 0) {
-            builder.append(", ");
-          }
-          builder.append(value.displayName()).append("(").append(value.tagValue()).append(")");
-        }
-        builder.append("]\n");
-      });
-      return builder.toString().trim();
-    } catch (RuntimeException ex) {
+    List<TagCategory> categories = tagCandidateBuilder.build(TagCandidatePurpose.SYSTEM_INFERENCE);
+    if (categories.isEmpty()) {
       return "当前无可用标签";
     }
+    StringBuilder builder = new StringBuilder();
+    for (TagCategory category : categories) {
+      builder.append("可用").append(category.categoryName()).append("标签: [");
+      for (int i = 0; i < category.values().size(); i++) {
+        TagValue value = category.values().get(i);
+        if (i > 0) {
+          builder.append(", ");
+        }
+        builder.append(value.displayName()).append("(").append(value.tagValue()).append(")");
+      }
+      builder.append("]\n");
+    }
+    return builder.toString().trim();
   }
 
   private String transferPhone(String phone, SkillConfig config) {

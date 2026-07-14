@@ -10,7 +10,7 @@ import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.config.SkillConfig;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
-import com.privateflow.modules.tags.TagCacheService;
+import com.privateflow.modules.tags.TagCandidateBuilder;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -47,7 +47,7 @@ class SkillRequestBuilderTest {
     SkillRequestBuilder builder = new SkillRequestBuilder(
         configProvider,
         Mockito.mock(CustomerQueryService.class),
-        Mockito.mock(TagCacheService.class),
+        Mockito.mock(TagCandidateBuilder.class),
         new ObjectMapper(),
         router);
 

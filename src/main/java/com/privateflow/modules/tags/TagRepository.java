@@ -466,21 +466,6 @@ public class TagRepository {
     return Math.max(structuredCount, legacy == null ? 0 : legacy);
   }
 
-  public List<TagValue> findEnabledForPrompt() {
-    return jdbcTemplate.query("""
-        SELECT v.id, v.category_id, c.category_key, v.tag_value, v.display_name,
-               v.meaning, v.applicable_when, v.not_applicable_when,
-               v.positive_examples, v.negative_examples, v.synonyms_json,
-               v.system_selectable, v.manual_selectable, v.is_enabled,
-               v.sort_order, v.merged_into_id, v.version, v.created_at, v.updated_at
-        FROM tag_categories c
-        JOIN tag_values v ON c.id = v.category_id
-        WHERE c.is_enabled = 1 AND c.merged_into_id IS NULL
-          AND v.is_enabled = 1 AND v.system_selectable = 1 AND v.merged_into_id IS NULL
-        ORDER BY c.sort_order ASC, v.sort_order ASC, v.id ASC
-        """, this::mapValue);
-  }
-
   private List<TagValue> values(long categoryId) {
     return jdbcTemplate.query("""
         SELECT v.id, v.category_id, c.category_key, v.tag_value, v.display_name,

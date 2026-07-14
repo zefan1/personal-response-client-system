@@ -78,7 +78,7 @@ class TagRepositoryTest {
   }
 
   @Test
-  void mapsCompleteCategoryAndValueMetadataAndFiltersPromptCandidates() {
+  void mapsCompleteCategoryAndValueMetadata() {
     jdbcTemplate.update("""
         INSERT INTO tag_categories (
           id, category_key, category_name, purpose, bound_field, selection_mode,
@@ -107,9 +107,7 @@ class TagRepositoryTest {
     assertThat(category.values()).hasSize(2);
     assertThat(category.values().get(0).synonyms()).containsExactly("高意向", "优先跟进");
 
-    assertThat(repository.findEnabledForPrompt())
-        .extracting(TagValue::tagValue)
-        .containsExactly("HIGH");
+    assertThat(category.values().get(1).systemSelectable()).isFalse();
   }
 
   @Test
