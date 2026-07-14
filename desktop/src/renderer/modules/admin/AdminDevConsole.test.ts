@@ -27,6 +27,12 @@ async function flushUi() {
   await nextTick();
 }
 
+async function flushRequests() {
+  await flushUi();
+  await flushUi();
+  await flushUi();
+}
+
 async function mountDevConsole(): Promise<MountedConsole> {
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -34,6 +40,19 @@ async function mountDevConsole(): Promise<MountedConsole> {
   app.mount(host);
   await flushUi();
   return { app, host };
+}
+
+function findButton(host: HTMLElement, text: string): HTMLButtonElement {
+  const button = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes(text)) as HTMLButtonElement | undefined;
+  expect(button).toBeTruthy();
+  return button as HTMLButtonElement;
+}
+
+function findActionPanel(host: HTMLElement, actionName: string): HTMLElement {
+  const panel = [...host.querySelectorAll('.admin-action-panel')]
+    .find((item) => item.querySelector('h3')?.textContent === actionName) as HTMLElement | undefined;
+  expect(panel).toBeTruthy();
+  return panel as HTMLElement;
 }
 
 describe('AdminDevConsole', () => {
@@ -92,6 +111,57 @@ describe('AdminDevConsole', () => {
     buttons[1].click();
     expect(onSwitchAdmin).toHaveBeenCalledTimes(1);
     expect(onLogout).toHaveBeenCalledTimes(1);
+
+    app.unmount();
+  });
+
+  it('fills create-tag-value with the first enabled unmerged backend category and omits tagValue', async () => {
+    apiMocks.getJson.mockImplementation(async (path: string) => ({
+      success: true,
+      data: path === '/admin/api/v1/tags/categories'
+        ? {
+            categories: [
+              { id: 70, isEnabled: false, mergedIntoId: null },
+              { id: 71, isEnabled: true, mergedIntoId: 99 },
+              { id: 72, isEnabled: true, mergedIntoId: null }
+            ]
+          }
+        : { items: [] },
+      errorCode: null,
+      message: null
+    }));
+    const { app, host } = await mountDevConsole();
+
+    findButton(host, '跟进规则与标签').click();
+    await flushRequests();
+    const panel = findActionPanel(host, '创建标签值');
+    const body = JSON.parse((panel.querySelector('textarea') as HTMLTextAreaElement).value);
+    expect(body).toEqual({ categoryId: 72, displayName: '人工验收标签', isEnabled: true, sortOrder: 99 });
+
+    findButton(panel, '执行').click();
+    await flushRequests();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/tags/values', {
+      categoryId: 72,
+      displayName: '人工验收标签',
+      isEnabled: true,
+      sortOrder: 99
+    });
+    expect((apiMocks.postJson.mock.calls[0]?.[1] as Record<string, unknown>).tagValue).toBeUndefined();
+
+    app.unmount();
+  });
+
+  it('rejects create-tag-value in Chinese when no enabled unmerged category is available', async () => {
+    const { app, host } = await mountDevConsole();
+
+    findButton(host, '跟进规则与标签').click();
+    await flushRequests();
+    const panel = findActionPanel(host, '创建标签值');
+    findButton(panel, '执行').click();
+    await flushRequests();
+
+    expect(apiMocks.postJson).not.toHaveBeenCalled();
+    expect(host.querySelector('.admin-message.error')?.textContent).toContain('没有可用的标签分类');
 
     app.unmount();
   });

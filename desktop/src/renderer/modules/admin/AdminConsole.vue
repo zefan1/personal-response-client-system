@@ -1840,76 +1840,6 @@ const TRANSLATED_VALUE_LABELS: Record<string, string> = {
   OPENING: '开场白'
 };
 
-const TAG_CATEGORY_LABELS: Record<string, string> = {
-  'Personality Type': '性格类型',
-  'Body Concerns': '身体关注',
-  Worries: '客户顾虑',
-  'Intent Level': '意向等级',
-  'Customer Stage': '客户阶段',
-  'Lead Type': '线索类型',
-  personalityType: '性格类型',
-  bodyConcerns: '身体关注',
-  worries: '客户顾虑',
-  intentLevel: '意向等级',
-  customerStage: '客户阶段',
-  leadType: '线索类型'
-};
-
-const TAG_VALUE_LABELS: Record<string, string> = {
-  Loyalist: '忠诚型',
-  LOYALIST: '忠诚型',
-  Peacemaker: '温和型',
-  PEACEMAKER: '温和型',
-  Decisive: '果断型',
-  DECISIVE: '果断型',
-  'Diastasis Recti': '腹直肌分离',
-  DIASTASIS_RECTI: '腹直肌分离',
-  'Pelvic Floor': '盆底问题',
-  PELVIC_FLOOR: '盆底问题',
-  'Urine Leakage': '漏尿',
-  URINE_LEAKAGE: '漏尿',
-  Lumbago: '腰痛',
-  LUMBAGO: '腰痛',
-  'Pubic Pain': '耻骨疼痛',
-  PUBIC_PAIN: '耻骨疼痛',
-  'Stretch Marks': '妊娠纹',
-  STRETCH_MARKS: '妊娠纹',
-  'Belly Sag': '腹部松弛',
-  BELLY_SAG: '腹部松弛',
-  'Weight Gain': '体重增加',
-  WEIGHT_GAIN: '体重增加',
-  'Fear No Effect': '担心没有效果',
-  FEAR_NO_EFFECT: '担心没有效果',
-  'Fear Expensive': '担心价格高',
-  FEAR_EXPENSIVE: '担心价格高',
-  'Fear Pain': '担心疼痛',
-  FEAR_PAIN: '担心疼痛',
-  'Fear Hard Sell': '担心强行推销',
-  FEAR_HARD_SELL: '担心强行推销',
-  Comparing: '正在对比',
-  COMPARING: '正在对比',
-  'Husband Disagree': '丈夫不同意',
-  HUSBAND_DISAGREE: '丈夫不同意',
-  'Family Unsupport': '家人不支持',
-  FAMILY_UNSUPPORT: '家人不支持',
-  'No Time': '没有时间',
-  NO_TIME: '没有时间',
-  'Too Far': '距离太远',
-  TOO_FAR: '距离太远',
-  High: '高意向',
-  HIGH: '高意向',
-  Medium: '中意向',
-  MEDIUM: '中意向',
-  Low: '低意向',
-  LOW: '低意向',
-  Pending: '待判断',
-  PENDING: '待判断',
-  Closed: '已成交',
-  CLOSED: '已成交',
-  Lost: '已流失',
-  LOST: '已流失'
-};
-
 const ANALYTICS_KEY_LABELS: Record<string, string> = {
   totalCalls: '调用次数',
   successCount: '成功',
@@ -4868,13 +4798,18 @@ function tagCategoryOptionLabel(category: AnyRecord) {
 }
 
 function tagCategoryName(category: AnyRecord) {
-  const raw = String(category.categoryName || category.name || category.categoryKey || category.id || '');
-  return TAG_CATEGORY_LABELS[raw] ?? customerFieldLabel(raw) ?? raw;
+  const categoryName = String(category.categoryName ?? '').trim();
+  if (categoryName) return categoryName;
+  const categoryKey = String(category.categoryKey ?? '').trim();
+  return categoryKey || (category.id == null ? '' : `分类 #${category.id}`);
 }
 
 function tagCategoryLabelForValue(tag: AnyRecord) {
   const category = tagCategoryOptionsCache.value.find((item) => String(item.id) === String(tag.categoryId));
-  return category?.categoryName || TAG_CATEGORY_LABELS[String(tag.categoryKey ?? '')] || tag.categoryKey || `分类 #${tag.categoryId}`;
+  const loadedCategoryName = category ? tagCategoryName(category) : '';
+  if (loadedCategoryName) return loadedCategoryName;
+  const categoryKey = String(tag.categoryKey ?? '').trim();
+  return categoryKey || `分类 #${tag.categoryId}`;
 }
 
 function tagSelectionModeLabel(value: unknown) {
@@ -4926,12 +4861,6 @@ function tagMergeTargetLabel(target: AnyRecord) {
   return tagMerge.kind === 'category'
     ? `${target.categoryName}（${target.categoryKey}）`
     : `${target.displayName}（${target.tagValue}）`;
-}
-
-function tagDisplayName(tag: AnyRecord) {
-  const raw = String(tag.displayName || tag.tagValue || '');
-  const code = String(tag.tagValue || '').toUpperCase();
-  return TAG_VALUE_LABELS[raw] ?? TAG_VALUE_LABELS[code] ?? translateValue(raw);
 }
 
 function isBuiltinTagCategory(category: AnyRecord) {

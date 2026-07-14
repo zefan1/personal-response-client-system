@@ -15,7 +15,7 @@ required_files = [
     "src/main/java/com/privateflow/modules/match/config/MatchConfig.java",
     "src/main/java/com/privateflow/modules/match/config/MatchConfigProvider.java",
     "src/main/java/com/privateflow/modules/match/service/MatchOrchestrator.java",
-    "src/main/java/com/privateflow/modules/match/service/TagRemovalProcessor.java",
+    "src/main/java/com/privateflow/modules/match/service/NicknamePrefixRemovalProcessor.java",
     "src/main/java/com/privateflow/modules/match/service/ConfidenceEvaluator.java",
     "src/main/java/com/privateflow/modules/match/service/CandidateRanker.java",
     "src/main/java/com/privateflow/modules/match/service/ExactMatcher.java",
@@ -70,7 +70,7 @@ orchestrator = read("src/main/java/com/privateflow/modules/match/service/MatchOr
 for token in [
     "exactMatcher.matchByPhone",
     "fuzzyMatcher.matchByNickname",
-    "tagRemovalProcessor.clean",
+    "nicknamePrefixRemovalProcessor.clean",
     "Confidence.HIGH",
     "MatchType.EXACT",
     "MatchType.FUZZY",
@@ -82,10 +82,10 @@ for token in [
 if orchestrator.find("exactMatcher.matchByPhone") > orchestrator.find("fuzzyMatcher.matchByNickname"):
     errors.append("MatchOrchestrator does not try exact phone match before fuzzy nickname match")
 
-tag_processor = read("src/main/java/com/privateflow/modules/match/service/TagRemovalProcessor.java")
+tag_processor = read("src/main/java/com/privateflow/modules/match/service/NicknamePrefixRemovalProcessor.java")
 for token in ["comparingInt(String::length).reversed()", "toUpperCase(Locale.ROOT)", "configProvider.get().tagRemovalRules()"]:
     if token not in tag_processor:
-        errors.append(f"TagRemovalProcessor missing {token}")
+        errors.append(f"NicknamePrefixRemovalProcessor missing {token}")
 
 evaluator = read("src/main/java/com/privateflow/modules/match/service/ConfidenceEvaluator.java")
 for token in ["Math.min", "Math.max", "confidenceRatioThreshold", "confidenceMinLength", "contains"]:

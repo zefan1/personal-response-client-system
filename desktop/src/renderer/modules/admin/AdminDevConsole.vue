@@ -326,7 +326,7 @@ const sections: AdminSection[] = [
         name: '创建标签值',
         method: 'POST',
         pathTemplate: '/admin/api/v1/tags/values',
-        body: { categoryId: 1, tagValue: `MANUAL_${nowSuffix()}`, displayName: '人工验收标签', isEnabled: true, sortOrder: 99 }
+        body: { categoryId: null, displayName: '人工验收标签', isEnabled: true, sortOrder: 99 }
       }
     ]
   },
@@ -398,6 +398,7 @@ const noticeKind = ref<'info' | 'error'>('info');
 const readResults = reactive<Record<string, unknown>>({});
 const actionResults = reactive<Record<string, unknown>>({});
 const actionState = reactive<ActionState>({});
+const availableTagCategoryId = ref<number | null>(null);
 
 for (const section of sections) {
   for (const action of section.actions) {
@@ -428,14 +429,18 @@ async function loadSection(section: AdminSection) {
 
 async function runRead(read: ReadEndpoint) {
   await runWithNotice(async () => {
-    readResults[read.path] = await getJson<unknown>(read.path);
+    const response = await getJson<unknown>(read.path);
+    readResults[read.path] = response;
+    if (read.path === '/admin/api/v1/tags/categories') {
+      updateAvailableTagCategory(response);
+    }
   }, `${read.name} 已刷新`);
 }
 
 async function runAction(action: ActionEndpoint) {
   await runWithNotice(async () => {
     const path = resolvePath(action);
-    const body = parseBody(action);
+    const body = actionRequestBody(action);
     let response: ApiResponse<unknown>;
     if (action.method === 'POST') {
       response = await postJson<unknown>(path, body);
@@ -487,6 +492,60 @@ function parseBody(action: ActionEndpoint) {
   } catch {
     throw new Error(`${action.name} 的请求体不是合法 JSON`);
   }
+}
+
+function actionRequestBody(action: ActionEndpoint) {
+  const body = parseBody(action);
+  if (action.pathTemplate !== '/admin/api/v1/tags/values' || action.method !== 'POST') {
+    return body;
+  }
+  if (availableTagCategoryId.value == null) {
+    throw new Error('没有可用的标签分类，请先创建并启用未合并的分类');
+  }
+  if (!body || Array.isArray(body) || typeof body !== 'object') {
+    throw new Error('创建标签值的请求体必须是 JSON 对象');
+  }
+  const sanitized = { ...(body as Record<string, unknown>) };
+  if (sanitized.categoryId == null || sanitized.categoryId === '') {
+    sanitized.categoryId = availableTagCategoryId.value;
+  }
+  delete sanitized.tagValue;
+  return sanitized;
+}
+
+function updateAvailableTagCategory(response: ApiResponse<unknown>) {
+  const categoryId = firstAvailableTagCategoryId(response);
+  availableTagCategoryId.value = categoryId;
+  if (categoryId == null) return;
+  const action = sections
+    .find((section) => section.key === 'rules-tags')
+    ?.actions.find((item) => item.pathTemplate === '/admin/api/v1/tags/values' && item.method === 'POST');
+  if (!action) return;
+  const body = safeParseActionBody(action);
+  if (!body || Array.isArray(body) || typeof body !== 'object') return;
+  const record = body as Record<string, unknown>;
+  if (record.categoryId != null && record.categoryId !== '') return;
+  record.categoryId = categoryId;
+  actionState[action.name].body = JSON.stringify(record, null, 2);
+}
+
+function firstAvailableTagCategoryId(response: ApiResponse<unknown>): number | null {
+  const data = response.data;
+  if (!data || typeof data !== 'object') return null;
+  const record = data as Record<string, unknown>;
+  const page = record.page && typeof record.page === 'object' ? record.page as Record<string, unknown> : null;
+  const candidates = [record.items, record.categories, page?.items, page?.categories]
+    .find(Array.isArray) as unknown[] | undefined;
+  if (!candidates) return null;
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const category = candidate as Record<string, unknown>;
+    const enabled = category.isEnabled === true || category.enabled === true;
+    const merged = category.merged === true || category.mergedIntoId != null;
+    const id = Number(category.id ?? category.categoryId);
+    if (enabled && !merged && Number.isInteger(id) && id > 0) return id;
+  }
+  return null;
 }
 
 function editableFields(action: ActionEndpoint): EditableField[] {

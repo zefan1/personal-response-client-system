@@ -432,6 +432,41 @@ async function runAdminRendererSmoke(window: BrowserWindow) {
           return label ? label.querySelector('input,select,textarea') : null;
         };
         const hasLoginForm = () => Boolean(inputByLabel('API 地址') && inputByLabel('账号') && inputByLabel('密码'));
+        const loadAdminData = async (path) => {
+          const response = await fetch(${JSON.stringify(rendererSmokeApiBaseUrl)} + path, {
+            headers: { Authorization: 'Bearer ' + ${JSON.stringify(rendererSmokeAccessToken)} }
+          });
+          const payload = await response.json();
+          if (!response.ok || payload.success === false) {
+            throw new Error('tag API failed: ' + path + ' ' + (payload.message || response.status));
+          }
+          return payload.data || payload;
+        };
+        const pageItems = (data) => Array.isArray(data.items)
+          ? data.items
+          : (Array.isArray(data.categories) ? data.categories : []);
+        const assertTagPage = (data, rows, nameKey, noun) => {
+          const items = pageItems(data);
+          if (rows.length !== items.length) {
+            throw new Error(noun + ' page row count mismatch: api=' + items.length + ' ui=' + rows.length);
+          }
+          items.forEach((item, index) => {
+            const name = String(item[nameKey] || '').trim();
+            if (!name || !rows[index].textContent.includes(name)) {
+              throw new Error(noun + ' name not displayed verbatim: ' + name);
+            }
+          });
+          const total = Number(data.total ?? items.length);
+          const page = Number(data.page ?? 1);
+          const size = Number(data.size ?? 20);
+          const totalPages = Number(data.totalPages ?? Math.max(1, Math.ceil(total / Math.max(1, size))));
+          const paginationText = document.querySelector('.ops-pagination')?.textContent || '';
+          if (!paginationText.includes('当前筛选：' + total + ' 个' + noun)
+              || !paginationText.includes('第 ' + page + ' / ' + totalPages + ' 页，每页 ' + size + ' 条')) {
+            throw new Error(noun + ' pagination does not match API page');
+          }
+          return items;
+        };
 
         const started = Date.now();
         while (!hasLoginForm() && !document.querySelector('.ops-admin-shell') && Date.now() - started < 15000) {
@@ -498,16 +533,16 @@ async function runAdminRendererSmoke(window: BrowserWindow) {
         buttonByText('取消', drawer)?.click();
 
         subnavByText('客户标签与分层')?.click();
+        const categoryPage = await loadAdminData('/admin/api/v1/tags/categories?merged=false&page=1&size=20&sortBy=sortOrder&sortDirection=ASC');
+        const expectedCategoryRows = pageItems(categoryPage).length;
         await waitForCondition(
-          () => document.querySelectorAll('.tag-category-row:not(.head)').length >= 4,
+          () => document.querySelectorAll('.tag-category-row:not(.head)').length === expectedCategoryRows,
           'tag category rows loaded'
         );
         const categoryRows = [...document.querySelectorAll('.tag-category-row:not(.head)')];
-        const categoryText = categoryRows.map((row) => row.textContent).join('|');
-        for (const expectedCategory of ['性格类型', '身体关注', '客户顾虑', '意向等级']) {
-          if (!categoryText.includes(expectedCategory)) {
-            throw new Error('tag category missing: ' + expectedCategory);
-          }
+        const categoryItems = assertTagPage(categoryPage, categoryRows, 'categoryName', '分类');
+        if (!categoryItems.length) {
+          throw new Error('tag category API returned no rows for detail smoke');
         }
         const categoryRow = categoryRows[0];
         const categoryCells = [...categoryRow.children];
@@ -542,17 +577,28 @@ async function runAdminRendererSmoke(window: BrowserWindow) {
         await waitForCondition(() => !document.querySelector('.ops-drawer'), 'tag category form closed');
 
         buttonByText('标签值')?.click();
+        const valuePage = await loadAdminData('/admin/api/v1/tags/values?merged=false&page=1&size=20&sortBy=sortOrder&sortDirection=ASC');
+        const expectedValueRows = pageItems(valuePage).length;
         await waitForCondition(
-          () => document.querySelectorAll('.tag-value-row:not(.head)').length >= 20,
+          () => document.querySelectorAll('.tag-value-row:not(.head)').length === expectedValueRows,
           'tag value rows loaded'
         );
         const valueRows = [...document.querySelectorAll('.tag-value-row:not(.head)')];
-        const valueText = valueRows.map((row) => row.textContent).join('|');
-        for (const expectedTag of ['忠诚型', '腹直肌分离', '担心没有效果', '高意向']) {
-          if (!valueText.includes(expectedTag)) {
-            throw new Error('localized tag value missing: ' + expectedTag);
-          }
+        const valueItems = assertTagPage(valuePage, valueRows, 'displayName', '标签值');
+        if (!valueItems.length) {
+          throw new Error('tag value API returned no rows for detail and merge smoke');
         }
+
+        buttonByText('新增标签值')?.click();
+        const valueForm = await waitForSelector('.ops-drawer');
+        const valueFormLabels = [...valueForm.querySelectorAll('.ops-label-title')]
+          .map((label) => label.textContent.trim());
+        if (valueFormLabels.some((label) => label.includes('系统编号'))) {
+          throw new Error('new tag value asks operators to enter an internal code');
+        }
+        buttonByText('取消', valueForm)?.click();
+        await waitForCondition(() => !document.querySelector('.ops-drawer'), 'tag value form closed');
+
         const valueRow = valueRows[0];
         buttonByText('详情', valueRow)?.click();
         const valueDetail = await waitForSelector('.ops-tag-detail-drawer');
@@ -621,7 +667,7 @@ async function runAdminRendererSmoke(window: BrowserWindow) {
         }
         buttonByText('标签分类')?.click();
         await waitForCondition(
-          () => document.querySelectorAll('.tag-category-row:not(.head)').length >= 4,
+          () => document.querySelectorAll('.tag-category-row:not(.head)').length > 0,
           'mobile tag categories loaded'
         );
         const categoryRow = document.querySelector('.tag-category-row:not(.head)');
@@ -681,6 +727,19 @@ async function runTagManagementRendererSmoke(window: BrowserWindow) {
         const buttonByText = (text, root = document) => [...root.querySelectorAll('button')]
           .find((button) => button.textContent.includes(text));
         const hasLoginForm = () => Boolean(inputByLabel('API 地址') && inputByLabel('账号') && inputByLabel('密码'));
+        const loadAdminData = async (path) => {
+          const response = await fetch(${JSON.stringify(rendererSmokeApiBaseUrl)} + path, {
+            headers: { Authorization: 'Bearer ' + ${JSON.stringify(rendererSmokeAccessToken)} }
+          });
+          const payload = await response.json();
+          if (!response.ok || payload.success === false) {
+            throw new Error('delegated tag API failed: ' + path + ' ' + (payload.message || response.status));
+          }
+          return payload.data || payload;
+        };
+        const pageItems = (data) => Array.isArray(data.items)
+          ? data.items
+          : (Array.isArray(data.categories) ? data.categories : []);
 
         const started = Date.now();
         while (!hasLoginForm() && !document.querySelector('.ops-admin-shell') && Date.now() - started < 15000) {
@@ -699,10 +758,19 @@ async function runTagManagementRendererSmoke(window: BrowserWindow) {
         }
 
         await waitForSelector('.ops-admin-shell');
+        const categoryPage = await loadAdminData('/admin/api/v1/tags/categories?merged=false&page=1&size=20&sortBy=sortOrder&sortDirection=ASC');
+        const categoryItems = pageItems(categoryPage);
         await waitForCondition(
-          () => document.querySelectorAll('.tag-category-row:not(.head)').length >= 4,
+          () => document.querySelectorAll('.tag-category-row:not(.head)').length === categoryItems.length,
           'delegated tag category rows loaded'
         );
+        const categoryRows = [...document.querySelectorAll('.tag-category-row:not(.head)')];
+        categoryItems.forEach((item, index) => {
+          const categoryName = String(item.categoryName || '').trim();
+          if (!categoryName || !categoryRows[index].textContent.includes(categoryName)) {
+            throw new Error('delegated category name not displayed verbatim: ' + categoryName);
+          }
+        });
         const subnav = [...document.querySelectorAll('.ops-admin-subnav-button')];
         if (subnav.length !== 1 || !subnav[0].textContent.includes('客户标签与分层')) {
           throw new Error('delegated tag manager can see navigation outside tag management');
@@ -722,16 +790,27 @@ async function runTagManagementRendererSmoke(window: BrowserWindow) {
           throw new Error('delegated tag value tab is missing');
         }
         valueTab.click();
+        const valuePage = await loadAdminData('/admin/api/v1/tags/values?merged=false&page=1&size=20&sortBy=sortOrder&sortDirection=ASC');
+        const valueItems = pageItems(valuePage);
         await waitForCondition(
-          () => (valueTab.classList.contains('active') && document.querySelectorAll('.tag-value-row:not(.head)').length > 0)
+          () => (valueTab.classList.contains('active') && document.querySelectorAll('.tag-value-row:not(.head)').length === valueItems.length)
             || Boolean(document.querySelector('.admin-message.error')),
           'delegated tag value rows loaded'
         );
         if (document.querySelector('.admin-message.error')) {
           throw new Error('delegated tag value page failed: ' + document.querySelector('.admin-message.error').textContent);
         }
-        if (!document.body.textContent.includes('当前筛选：27 个标签值')) {
-          throw new Error('delegated tag value total is incorrect');
+        const valueRows = [...document.querySelectorAll('.tag-value-row:not(.head)')];
+        valueItems.forEach((item, index) => {
+          const displayName = String(item.displayName || '').trim();
+          if (!displayName || !valueRows[index].textContent.includes(displayName)) {
+            throw new Error('delegated tag display name not displayed verbatim: ' + displayName);
+          }
+        });
+        const valueTotal = Number(valuePage.total ?? valueItems.length);
+        const paginationText = document.querySelector('.ops-pagination')?.textContent || '';
+        if (!paginationText.includes('当前筛选：' + valueTotal + ' 个标签值')) {
+          throw new Error('delegated tag value total does not match API page');
         }
         return true;
       })();

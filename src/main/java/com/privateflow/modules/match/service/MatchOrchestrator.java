@@ -17,7 +17,7 @@ public class MatchOrchestrator implements CustomerMatchService {
 
   private final ExactMatcher exactMatcher;
   private final FuzzyMatcher fuzzyMatcher;
-  private final TagRemovalProcessor tagRemovalProcessor;
+  private final NicknamePrefixRemovalProcessor nicknamePrefixRemovalProcessor;
   private final ConfidenceEvaluator confidenceEvaluator;
   private final CandidateRanker candidateRanker;
   private final CustomerSummaryMapper summaryMapper;
@@ -26,14 +26,14 @@ public class MatchOrchestrator implements CustomerMatchService {
   public MatchOrchestrator(
       ExactMatcher exactMatcher,
       FuzzyMatcher fuzzyMatcher,
-      TagRemovalProcessor tagRemovalProcessor,
+      NicknamePrefixRemovalProcessor nicknamePrefixRemovalProcessor,
       ConfidenceEvaluator confidenceEvaluator,
       CandidateRanker candidateRanker,
       CustomerSummaryMapper summaryMapper,
       MatchConfigProvider configProvider) {
     this.exactMatcher = exactMatcher;
     this.fuzzyMatcher = fuzzyMatcher;
-    this.tagRemovalProcessor = tagRemovalProcessor;
+    this.nicknamePrefixRemovalProcessor = nicknamePrefixRemovalProcessor;
     this.confidenceEvaluator = confidenceEvaluator;
     this.candidateRanker = candidateRanker;
     this.summaryMapper = summaryMapper;
@@ -56,7 +56,7 @@ public class MatchOrchestrator implements CustomerMatchService {
     if (nickname.isBlank()) {
       return MatchResult.none();
     }
-    String cleanedNickname = tagRemovalProcessor.clean(nickname);
+    String cleanedNickname = nicknamePrefixRemovalProcessor.clean(nickname);
     if (cleanedNickname.isBlank()) {
       return MatchResult.none();
     }

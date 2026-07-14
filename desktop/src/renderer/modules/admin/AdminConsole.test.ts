@@ -1311,6 +1311,60 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
+  it('uses backend tag names without applying general value translations', async () => {
+    const backendCategory = {
+      id: 73,
+      categoryKey: 'intentLevel',
+      categoryName: 'Intent Level',
+      selectionMode: 'SINGLE',
+      isEnabled: true,
+      mergedIntoId: null,
+      values: [],
+      impact: { customerCount: 0, ruleCount: 0, historyCount: 0 }
+    };
+    const backendValue = {
+      id: 74,
+      categoryId: 73,
+      categoryKey: 'intentLevel',
+      tagValue: 'PENDING',
+      displayName: '后端待处理',
+      systemSelectable: true,
+      manualSelectable: true,
+      isEnabled: true,
+      mergedIntoId: null,
+      impact: { customerCount: 0, ruleCount: 0, historyCount: 0 }
+    };
+    apiMocks.getJson.mockImplementation(async (path: string) => {
+      const data = path.startsWith('/admin/api/v1/tags/categories')
+        ? { items: [backendCategory], total: 1, page: 1, size: 20, totalPages: 1 }
+        : path.startsWith('/admin/api/v1/tags/values')
+          ? { items: [backendValue], total: 1, page: 1, size: 20, totalPages: 1 }
+          : apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] };
+      return { success: true, data, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户标签与分层').click();
+    await flushSave();
+    findButton(host, '标签值').click();
+    await flushSave();
+
+    const valueRow = host.querySelector('.tag-value-row:not(.head)') as HTMLElement;
+    expect(valueRow.textContent).toContain('后端待处理');
+    expect(valueRow.textContent).toContain('PENDING');
+    expect(valueRow.textContent).toContain('Intent Level');
+    expect(valueRow.textContent).not.toContain('待确认');
+    expect(valueRow.textContent).not.toContain('意向等级');
+
+    findButton(host, '新增标签值').click();
+    await flushUi();
+    const categorySelect = controlByLabel<HTMLSelectElement>(host.querySelector('.ops-drawer') as HTMLElement, '分类');
+    expect([...categorySelect.options].map((option) => option.textContent)).toContain('Intent Level');
+    expect([...categorySelect.options].map((option) => option.textContent)).not.toContain('意向等级');
+
+    app.unmount();
+  });
+
   it('sends an explicitly cleared category purpose with its version', async () => {
     const { app, host } = await mountConsole();
 

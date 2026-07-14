@@ -6,11 +6,11 @@ import java.util.Locale;
 import org.springframework.stereotype.Component;
 
 @Component
-public class TagRemovalProcessor {
+public class NicknamePrefixRemovalProcessor {
 
   private final MatchConfigProvider configProvider;
 
-  public TagRemovalProcessor(MatchConfigProvider configProvider) {
+  public NicknamePrefixRemovalProcessor(MatchConfigProvider configProvider) {
     this.configProvider = configProvider;
   }
 
