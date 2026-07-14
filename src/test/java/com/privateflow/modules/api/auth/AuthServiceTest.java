@@ -3,6 +3,7 @@ package com.privateflow.modules.api.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -17,6 +18,7 @@ import com.privateflow.modules.api.config.SystemConfigProvider;
 import com.privateflow.modules.runtime.ProductionSafetyService;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -36,6 +38,8 @@ class AuthServiceTest {
   private SystemConfigProvider configProvider;
   @Mock
   private ProductionSafetyService productionSafetyService;
+  @Mock
+  private AccountPermissionRepository permissionRepository;
 
   private AuthService authService;
 
@@ -43,13 +47,21 @@ class AuthServiceTest {
   void setUp() {
     MockitoAnnotations.openMocks(this);
     when(configProvider.get()).thenReturn(config());
-    authService = new AuthService(accountRepository, jwtService, refreshTokenStore, rateLimiter, configProvider, productionSafetyService);
+    authService = new AuthService(
+        accountRepository,
+        jwtService,
+        refreshTokenStore,
+        rateLimiter,
+        configProvider,
+        productionSafetyService,
+        permissionRepository);
   }
 
   @Test
   void loginIssuesTokensForEnabledAdmin() {
     Account account = new Account(1L, "admin", "{plain}admin123", "Admin", Role.ADMIN, null, true);
-    AuthUser expectedUser = new AuthUser("admin", "Admin", Role.ADMIN, null);
+    AuthUser expectedUser = new AuthUser(
+        "admin", "Admin", Role.ADMIN, null, 0L, Set.of(PermissionCodes.TAG_MANAGEMENT));
     when(accountRepository.findByPhone("admin")).thenReturn(Optional.of(account));
     when(jwtService.issue(expectedUser)).thenReturn("access-token");
     when(refreshTokenStore.issue(eq("admin"), any(Duration.class))).thenReturn("refresh-token");
@@ -74,6 +86,55 @@ class AuthServiceTest {
         .isEqualTo(ApiErrorCodes.FORBIDDEN);
 
     verify(jwtService, never()).issue(any());
+  }
+
+  @Test
+  void adminLoginChecksPasswordBeforeRevealingMissingPermission() {
+    Account account = new Account(8L, "leader", "{plain}leader123", "Leader", Role.LEADER, null, true);
+    when(accountRepository.findByPhone("leader")).thenReturn(Optional.of(account));
+
+    assertThatThrownBy(() -> authService.login(
+        new LoginRequest("leader", "wrong-pass", null, null, null), "127.0.0.1", true))
+        .isInstanceOf(ApiException.class)
+        .extracting(ex -> ((ApiException) ex).getErrorCode())
+        .isEqualTo(ApiErrorCodes.AUTH_FAILED);
+
+    verify(permissionRepository, never()).findEnabledByAccountId(anyLong());
+    verify(rateLimiter).recordFailure("127.0.0.1");
+  }
+
+  @Test
+  void adminLoginAllowsDelegatedTagManagerAndReturnsPermissions() {
+    Account account = new Account(6L, "leader", "{plain}leader123", "Leader", Role.LEADER, null, true);
+    AuthUser expectedUser = new AuthUser(
+        "leader", "Leader", Role.LEADER, null, 0L, Set.of(PermissionCodes.TAG_MANAGEMENT));
+    when(accountRepository.findByPhone("leader")).thenReturn(Optional.of(account));
+    when(permissionRepository.findEnabledByAccountId(6L)).thenReturn(Set.of(PermissionCodes.TAG_MANAGEMENT));
+    when(jwtService.issue(expectedUser)).thenReturn("access-token");
+    when(refreshTokenStore.issue(eq("leader"), any(Duration.class))).thenReturn("refresh-token");
+
+    LoginResponse response = authService.login(
+        new LoginRequest("leader", "leader123", null, null, null), "127.0.0.1", true);
+
+    assertThat(response.account()).isEqualTo(expectedUser);
+    assertThat(response.account().permissions()).containsExactly(PermissionCodes.TAG_MANAGEMENT);
+  }
+
+  @Test
+  void refreshReturnsCurrentPermissionsFromDatabase() {
+    Account account = new Account(7L, "leader", "{plain}leader123", "Leader", Role.LEADER, null, true, 3L);
+    AuthUser staleUser = new AuthUser("leader", "Leader", Role.LEADER, null, 2L);
+    AuthUser expectedUser = new AuthUser(
+        "leader", "Leader", Role.LEADER, null, 3L, Set.of(PermissionCodes.TAG_MANAGEMENT));
+    when(refreshTokenStore.read("leader")).thenReturn(Optional.of("refresh-token"));
+    when(accountRepository.findByPhone("leader")).thenReturn(Optional.of(account));
+    when(permissionRepository.findEnabledByAccountId(7L)).thenReturn(Set.of(PermissionCodes.TAG_MANAGEMENT));
+    when(jwtService.issue(expectedUser)).thenReturn("new-access-token");
+
+    LoginResponse response = authService.refresh(new RefreshRequest("refresh-token"), staleUser);
+
+    assertThat(response.accessToken()).isEqualTo("new-access-token");
+    assertThat(response.account()).isEqualTo(expectedUser);
   }
 
   @Test

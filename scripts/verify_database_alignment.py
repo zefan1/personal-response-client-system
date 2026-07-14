@@ -15,7 +15,11 @@ DB_PASSWORD = os.environ.get("SMOKE_DB_PASSWORD", "pda_smoke_pwd")
 REQUIRED_COLUMNS = {
     "accounts": {
         "id", "phone", "username", "password_hash", "display_name", "role", "leader_id",
-        "is_enabled", "last_login_at", "created_at", "updated_at",
+        "is_enabled", "token_version", "last_login_at", "created_at", "updated_at",
+    },
+    "account_permissions": {
+        "id", "account_id", "permission_code", "is_enabled", "granted_by",
+        "created_at", "updated_at",
     },
     "datasources": {
         "id", "name", "sheet_id", "source_table", "description", "is_enabled",
@@ -116,6 +120,11 @@ REQUIRED_COLUMNS = {
         "id", "source_type", "legacy_category_key", "legacy_value", "category_id",
         "tag_value_id", "mapping_status", "mapping_note", "created_at", "updated_at",
     },
+    "tag_merge_operations": {
+        "id", "entity_type", "source_id", "target_id", "source_code", "target_code",
+        "affected_customers", "affected_rules", "affected_history", "detail_json",
+        "operated_by", "created_at",
+    },
 }
 
 EXPECTED_COLUMN_PROPERTIES = {
@@ -124,6 +133,12 @@ EXPECTED_COLUMN_PROPERTIES = {
         "password_hash": {"nullable": "NO"},
         "display_name": {"nullable": "NO"},
         "role": {"nullable": "NO"},
+        "is_enabled": {"nullable": "NO", "default": "1"},
+        "token_version": {"nullable": "NO", "default": "0"},
+    },
+    "account_permissions": {
+        "account_id": {"nullable": "NO"},
+        "permission_code": {"nullable": "NO"},
         "is_enabled": {"nullable": "NO", "default": "1"},
     },
     "customers": {
@@ -284,6 +299,16 @@ EXPECTED_COLUMN_PROPERTIES = {
         "tag_value_id": {"nullable": "YES"},
         "mapping_status": {"nullable": "NO", "default": "UNMATCHED"},
     },
+    "tag_merge_operations": {
+        "entity_type": {"nullable": "NO"},
+        "source_id": {"nullable": "NO"},
+        "target_id": {"nullable": "NO"},
+        "affected_customers": {"nullable": "NO", "default": "0"},
+        "affected_rules": {"nullable": "NO", "default": "0"},
+        "affected_history": {"nullable": "NO", "default": "0"},
+        "detail_json": {"nullable": "NO"},
+        "operated_by": {"nullable": "NO"},
+    },
     "skill_environments": {
         "env_name": {"nullable": "NO"},
         "provider": {"nullable": "NO", "default": "skill"},
@@ -353,6 +378,7 @@ ENUM_COLUMNS = {
     ("customer_tag_assignments", "selection_mode"): {"SINGLE", "MULTI"},
     ("unmatched_legacy_tag_values", "status"): {"PENDING", "MAPPED", "IGNORED", "SUPERSEDED"},
     ("tag_legacy_value_mappings", "mapping_status"): {"MAPPED", "UNMATCHED", "RETIRED"},
+    ("tag_merge_operations", "entity_type"): {"CATEGORY", "VALUE"},
     ("pending_table_writes", "action_type"): {"INSERT", "UPDATE"},
     ("pending_table_writes", "status"): {"PENDING", "RESOLVED", "FAILED"},
     ("desktop_client_versions", "platform"): {"WINDOWS", "MAC"},

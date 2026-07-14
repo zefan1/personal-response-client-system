@@ -21,6 +21,7 @@ public record TagValue(
     int sortOrder,
     Long mergedIntoId,
     int version,
+    TagImpact impact,
     LocalDateTime createdAt,
     LocalDateTime updatedAt
 ) {
@@ -53,7 +54,16 @@ public record TagValue(
         sortOrder,
         null,
         0,
+        TagImpact.empty(),
         createdAt,
         updatedAt);
+  }
+
+  public TagValue withImpact(TagImpact nextImpact) {
+    return new TagValue(
+        id, categoryId, categoryKey, tagValue, displayName, meaning, applicableWhen,
+        notApplicableWhen, positiveExamples, negativeExamples, synonyms,
+        systemSelectable, manualSelectable, isEnabled, sortOrder, mergedIntoId,
+        version, nextImpact == null ? TagImpact.empty() : nextImpact, createdAt, updatedAt);
   }
 }

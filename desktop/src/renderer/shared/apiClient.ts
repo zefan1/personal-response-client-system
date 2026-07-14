@@ -9,6 +9,11 @@ export type ApiResponse<T> = {
   message: string | null;
 };
 
+export type BlobDownload = {
+  blob: Blob;
+  filename: string | null;
+};
+
 type AuthExpiredPayload = {
   message: string;
 };
@@ -41,6 +46,46 @@ export async function deleteJson<T>(
   signal?: AbortSignal
 ): Promise<ApiResponse<T>> {
   return requestJson<T>('DELETE', path, undefined, timeoutMs, signal);
+}
+
+export async function getBlob(
+  path: string,
+  timeoutMs = loadDesktopConfig().requestTotalTimeoutMs,
+  signal?: AbortSignal
+): Promise<BlobDownload> {
+  const config = loadDesktopConfig();
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${config.apiBaseUrl}${path}`, {
+      method: 'GET',
+      headers: {
+        ...(config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : {})
+      },
+      signal: controller.signal
+    });
+    recordApiSuccess();
+    if (!response.ok) {
+      const payload = await readErrorPayload(response);
+      emitAuthExpiredIfNeeded(path, config.accessToken, response.status, payload);
+      throw new Error(payload.message || payload.errorCode || `下载失败：${response.status}`);
+    }
+    return {
+      blob: await response.blob(),
+      filename: filenameFromDisposition(response.headers.get('Content-Disposition'))
+    };
+  } catch (error) {
+    if (error instanceof Error && !isNetworkError(error)) {
+      throw error;
+    }
+    recordApiNetworkFailure(error);
+    throw toUserFacingNetworkError(error);
+  } finally {
+    window.clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
 }
 
 export async function postForm<T>(
@@ -122,6 +167,37 @@ function emitAuthExpiredIfNeeded<T>(path: string, accessToken: string, status: n
   eventBus.emit<AuthExpiredPayload>('auth:expired', {
     message: payload.message?.trim() || '登录已过期，请重新登录'
   });
+}
+
+async function readErrorPayload(response: Response): Promise<ApiResponse<unknown>> {
+  try {
+    return await response.json() as ApiResponse<unknown>;
+  } catch {
+    return {
+      success: false,
+      data: null,
+      errorCode: null,
+      message: `下载失败：${response.status}`
+    };
+  }
+}
+
+function filenameFromDisposition(disposition: string | null): string | null {
+  if (!disposition) return null;
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return encoded;
+    }
+  }
+  return disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? null;
+}
+
+function isNetworkError(error: Error): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+    || /failed to fetch|networkerror|load failed/i.test(error.message);
 }
 
 function toUserFacingNetworkError(error: unknown): Error {

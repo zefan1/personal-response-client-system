@@ -1,6 +1,7 @@
 import { createApp, nextTick, type App as VueApp } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.vue';
+import { resetDesktopStatus } from './shared/desktopStatusStore';
 
 const apiMocks = vi.hoisted(() => ({
   getJson: vi.fn(),
@@ -25,10 +26,10 @@ vi.mock('./modules/stage-suggestion/stageSuggestionHandler', () => ({
 
 vi.mock('./modules/admin/AdminConsole.vue', () => ({
   default: {
-    props: ['accountName'],
+    props: ['accountName', 'tagManagementOnly'],
     emits: ['logout', 'switch-dev-console'],
     template: `
-      <section class="ops-admin-shell">
+      <section class="ops-admin-shell" :data-tag-management-only="String(tagManagementOnly)">
         <button type="button" @click="$emit('switch-dev-console')">开发调试台</button>
         <button type="button" @click="$emit('logout')">退出</button>
       </section>
@@ -146,6 +147,7 @@ function unsignedJwt(payload: Record<string, unknown>): string {
 describe('App route shell', () => {
   beforeEach(() => {
     installMemoryLocalStorage();
+    resetDesktopStatus();
     uninstallDesktopBridge();
     window.history.replaceState(null, '', '#/desktop');
     apiMocks.getJson.mockResolvedValue({
@@ -352,6 +354,69 @@ describe('App route shell', () => {
 
     expect([...host.querySelectorAll('.desktop-sidebar-actions button')]
       .some((button) => button.textContent?.includes('后台'))).toBe(false);
+
+    app.unmount();
+  });
+
+  it('allows delegated tag managers into the browser admin with a restricted console', async () => {
+    apiMocks.getJson.mockResolvedValueOnce({
+      success: true,
+      data: {
+        accountName: 'Leader',
+        role: 'LEADER',
+        permissions: ['TAG_MANAGEMENT'],
+        skillStatus: { status: 'UNKNOWN', expireAt: null, daysLeft: null, label: '技能有效期未配置' }
+      },
+      errorCode: null,
+      message: null
+    });
+    window.history.replaceState(null, '', '#/admin');
+    localStorage.setItem('desktop_config', JSON.stringify({
+      apiBaseUrl: 'http://localhost:8080',
+      accessToken: 'token-a',
+      accountRole: 'LEADER',
+      accountPermissions: []
+    }));
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const app = createApp(App);
+    app.mount(host);
+    await flushUi();
+
+    const console = host.querySelector('.ops-admin-shell') as HTMLElement | null;
+    expect(console).toBeTruthy();
+    expect(console?.dataset.tagManagementOnly).toBe('true');
+
+    app.unmount();
+  });
+
+  it('keeps accounts without admin or tag permission out of the browser admin', async () => {
+    apiMocks.getJson.mockResolvedValueOnce({
+      success: true,
+      data: {
+        accountName: 'Keeper',
+        role: 'KEEPER',
+        permissions: [],
+        skillStatus: { status: 'UNKNOWN', expireAt: null, daysLeft: null, label: '技能有效期未配置' }
+      },
+      errorCode: null,
+      message: null
+    });
+    window.history.replaceState(null, '', '#/admin');
+    localStorage.setItem('desktop_config', JSON.stringify({
+      apiBaseUrl: 'http://localhost:8080',
+      accessToken: 'token-a',
+      accountRole: 'KEEPER',
+      accountPermissions: []
+    }));
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const app = createApp(App);
+    app.mount(host);
+    await flushUi();
+
+    expect(host.querySelector('.ops-admin-shell')).toBeFalsy();
+    expect(host.textContent).toContain('当前账号没有后台管理权限');
 
     app.unmount();
   });

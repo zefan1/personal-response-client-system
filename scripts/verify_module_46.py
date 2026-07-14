@@ -19,6 +19,8 @@ required_files = [
     "src/main/java/com/privateflow/modules/tags/TagCategoryRequest.java",
     "src/main/java/com/privateflow/modules/tags/TagValueRequest.java",
     "src/main/java/com/privateflow/modules/tags/TagErrorCodes.java",
+    "src/main/java/com/privateflow/modules/tags/TagMergeRepository.java",
+    "src/main/java/com/privateflow/modules/tags/TagRuleReferenceService.java",
     "src/main/resources/db/migration/V25__module_46_tag_management.sql",
     "dev-progress/46_progress.md",
 ]
@@ -34,6 +36,10 @@ for token in [
     "/admin/api/v1/tags/values",
     "/admin/api/v1/tags/values/{id}",
     "/admin/api/v1/tags/values/{id}/toggle",
+    "/admin/api/v1/tags/categories/{id}/merge-preview",
+    "/admin/api/v1/tags/categories/{id}/merge",
+    "/admin/api/v1/tags/values/{id}/merge-preview",
+    "/admin/api/v1/tags/values/{id}/merge",
     "@ExceptionHandler(ApiException.class)",
 ]:
     if token not in controller:
@@ -41,14 +47,17 @@ for token in [
 
 service = read("src/main/java/com/privateflow/modules/tags/TagAdminService.java")
 for token in [
-    "VALUE_MAX_PER_CATEGORY = 50",
-    "^[A-Z0-9_]{1,50}$",
-    "Introspector.getBeanInfo(Customer.class)",
-    "boundField cannot be changed",
+    "generateCategoryKey",
+    "generateTagValue",
+    "validateCategorySettings",
+    "validateValueSettings",
     "BUILTIN_CATEGORY_DELETE_FORBIDDEN",
     "CATEGORY_HAS_VALUES",
     "VALUE_IN_USE",
-    "repository.usageCount",
+    "MERGED_ITEM_READ_ONLY",
+    "VERSION_REQUIRED",
+    "mergeRepository.mergeValueReferences",
+    "ruleReferenceService.rewriteCategory",
     "UPDATE_TAG",
     "ConfigChangedEvent(\"tag_config\")",
     "CONFIG_REFRESH",
@@ -67,9 +76,23 @@ for token in [
     "LIKE CONCAT('%', ?, '%')",
     "UPDATE tag_values",
     "display_name = COALESCE",
+    "WHERE id = ? AND version = ?",
+    "trimIfPresent",
 ]:
     if token not in repo:
         errors.append(f"TagRepository missing {token}")
+
+merge_repo = read("src/main/java/com/privateflow/modules/tags/TagMergeRepository.java")
+for token in [
+    "transferBoundField",
+    "mergeValueReferences",
+    "mergeCategoryOnlyReferences",
+    "saveLegacyMappings",
+    "recordOperation",
+    "target_lock.locked_by = CASE",
+]:
+    if token not in merge_repo:
+        errors.append(f"TagMergeRepository missing {token}")
 
 cache = read("src/main/java/com/privateflow/modules/tags/TagCacheService.java")
 for token in [

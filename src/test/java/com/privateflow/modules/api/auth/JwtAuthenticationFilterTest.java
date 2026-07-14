@@ -79,6 +79,34 @@ class JwtAuthenticationFilterTest {
   }
 
   @Test
+  void explicitTagPermissionAllowsOnlyTagAdminEndpoints() throws Exception {
+    JwtService jwtService = mock(JwtService.class);
+    AccountRepository accountRepository = mock(AccountRepository.class);
+    AccountPermissionRepository permissionRepository = mock(AccountPermissionRepository.class);
+    JwtAuthenticationFilter filter = new JwtAuthenticationFilter(
+        jwtService,
+        accountRepository,
+        permissionRepository,
+        new ObjectMapper());
+    when(jwtService.verify("leader-token")).thenReturn(new AuthUser("18800000001", "组长", Role.LEADER, null));
+    when(accountRepository.findByPhone("18800000001")).thenReturn(Optional.of(
+        new Account(2L, "18800000001", "hash", "组长", Role.LEADER, null, true)));
+    when(permissionRepository.hasPermission("18800000001", Role.LEADER, PermissionCodes.TAG_MANAGEMENT))
+        .thenReturn(true);
+    FilterChain chain = mock(FilterChain.class);
+
+    MockHttpServletRequest tagRequest = authed("GET", "/admin/api/v1/tags/categories", "leader-token");
+    MockHttpServletResponse tagResponse = new MockHttpServletResponse();
+    filter.doFilter(tagRequest, tagResponse, chain);
+    verify(chain).doFilter(tagRequest, tagResponse);
+
+    MockHttpServletRequest accountRequest = authed("GET", "/admin/api/v1/accounts", "leader-token");
+    MockHttpServletResponse accountResponse = new MockHttpServletResponse();
+    filter.doFilter(accountRequest, accountResponse, chain);
+    assertThat(accountResponse.getStatus()).isEqualTo(403);
+  }
+
+  @Test
   void adminCanWriteAndKeeperCannotAccessAdminApis() throws Exception {
     JwtService jwtService = mock(JwtService.class);
     AccountRepository accountRepository = mock(AccountRepository.class);

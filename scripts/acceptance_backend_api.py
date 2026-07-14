@@ -713,38 +713,26 @@ def followup_flow(api: ApiClient, ctx: Context):
 
 
 def tag_flow(api: ApiClient, ctx: Context):
-  fields_payload = api.request("tag customer fields for create", "GET", "/admin/api/v1/customer-fields", token=ctx.token)
-  listed = api.request("tag list before create", "GET", "/admin/api/v1/tags/categories", token=ctx.token)
-  categories = data(listed).get("categories", [])
-  bound_fields = {item.get("boundField") for item in categories}
-  available_fields = [item.get("fieldName") for item in data(fields_payload).get("fields", [])]
-  bound_field = next((field for field in available_fields if field and field not in bound_fields), None)
-  if not bound_field:
-    api.request("tag duplicate category guard", "POST", "/admin/api/v1/tags/categories", {
-        "categoryName": "验收标签" + ctx.ts[-4:],
-        "boundField": categories[0]["boundField"],
-        "isEnabled": True,
-        "sortOrder": 999
-    }, ctx.token, expect_success=False, allow_status={400})
-    return
-  created = api.request("tag category create", "POST", "/admin/api/v1/tags/categories", {
-      "categoryName": "验收标签" + ctx.ts[-4:],
-      "boundField": bound_field,
-      "isEnabled": True,
-      "sortOrder": 999
-  }, ctx.token)
-  cat_id = data(created)["id"]
-  api.request("tag duplicate category guard", "POST", "/admin/api/v1/tags/categories", {
-      "categoryName": "验收标签重复" + ctx.ts[-4:],
-      "boundField": bound_field,
+  api.request("tag list before create", "GET", "/admin/api/v1/tags/categories", token=ctx.token)
+  api.request("tag legacy binding guard", "POST", "/admin/api/v1/tags/categories", {
+      "categoryName": "非法绑定标签" + ctx.ts[-4:],
+      "boundField": "intentLevel",
       "isEnabled": True,
       "sortOrder": 1000
   }, ctx.token, expect_success=False, allow_status={400})
-  api.request("tag category update", "PUT", f"/admin/api/v1/tags/categories/{cat_id}", {
-      "categoryName": "验收标签改" + ctx.ts[-4:],
-      "boundField": bound_field,
+  created = api.request("tag category create", "POST", "/admin/api/v1/tags/categories", {
+      "categoryName": "验收标签" + ctx.ts[-4:],
+      "purpose": "标签管理验收分类",
       "isEnabled": True,
-      "sortOrder": 998
+      "sortOrder": 999
+  }, ctx.token)
+  category = data(created)
+  cat_id = category["id"]
+  updated_category = api.request("tag category update", "PUT", f"/admin/api/v1/tags/categories/{cat_id}", {
+      "categoryName": "验收标签改" + ctx.ts[-4:],
+      "isEnabled": True,
+      "sortOrder": 998,
+      "version": category["version"]
   }, ctx.token)
   created_value = api.request("tag value create", "POST", "/admin/api/v1/tags/values", {
       "categoryId": cat_id,
@@ -753,13 +741,18 @@ def tag_flow(api: ApiClient, ctx: Context):
       "isEnabled": True,
       "sortOrder": 999
   }, ctx.token)
-  value_id = data(created_value)["id"]
-  api.request("tag value update", "PUT", f"/admin/api/v1/tags/values/{value_id}", {
+  value = data(created_value)
+  value_id = value["id"]
+  updated_value = api.request("tag value update", "PUT", f"/admin/api/v1/tags/values/{value_id}", {
       "displayName": "验收值改",
       "isEnabled": True,
-      "sortOrder": 998
+      "sortOrder": 998,
+      "version": value["version"]
   }, ctx.token)
-  api.request("tag value toggle", "PUT", f"/admin/api/v1/tags/values/{value_id}/toggle", {"isEnabled": False}, ctx.token)
+  api.request("tag value toggle", "PUT", f"/admin/api/v1/tags/values/{value_id}/toggle", {
+      "isEnabled": False,
+      "version": data(updated_value)["version"]
+  }, ctx.token)
   api.request("tag value delete", "DELETE", f"/admin/api/v1/tags/values/{value_id}", token=ctx.token)
   api.request("tag category delete", "DELETE", f"/admin/api/v1/tags/categories/{cat_id}", token=ctx.token)
 

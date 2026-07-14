@@ -29,17 +29,38 @@
   </main>
 
   <AdminConsole
-    v-else-if="currentMode === 'admin' && !isElectronRuntime"
+    v-else-if="currentMode === 'admin' && !isElectronRuntime && canOpenAdmin && !adminAccessPending"
     :account-name="session.accountName"
+    :tag-management-only="effectiveRole !== 'ADMIN'"
     @logout="logout"
   />
 
+  <main v-else-if="currentMode === 'admin' && !isElectronRuntime" class="login-shell">
+    <section class="login-panel">
+      <div>
+        <h1>运营后台</h1>
+        <p>{{ adminAccessPending ? '正在校验后台权限。' : '当前账号没有后台管理权限。' }}</p>
+      </div>
+      <button v-if="!adminAccessPending" class="secondary" type="button" @click="logout">退出登录</button>
+    </section>
+  </main>
+
   <AdminDevConsole
-    v-else-if="currentMode === 'admin-dev' && devConsoleEnabled && !isElectronRuntime"
+    v-else-if="currentMode === 'admin-dev' && devConsoleEnabled && !isElectronRuntime && effectiveRole === 'ADMIN'"
     :account-name="session.accountName"
     @logout="logout"
     @switch-admin="setMode('admin')"
   />
+
+  <main v-else-if="currentMode === 'admin-dev' && !isElectronRuntime" class="login-shell">
+    <section class="login-panel">
+      <div>
+        <h1>开发调试台</h1>
+        <p>只有管理员可以使用开发调试台。</p>
+      </div>
+      <button class="secondary" type="button" @click="setMode('admin')">返回正式后台</button>
+    </section>
+  </main>
 
   <main v-else class="desktop-shell">
     <aside class="desktop-sidebar">
@@ -182,11 +203,13 @@ type LoginPayload = {
     username?: string;
     displayName?: string;
     role?: string;
+    permissions?: string[];
   };
   userInfo?: {
     username?: string;
     displayName?: string;
     role?: string;
+    permissions?: string[];
   };
 };
 
@@ -229,12 +252,21 @@ const session = reactive({
   accessToken: config.accessToken,
   refreshToken: '',
   accountName: config.accessToken ? '当前账号' : '',
-  role: resolveInitialRole(config)
+  role: resolveInitialRole(config),
+  permissions: normalizePermissions(config.accountPermissions)
 });
 const activeDesktopNav = computed(() => desktopNavItems.find((item) => item.key === activeDesktopPanel.value) ?? desktopNavItems[0]);
 const displayAccountName = computed(() => desktopStatusState.accountName || session.accountName || '当前账号');
 const effectiveRole = computed<AccountRole>(() => normalizeRole(desktopStatusState.role) || session.role);
-const canOpenAdmin = computed(() => effectiveRole.value === 'ADMIN');
+const effectivePermissions = computed(() => desktopStatusState.loaded
+  ? desktopStatusState.permissions
+  : session.permissions);
+const canOpenAdmin = computed(() => effectiveRole.value === 'ADMIN' || effectivePermissions.value.includes('TAG_MANAGEMENT'));
+const adminAccessPending = computed(() => Boolean(
+  session.accessToken
+  && !desktopStatusState.loaded
+  && effectiveRole.value !== 'ADMIN'
+));
 const skillStatusClass = computed(() => desktopStatusState.skillStatus.status.toLowerCase());
 const skillStatusCompactLabel = computed(() => {
   const status = desktopStatusState.skillStatus.status;
@@ -301,7 +333,12 @@ async function login() {
     session.refreshToken = response.data.refreshToken ?? '';
     session.accountName = account?.displayName || account?.username || loginForm.username.trim();
     session.role = normalizeRole(account?.role);
-    saveDesktopConfig({ accessToken: session.accessToken, accountRole: session.role });
+    session.permissions = normalizePermissions(account?.permissions);
+    saveDesktopConfig({
+      accessToken: session.accessToken,
+      accountRole: session.role,
+      accountPermissions: session.permissions
+    });
     await refreshDesktopStatus();
     setMode(loginForm.mode === 'admin' && !hasDesktopBridge() ? currentMode.value === 'admin-dev' && devConsoleEnabled ? 'admin-dev' : 'admin' : 'desktop');
   } catch (error) {
@@ -326,9 +363,10 @@ function clearSession() {
   session.refreshToken = '';
   session.accountName = '';
   session.role = '';
+  session.permissions = [];
   clearDesktopNotice();
   resetDesktopStatus();
-  saveDesktopConfig({ accessToken: '', accountRole: '' });
+  saveDesktopConfig({ accessToken: '', accountRole: '', accountPermissions: [] });
 }
 
 function setMode(mode: RouteMode) {
@@ -452,8 +490,9 @@ async function refreshDesktopStatus() {
   }
   if (desktopStatusState.role) {
     session.role = normalizeRole(desktopStatusState.role);
-    saveDesktopConfig({ accountRole: session.role });
   }
+  session.permissions = [...desktopStatusState.permissions];
+  saveDesktopConfig({ accountRole: session.role, accountPermissions: session.permissions });
 }
 
 function normalizeRole(value?: string): AccountRole {
@@ -461,6 +500,11 @@ function normalizeRole(value?: string): AccountRole {
     return value;
   }
   return '';
+}
+
+function normalizePermissions(value?: string[]): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((permission) => String(permission).trim()).filter(Boolean))];
 }
 
 function resolveInitialRole(savedConfig: typeof config): AccountRole {

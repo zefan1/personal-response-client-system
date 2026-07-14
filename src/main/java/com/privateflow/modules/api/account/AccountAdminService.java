@@ -5,22 +5,28 @@ import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.Role;
 import com.privateflow.modules.api.audit.AuditLogger;
+import com.privateflow.modules.api.auth.AccountPermissionRepository;
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.auth.AuthUser;
+import com.privateflow.modules.api.auth.PermissionCodes;
 import com.privateflow.modules.api.auth.RefreshTokenStore;
 import com.privateflow.modules.api.ws.WsPushService;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Pattern;
 import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AccountAdminService {
 
   private static final Pattern PHONE = Pattern.compile("^1[3-9]\\d{9}$");
   private final AccountAdminRepository repository;
+  private final AccountPermissionRepository permissionRepository;
   private final RefreshTokenStore refreshTokenStore;
   private final WsPushService wsPushService;
   private final AuditLogger auditLogger;
@@ -28,11 +34,13 @@ public class AccountAdminService {
 
   public AccountAdminService(
       AccountAdminRepository repository,
+      AccountPermissionRepository permissionRepository,
       RefreshTokenStore refreshTokenStore,
       WsPushService wsPushService,
       AuditLogger auditLogger,
       ObjectMapper objectMapper) {
     this.repository = repository;
+    this.permissionRepository = permissionRepository;
     this.refreshTokenStore = refreshTokenStore;
     this.wsPushService = wsPushService;
     this.auditLogger = auditLogger;
@@ -51,33 +59,41 @@ public class AccountAdminService {
         "list", repository.list(safePage, safePageSize, role, keyword, enabled));
   }
 
+  @Transactional
   public AccountAdminItem create(AccountCreateRequest request) {
     validateCreate(request);
+    Set<String> permissions = normalizePermissions(request.role(), request.permissions(), Set.of());
     long id = repository.create(new AccountCreateRequest(
         request.phone().trim(),
         request.password(),
         request.displayName().trim(),
         request.role(),
-        normalizeLeaderId(request.role(), request.leaderId())),
+        normalizeLeaderId(request.role(), request.leaderId()),
+        permissions),
         BCrypt.hashpw(request.password(), BCrypt.gensalt()));
+    permissionRepository.replace(id, permissions, AuthContext.username());
     AccountAdminItem saved = require(id);
     audit("ACCOUNT_CREATE", saved, accountDetail(saved));
     return saved;
   }
 
+  @Transactional
   public AccountAdminItem update(long id, AccountUpdateRequest request) {
     AccountAdminItem current = require(id);
     validateUpdate(request);
     Long leaderId = normalizeLeaderId(request.role(), request.leaderId());
+    Set<String> permissions = normalizePermissions(request.role(), request.permissions(), current.permissions());
     AuthUser operator = AuthContext.current();
     if (operator.username().equals(current.phone())
         && (current.role() != request.role() || current.isEnabled() != Boolean.TRUE.equals(request.isEnabled()))) {
       throw new ApiException(ApiErrorCodes.FORBIDDEN, "不能修改当前登录账号的角色或启停状态");
     }
     repository.update(id, request, leaderId);
+    permissionRepository.replace(id, permissions, AuthContext.username());
     boolean securityChanged = current.role() != request.role()
         || current.isEnabled() != Boolean.TRUE.equals(request.isEnabled())
-        || !Objects.equals(current.leaderId(), leaderId);
+        || !Objects.equals(current.leaderId(), leaderId)
+        || !Objects.equals(current.permissions(), permissions);
     if (securityChanged) {
       repository.bumpTokenVersion(id);
       refreshTokenStore.revoke(current.phone());
@@ -92,6 +108,7 @@ public class AccountAdminService {
     return saved;
   }
 
+  @Transactional
   public AccountAdminItem toggle(long id, boolean enabled) {
     AccountAdminItem current = require(id);
     if (AuthContext.username().equals(current.phone())) {
@@ -110,6 +127,7 @@ public class AccountAdminService {
     return saved;
   }
 
+  @Transactional
   public Map<String, Object> resetPassword(long id, PasswordResetRequest request) {
     AccountAdminItem current = require(id);
     if (request == null || request.newPassword() == null || request.newPassword().length() < 6) {
@@ -122,6 +140,7 @@ public class AccountAdminService {
     return Map.of("id", id, "revokedRefreshToken", true);
   }
 
+  @Transactional
   public void delete(long id) {
     AccountAdminItem current = require(id);
     if (AuthContext.username().equals(current.phone())) {
@@ -198,8 +217,20 @@ public class AccountAdminService {
     detail.put("role", item.role().name());
     detail.put("leaderId", item.leaderId());
     detail.put("enabled", item.isEnabled());
+    detail.put("permissions", item.permissions());
     detail.put("phoneLast4", item.phone() == null || item.phone().length() <= 4 ? item.phone() : item.phone().substring(item.phone().length() - 4));
     return detail;
+  }
+
+  private Set<String> normalizePermissions(Role role, Set<String> requested, Set<String> fallback) {
+    Set<String> normalized = requested == null ? new LinkedHashSet<>(fallback) : new LinkedHashSet<>(requested);
+    if (!PermissionCodes.ASSIGNABLE.containsAll(normalized)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "账号权限包含不支持的权限项");
+    }
+    if (role == Role.ADMIN) {
+      normalized.add(PermissionCodes.TAG_MANAGEMENT);
+    }
+    return Set.copyOf(normalized);
   }
 
   private void audit(String action, AccountAdminItem item, Map<String, Object> detail) {

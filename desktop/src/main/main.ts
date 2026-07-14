@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net, shell } from 'electron';
 import crypto from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,6 +24,7 @@ const rendererSmoke = process.env.PDA_RENDERER_SMOKE === '1';
 const rendererSmokeTarget = process.env.PDA_RENDERER_SMOKE_TARGET ?? 'desktop';
 const rendererSmokeApiBaseUrl = process.env.PDA_SMOKE_API_BASE_URL ?? 'http://localhost:8080';
 const rendererSmokeAccessToken = process.env.PDA_RENDERER_SMOKE_ACCESS_TOKEN ?? '';
+const rendererSmokeScreenshotDir = process.env.PDA_RENDERER_SMOKE_SCREENSHOT_DIR ?? '';
 const smokeUserDataDir = process.env.PDA_ELECTRON_SMOKE_USER_DATA_DIR;
 const clipboardImageHistory: ClipboardHistoryItem[] = [];
 let clipboardPollTimer: NodeJS.Timeout | null = null;
@@ -53,7 +54,7 @@ function createWindow() {
     minHeight: 560,
     title: '私域辅助系统',
     webPreferences: {
-      ...(rendererSmoke && rendererSmokeTarget === 'admin'
+      ...(rendererSmoke && ['admin', 'tag-admin'].includes(rendererSmokeTarget)
         ? {}
         : { preload: path.join(__dirname, '../preload/preload.cjs') }),
       contextIsolation: true,
@@ -77,7 +78,11 @@ function createWindow() {
   if (isSmoke) {
     mainWindow.webContents.on('did-finish-load', () => {
       if (rendererSmoke && mainWindow) {
-        void (rendererSmokeTarget === 'admin' ? runAdminRendererSmoke(mainWindow) : runRendererSmoke(mainWindow));
+        void (rendererSmokeTarget === 'admin'
+          ? runAdminRendererSmoke(mainWindow)
+          : rendererSmokeTarget === 'tag-admin'
+            ? runTagManagementRendererSmoke(mainWindow)
+            : runRendererSmoke(mainWindow));
         return;
       }
       if (smokeAutoQuit) {
@@ -391,6 +396,8 @@ async function runRendererSmoke(window: BrowserWindow) {
 
 async function runAdminRendererSmoke(window: BrowserWindow) {
   try {
+    window.setSize(1440, 900);
+    await new Promise((resolve) => setTimeout(resolve, 150));
     const result = await window.webContents.executeJavaScript(`
       (async () => {
         const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -491,19 +498,240 @@ async function runAdminRendererSmoke(window: BrowserWindow) {
         buttonByText('取消', drawer)?.click();
 
         subnavByText('客户标签与分层')?.click();
-        await waitForCondition(() => document.querySelectorAll('.ops-tag-card').length >= 4, 'tag categories loaded');
-        const tagText = [...document.querySelectorAll('.ops-tag-card')]
-          .map((card) => card.textContent)
-          .join('|');
-        for (const expectedTag of ['忠诚型', '腹直肌分离', '担心没有效果', '高意向']) {
-          if (!tagText.includes(expectedTag)) {
-            throw new Error('localized tag missing: ' + expectedTag);
+        await waitForCondition(
+          () => document.querySelectorAll('.tag-category-row:not(.head)').length >= 4,
+          'tag category rows loaded'
+        );
+        const categoryRows = [...document.querySelectorAll('.tag-category-row:not(.head)')];
+        const categoryText = categoryRows.map((row) => row.textContent).join('|');
+        for (const expectedCategory of ['性格类型', '身体关注', '客户顾虑', '意向等级']) {
+          if (!categoryText.includes(expectedCategory)) {
+            throw new Error('tag category missing: ' + expectedCategory);
           }
         }
-        for (const internalText of ['personalityType', 'bodyConcerns', 'intentLevel', 'Loyalist', 'Diastasis Recti', 'Fear No Effect']) {
-          if (tagText.includes(internalText)) {
-            throw new Error('internal English tag text is visible: ' + internalText);
+        const categoryRow = categoryRows[0];
+        const categoryCells = [...categoryRow.children];
+        if (categoryCells.length !== 6 || !categoryCells[5].classList.contains('ops-row-actions')) {
+          throw new Error('tag category table does not have a dedicated sixth action column');
+        }
+        const categoryStatusRect = categoryCells[4].getBoundingClientRect();
+        const categoryActionRect = categoryCells[5].getBoundingClientRect();
+        const categoryVerticallyOverlaps = categoryActionRect.top < categoryStatusRect.bottom
+          && categoryStatusRect.top < categoryActionRect.bottom;
+        if (categoryActionRect.left <= categoryStatusRect.left || !categoryVerticallyOverlaps) {
+          throw new Error('tag category action column wrapped below the data columns');
+        }
+
+        buttonByText('详情', categoryRow)?.click();
+        const categoryDetail = await waitForSelector('.ops-tag-detail-drawer');
+        await waitForCondition(() => categoryDetail.textContent.includes('影响范围'), 'tag category detail loaded');
+        buttonByText('关闭', categoryDetail)?.click();
+        await waitForCondition(() => !document.querySelector('.ops-tag-detail-drawer'), 'tag category detail closed');
+
+        buttonByText('新增分类')?.click();
+        const categoryForm = await waitForSelector('.ops-drawer');
+        const categoryFormLabels = [...categoryForm.querySelectorAll('.ops-label-title')]
+          .map((label) => label.textContent.trim());
+        if (categoryFormLabels.some((label) => label.includes('绑定客户档案字段'))) {
+          throw new Error('new tag category still exposes the legacy customer field binding');
+        }
+        if (categoryFormLabels.some((label) => label.includes('系统编号'))) {
+          throw new Error('new tag category asks operators to enter an internal code');
+        }
+        buttonByText('取消', categoryForm)?.click();
+        await waitForCondition(() => !document.querySelector('.ops-drawer'), 'tag category form closed');
+
+        buttonByText('标签值')?.click();
+        await waitForCondition(
+          () => document.querySelectorAll('.tag-value-row:not(.head)').length >= 20,
+          'tag value rows loaded'
+        );
+        const valueRows = [...document.querySelectorAll('.tag-value-row:not(.head)')];
+        const valueText = valueRows.map((row) => row.textContent).join('|');
+        for (const expectedTag of ['忠诚型', '腹直肌分离', '担心没有效果', '高意向']) {
+          if (!valueText.includes(expectedTag)) {
+            throw new Error('localized tag value missing: ' + expectedTag);
           }
+        }
+        const valueRow = valueRows[0];
+        buttonByText('详情', valueRow)?.click();
+        const valueDetail = await waitForSelector('.ops-tag-detail-drawer');
+        await waitForCondition(() => valueDetail.textContent.includes('标签含义'), 'tag value detail loaded');
+        buttonByText('关闭', valueDetail)?.click();
+        await waitForCondition(() => !document.querySelector('.ops-tag-detail-drawer'), 'tag value detail closed');
+
+        buttonByText('合并', valueRow)?.click();
+        const mergeDrawer = await waitForSelector('.ops-tag-merge-drawer');
+        await waitForCondition(() => {
+          const select = mergeDrawer.querySelector('select');
+          return Boolean(select && select.options.length >= 2) || Boolean(mergeDrawer.querySelector('.admin-message.error'));
+        }, 'tag merge targets loaded');
+        const mergeTarget = mergeDrawer.querySelector('select');
+        if (!mergeTarget || mergeTarget.options.length < 2) {
+          throw new Error('tag merge target list is empty: ' + (mergeDrawer.querySelector('.admin-message.error')?.textContent || 'unknown'));
+        }
+        setValue(mergeTarget, mergeTarget.options[1].value);
+        await waitForCondition(
+          () => Boolean(buttonByText('生成合并预览', mergeDrawer) && !buttonByText('生成合并预览', mergeDrawer).disabled),
+          'tag merge preview enabled'
+        );
+        buttonByText('生成合并预览', mergeDrawer)?.click();
+        await waitForCondition(
+          () => Boolean(mergeDrawer.querySelector('.ops-detail-box.warning')) || Boolean(mergeDrawer.querySelector('.admin-message.error')),
+          'tag merge preview loaded'
+        );
+        if (mergeDrawer.querySelector('.admin-message.error')) {
+          throw new Error('tag merge preview failed: ' + mergeDrawer.querySelector('.admin-message.error').textContent);
+        }
+        const confirmMerge = buttonByText('确认合并', mergeDrawer);
+        if (!confirmMerge || confirmMerge.disabled) {
+          throw new Error('tag merge preview did not enable confirmation');
+        }
+        buttonByText('取消', mergeDrawer)?.click();
+        await waitForCondition(() => !document.querySelector('.ops-tag-merge-drawer'), 'tag merge drawer closed');
+        return true;
+      })();
+    `);
+    if (result === 'renderer_smoke_reloaded') {
+      return;
+    }
+    await captureRendererSmokeScreenshot(window, 'tag-management-admin-desktop.png');
+    window.setSize(390, 844);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await window.webContents.executeJavaScript(`
+      (async () => {
+        const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const waitForCondition = async (predicate, label, timeout = 15000) => {
+          const started = Date.now();
+          while (Date.now() - started < timeout) {
+            if (await predicate()) return;
+            await delay(100);
+          }
+          throw new Error('condition timeout: ' + label);
+        };
+        const buttonByText = (text, root = document) => [...root.querySelectorAll('button')]
+          .find((button) => button.textContent.includes(text));
+
+        if (document.documentElement.scrollWidth > window.innerWidth + 2) {
+          throw new Error('admin page overflows the mobile viewport');
+        }
+        const tagTable = document.querySelector('.ops-table');
+        if (!tagTable || tagTable.scrollWidth <= tagTable.clientWidth) {
+          throw new Error('mobile tag table does not provide contained horizontal scrolling');
+        }
+        buttonByText('标签分类')?.click();
+        await waitForCondition(
+          () => document.querySelectorAll('.tag-category-row:not(.head)').length >= 4,
+          'mobile tag categories loaded'
+        );
+        const categoryRow = document.querySelector('.tag-category-row:not(.head)');
+        buttonByText('详情', categoryRow)?.click();
+        await waitForCondition(() => Boolean(document.querySelector('.ops-tag-detail-drawer')), 'mobile detail drawer loaded');
+        const drawer = document.querySelector('.ops-tag-detail-drawer');
+        const drawerRect = drawer.getBoundingClientRect();
+        if (drawerRect.left < -1 || drawerRect.right > window.innerWidth + 1 || drawerRect.width > window.innerWidth + 1) {
+          throw new Error('tag detail drawer overflows the mobile viewport');
+        }
+        for (const element of drawer.querySelectorAll('button,input,select,textarea,strong')) {
+          const rect = element.getBoundingClientRect();
+          if (rect.width > 0 && (rect.left < drawerRect.left - 1 || rect.right > drawerRect.right + 1)) {
+            throw new Error('tag detail content overflows its mobile drawer');
+          }
+        }
+        return true;
+      })();
+    `);
+    await captureRendererSmokeScreenshot(window, 'tag-management-admin-mobile.png');
+    console.log('renderer_smoke=passed target=admin');
+    app.quit();
+  } catch (error) {
+    console.error('renderer_smoke=failed target=admin', error);
+    app.exit(1);
+  }
+}
+
+async function runTagManagementRendererSmoke(window: BrowserWindow) {
+  try {
+    window.setSize(1180, 820);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const result = await window.webContents.executeJavaScript(`
+      (async () => {
+        const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const waitForSelector = async (selector, timeout = 15000) => {
+          const started = Date.now();
+          while (Date.now() - started < timeout) {
+            const element = document.querySelector(selector);
+            if (element) return element;
+            await delay(100);
+          }
+          throw new Error('missing selector: ' + selector);
+        };
+        const waitForCondition = async (predicate, label, timeout = 15000) => {
+          const started = Date.now();
+          while (Date.now() - started < timeout) {
+            if (await predicate()) return;
+            await delay(100);
+          }
+          throw new Error('condition timeout: ' + label);
+        };
+        const inputByLabel = (text) => {
+          const label = [...document.querySelectorAll('label')].find((item) => item.textContent.includes(text));
+          return label ? label.querySelector('input,select,textarea') : null;
+        };
+        const buttonByText = (text, root = document) => [...root.querySelectorAll('button')]
+          .find((button) => button.textContent.includes(text));
+        const hasLoginForm = () => Boolean(inputByLabel('API 地址') && inputByLabel('账号') && inputByLabel('密码'));
+
+        const started = Date.now();
+        while (!hasLoginForm() && !document.querySelector('.ops-admin-shell') && Date.now() - started < 15000) {
+          await delay(100);
+        }
+        if (hasLoginForm()) {
+          localStorage.setItem('desktop_config', JSON.stringify({
+            apiBaseUrl: ${JSON.stringify(rendererSmokeApiBaseUrl)},
+            accessToken: ${JSON.stringify(rendererSmokeAccessToken)},
+            accountRole: 'KEEPER',
+            accountPermissions: ['TAG_MANAGEMENT']
+          }));
+          window.location.hash = '#/admin';
+          window.location.reload();
+          return 'renderer_smoke_reloaded';
+        }
+
+        await waitForSelector('.ops-admin-shell');
+        await waitForCondition(
+          () => document.querySelectorAll('.tag-category-row:not(.head)').length >= 4,
+          'delegated tag category rows loaded'
+        );
+        const subnav = [...document.querySelectorAll('.ops-admin-subnav-button')];
+        if (subnav.length !== 1 || !subnav[0].textContent.includes('客户标签与分层')) {
+          throw new Error('delegated tag manager can see navigation outside tag management');
+        }
+        const pageText = document.querySelector('.ops-admin-shell').textContent;
+        for (const forbiddenText of ['账号与权限', '跟进规则引擎配置', '配置中心', '运营分析看板']) {
+          if (pageText.includes(forbiddenText)) {
+            throw new Error('delegated tag manager can see forbidden section: ' + forbiddenText);
+          }
+        }
+        if (document.querySelector('.admin-message.error')) {
+          throw new Error('delegated tag manager page contains an API error');
+        }
+        const valueTab = [...document.querySelectorAll('.ops-segmented button')]
+          .find((button) => button.textContent.trim() === '标签值');
+        if (!valueTab) {
+          throw new Error('delegated tag value tab is missing');
+        }
+        valueTab.click();
+        await waitForCondition(
+          () => (valueTab.classList.contains('active') && document.querySelectorAll('.tag-value-row:not(.head)').length > 0)
+            || Boolean(document.querySelector('.admin-message.error')),
+          'delegated tag value rows loaded'
+        );
+        if (document.querySelector('.admin-message.error')) {
+          throw new Error('delegated tag value page failed: ' + document.querySelector('.admin-message.error').textContent);
+        }
+        if (!document.body.textContent.includes('当前筛选：27 个标签值')) {
+          throw new Error('delegated tag value total is incorrect');
         }
         return true;
       })();
@@ -511,12 +739,21 @@ async function runAdminRendererSmoke(window: BrowserWindow) {
     if (result === 'renderer_smoke_reloaded') {
       return;
     }
-    console.log('renderer_smoke=passed target=admin');
+    await captureRendererSmokeScreenshot(window, 'tag-management-delegated.png');
+    console.log('renderer_smoke=passed target=tag-admin');
     app.quit();
   } catch (error) {
-    console.error('renderer_smoke=failed target=admin', error);
+    await captureRendererSmokeScreenshot(window, 'tag-management-delegated-failed.png');
+    console.error('renderer_smoke=failed target=tag-admin', error);
     app.exit(1);
   }
+}
+
+async function captureRendererSmokeScreenshot(window: BrowserWindow, fileName: string) {
+  if (!rendererSmokeScreenshotDir) return;
+  mkdirSync(rendererSmokeScreenshotDir, { recursive: true });
+  const image = await window.webContents.capturePage();
+  writeFileSync(path.join(rendererSmokeScreenshotDir, fileName), image.toPNG());
 }
 
 app.whenReady().then(() => {

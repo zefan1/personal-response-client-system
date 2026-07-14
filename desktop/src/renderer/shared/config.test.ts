@@ -51,4 +51,14 @@ describe('desktop config', () => {
 
     expect(loadDesktopConfig().clipboardScreenshotConfirmPromptS).toBe(15);
   });
+
+  it('persists normalized account permissions for admin access gating', () => {
+    installMemoryLocalStorage();
+
+    expect(loadDesktopConfig().accountPermissions).toEqual([]);
+
+    saveDesktopConfig({ accountPermissions: ['TAG_MANAGEMENT', ' TAG_MANAGEMENT ', ''] });
+
+    expect(loadDesktopConfig().accountPermissions).toEqual(['TAG_MANAGEMENT']);
+  });
 });

@@ -6,6 +6,8 @@ import com.privateflow.modules.api.Role;
 import com.privateflow.modules.api.config.SystemConfigProvider;
 import com.privateflow.modules.runtime.ProductionSafetyService;
 import java.time.Duration;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +20,7 @@ public class AuthService {
   private final LoginRateLimiter rateLimiter;
   private final SystemConfigProvider configProvider;
   private final ProductionSafetyService productionSafetyService;
+  private final AccountPermissionRepository permissionRepository;
 
   public AuthService(
       AccountRepository accountRepository,
@@ -25,13 +28,15 @@ public class AuthService {
       RefreshTokenStore refreshTokenStore,
       LoginRateLimiter rateLimiter,
       SystemConfigProvider configProvider,
-      ProductionSafetyService productionSafetyService) {
+      ProductionSafetyService productionSafetyService,
+      AccountPermissionRepository permissionRepository) {
     this.accountRepository = accountRepository;
     this.jwtService = jwtService;
     this.refreshTokenStore = refreshTokenStore;
     this.rateLimiter = rateLimiter;
     this.configProvider = configProvider;
     this.productionSafetyService = productionSafetyService;
+    this.permissionRepository = permissionRepository;
   }
 
   public LoginResponse login(LoginRequest request, String ip, boolean adminLogin) {
@@ -48,15 +53,16 @@ public class AuthService {
     if (!account.enabled()) {
       throw new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "账号已停用，请联系管理员");
     }
-    if (adminLogin && account.role() != Role.ADMIN) {
-      throw new ApiException(ApiErrorCodes.FORBIDDEN, "当前账号没有后台权限");
-    }
     if (!passwordMatches(request.password(), account.passwordHash())) {
       throw authFailure(ip);
     }
+    Set<String> permissions = permissions(account);
+    if (adminLogin && account.role() != Role.ADMIN && !permissions.contains(PermissionCodes.TAG_MANAGEMENT)) {
+      throw new ApiException(ApiErrorCodes.FORBIDDEN, "当前账号没有后台权限");
+    }
     rateLimiter.clear(ip);
     accountRepository.updateLastLogin(account.username());
-    AuthUser user = new AuthUser(account.username(), account.displayName(), account.role(), account.leaderId(), account.tokenVersion());
+    AuthUser user = authUser(account, permissions);
     String accessToken = jwtService.issue(user);
     String refreshToken = refreshTokenStore.issue(user.username(), Duration.ofSeconds(configProvider.get().jwtRefreshTokenTtlS()));
     return new LoginResponse(accessToken, refreshToken, configProvider.get().jwtAccessTokenTtlS(), user);
@@ -76,7 +82,7 @@ public class AuthService {
     if (!account.enabled()) {
       throw new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "账号已停用，请联系管理员");
     }
-    AuthUser freshUser = new AuthUser(account.username(), account.displayName(), account.role(), account.leaderId(), account.tokenVersion());
+    AuthUser freshUser = authUser(account, permissions(account));
     String accessToken = jwtService.issue(freshUser);
     return new LoginResponse(accessToken, request.refreshToken(), configProvider.get().jwtAccessTokenTtlS(), freshUser);
   }
@@ -84,6 +90,24 @@ public class AuthService {
   private ApiException authFailure(String ip) {
     rateLimiter.recordFailure(ip);
     return new ApiException(ApiErrorCodes.AUTH_FAILED, "手机号或密码不正确");
+  }
+
+  private AuthUser authUser(Account account, Set<String> permissions) {
+    return new AuthUser(
+        account.username(),
+        account.displayName(),
+        account.role(),
+        account.leaderId(),
+        account.tokenVersion(),
+        permissions);
+  }
+
+  private Set<String> permissions(Account account) {
+    Set<String> permissions = new LinkedHashSet<>(permissionRepository.findEnabledByAccountId(account.id()));
+    if (account.role() == Role.ADMIN) {
+      permissions.add(PermissionCodes.TAG_MANAGEMENT);
+    }
+    return Set.copyOf(permissions);
   }
 
   private boolean passwordMatches(String raw, String stored) {

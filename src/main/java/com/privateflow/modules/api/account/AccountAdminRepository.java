@@ -4,8 +4,11 @@ import com.privateflow.modules.api.Role;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -25,7 +28,9 @@ public class AccountAdminRepository {
     args.add((page - 1) * pageSize);
     return jdbcTemplate.query("""
         SELECT a.id, COALESCE(a.phone, a.username) AS phone, a.display_name, a.role, a.leader_id,
-               l.display_name AS leader_name, a.is_enabled, a.last_login_at, a.created_at
+               l.display_name AS leader_name, a.is_enabled, a.last_login_at, a.created_at,
+               (SELECT GROUP_CONCAT(p.permission_code ORDER BY p.permission_code SEPARATOR ',')
+                FROM account_permissions p WHERE p.account_id = a.id AND p.is_enabled = 1) AS permissions
         FROM accounts a
         LEFT JOIN accounts l ON a.leader_id = l.id
         """ + where + """
@@ -44,7 +49,9 @@ public class AccountAdminRepository {
   public Optional<AccountAdminItem> find(long id) {
     return jdbcTemplate.query("""
         SELECT a.id, COALESCE(a.phone, a.username) AS phone, a.display_name, a.role, a.leader_id,
-               l.display_name AS leader_name, a.is_enabled, a.last_login_at, a.created_at
+               l.display_name AS leader_name, a.is_enabled, a.last_login_at, a.created_at,
+               (SELECT GROUP_CONCAT(p.permission_code ORDER BY p.permission_code SEPARATOR ',')
+                FROM account_permissions p WHERE p.account_id = a.id AND p.is_enabled = 1) AS permissions
         FROM accounts a
         LEFT JOIN accounts l ON a.leader_id = l.id
         WHERE a.id = ?
@@ -159,8 +166,19 @@ public class AccountAdminRepository {
         rs.getObject("leader_id", Long.class),
         rs.getString("leader_name"),
         rs.getInt("is_enabled") == 1,
+        permissions(rs.getString("permissions")),
         rs.getTimestamp("last_login_at") == null ? null : rs.getTimestamp("last_login_at").toLocalDateTime(),
         rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime());
+  }
+
+  private Set<String> permissions(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return Set.of();
+    }
+    return new LinkedHashSet<>(Arrays.stream(raw.split(","))
+        .map(String::trim)
+        .filter(value -> !value.isBlank())
+        .toList());
   }
 
   private String roleLabel(Role role) {

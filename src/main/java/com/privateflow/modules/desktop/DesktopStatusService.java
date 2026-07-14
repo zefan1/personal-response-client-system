@@ -2,6 +2,8 @@ package com.privateflow.modules.desktop;
 
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.auth.AuthUser;
+import com.privateflow.modules.api.auth.AccountPermissionRepository;
+import com.privateflow.modules.api.auth.PermissionCodes;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import com.privateflow.modules.llm.LlmCallAnalytics;
 import com.privateflow.modules.llm.LlmCallAnalyticsRepository;
@@ -14,6 +16,8 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -37,20 +41,22 @@ public class DesktopStatusService {
   private final Clock clock;
   private final RuntimeModeService runtimeModeService;
   private final LlmCallAnalyticsRepository llmCallAnalyticsRepository;
+  private final AccountPermissionRepository permissionRepository;
 
   @Autowired
   public DesktopStatusService(
       SystemConfigRepository configRepository,
       RuntimeModeService runtimeModeService,
-      LlmCallAnalyticsRepository llmCallAnalyticsRepository) {
-    this(configRepository, Clock.systemDefaultZone(), runtimeModeService, llmCallAnalyticsRepository);
+      LlmCallAnalyticsRepository llmCallAnalyticsRepository,
+      AccountPermissionRepository permissionRepository) {
+    this(configRepository, Clock.systemDefaultZone(), runtimeModeService, llmCallAnalyticsRepository, permissionRepository);
   }
 
   DesktopStatusService(
       SystemConfigRepository configRepository,
       Clock clock,
       RuntimeModeService runtimeModeService) {
-    this(configRepository, clock, runtimeModeService, null);
+    this(configRepository, clock, runtimeModeService, null, null);
   }
 
   DesktopStatusService(
@@ -58,10 +64,20 @@ public class DesktopStatusService {
       Clock clock,
       RuntimeModeService runtimeModeService,
       LlmCallAnalyticsRepository llmCallAnalyticsRepository) {
+    this(configRepository, clock, runtimeModeService, llmCallAnalyticsRepository, null);
+  }
+
+  DesktopStatusService(
+      SystemConfigRepository configRepository,
+      Clock clock,
+      RuntimeModeService runtimeModeService,
+      LlmCallAnalyticsRepository llmCallAnalyticsRepository,
+      AccountPermissionRepository permissionRepository) {
     this.configRepository = configRepository;
     this.clock = clock;
     this.runtimeModeService = runtimeModeService;
     this.llmCallAnalyticsRepository = llmCallAnalyticsRepository;
+    this.permissionRepository = permissionRepository;
   }
 
   public DesktopStatusResponse currentStatus() {
@@ -70,10 +86,24 @@ public class DesktopStatusService {
     return new DesktopStatusResponse(
         accountName,
         user == null ? null : user.role(),
+        permissions(user),
         skillStatus(configRepository.findValue(SKILL_SUBSCRIPTION_EXPIRE_AT).orElse("")),
         llmStatus(),
         runtimeModeService.currentMode(),
         runtimeConfig());
+  }
+
+  private Set<String> permissions(AuthUser user) {
+    if (user == null) {
+      return Set.of();
+    }
+    Set<String> result = permissionRepository == null
+        ? new LinkedHashSet<>()
+        : new LinkedHashSet<>(permissionRepository.findEnabledByPhone(user.username()));
+    if (user.role() == com.privateflow.modules.api.Role.ADMIN) {
+      result.add(PermissionCodes.TAG_MANAGEMENT);
+    }
+    return Set.copyOf(result);
   }
 
   DesktopRuntimeConfigResponse runtimeConfig() {

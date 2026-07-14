@@ -255,10 +255,10 @@ def main() -> int:
         status, payload, raw = request_json("PUT", f"/admin/api/v1/rules/{rule_id}/toggle", {"enabled": False}, token=token)
         add(checks, "B5 toggle rule", status == 200 and data_of(payload) is not None, f"status={status}")
 
-    # B5: tags. Use a field unlikely to be already bound.
+    # B5: tags. Custom categories use unified assignments and do not bind legacy customer fields.
     status, payload, raw = request_json("POST", "/admin/api/v1/tags/categories", {
         "categoryName": f"codex-b-tag-{RUN_ID}",
-        "boundField": "purchasedProject",
+        "purpose": "codex batch b temporary tag category",
         "isEnabled": True,
         "sortOrder": 999,
     }, token=token)
@@ -279,7 +279,10 @@ def main() -> int:
         add(checks, "B5 create tag value", status == 200 and tag_value_id is not None, f"status={status} body={raw[:300]}")
         if tag_value_id:
             cleanups.append((f"tag value {tag_value_id}", lambda vid=tag_value_id: delete_ok(f"/admin/api/v1/tags/values/{vid}", token)))
-            status, payload, raw = request_json("PUT", f"/admin/api/v1/tags/values/{tag_value_id}/toggle", {"isEnabled": False}, token=token)
+            status, payload, raw = request_json("PUT", f"/admin/api/v1/tags/values/{tag_value_id}/toggle", {
+                "isEnabled": False,
+                "version": tag_value.get("version"),
+            }, token=token)
             add(checks, "B5 toggle tag value", status == 200 and data_of(payload) is not None, f"status={status}")
 
     # B5: notices.

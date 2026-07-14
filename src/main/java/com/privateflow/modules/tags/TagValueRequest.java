@@ -15,7 +15,8 @@ public record TagValueRequest(
     Boolean systemSelectable,
     Boolean manualSelectable,
     Boolean isEnabled,
-    Integer sortOrder
+    Integer sortOrder,
+    Integer version
 ) {
 
   public TagValueRequest(Long categoryId, String tagValue, String displayName, Boolean isEnabled, Integer sortOrder) {
@@ -32,6 +33,26 @@ public record TagValueRequest(
         null,
         null,
         isEnabled,
-        sortOrder);
+        sortOrder,
+        null);
+  }
+
+  public TagValueRequest(
+      Long categoryId,
+      String tagValue,
+      String displayName,
+      String meaning,
+      String applicableWhen,
+      String notApplicableWhen,
+      String positiveExamples,
+      String negativeExamples,
+      List<String> synonyms,
+      Boolean systemSelectable,
+      Boolean manualSelectable,
+      Boolean isEnabled,
+      Integer sortOrder) {
+    this(categoryId, tagValue, displayName, meaning, applicableWhen,
+        notApplicableWhen, positiveExamples, negativeExamples, synonyms,
+        systemSelectable, manualSelectable, isEnabled, sortOrder, null);
   }
 }

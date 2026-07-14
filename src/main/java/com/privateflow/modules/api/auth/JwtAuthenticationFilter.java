@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import org.springframework.http.MediaType;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -27,12 +28,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       "http://127.0.0.1:5174");
   private final JwtService jwtService;
   private final AccountRepository accountRepository;
+  private final AccountPermissionRepository permissionRepository;
   private final ObjectMapper objectMapper;
 
-  public JwtAuthenticationFilter(JwtService jwtService, AccountRepository accountRepository, ObjectMapper objectMapper) {
+  @Autowired
+  public JwtAuthenticationFilter(
+      JwtService jwtService,
+      AccountRepository accountRepository,
+      AccountPermissionRepository permissionRepository,
+      ObjectMapper objectMapper) {
     this.jwtService = jwtService;
     this.accountRepository = accountRepository;
+    this.permissionRepository = permissionRepository;
     this.objectMapper = objectMapper;
+  }
+
+  JwtAuthenticationFilter(JwtService jwtService, AccountRepository accountRepository, ObjectMapper objectMapper) {
+    this(jwtService, accountRepository, null, objectMapper);
   }
 
   @Override
@@ -106,6 +118,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   }
 
   private boolean allowedAdminAccess(HttpServletRequest request, AuthUser user) {
-    return user.role() == Role.ADMIN;
+    if (user.role() == Role.ADMIN) {
+      return true;
+    }
+    return request.getRequestURI().startsWith("/admin/api/v1/tags/")
+        && permissionRepository != null
+        && permissionRepository.hasPermission(user.username(), user.role(), PermissionCodes.TAG_MANAGEMENT);
   }
 }

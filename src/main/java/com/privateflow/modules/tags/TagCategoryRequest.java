@@ -19,7 +19,8 @@ public record TagCategoryRequest(
     Boolean useForStatistics,
     Boolean useForFollowupRules,
     Boolean isEnabled,
-    Integer sortOrder
+    Integer sortOrder,
+    Integer version
 ) {
 
   public TagCategoryRequest(String categoryName, String boundField, Boolean isEnabled, Integer sortOrder) {
@@ -40,6 +41,31 @@ public record TagCategoryRequest(
         null,
         null,
         isEnabled,
-        sortOrder);
+        sortOrder,
+        null);
+  }
+
+  public TagCategoryRequest(
+      String categoryName,
+      String purpose,
+      String boundField,
+      TagSelectionMode selectionMode,
+      Boolean systemInferenceEnabled,
+      Boolean manualEditEnabled,
+      TagAutoUpdateMode autoUpdateMode,
+      BigDecimal minConfidence,
+      Integer minEvidenceMessages,
+      Integer cooldownHours,
+      TagUncertainPolicy uncertainPolicy,
+      Boolean useForReply,
+      Boolean useForFilter,
+      Boolean useForStatistics,
+      Boolean useForFollowupRules,
+      Boolean isEnabled,
+      Integer sortOrder) {
+    this(categoryName, purpose, boundField, selectionMode, systemInferenceEnabled,
+        manualEditEnabled, autoUpdateMode, minConfidence, minEvidenceMessages,
+        cooldownHours, uncertainPolicy, useForReply, useForFilter, useForStatistics,
+        useForFollowupRules, isEnabled, sortOrder, null);
   }
 }

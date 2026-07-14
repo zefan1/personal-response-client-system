@@ -42,7 +42,9 @@ class TagAdminControllerTest {
 
   @Test
   void listReturnsCategoriesAndValues() throws Exception {
-    when(service.list()).thenReturn(Map.of("categories", List.of(category(1L, "source", List.of(value(8L, true))))));
+    TagCategory item = category(1L, "source", List.of(value(8L, true)));
+    when(service.searchCategories(any(), any(), any(), any(), any(), eq(1), eq(20), eq("sortOrder"), eq("ASC")))
+        .thenReturn(new TagCategoryPage(1, 20, 1, 1, List.of(item)));
 
     mockMvc.perform(get("/admin/api/v1/tags/categories"))
         .andExpect(status().isOk())
@@ -67,7 +69,7 @@ class TagAdminControllerTest {
 
     mockMvc.perform(put("/admin/api/v1/tags/categories/2")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(request)))
+            .content("{\"categoryName\":\"Source\",\"version\":0}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.categoryKey").value("source_custom"));
 
@@ -85,7 +87,7 @@ class TagAdminControllerTest {
     TagValueRequest request = new TagValueRequest(2L, "wechat", "WeChat", true, 3);
     when(service.createValue(any())).thenReturn(value(9L, true));
     when(service.updateValue(eq(9L), any())).thenReturn(value(9L, true));
-    when(service.toggleValue(9L, false)).thenReturn(value(9L, false));
+    when(service.toggleValue(9L, false, 0)).thenReturn(value(9L, false));
     doNothing().when(service).deleteValue(9L);
 
     mockMvc.perform(post("/admin/api/v1/tags/values")
@@ -97,13 +99,13 @@ class TagAdminControllerTest {
 
     mockMvc.perform(put("/admin/api/v1/tags/values/9")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(request)))
+            .content("{\"categoryId\":2,\"displayName\":\"WeChat\",\"version\":0}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.tagValue").value("wechat"));
 
     mockMvc.perform(put("/admin/api/v1/tags/values/9/toggle")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"isEnabled\":false}"))
+            .content("{\"isEnabled\":false,\"version\":0}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.isEnabled").value(false));
 
@@ -113,7 +115,7 @@ class TagAdminControllerTest {
 
     verify(service).createValue(any());
     verify(service).updateValue(eq(9L), any());
-    verify(service).toggleValue(9L, false);
+    verify(service).toggleValue(9L, false, 0);
     verify(service).deleteValue(9L);
   }
 
@@ -126,6 +128,23 @@ class TagAdminControllerTest {
         .andExpect(jsonPath("$.success").value(false))
         .andExpect(jsonPath("$.errorCode").value(ApiErrorCodes.BAD_REQUEST))
         .andExpect(jsonPath("$.message").value("请明确选择启用或停用"));
+  }
+
+  @Test
+  void writeEndpointsRejectMissingVersion() throws Exception {
+    mockMvc.perform(put("/admin/api/v1/tags/values/9/toggle")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"isEnabled\":false}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.success").value(false))
+        .andExpect(jsonPath("$.errorCode").value(TagErrorCodes.VERSION_REQUIRED))
+        .andExpect(jsonPath("$.message").value("缺少数据版本，请刷新后重试"));
+
+    mockMvc.perform(post("/admin/api/v1/tags/categories/1/merge-preview")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"targetId\":2,\"sourceVersion\":0}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errorCode").value(TagErrorCodes.VERSION_REQUIRED));
   }
 
   @Test

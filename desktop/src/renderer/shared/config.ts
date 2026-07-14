@@ -2,6 +2,7 @@ export type DesktopConfig = {
   apiBaseUrl: string;
   accessToken: string;
   accountRole: string;
+  accountPermissions: string[];
   wsUrl: string;
   clipboardPollIntervalMs: number;
   clipboardMd5CacheSize: number;
@@ -54,6 +55,7 @@ const defaults: DesktopConfig = {
   apiBaseUrl: 'http://localhost:8080',
   accessToken: '',
   accountRole: '',
+  accountPermissions: [],
   wsUrl: '',
   clipboardPollIntervalMs: 500,
   clipboardMd5CacheSize: 5,
@@ -121,7 +123,10 @@ function normalizeConfig(config: DesktopConfig, explicitWsUrl = false): DesktopC
   const wsUrl = explicitWsUrl && config.wsUrl.trim()
     ? config.wsUrl.trim()
     : deriveWsUrl(apiBaseUrl);
-  return { ...config, apiBaseUrl, wsUrl };
+  const accountPermissions = Array.isArray(config.accountPermissions)
+    ? [...new Set(config.accountPermissions.map((permission) => String(permission).trim()).filter(Boolean))]
+    : [];
+  return { ...config, apiBaseUrl, accountPermissions, wsUrl };
 }
 
 export function deriveWsUrl(apiBaseUrl: string): string {

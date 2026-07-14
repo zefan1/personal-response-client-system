@@ -9,6 +9,7 @@ export type DesktopRole = 'ADMIN' | 'LEADER' | 'KEEPER' | '';
 export type DesktopStatusPayload = {
   accountName?: string;
   role?: DesktopRole;
+  permissions?: string[];
   skillStatus?: {
     status?: DesktopSkillStatus;
     expireAt?: string | null;
@@ -28,9 +29,11 @@ export type DesktopStatusPayload = {
 
 export const desktopStatusState = reactive({
   loading: false,
+  loaded: false,
   error: '',
   accountName: '',
   role: '' as DesktopRole,
+  permissions: [] as string[],
   skillStatus: {
     status: 'UNKNOWN' as DesktopSkillStatus,
     expireAt: null as string | null,
@@ -64,12 +67,15 @@ export async function loadDesktopStatus(): Promise<void> {
     desktopStatusState.error = error instanceof Error ? error.message : '桌面状态加载失败';
   } finally {
     desktopStatusState.loading = false;
+    desktopStatusState.loaded = true;
   }
 }
 
 export function applyDesktopStatus(payload: DesktopStatusPayload): void {
+  desktopStatusState.loaded = true;
   desktopStatusState.accountName = payload.accountName?.trim() ?? desktopStatusState.accountName;
   desktopStatusState.role = normalizeRole(payload.role) || desktopStatusState.role;
+  desktopStatusState.permissions = normalizePermissions(payload.permissions);
   desktopStatusState.skillStatus.status = normalizeSkillStatus(payload.skillStatus?.status);
   desktopStatusState.skillStatus.expireAt = payload.skillStatus?.expireAt ?? null;
   desktopStatusState.skillStatus.daysLeft = Number.isFinite(payload.skillStatus?.daysLeft)
@@ -83,14 +89,19 @@ export function applyDesktopStatus(payload: DesktopStatusPayload): void {
 
   const clipboardPromptSeconds = normalizeClipboardPromptSeconds(payload.runtimeConfig?.clipboardScreenshotConfirmPromptS);
   desktopStatusState.runtimeConfig.clipboardScreenshotConfirmPromptS = clipboardPromptSeconds;
-  saveDesktopConfig({ clipboardScreenshotConfirmPromptS: clipboardPromptSeconds });
+  saveDesktopConfig({
+    accountPermissions: desktopStatusState.permissions,
+    clipboardScreenshotConfirmPromptS: clipboardPromptSeconds
+  });
 }
 
 export function resetDesktopStatus(): void {
   desktopStatusState.loading = false;
+  desktopStatusState.loaded = false;
   desktopStatusState.error = '';
   desktopStatusState.accountName = '';
   desktopStatusState.role = '';
+  desktopStatusState.permissions = [];
   desktopStatusState.skillStatus.status = 'UNKNOWN';
   desktopStatusState.skillStatus.expireAt = null;
   desktopStatusState.skillStatus.daysLeft = null;
@@ -107,6 +118,13 @@ function normalizeRole(value?: string): DesktopRole {
     return value;
   }
   return '';
+}
+
+function normalizePermissions(value?: string[]): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [...new Set(value.map((permission) => String(permission).trim()).filter(Boolean))];
 }
 
 function normalizeSkillStatus(value?: string): DesktopSkillStatus {

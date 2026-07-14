@@ -71,4 +71,40 @@ describe('apiClient authentication expiry', () => {
     expect(events).toEqual([]);
     dispose();
   });
+
+  it('downloads authenticated CSV blobs and reads the response filename', async () => {
+    const fetchMock = vi.fn(async () => new Response('编号,名称\n1,高意向\n', {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv;charset=utf-8',
+        'Content-Disposition': "attachment; filename*=UTF-8''tag-values.csv"
+      }
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { getBlob } = await import('./apiClient');
+
+    const result = await getBlob('/admin/api/v1/tags/values/export');
+
+    expect(result.filename).toBe('tag-values.csv');
+    expect(await result.blob.text()).toContain('高意向');
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8080/admin/api/v1/tags/values/export', expect.objectContaining({
+      method: 'GET',
+      headers: { Authorization: 'Bearer token-a' }
+    }));
+  });
+
+  it('surfaces backend download protection errors instead of returning an empty file', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      success: false,
+      data: null,
+      errorCode: '90-10004',
+      message: '当前筛选条件无权导出'
+    }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' }
+    })));
+    const { getBlob } = await import('./apiClient');
+
+    await expect(getBlob('/admin/api/v1/tags/values/export')).rejects.toThrow('当前筛选条件无权导出');
+  });
 });

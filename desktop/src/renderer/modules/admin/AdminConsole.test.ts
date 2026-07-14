@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AdminConsole from './AdminConsole.vue';
 
 const apiMocks = vi.hoisted(() => ({
+  getBlob: vi.fn(),
   getJson: vi.fn(),
   postForm: vi.fn(),
   postJson: vi.fn(),
@@ -11,6 +12,7 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../shared/apiClient', () => ({
+  getBlob: apiMocks.getBlob,
   getJson: apiMocks.getJson,
   postForm: apiMocks.postForm,
   postJson: apiMocks.postJson,
@@ -207,8 +209,8 @@ const apiData: Record<string, unknown> = {
   },
   '/admin/api/v1/accounts': {
     list: [
-      { id: 30, displayName: '管理员', phone: '18800000000', role: 'ADMIN', isEnabled: true, lastLoginAt: '2026-07-03T09:00:00Z' },
-      { id: 31, displayName: '组长', phone: '18800000001', role: 'LEADER', isEnabled: true, lastLoginAt: '2026-07-03T09:05:00Z' }
+      { id: 30, displayName: '管理员', phone: '18800000000', role: 'ADMIN', isEnabled: true, permissions: ['TAG_MANAGEMENT'], lastLoginAt: '2026-07-03T09:00:00Z' },
+      { id: 31, displayName: '组长', phone: '18800000001', role: 'LEADER', isEnabled: true, permissions: [], lastLoginAt: '2026-07-03T09:05:00Z' }
     ],
     total: 42,
     page: 1,
@@ -226,7 +228,128 @@ const apiData: Record<string, unknown> = {
     totalPages: 2
   },
   '/admin/api/v1/tags/categories': {
-    items: [{ id: 50, categoryName: 'Intent Level', boundField: 'intentLevel', isBuiltin: true, values: [{ id: 51, tagValue: 'HIGH', displayName: 'High' }] }]
+    items: [{
+      id: 50,
+      categoryKey: 'intent_level',
+      categoryName: '意向等级',
+      purpose: '用于判断客户购买意向',
+      boundField: 'intentLevel',
+      selectionMode: 'SINGLE',
+      systemInferenceEnabled: true,
+      manualEditEnabled: true,
+      autoUpdateMode: 'REPLACE',
+      minConfidence: 0.85,
+      minEvidenceMessages: 2,
+      cooldownHours: 12,
+      uncertainPolicy: 'KEEP_CURRENT',
+      useForReply: true,
+      useForFilter: true,
+      useForStatistics: true,
+      useForFollowupRules: true,
+      isBuiltin: true,
+      isEnabled: true,
+      sortOrder: 10,
+      mergedIntoId: null,
+      version: 4,
+      values: [],
+      impact: { customerCount: 12, ruleCount: 2, historyCount: 8 },
+      updatedAt: '2026-07-03T09:00:00Z'
+    }],
+    total: 21,
+    page: 1,
+    size: 20,
+    totalPages: 2
+  },
+  '/admin/api/v1/tags/categories/50': {
+    id: 50,
+    categoryKey: 'intent_level',
+    categoryName: '意向等级',
+    purpose: '用于判断客户购买意向',
+    boundField: 'intentLevel',
+    selectionMode: 'SINGLE',
+    systemInferenceEnabled: true,
+    manualEditEnabled: true,
+    autoUpdateMode: 'REPLACE',
+    minConfidence: 0.85,
+    minEvidenceMessages: 2,
+    cooldownHours: 12,
+    uncertainPolicy: 'KEEP_CURRENT',
+    useForReply: true,
+    useForFilter: true,
+    useForStatistics: true,
+    useForFollowupRules: true,
+    isBuiltin: true,
+    isEnabled: true,
+    sortOrder: 10,
+    mergedIntoId: null,
+    version: 4,
+    values: [],
+    impact: { customerCount: 12, ruleCount: 2, historyCount: 8 },
+    updatedAt: '2026-07-03T09:00:00Z'
+  },
+  '/admin/api/v1/tags/values': {
+    items: [{
+      id: 51,
+      categoryId: 50,
+      categoryKey: 'intent_level',
+      tagValue: 'high_intent',
+      displayName: '高意向',
+      meaning: '近期有明确购买计划',
+      applicableWhen: '主动询价并确认到店时间',
+      notApplicableWhen: '仅咨询基础信息',
+      positiveExamples: '本周可以到店体验吗',
+      negativeExamples: '先了解一下',
+      synonyms: ['想尽快购买', '近期到店'],
+      systemSelectable: true,
+      manualSelectable: true,
+      isEnabled: true,
+      sortOrder: 10,
+      mergedIntoId: null,
+      version: 7,
+      impact: { customerCount: 9, ruleCount: 1, historyCount: 5 },
+      updatedAt: '2026-07-03T09:10:00Z'
+    }, {
+      id: 52,
+      categoryId: 50,
+      categoryKey: 'intent_level',
+      tagValue: 'medium_intent',
+      displayName: '中意向',
+      meaning: '有兴趣但购买时间不明确',
+      synonyms: [],
+      systemSelectable: true,
+      manualSelectable: true,
+      isEnabled: true,
+      sortOrder: 20,
+      mergedIntoId: null,
+      version: 3,
+      impact: { customerCount: 3, ruleCount: 0, historyCount: 2 },
+      updatedAt: '2026-07-03T09:20:00Z'
+    }],
+    total: 22,
+    page: 1,
+    size: 20,
+    totalPages: 2
+  },
+  '/admin/api/v1/tags/values/51': {
+    id: 51,
+    categoryId: 50,
+    categoryKey: 'intent_level',
+    tagValue: 'high_intent',
+    displayName: '高意向',
+    meaning: '近期有明确购买计划',
+    applicableWhen: '主动询价并确认到店时间',
+    notApplicableWhen: '仅咨询基础信息',
+    positiveExamples: '本周可以到店体验吗',
+    negativeExamples: '先了解一下',
+    synonyms: ['想尽快购买', '近期到店'],
+    systemSelectable: true,
+    manualSelectable: true,
+    isEnabled: true,
+    sortOrder: 10,
+    mergedIntoId: null,
+    version: 7,
+    impact: { customerCount: 9, ruleCount: 1, historyCount: 5 },
+    updatedAt: '2026-07-03T09:10:00Z'
   },
   '/admin/api/v1/analytics/overview': {
     summary: { totalCalls: 18, adoptionRate: '98%', avgResponseTimeMs: 1200, activeCallerCount: 2 },
@@ -304,11 +427,11 @@ async function flushSave() {
   await flushUi();
 }
 
-async function mountConsole(): Promise<MountedConsole> {
+async function mountConsole(props: { accountName?: string; tagManagementOnly?: boolean } = {}): Promise<MountedConsole> {
   localStorage.setItem('desktop_config', JSON.stringify({ apiBaseUrl: 'http://localhost:8080', accessToken: 'token-a' }));
   const host = document.createElement('div');
   document.body.appendChild(host);
-  const app = createApp(AdminConsole, { accountName: 'admin' });
+  const app = createApp(AdminConsole, { accountName: props.accountName ?? 'admin', tagManagementOnly: props.tagManagementOnly ?? false });
   app.mount(host);
   await flushUi();
   return { app, host };
@@ -336,10 +459,18 @@ function setInputValue(element: HTMLInputElement | HTMLSelectElement | HTMLTextA
   element.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+function controlByLabel<T extends HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(host: HTMLElement, text: string): T {
+  const label = [...host.querySelectorAll('label')].find((item) => item.querySelector('.ops-label-title')?.textContent?.includes(text));
+  const control = label?.querySelector('input, select, textarea') as T | null;
+  expect(control).toBeTruthy();
+  return control as T;
+}
+
 describe('AdminConsole product surface', () => {
   beforeEach(() => {
     installMemoryLocalStorage();
     localStorage.clear();
+    apiMocks.getBlob.mockResolvedValue({ blob: new Blob(['csv']), filename: 'tags.csv' });
     apiMocks.getJson.mockImplementation(async (path: string) => ({ success: true, data: apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] }, errorCode: null, message: null }));
     apiMocks.postForm.mockResolvedValue({ success: true, data: { totalRows: 1, created: 1, updated: 0, skipped: 0, errors: [] }, errorCode: null, message: null });
     apiMocks.postJson.mockResolvedValue({ success: true, data: {}, errorCode: null, message: null });
@@ -351,6 +482,7 @@ describe('AdminConsole product surface', () => {
     document.body.innerHTML = '';
     localStorage.clear();
     apiMocks.getJson.mockReset();
+    apiMocks.getBlob.mockReset();
     apiMocks.postForm.mockReset();
     apiMocks.postJson.mockReset();
     apiMocks.putJson.mockReset();
@@ -958,7 +1090,8 @@ describe('AdminConsole product surface', () => {
     findSubnavButton(host, '客户标签与分层').click();
     await flushUi();
     expect(mainText(host)).toContain('标签与分层');
-    expect(mainText(host)).toContain('高意向');
+    expect(mainText(host)).toContain('意向等级');
+    expect(mainText(host)).toContain('客户 12 · 规则 2 · 历史 8');
 
     findSubnavButton(host, '运营分析看板').click();
     await flushUi();
@@ -1023,6 +1156,7 @@ describe('AdminConsole product surface', () => {
     const labels = [...drawer.querySelectorAll('label')].map((label) => label.textContent ?? '');
     expect(labels.some((label) => label.includes('手机号'))).toBe(false);
     expect(labels.some((label) => label.includes('初始密码'))).toBe(false);
+    expect(labels.some((label) => label.includes('客户标签管理权限'))).toBe(true);
     expect(drawer.textContent).toContain('手机号不可在编辑中修改');
     setInputValue(textInputs[0], '管理员新名');
     setInputValue(selects[0], 'KEEPER');
@@ -1034,7 +1168,8 @@ describe('AdminConsole product surface', () => {
       displayName: '管理员新名',
       role: 'KEEPER',
       leaderId: 31,
-      isEnabled: true
+      isEnabled: true,
+      permissions: ['TAG_MANAGEMENT']
     });
 
     app.unmount();
@@ -1123,68 +1258,271 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
-  it('uses customer-field and category dictionaries for tag management forms', async () => {
+  it('loads category filters, pagination, detail and versioned toggle from tag APIs', async () => {
     const { app, host } = await mountConsole();
 
     findSubnavButton(host, '客户标签与分层').click();
-    await flushUi();
+    await flushSave();
+
+    expect(mainText(host)).toContain('当前筛选：21 个分类');
+    expect(mainText(host)).toContain('客户 12 · 规则 2 · 历史 8');
+    expect(mainText(host)).toContain('intent_level');
+    expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringMatching(/\/admin\/api\/v1\/tags\/categories\?.*merged=false.*page=1.*size=20.*sortBy=sortOrder.*sortDirection=ASC/));
+
+    const filters = host.querySelector('.tag-filters') as HTMLElement;
+    setInputValue(filters.querySelector('input') as HTMLInputElement, '意向');
+    setInputValue([...filters.querySelectorAll('select')][0] as HTMLSelectElement, 'true');
+    setInputValue([...filters.querySelectorAll('select')][2] as HTMLSelectElement, 'updatedAt');
+    setInputValue([...filters.querySelectorAll('select')][3] as HTMLSelectElement, 'DESC');
+    await flushSave();
+    expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringMatching(/keyword=%E6%84%8F%E5%90%91.*enabled=true.*sortBy=updatedAt.*sortDirection=DESC/));
+
+    const categoryRow = [...host.querySelectorAll('.tag-category-row')].find((row) => row.textContent?.includes('意向等级') && !row.classList.contains('head')) as HTMLElement;
+    findButton(categoryRow, '详情').click();
+    await flushSave();
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/tags/categories/50');
+    expect((host.querySelector('.ops-tag-detail-drawer') as HTMLElement).textContent).toContain('用于判断客户购买意向');
+    findButton(host.querySelector('.ops-tag-detail-drawer') as HTMLElement, '关闭').click();
     await flushUi();
 
-    expect(mainText(host)).toContain('写入客户档案：意向等级');
-    expect(mainText(host)).toContain('高意向');
-    expect(mainText(host)).not.toContain('intentLevel');
-    expect(mainText(host)).not.toContain('High');
-    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/customer-fields');
-    const categoryCard = host.querySelector('.ops-tag-card') as HTMLElement;
-    expect((findButton(categoryCard, '删除分类') as HTMLButtonElement).disabled).toBe(true);
-    findButton(categoryCard, '停用').click();
-    await flushUi();
-    await flushUi();
-    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/tags/values/51/toggle', { isEnabled: false });
+    findButton(categoryRow, '编辑').click();
+    await flushSave();
+    const editDrawer = host.querySelector('.ops-drawer') as HTMLElement;
+    expect(controlByLabel<HTMLInputElement>(editDrawer, '系统编号').disabled).toBe(true);
+    setInputValue(controlByLabel<HTMLTextAreaElement>(editDrawer, '分类用途'), '更新后的业务用途');
+    setInputValue(controlByLabel<HTMLInputElement>(editDrawer, '最低把握程度'), '0.9');
+    findButton(editDrawer, '保存').click();
+    await flushSave();
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/tags/categories/50', expect.objectContaining({
+      categoryName: '意向等级',
+      purpose: '更新后的业务用途',
+      selectionMode: 'SINGLE',
+      minConfidence: 0.9,
+      version: 4
+    }));
+    expect((apiMocks.putJson.mock.calls.find((call) => call[0] === '/admin/api/v1/tags/categories/50')?.[1] as Record<string, unknown>).categoryKey).toBeUndefined();
 
+    const refreshedCategoryRow = [...host.querySelectorAll('.tag-category-row')].find((row) => row.textContent?.includes('意向等级') && !row.classList.contains('head')) as HTMLElement;
+    findButton(refreshedCategoryRow, '停用').click();
+    await flushSave();
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/tags/categories/50/toggle', { enabled: false, version: 4 });
+    expect((findButton(refreshedCategoryRow, '删除') as HTMLButtonElement).disabled).toBe(true);
+
+    app.unmount();
+  });
+
+  it('sends an explicitly cleared category purpose with its version', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户标签与分层').click();
+    await flushSave();
+    const categoryRow = [...host.querySelectorAll('.tag-category-row')]
+      .find((row) => row.textContent?.includes('意向等级') && !row.classList.contains('head')) as HTMLElement;
+    findButton(categoryRow, '编辑').click();
+    await flushSave();
+
+    const drawer = host.querySelector('.ops-drawer') as HTMLElement;
+    setInputValue(controlByLabel<HTMLTextAreaElement>(drawer, '分类用途'), '');
+    findButton(drawer, '保存').click();
+    await flushSave();
+
+    const payload = apiMocks.putJson.mock.calls
+      .find((call) => call[0] === '/admin/api/v1/tags/categories/50')?.[1] as Record<string, unknown>;
+    expect(payload).toMatchObject({ purpose: '', version: 4 });
+
+    app.unmount();
+  });
+
+  it('sends explicitly cleared tag-value text fields, empty synonyms and its version', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户标签与分层').click();
+    await flushSave();
+    findButton(host, '标签值').click();
+    await flushSave();
+    const valueRow = [...host.querySelectorAll('.tag-value-row')]
+      .find((row) => row.textContent?.includes('高意向') && !row.classList.contains('head')) as HTMLElement;
+    findButton(valueRow, '编辑').click();
+    await flushSave();
+
+    const drawer = host.querySelector('.ops-drawer') as HTMLElement;
+    for (const label of ['标签含义', '适用条件', '禁止条件', '正确例子', '错误例子', '同义表达']) {
+      setInputValue(controlByLabel<HTMLTextAreaElement>(drawer, label), '');
+    }
+    findButton(drawer, '保存').click();
+    await flushSave();
+
+    const payload = apiMocks.putJson.mock.calls
+      .find((call) => call[0] === '/admin/api/v1/tags/values/51')?.[1] as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      meaning: '',
+      applicableWhen: '',
+      notApplicableWhen: '',
+      positiveExamples: '',
+      negativeExamples: '',
+      synonyms: [],
+      version: 7
+    });
+
+    app.unmount();
+  });
+
+  it('creates categories and edits every tag-value business field without accepting internal codes', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户标签与分层').click();
+    await flushSave();
     findButton(host, '新增分类').click();
     await flushUi();
     let drawer = host.querySelector('.ops-drawer') as HTMLElement;
-    let selects = [...drawer.querySelectorAll('select')] as HTMLSelectElement[];
-    expect(drawer.textContent).toContain('绑定字段');
-    expect([...selects[0].options].map((option) => option.value)).toContain('customerStage');
-    expect([...selects[0].options].map((option) => option.value)).not.toContain('intentLevel');
-    setInputValue(drawer.querySelector('input[type="text"]') as HTMLInputElement, '客户阶段标签');
-    setInputValue(selects[0], 'customerStage');
-    await flushUi();
+    expect([...drawer.querySelectorAll('.ops-label-title')].some((label) => label.textContent?.includes('系统编号'))).toBe(false);
+    expect([...drawer.querySelectorAll('.ops-label-title')].some((label) => label.textContent?.includes('绑定客户档案字段'))).toBe(false);
+    setInputValue(controlByLabel<HTMLInputElement>(drawer, '分类名称'), '客户阶段');
+    setInputValue(controlByLabel<HTMLTextAreaElement>(drawer, '分类用途'), '用于运营阶段判断');
+    setInputValue(controlByLabel<HTMLSelectElement>(drawer, '选择模式'), 'MULTI');
     findButton(drawer, '保存').click();
-    await flushUi();
-    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/tags/categories', {
-      categoryName: '客户阶段标签',
-      boundField: 'customerStage',
-      isEnabled: true
-    });
+    await flushSave();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/tags/categories', expect.objectContaining({
+      categoryName: '客户阶段',
+      purpose: '用于运营阶段判断',
+      selectionMode: 'MULTI',
+      autoUpdateMode: 'RECORD_ONLY',
+      minConfidence: 0.85,
+      useForFollowupRules: true,
+      sortOrder: 99
+    }));
+    const createPayload = apiMocks.postJson.mock.calls.find((call) => call[0] === '/admin/api/v1/tags/categories')?.[1] as Record<string, unknown>;
+    expect(createPayload.categoryKey).toBeUndefined();
+    expect(createPayload.boundField).toBeUndefined();
 
-    findButton(categoryCard, '新增标签值').click();
-    await flushUi();
+    findButton(host, '标签值').click();
+    await flushSave();
+    expect(mainText(host)).toContain('当前筛选：22 个标签值');
+    const valueFilters = host.querySelector('.tag-value-filters') as HTMLElement;
+    const valueFilterSelects = [...valueFilters.querySelectorAll('select')] as HTMLSelectElement[];
+    setInputValue(valueFilters.querySelector('input') as HTMLInputElement, '高意向');
+    setInputValue(valueFilterSelects[0], '50');
+    setInputValue(valueFilterSelects[1], 'true');
+    setInputValue(valueFilterSelects[3], 'updatedAt');
+    setInputValue(valueFilterSelects[4], 'DESC');
+    await flushSave();
+    expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringMatching(/\/admin\/api\/v1\/tags\/values\?.*categoryId=50.*keyword=%E9%AB%98%E6%84%8F%E5%90%91.*enabled=true.*merged=false.*sortBy=updatedAt.*sortDirection=DESC/));
+    const valueRow = [...host.querySelectorAll('.tag-value-row')].find((row) => row.textContent?.includes('高意向') && !row.classList.contains('head')) as HTMLElement;
+    findButton(valueRow, '编辑').click();
+    await flushSave();
     drawer = host.querySelector('.ops-drawer') as HTMLElement;
-    selects = [...drawer.querySelectorAll('select')] as HTMLSelectElement[];
-    expect([...selects[0].options].map((option) => option.textContent)).toContain('意向等级（意向等级）');
-    expect(selects[0].value).toBe('50');
-    findButton(drawer, '取消').click();
-    await flushUi();
-
-    findButton(categoryCard, '高意向').click();
-    await flushUi();
-    drawer = host.querySelector('.ops-drawer') as HTMLElement;
-    const disabledInputs = [...drawer.querySelectorAll('select:disabled, input:disabled')];
-    expect(disabledInputs).toHaveLength(2);
-    const textInputs = [...drawer.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
-    const numberInput = drawer.querySelector('input[type="number"]') as HTMLInputElement;
-    setInputValue(textInputs[1], '高意向客户');
-    setInputValue(numberInput, '8');
+    const internalCode = controlByLabel<HTMLInputElement>(drawer, '系统编号');
+    expect(internalCode.disabled).toBe(true);
+    expect(internalCode.value).toBe('high_intent');
+    setInputValue(controlByLabel<HTMLInputElement>(drawer, '标签名称'), '高意向客户');
+    setInputValue(controlByLabel<HTMLTextAreaElement>(drawer, '标签含义'), '两周内有明确购买计划');
+    setInputValue(controlByLabel<HTMLTextAreaElement>(drawer, '同义表达'), '近期购买\n准备到店');
     findButton(drawer, '保存').click();
-    await flushUi();
+    await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/tags/values/51', {
+      categoryId: 50,
       displayName: '高意向客户',
-      sortOrder: 8,
-      isEnabled: true
+      meaning: '两周内有明确购买计划',
+      applicableWhen: '主动询价并确认到店时间',
+      notApplicableWhen: '仅咨询基础信息',
+      positiveExamples: '本周可以到店体验吗',
+      negativeExamples: '先了解一下',
+      systemSelectable: true,
+      manualSelectable: true,
+      isEnabled: true,
+      sortOrder: 10,
+      version: 7,
+      synonyms: ['近期购买', '准备到店']
     });
+
+    app.unmount();
+  });
+
+  it('previews and executes a versioned value merge, exports CSV and displays delete protection errors', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:tags');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    apiMocks.postJson.mockImplementation(async (path: string) => path.endsWith('/merge-preview')
+      ? {
+          success: true,
+          data: {
+            sourceName: '高意向',
+            targetName: '中意向',
+            impact: { customerCount: 9, ruleCount: 1, historyCount: 5 },
+            valueCount: 0,
+            codeConflictCount: 0,
+            warnings: ['将更新 9 位客户的标签引用']
+          },
+          errorCode: null,
+          message: null
+        }
+      : { success: true, data: {}, errorCode: null, message: null });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户标签与分层').click();
+    await flushSave();
+    findButton(host, '标签值').click();
+    await flushSave();
+    const valueRow = [...host.querySelectorAll('.tag-value-row')].find((row) => row.textContent?.includes('高意向') && !row.classList.contains('head')) as HTMLElement;
+    findButton(valueRow, '合并').click();
+    await flushSave();
+    await flushSave();
+    const mergeDrawer = host.querySelector('.ops-tag-merge-drawer') as HTMLElement;
+    const targetSelect = mergeDrawer.querySelector('select') as HTMLSelectElement;
+    expect([...targetSelect.options].map((option) => option.value)).toContain('52');
+    setInputValue(targetSelect, '52');
+    await flushUi();
+    findButton(mergeDrawer, '生成合并预览').click();
+    await flushSave();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/tags/values/51/merge-preview', {
+      targetId: 52,
+      sourceVersion: 7,
+      targetVersion: 3
+    });
+    expect(mergeDrawer.textContent).toContain('将更新 9 位客户的标签引用');
+    findButton(mergeDrawer, '确认合并').click();
+    await flushSave();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/tags/values/51/merge', {
+      targetId: 52,
+      sourceVersion: 7,
+      targetVersion: 3
+    });
+
+    findButton(host, '导出 CSV').click();
+    await flushSave();
+    expect(apiMocks.getBlob).toHaveBeenCalledWith(expect.stringMatching(/\/admin\/api\/v1\/tags\/values\/export\?.*merged=false.*sortBy=sortOrder.*sortDirection=ASC/));
+
+    apiMocks.deleteJson.mockResolvedValueOnce({
+      success: false,
+      data: null,
+      errorCode: '90-10004',
+      message: '该标签仍影响 9 位客户、1 条规则和 5 条历史记录，只能停用或合并'
+    });
+    const refreshedValueRow = [...host.querySelectorAll('.tag-value-row')].find((row) => row.textContent?.includes('高意向') && !row.classList.contains('head')) as HTMLElement;
+    findButton(refreshedValueRow, '删除').click();
+    await flushSave();
+    expect(mainText(host)).toContain('只能停用或合并');
+
+    app.unmount();
+  });
+
+  it('limits delegated tag managers to the tag page and tag endpoints only', async () => {
+    const { app, host } = await mountConsole({ accountName: '组长', tagManagementOnly: true });
+    await flushSave();
+
+    expect([...host.querySelectorAll('.ops-admin-subnav-button small')].map((item) => item.textContent)).toEqual(['客户标签与分层']);
+    expect(host.textContent).not.toContain('账号与权限');
+    expect(host.textContent).not.toContain('跟进规则引擎配置');
+    const requestedPaths = apiMocks.getJson.mock.calls.map((call) => String(call[0]));
+    expect(requestedPaths.length).toBeGreaterThan(0);
+    expect(requestedPaths.every((path) => path.startsWith('/admin/api/v1/tags/'))).toBe(true);
+
+    apiMocks.getJson.mockClear();
+    const { eventBus } = await import('../../shared/eventBus');
+    eventBus.emit('CONFIG_REFRESH', { configKeys: ['tag_config'] });
+    await flushSave();
+    expect(apiMocks.getJson.mock.calls.length).toBeGreaterThan(0);
+    expect(apiMocks.getJson.mock.calls.every((call) => String(call[0]).startsWith('/admin/api/v1/tags/'))).toBe(true);
 
     app.unmount();
   });

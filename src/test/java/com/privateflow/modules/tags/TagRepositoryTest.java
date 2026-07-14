@@ -165,9 +165,13 @@ class TagRepositoryTest {
     assertThat(createdValue.meaning()).contains("安静");
     assertThat(createdValue.synonyms()).containsExactly("安静服务", "少打扰");
 
-    repository.updateValue(valueId, new TagValueRequest(
+    TagValueRequest updateWithoutVersion = new TagValueRequest(
         null, null, "安静沟通", "偏好低打扰沟通", null, null, null, null,
-        List.of("安静沟通"), false, true, true, 2));
+        List.of("安静沟通"), false, true, true, 2);
+    assertThat(repository.updateValue(valueId, updateWithoutVersion)).isZero();
+    assertThat(repository.updateValue(valueId, new TagValueRequest(
+        null, null, "安静沟通", "偏好低打扰沟通", null, null, null, null,
+        List.of("安静沟通"), false, true, true, 2, createdValue.version()))).isEqualTo(1);
     TagValue updated = repository.findValue(valueId).orElseThrow();
     assertThat(updated.displayName()).isEqualTo("安静沟通");
     assertThat(updated.systemSelectable()).isFalse();

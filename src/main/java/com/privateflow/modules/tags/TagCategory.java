@@ -28,6 +28,7 @@ public record TagCategory(
     Long mergedIntoId,
     int version,
     List<TagValue> values,
+    TagImpact impact,
     LocalDateTime createdAt,
     LocalDateTime updatedAt
 ) {
@@ -67,7 +68,28 @@ public record TagCategory(
         null,
         0,
         values,
+        TagImpact.empty(),
         createdAt,
         updatedAt);
+  }
+
+  public TagCategory withImpact(TagImpact nextImpact) {
+    return new TagCategory(
+        id, categoryKey, categoryName, purpose, boundField, selectionMode,
+        systemInferenceEnabled, manualEditEnabled, autoUpdateMode, minConfidence,
+        minEvidenceMessages, cooldownHours, uncertainPolicy, useForReply, useForFilter,
+        useForStatistics, useForFollowupRules, isBuiltin, isEnabled, sortOrder,
+        mergedIntoId, version, values, nextImpact == null ? TagImpact.empty() : nextImpact,
+        createdAt, updatedAt);
+  }
+
+  public TagCategory withValues(List<TagValue> nextValues) {
+    return new TagCategory(
+        id, categoryKey, categoryName, purpose, boundField, selectionMode,
+        systemInferenceEnabled, manualEditEnabled, autoUpdateMode, minConfidence,
+        minEvidenceMessages, cooldownHours, uncertainPolicy, useForReply, useForFilter,
+        useForStatistics, useForFollowupRules, isBuiltin, isEnabled, sortOrder,
+        mergedIntoId, version, nextValues == null ? List.of() : List.copyOf(nextValues), impact,
+        createdAt, updatedAt);
   }
 }

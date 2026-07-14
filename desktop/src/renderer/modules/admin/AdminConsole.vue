@@ -44,7 +44,7 @@
           <span>{{ activeSection.description }}</span>
         </div>
         <div class="ops-admin-toolbar-actions">
-          <span :class="['runtime-mode-pill', runtimeModePillClass]" :title="runtimeModeDescription">{{ runtimeModeLabel }}</span>
+          <span v-if="!tagManagementOnly" :class="['runtime-mode-pill', runtimeModePillClass]" :title="runtimeModeDescription">{{ runtimeModeLabel }}</span>
           <button class="secondary" type="button" :disabled="loading" @click="refreshActiveSection">刷新</button>
           <button class="primary" type="button" @click="startPrimaryAction">{{ activeSection.primaryAction }}</button>
         </div>
@@ -972,7 +972,7 @@
           <div class="ops-panel-head">
             <div>
               <h2>账号与权限</h2>
-              <p>ADMIN/LEADER 可进后台，KEEPER 仅使用桌面端。</p>
+              <p>管理员可为组长或管家单独授予客户标签管理权限。</p>
             </div>
             <button class="primary small" type="button" @click="openForm('account')">新增账号</button>
           </div>
@@ -1086,37 +1086,156 @@
           <div class="ops-panel-head">
             <div>
               <h2>标签与分层</h2>
-              <p>用于客户筛选、运营分层、跟进规则和 AI 判断；修改中文名称不会改变已有客户数据。</p>
+              <p>分类和标签值使用独立分页管理，系统编号由后端生成并永久保留。</p>
             </div>
-            <button class="primary small" type="button" @click="openForm('tagCategory')">新增分类</button>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" @click="exportCurrentTags">导出 CSV</button>
+              <button class="primary small" type="button" @click="openForm(tagView === 'categories' ? 'tagCategory' : 'tagValue')">
+                {{ tagView === 'categories' ? '新增分类' : '新增标签值' }}
+              </button>
+            </div>
           </div>
-          <div class="ops-filter-bar">
-            <input v-model="tagKeyword" placeholder="搜索分类或标签" />
-            <button class="secondary small" type="button" :disabled="!tagKeyword" @click="tagKeyword = ''">清空筛选</button>
+
+          <div class="ops-segmented" role="tablist" aria-label="标签管理视图">
+            <button type="button" :class="{ active: tagView === 'categories' }" @click="switchTagView('categories')">标签分类</button>
+            <button type="button" :class="{ active: tagView === 'values' }" @click="switchTagView('values')">标签值</button>
           </div>
-          <div class="ops-card-grid">
-            <article v-for="category in filteredTagCategories" :key="category.id" class="ops-tag-card">
-              <div class="ops-tag-card-head">
-                <strong>{{ tagCategoryName(category) }}</strong>
-                <span>{{ tagCategoryFieldText(category) }}</span>
+
+          <template v-if="tagView === 'categories'">
+            <div class="ops-filter-bar tag-filters">
+              <input v-model="tagCategoryKeyword" placeholder="搜索分类名称、系统编号或用途" @change="resetTagCategoryPageAndLoad" />
+              <select v-model="tagCategoryEnabledFilter" @change="resetTagCategoryPageAndLoad">
+                <option value="">全部启用状态</option>
+                <option value="true">启用</option>
+                <option value="false">停用</option>
+              </select>
+              <select v-model="tagCategoryMergedFilter" @change="resetTagCategoryPageAndLoad">
+                <option value="">全部合并状态</option>
+                <option value="false">有效分类</option>
+                <option value="true">已合并</option>
+              </select>
+              <select v-model="tagCategorySortBy" @change="resetTagCategoryPageAndLoad">
+                <option value="sortOrder">按显示顺序</option>
+                <option value="categoryName">按分类名称</option>
+                <option value="updatedAt">按更新时间</option>
+                <option value="createdAt">按创建时间</option>
+              </select>
+              <select v-model="tagCategorySortDirection" @change="resetTagCategoryPageAndLoad">
+                <option value="ASC">升序</option>
+                <option value="DESC">降序</option>
+              </select>
+            </div>
+            <div class="ops-table">
+              <div class="ops-table-row head tag-category-row">
+                <span>分类</span>
+                <span>管理方式</span>
+                <span>状态</span>
+                <span>影响范围</span>
+                <span>更新时间</span>
+                <span>操作</span>
               </div>
-              <div class="ops-tag-list">
-                <span v-for="tag in category.values || category.tags || []" :key="tag.id || tag.tagValue" class="ops-tag-value">
-                  <button class="status-pill" type="button" @click="openForm('tagValue', tagDraft(category, tag))">
-                    {{ tagDisplayName(tag) }}
-                  </button>
-                  <button class="secondary small" type="button" @click="toggleTagValue(category, tag)">{{ tag.isEnabled === false ? '启用' : '停用' }}</button>
-                  <button class="secondary small danger" type="button" @click="confirmDeleteTagValue(category, tag)">删除</button>
+              <div v-for="category in tagCategories" :key="category.id" class="ops-table-row tag-category-row">
+                <span class="ops-table-primary">
+                  <strong>{{ category.categoryName }}</strong>
+                  <small>{{ category.categoryKey }}</small>
+                  <small>{{ category.purpose || '未填写用途' }}</small>
+                </span>
+                <span>{{ tagSelectionModeLabel(category.selectionMode) }} · {{ category.values?.length ?? 0 }} 个标签值</span>
+                <span>
+                  <b :class="category.isEnabled ? 'ok-text' : 'warn-text'">{{ category.isEnabled ? '启用' : '停用' }}</b>
+                  <small v-if="category.mergedIntoId">已合并至 #{{ category.mergedIntoId }}</small>
+                </span>
+                <span>{{ tagImpactText(category.impact) }}</span>
+                <span>{{ formatDate(category.updatedAt) }}</span>
+                <span class="ops-row-actions tag-actions">
+                  <button class="secondary small" type="button" @click="openTagDetail('category', category)">详情</button>
+                  <button class="secondary small" type="button" :disabled="Boolean(category.mergedIntoId)" @click="editTagEntity('category', category)">编辑</button>
+                  <button class="secondary small" type="button" :disabled="Boolean(category.mergedIntoId)" @click="toggleTagCategory(category)">{{ category.isEnabled ? '停用' : '启用' }}</button>
+                  <button class="secondary small" type="button" :disabled="Boolean(category.mergedIntoId)" @click="openTagMerge('category', category)">合并</button>
+                  <button class="secondary small danger" type="button" :disabled="category.isBuiltin || Boolean(category.mergedIntoId)" @click="confirmDeleteTagCategory(category)">删除</button>
                 </span>
               </div>
+              <p v-if="!tagCategories.length" class="ops-empty">暂无匹配分类。</p>
+            </div>
+            <div class="ops-pagination">
+              <strong>当前筛选：{{ tagCategoryPageInfo.total }} 个分类</strong>
+              <p>第 {{ tagCategoryPageInfo.page }} / {{ tagCategoryTotalPages }} 页，每页 {{ tagCategoryPageInfo.size }} 条</p>
               <div class="ops-row-actions">
-                <button class="secondary small" type="button" @click="openForm('tagValue', category)">新增标签值</button>
-                <button class="secondary small" type="button" @click="openForm('tagCategory', category)">编辑分类</button>
-                <button class="secondary small danger" type="button" :disabled="isBuiltinTagCategory(category)" @click="confirmDeleteTagCategory(category)">删除分类</button>
+                <button class="secondary small" type="button" :disabled="tagCategoryPageInfo.page <= 1" @click="changeTagCategoryPage(-1)">上一页</button>
+                <button class="secondary small" type="button" :disabled="tagCategoryPageInfo.page >= tagCategoryTotalPages" @click="changeTagCategoryPage(1)">下一页</button>
               </div>
-            </article>
-          </div>
-          <p v-if="!filteredTagCategories.length" class="ops-empty">暂无标签分类。</p>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="ops-filter-bar tag-filters tag-value-filters">
+              <input v-model="tagValueKeyword" placeholder="搜索标签名称、系统编号或含义" @change="resetTagValuePageAndLoad" />
+              <select v-model="tagValueCategoryFilter" @change="resetTagValuePageAndLoad">
+                <option value="">全部分类</option>
+                <option v-for="category in tagCategoryOptionsCache" :key="category.id" :value="String(category.id)">{{ category.categoryName }}</option>
+              </select>
+              <select v-model="tagValueEnabledFilter" @change="resetTagValuePageAndLoad">
+                <option value="">全部启用状态</option>
+                <option value="true">启用</option>
+                <option value="false">停用</option>
+              </select>
+              <select v-model="tagValueMergedFilter" @change="resetTagValuePageAndLoad">
+                <option value="">全部合并状态</option>
+                <option value="false">有效标签</option>
+                <option value="true">已合并</option>
+              </select>
+              <select v-model="tagValueSortBy" @change="resetTagValuePageAndLoad">
+                <option value="sortOrder">按显示顺序</option>
+                <option value="displayName">按标签名称</option>
+                <option value="updatedAt">按更新时间</option>
+                <option value="createdAt">按创建时间</option>
+              </select>
+              <select v-model="tagValueSortDirection" @change="resetTagValuePageAndLoad">
+                <option value="ASC">升序</option>
+                <option value="DESC">降序</option>
+              </select>
+            </div>
+            <div class="ops-table">
+              <div class="ops-table-row head tag-value-row">
+                <span>标签值</span>
+                <span>所属分类</span>
+                <span>选择范围</span>
+                <span>状态</span>
+                <span>影响范围</span>
+                <span>操作</span>
+              </div>
+              <div v-for="tag in tagValues" :key="tag.id" class="ops-table-row tag-value-row">
+                <span class="ops-table-primary">
+                  <strong>{{ tag.displayName }}</strong>
+                  <small>{{ tag.tagValue }}</small>
+                  <small>{{ tag.meaning || '未填写标签含义' }}</small>
+                </span>
+                <span>{{ tagCategoryLabelForValue(tag) }}</span>
+                <span>{{ tagSelectableText(tag) }}</span>
+                <span>
+                  <b :class="tag.isEnabled ? 'ok-text' : 'warn-text'">{{ tag.isEnabled ? '启用' : '停用' }}</b>
+                  <small v-if="tag.mergedIntoId">已合并至 #{{ tag.mergedIntoId }}</small>
+                </span>
+                <span>{{ tagImpactText(tag.impact) }}</span>
+                <span class="ops-row-actions tag-actions">
+                  <button class="secondary small" type="button" @click="openTagDetail('value', tag)">详情</button>
+                  <button class="secondary small" type="button" :disabled="Boolean(tag.mergedIntoId)" @click="editTagEntity('value', tag)">编辑</button>
+                  <button class="secondary small" type="button" :disabled="Boolean(tag.mergedIntoId)" @click="toggleTagValue(tag)">{{ tag.isEnabled ? '停用' : '启用' }}</button>
+                  <button class="secondary small" type="button" :disabled="Boolean(tag.mergedIntoId)" @click="openTagMerge('value', tag)">合并</button>
+                  <button class="secondary small danger" type="button" :disabled="Boolean(tag.mergedIntoId)" @click="confirmDeleteTagValue(tag)">删除</button>
+                </span>
+              </div>
+              <p v-if="!tagValues.length" class="ops-empty">暂无匹配标签值。</p>
+            </div>
+            <div class="ops-pagination">
+              <strong>当前筛选：{{ tagValuePageInfo.total }} 个标签值</strong>
+              <p>第 {{ tagValuePageInfo.page }} / {{ tagValueTotalPages }} 页，每页 {{ tagValuePageInfo.size }} 条</p>
+              <div class="ops-row-actions">
+                <button class="secondary small" type="button" :disabled="tagValuePageInfo.page <= 1" @click="changeTagValuePage(-1)">上一页</button>
+                <button class="secondary small" type="button" :disabled="tagValuePageInfo.page >= tagValueTotalPages" @click="changeTagValuePage(1)">下一页</button>
+              </div>
+            </div>
+          </template>
         </article>
       </section>
 
@@ -1444,7 +1563,7 @@
                 {{ variable.label }}
               </button>
             </div>
-            <select v-if="field.type === 'select'" v-model="formDraft[field.key]" :disabled="field.disabled">
+            <select v-if="field.type === 'select'" v-model="formDraft[field.key]" :disabled="field.disabled" @change="onFormFieldChange(field.key)">
               <option v-for="option in field.options ?? []" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
             </select>
             <textarea v-else-if="field.type === 'textarea'" v-model="formDraft[field.key]" :placeholder="field.placeholder" :disabled="field.disabled" rows="5"></textarea>
@@ -1461,6 +1580,94 @@
         </footer>
       </form>
     </div>
+
+    <div v-if="tagDetailKind" class="ops-drawer-backdrop" @click.self="closeTagDetail">
+      <aside class="ops-drawer ops-tag-detail-drawer" aria-label="标签详情">
+        <header>
+          <div>
+            <h2>{{ tagDetailKind === 'category' ? '分类详情' : '标签值详情' }}</h2>
+            <p>系统编号、配置和影响统计均来自当前后端数据。</p>
+          </div>
+          <button class="icon-close-button" type="button" aria-label="关闭详情" title="关闭详情" @click="closeTagDetail"><span aria-hidden="true">×</span></button>
+        </header>
+        <p v-if="tagDetailLoading" class="ops-empty">正在加载详情。</p>
+        <div v-else-if="tagDetail" class="ops-tag-detail-grid">
+          <template v-if="tagDetailKind === 'category'">
+            <div><span>分类名称</span><strong>{{ tagDetail.categoryName }}</strong></div>
+            <div><span>系统编号</span><strong>{{ tagDetail.categoryKey }}</strong></div>
+            <div><span>用途</span><strong>{{ tagDetail.purpose || '未填写' }}</strong></div>
+            <div><span>绑定字段</span><strong>{{ tagDetail.boundField ? customerFieldLabel(tagDetail.boundField) : '未绑定' }}</strong></div>
+            <div><span>选择模式</span><strong>{{ tagSelectionModeLabel(tagDetail.selectionMode) }}</strong></div>
+            <div><span>自动更新</span><strong>{{ tagAutoUpdateModeLabel(tagDetail.autoUpdateMode) }}</strong></div>
+            <div><span>系统判断</span><strong>{{ booleanLabel(tagDetail.systemInferenceEnabled) }}</strong></div>
+            <div><span>员工手动</span><strong>{{ booleanLabel(tagDetail.manualEditEnabled) }}</strong></div>
+            <div><span>最低把握程度</span><strong>{{ tagDetail.minConfidence ?? '-' }}</strong></div>
+            <div><span>最低有效消息</span><strong>{{ tagDetail.minEvidenceMessages ?? 0 }}</strong></div>
+            <div><span>更新冷却</span><strong>{{ tagDetail.cooldownHours ?? 0 }} 小时</strong></div>
+            <div><span>不确定策略</span><strong>{{ tagUncertainPolicyLabel(tagDetail.uncertainPolicy) }}</strong></div>
+            <div><span>业务用途</span><strong>{{ tagUsageText(tagDetail) }}</strong></div>
+            <div><span>状态</span><strong>{{ tagStatusText(tagDetail) }}</strong></div>
+          </template>
+          <template v-else>
+            <div><span>标签名称</span><strong>{{ tagDetail.displayName }}</strong></div>
+            <div><span>系统编号</span><strong>{{ tagDetail.tagValue }}</strong></div>
+            <div><span>所属分类</span><strong>{{ tagCategoryLabelForValue(tagDetail) }}</strong></div>
+            <div><span>选择范围</span><strong>{{ tagSelectableText(tagDetail) }}</strong></div>
+            <div class="span-2"><span>标签含义</span><strong>{{ tagDetail.meaning || '未填写' }}</strong></div>
+            <div class="span-2"><span>适用条件</span><strong>{{ tagDetail.applicableWhen || '未填写' }}</strong></div>
+            <div class="span-2"><span>禁止条件</span><strong>{{ tagDetail.notApplicableWhen || '未填写' }}</strong></div>
+            <div class="span-2"><span>正确例子</span><strong>{{ tagDetail.positiveExamples || '未填写' }}</strong></div>
+            <div class="span-2"><span>错误例子</span><strong>{{ tagDetail.negativeExamples || '未填写' }}</strong></div>
+            <div class="span-2"><span>同义表达</span><strong>{{ tagSynonymsText(tagDetail.synonyms) }}</strong></div>
+            <div><span>状态</span><strong>{{ tagStatusText(tagDetail) }}</strong></div>
+          </template>
+          <div class="span-2"><span>影响范围</span><strong>{{ tagImpactText(tagDetail.impact) }}</strong></div>
+          <div><span>版本</span><strong>{{ tagDetail.version }}</strong></div>
+          <div><span>更新时间</span><strong>{{ formatDate(tagDetail.updatedAt) }}</strong></div>
+        </div>
+        <footer>
+          <button class="secondary" type="button" @click="closeTagDetail">关闭</button>
+          <button v-if="tagDetail && !tagDetail.mergedIntoId" class="primary" type="button" @click="editTagEntity(tagDetailKind, tagDetail)">编辑</button>
+        </footer>
+      </aside>
+    </div>
+
+    <div v-if="tagMerge.kind" class="ops-drawer-backdrop" @click.self="closeTagMerge">
+      <aside class="ops-drawer ops-tag-merge-drawer" aria-label="标签合并">
+        <header>
+          <div>
+            <h2>{{ tagMerge.kind === 'category' ? '合并标签分类' : '合并标签值' }}</h2>
+            <p>源项会保留历史编号，客户、规则和历史引用会迁移到目标项。</p>
+          </div>
+          <button class="icon-close-button" type="button" aria-label="关闭合并" title="关闭合并" @click="closeTagMerge"><span aria-hidden="true">×</span></button>
+        </header>
+        <div class="ops-detail-box">
+          <strong>源项：{{ tagMergeSourceName }}</strong>
+          <p>{{ tagImpactText(tagMerge.source?.impact) }}</p>
+        </div>
+        <label class="ops-tag-merge-target">
+          <span class="ops-label-title">合并目标</span>
+          <select v-model="tagMerge.targetId" :disabled="tagMerge.loading" @change="tagMerge.preview = null">
+            <option value="">请选择有效目标</option>
+            <option v-for="target in tagMerge.targets" :key="target.id" :value="String(target.id)">{{ tagMergeTargetLabel(target) }}</option>
+          </select>
+        </label>
+        <button class="secondary" type="button" :disabled="!tagMerge.targetId || tagMerge.loading" @click="previewTagMerge">生成合并预览</button>
+        <div v-if="tagMerge.preview" class="ops-detail-box warning">
+          <strong>{{ tagMerge.preview.sourceName }} → {{ tagMerge.preview.targetName }}</strong>
+          <p>{{ tagImpactText(tagMerge.preview.impact) }}</p>
+          <p v-if="tagMerge.preview.valueCount">涉及 {{ tagMerge.preview.valueCount }} 个标签值，{{ tagMerge.preview.codeConflictCount }} 个编号冲突。</p>
+          <ul v-if="tagMerge.preview.warnings?.length" class="ops-warning-list">
+            <li v-for="warning in tagMerge.preview.warnings" :key="warning">{{ warning }}</li>
+          </ul>
+        </div>
+        <p v-if="tagMerge.error" class="admin-message error">{{ tagMerge.error }}</p>
+        <footer>
+          <button class="secondary" type="button" @click="closeTagMerge">取消</button>
+          <button class="primary" type="button" :disabled="!tagMerge.preview || tagMerge.loading" @click="executeTagMerge">确认合并</button>
+        </footer>
+      </aside>
+    </div>
   </section>
 </template>
 
@@ -1468,6 +1675,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import {
   deleteJson as requestDeleteJson,
+  getBlob as requestGetBlob,
   getJson as requestGetJson,
   postForm as requestPostForm,
   postJson as requestPostJson,
@@ -1475,6 +1683,7 @@ import {
   type ApiResponse
 } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
+import { eventBus } from '../../shared/eventBus';
 import { QUICK_SEARCH_TEMPLATE_VARIABLES } from '../quick-search/templateVariables';
 
 type SectionGroupKey = 'config-center' | 'data-content' | 'org-rules-tags' | 'insight-ops';
@@ -1525,7 +1734,10 @@ type FormField = {
 
 const props = defineProps<{
   accountName: string;
+  tagManagementOnly?: boolean;
 }>();
+
+const tagManagementOnly = computed(() => props.tagManagementOnly === true);
 
 defineEmits<{
   logout: [];
@@ -1558,7 +1770,7 @@ const sections: AdminSection[] = [
   { key: 'quick-search-content', groupKey: 'data-content', group: '运营 D', module: 'D', title: '速搜内容管理', subtitle: '模板、知识、图片、小程序', description: '维护桌面端速搜可用的话术、知识片段、门店定位、图片素材和小程序引导。', primaryAction: '新增内容' },
   { key: 'account-permissions', groupKey: 'org-rules-tags', group: '运营 E', module: 'E', title: '账号与权限', subtitle: '账号、角色、组长关系', description: '管理 ADMIN、LEADER、KEEPER 的账号权限和直属组长关系。', primaryAction: '新增账号' },
   { key: 'followup-rules', groupKey: 'org-rules-tags', group: '运营 F', module: 'F', title: '跟进规则引擎配置', subtitle: '条件、动作、启停', description: '配置跟进提醒、标签建议和通知组长的业务规则。', primaryAction: '新增规则' },
-  { key: 'customer-tags', groupKey: 'org-rules-tags', group: '运营 G', module: 'G', title: '客户标签与分层', subtitle: '标签分类、字段绑定、标签值', description: '维护 AI 和运营共用的客户标签分类、分层字段和展示名称。', primaryAction: '新增分类' },
+  { key: 'customer-tags', groupKey: 'org-rules-tags', group: '运营 G', module: 'G', title: '客户标签与分层', subtitle: '标签分类、标签值、合并', description: '维护 AI 和运营共用的客户标签分类、标签值和历史合并关系。', primaryAction: '新增分类' },
   { key: 'analytics-dashboard', groupKey: 'insight-ops', group: '运营 H', module: 'H', title: '运营分析看板', subtitle: '使用、漏斗、来源、风险', description: '查看 AI 使用、转化漏斗、同事效能、客户来源、阶段、风险和内容排行。', primaryAction: '导出当前看板' },
   { key: 'version-management', groupKey: 'insight-ops', group: '运营 I', module: 'I', title: '版本管理', subtitle: '桌面版本、发布、撤回', description: '管理桌面端版本、发布策略、灰度和撤回记录。', primaryAction: '新增版本' },
   { key: 'system-notices', groupKey: 'insight-ops', group: '运营 J', module: 'J', title: '系统公告', subtitle: '公告、排期、停止', description: '发布工具能力变化、维护窗口和故障通知。', primaryAction: '新增公告' },
@@ -1759,14 +1971,24 @@ const QUICK_SEARCH_CONTENT_META: Record<string, { contentLabel: string; contentP
   }
 };
 
-const navGroups: AdminNavGroup[] = [
+const allNavGroups: AdminNavGroup[] = [
   { key: 'config-center', title: '配置中心', subtitle: 'Skill、AI、识图、Prompt', defaultKey: 'skill-scenes', pages: sections.filter((section) => section.groupKey === 'config-center') },
   { key: 'data-content', title: '数据源与内容', subtitle: '数据对接、速搜内容', defaultKey: 'data-integration', pages: sections.filter((section) => section.groupKey === 'data-content') },
   { key: 'org-rules-tags', title: '组织与规则', subtitle: '账号、规则、标签', defaultKey: 'account-permissions', pages: sections.filter((section) => section.groupKey === 'org-rules-tags') },
   { key: 'insight-ops', title: '分析与系统', subtitle: '看板、版本、公告、审计、健康', defaultKey: 'analytics-dashboard', pages: sections.filter((section) => section.groupKey === 'insight-ops') }
 ];
 
-const activeSectionKey = ref<SectionKey>('skill-scenes');
+const navGroups = computed<AdminNavGroup[]>(() => tagManagementOnly.value
+  ? [{
+      key: 'org-rules-tags',
+      title: '客户标签',
+      subtitle: '分类与标签值',
+      defaultKey: 'customer-tags',
+      pages: sections.filter((section) => section.key === 'customer-tags')
+    }]
+  : allNavGroups);
+
+const activeSectionKey = ref<SectionKey>(props.tagManagementOnly ? 'customer-tags' : 'skill-scenes');
 const loading = ref(false);
 const notice = ref('');
 const noticeKind = ref<NoticeKind>('info');
@@ -1801,7 +2023,30 @@ const csvImportResult = ref<AnyRecord | null>(null);
 const accountKeyword = ref('');
 const accountRoleFilter = ref('');
 const accountEnabledFilter = ref('');
-const tagKeyword = ref('');
+const tagView = ref<'categories' | 'values'>('categories');
+const tagCategoryKeyword = ref('');
+const tagCategoryEnabledFilter = ref('');
+const tagCategoryMergedFilter = ref('false');
+const tagCategorySortBy = ref('sortOrder');
+const tagCategorySortDirection = ref<'ASC' | 'DESC'>('ASC');
+const tagValueKeyword = ref('');
+const tagValueCategoryFilter = ref('');
+const tagValueEnabledFilter = ref('');
+const tagValueMergedFilter = ref('false');
+const tagValueSortBy = ref('sortOrder');
+const tagValueSortDirection = ref<'ASC' | 'DESC'>('ASC');
+const tagDetailKind = ref<'category' | 'value' | null>(null);
+const tagDetail = ref<AnyRecord | null>(null);
+const tagDetailLoading = ref(false);
+const tagMerge = reactive<{
+  kind: 'category' | 'value' | null;
+  source: AnyRecord | null;
+  targetId: string;
+  targets: AnyRecord[];
+  preview: AnyRecord | null;
+  loading: boolean;
+  error: string;
+}>({ kind: null, source: null, targetId: '', targets: [], preview: null, loading: false, error: '' });
 const versionStatusFilter = ref('');
 const versionPlatformFilter = ref('');
 const analyticsCallerFilter = ref('');
@@ -1849,6 +2094,8 @@ const leaderAccounts = ref<AnyRecord[]>([]);
 const analyticsAccounts = ref<AnyRecord[]>([]);
 const rules = ref<AnyRecord[]>([]);
 const tagCategories = ref<AnyRecord[]>([]);
+const tagCategoryOptionsCache = ref<AnyRecord[]>([]);
+const tagValues = ref<AnyRecord[]>([]);
 const analytics = reactive<Record<string, AnyRecord>>({});
 const analyticsStatus = reactive<Record<AnalyticsKey, { loading: boolean; error: string }>>({
   overview: { loading: false, error: '' },
@@ -1898,6 +2145,18 @@ const customerSearchPageInfo = reactive({
   totalPages: 1
 });
 const rulePageInfo = reactive({
+  total: 0,
+  page: 1,
+  size: 20,
+  totalPages: 1
+});
+const tagCategoryPageInfo = reactive({
+  total: 0,
+  page: 1,
+  size: 20,
+  totalPages: 1
+});
+const tagValuePageInfo = reactive({
   total: 0,
   page: 1,
   size: 20,
@@ -2006,8 +2265,11 @@ const datasourceRuntimeDraft = reactive({
 
 let healthTimer: number | null = null;
 let analyticsTimer: number | null = null;
+let disposeTagRefresh: (() => void) | null = null;
 
-const activeSection = computed(() => sections.find((section) => section.key === activeSectionKey.value) ?? sections[0]);
+const activeSection = computed(() => sections.find((section) => section.key === activeSectionKey.value)
+  ?? sections.find((section) => section.key === 'customer-tags')
+  ?? sections[0]);
 const activeMetrics = computed(() => {
   const metricsBySection: Record<SectionKey, Array<{ label: string; value: string | number; help: string }>> = {
     'skill-scenes': [
@@ -2041,10 +2303,9 @@ const activeMetrics = computed(() => {
       { label: '当前页', value: rules.value.length, help: '按规则名称、动作和状态筛选' }
     ],
     'customer-tags': [
-      { label: '标签分类', value: tagCategories.value.length, help: 'AI 和运营共用标签库' }
-      ,
-      { label: '筛选结果', value: filteredTagCategories.value.length, help: '可按分类、字段和标签值搜索' },
-      { label: '绑定字段', value: new Set(tagCategories.value.map((item) => item.boundField || item.fieldName).filter(Boolean)).size, help: '字段应与客户档案一致' }
+      { label: '标签分类', value: tagCategoryPageInfo.total, help: 'AI 和运营共用分类' },
+      { label: '标签值', value: tagValuePageInfo.total, help: '可用于客户分层和规则' },
+      { label: '当前视图', value: tagView.value === 'categories' ? '分类' : '标签值', help: '支持详情、合并和导出' }
     ],
     'analytics-dashboard': [
       { label: '看板区块', value: analyticsBlocks.value.length, help: '使用、漏斗、效能、来源、风险' },
@@ -2080,14 +2341,11 @@ const filteredRules = computed(() => rules.value.filter((rule) => {
   return matchesKeyword && matchesType;
 }));
 const deletableSelectedRules = computed(() => rules.value.filter((rule) => ruleSelectedIds.value.includes(rule.id) && !isBuiltinRule(rule)));
-const filteredTagCategories = computed(() => tagCategories.value.filter((category) => {
-  const keyword = tagKeyword.value.trim().toLowerCase();
-  if (!keyword) return true;
-  const tags = category.values || category.tags || [];
-          return [tagCategoryName(category), category.categoryName, category.name, category.boundField, category.fieldName]
-    .some((value) => String(value ?? '').toLowerCase().includes(keyword))
-    || tags.some((tag: AnyRecord) => [tagDisplayName(tag), tag.displayName, tag.tagValue].some((value) => String(value ?? '').toLowerCase().includes(keyword)));
-}));
+const tagCategoryTotalPages = computed(() => Math.max(1, tagCategoryPageInfo.totalPages));
+const tagValueTotalPages = computed(() => Math.max(1, tagValuePageInfo.totalPages));
+const tagMergeSourceName = computed(() => tagMerge.kind === 'category'
+  ? String(tagMerge.source?.categoryName ?? '')
+  : String(tagMerge.source?.displayName ?? ''));
 const filteredAuditLogs = computed(() => auditLogs.value.filter((log) => {
   const keyword = auditKeyword.value.trim();
   const matchesKeyword = !keyword || [log.operator, log.action, log.detail, log.target].some((value) => String(value ?? '').includes(keyword));
@@ -2296,6 +2554,16 @@ const csvImportSummary = computed(() => {
 });
 
 onMounted(() => {
+  disposeTagRefresh = eventBus.on<{ configKey?: string; configKeys?: string[] }>('CONFIG_REFRESH', (payload) => {
+    const keys = [payload?.configKey, ...(payload?.configKeys ?? [])].filter(Boolean);
+    if (activeSectionKey.value === 'customer-tags' && keys.includes('tag_config')) {
+      void loadOrgRulesTags();
+    }
+  });
+  if (tagManagementOnly.value) {
+    void refreshActiveSection();
+    return;
+  }
   void loadRuntimeModeStatus();
   void refreshActiveSection();
   scheduleHealthRefresh();
@@ -2303,12 +2571,15 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  disposeTagRefresh?.();
+  disposeTagRefresh = null;
   stopHealthRefresh();
   stopAnalyticsRefresh();
   stopAuditExportPolling();
 });
 
 function selectSection(section: SectionKey) {
+  if (tagManagementOnly.value && section !== 'customer-tags') return;
   activeSectionKey.value = section;
   void refreshActiveSection();
 }
@@ -2327,7 +2598,7 @@ function startPrimaryAction() {
   if (activeSectionKey.value === 'quick-search-content') openForm('quickSearch');
   if (activeSectionKey.value === 'account-permissions') openForm('account');
   if (activeSectionKey.value === 'followup-rules') openForm('rule');
-  if (activeSectionKey.value === 'customer-tags') openForm('tagCategory');
+  if (activeSectionKey.value === 'customer-tags') openForm(tagView.value === 'categories' ? 'tagCategory' : 'tagValue');
   if (activeSectionKey.value === 'analytics-dashboard') downloadAnalyticsCsv();
   if (activeSectionKey.value === 'version-management') openForm('version');
   if (activeSectionKey.value === 'system-notices') openForm('notice');
@@ -2405,23 +2676,27 @@ async function loadDataContent() {
 
 async function loadOrgRulesTags() {
   await runWithNotice(async () => {
-    const [accountList, ruleList, tagList] = await Promise.all([
-      getJson<unknown>(accountListPath()),
-      getJson<unknown>(ruleListPath()),
-      getJson<unknown>('/admin/api/v1/tags/categories')
-    ]);
-    applyAccountList(accountList);
     if (activeSectionKey.value === 'account-permissions') {
-      void loadLeaderAccounts();
+      applyAccountList(await getJson<unknown>(accountListPath()));
+      await loadLeaderAccounts();
+      return;
     }
-    applyRuleList(ruleList);
-    tagCategories.value = listFromResponse(tagList);
-    try {
-      customerFields.value = normalizeCustomerFields(await getJson<unknown>('/admin/api/v1/customer-fields'));
-    } catch {
-      customerFields.value = normalizeCustomerFields({ success: true, data: { items: customerFields.value }, errorCode: null, message: null });
+    if (activeSectionKey.value === 'followup-rules') {
+      applyRuleList(await getJson<unknown>(ruleListPath()));
+      return;
     }
+    await loadTags();
   }, '组织与规则已刷新');
+}
+
+async function loadTags() {
+  const [categoryList, valueList] = await Promise.all([
+    getJson<unknown>(tagCategoryListPath()),
+    getJson<unknown>(tagValueListPath())
+  ]);
+  applyTagCategoryList(categoryList);
+  applyTagValueList(valueList);
+  await refreshTagCategoryOptionsCache();
 }
 
 async function loadInsightOps() {
@@ -2602,6 +2877,35 @@ async function changeRulePage(delta: number) {
   await loadOrgRulesTags();
 }
 
+async function resetTagCategoryPageAndLoad() {
+  tagCategoryPageInfo.page = 1;
+  await loadOrgRulesTags();
+}
+
+async function changeTagCategoryPage(delta: number) {
+  const nextPage = Math.min(tagCategoryTotalPages.value, Math.max(1, tagCategoryPageInfo.page + delta));
+  if (nextPage === tagCategoryPageInfo.page) return;
+  tagCategoryPageInfo.page = nextPage;
+  await loadOrgRulesTags();
+}
+
+async function resetTagValuePageAndLoad() {
+  tagValuePageInfo.page = 1;
+  await loadOrgRulesTags();
+}
+
+async function changeTagValuePage(delta: number) {
+  const nextPage = Math.min(tagValueTotalPages.value, Math.max(1, tagValuePageInfo.page + delta));
+  if (nextPage === tagValuePageInfo.page) return;
+  tagValuePageInfo.page = nextPage;
+  await loadOrgRulesTags();
+}
+
+async function switchTagView(view: 'categories' | 'values') {
+  tagView.value = view;
+  await loadOrgRulesTags();
+}
+
 async function resetQuickSearchPageAndLoad() {
   quickSearchPageInfo.page = 1;
   await loadDataContent();
@@ -2664,6 +2968,24 @@ function applyRuleList(response: ApiResponse<unknown>) {
   rulePageInfo.page = Number(data.page ?? rulePageInfo.page ?? 1);
   rulePageInfo.size = Number(data.size ?? data.pageSize ?? rulePageInfo.size ?? 20);
   rulePageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(rulePageInfo.total / Math.max(1, rulePageInfo.size)) || 1));
+}
+
+function applyTagCategoryList(response: ApiResponse<unknown>) {
+  const data = recordFromResponse(response);
+  tagCategories.value = listFrom(data);
+  tagCategoryPageInfo.total = Number(data.total ?? tagCategories.value.length);
+  tagCategoryPageInfo.page = Number(data.page ?? tagCategoryPageInfo.page ?? 1);
+  tagCategoryPageInfo.size = Number(data.size ?? tagCategoryPageInfo.size ?? 20);
+  tagCategoryPageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(tagCategoryPageInfo.total / Math.max(1, tagCategoryPageInfo.size)) || 1));
+}
+
+function applyTagValueList(response: ApiResponse<unknown>) {
+  const data = recordFromResponse(response);
+  tagValues.value = listFrom(data);
+  tagValuePageInfo.total = Number(data.total ?? tagValues.value.length);
+  tagValuePageInfo.page = Number(data.page ?? tagValuePageInfo.page ?? 1);
+  tagValuePageInfo.size = Number(data.size ?? tagValuePageInfo.size ?? 20);
+  tagValuePageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(tagValuePageInfo.total / Math.max(1, tagValuePageInfo.size)) || 1));
 }
 
 function applyQuickSearchList(response: ApiResponse<unknown>) {
@@ -2784,6 +3106,12 @@ async function submitActiveForm() {
   }
 }
 
+function onFormFieldChange(key: string) {
+  if (key === 'role' && formDraft.role === 'ADMIN') {
+    formDraft.tagManagementPermission = true;
+  }
+}
+
 async function submitForm(kind: FormKind) {
   loading.value = true;
   try {
@@ -2821,13 +3149,19 @@ async function submitForm(kind: FormKind) {
       if (editingItem.value?.id) await putJson(`/admin/api/v1/rules/${editingItem.value.id}`, payload);
       else await postJson('/admin/api/v1/rules', payload);
     } else if (kind === 'tagCategory') {
-      const payload = pickDraft(editingItem.value?.id ? ['categoryName', 'isEnabled'] : ['categoryName', 'boundField', 'isEnabled']);
+      const payload = tagCategoryPayload();
       if (editingItem.value?.id) await putJson(`/admin/api/v1/tags/categories/${editingItem.value.id}`, payload);
-      else await postJson('/admin/api/v1/tags/categories', payload);
+      else {
+        await postJson('/admin/api/v1/tags/categories', payload);
+        tagCategoryPageInfo.page = 1;
+      }
     } else if (kind === 'tagValue') {
-      const payload = pickDraft(editingItem.value?.id ? ['displayName', 'sortOrder', 'isEnabled'] : ['categoryId', 'tagValue', 'displayName', 'sortOrder', 'isEnabled']);
+      const payload = tagValueFormPayload();
       if (editingItem.value?.id) await putJson(`/admin/api/v1/tags/values/${editingItem.value.id}`, payload);
-      else await postJson('/admin/api/v1/tags/values', payload);
+      else {
+        await postJson('/admin/api/v1/tags/values', payload);
+        tagValuePageInfo.page = 1;
+      }
     } else if (kind === 'version') {
       const payload = pickDraft(['version', 'platform', 'downloadUrl', 'changelog', 'updateStrategy', 'gradualPercent', 'fileSize']);
       if (editingItem.value?.id) await putJson(`/admin/api/v1/versions/${editingItem.value.id}`, payload);
@@ -2913,15 +3247,17 @@ function pickDraft(keys: string[]) {
 }
 
 function accountCreatePayload() {
-  return normalizeAccountPayload(pickDraft(['phone', 'password', 'displayName', 'role', 'leaderId']));
+  return normalizeAccountPayload(pickDraft(['phone', 'password', 'displayName', 'role', 'leaderId', 'tagManagementPermission']));
 }
 
 function accountUpdatePayload() {
-  return normalizeAccountPayload(pickDraft(['displayName', 'role', 'leaderId', 'isEnabled']));
+  return normalizeAccountPayload(pickDraft(['displayName', 'role', 'leaderId', 'isEnabled', 'tagManagementPermission']));
 }
 
 function normalizeAccountPayload(payload: AnyRecord) {
   const next = { ...payload };
+  next.permissions = next.role === 'ADMIN' || next.tagManagementPermission === true ? ['TAG_MANAGEMENT'] : [];
+  delete next.tagManagementPermission;
   if (next.role !== 'KEEPER') {
     next.leaderId = null;
   } else if (next.leaderId !== undefined && next.leaderId !== null && next.leaderId !== '') {
@@ -2933,6 +3269,53 @@ function normalizeAccountPayload(payload: AnyRecord) {
     next.isEnabled = next.isEnabled !== false;
   }
   return next;
+}
+
+function tagCategoryPayload() {
+  const payload = pickDraft([
+    'categoryName',
+    'purpose',
+    'selectionMode',
+    'systemInferenceEnabled',
+    'manualEditEnabled',
+    'autoUpdateMode',
+    'minConfidence',
+    'minEvidenceMessages',
+    'cooldownHours',
+    'uncertainPolicy',
+    'useForReply',
+    'useForFilter',
+    'useForStatistics',
+    'useForFollowupRules',
+    'isEnabled',
+    'sortOrder',
+    'version'
+  ]);
+  if (formDraft.purpose !== undefined) payload.purpose = formDraft.purpose;
+  return payload;
+}
+
+function tagValueFormPayload() {
+  const payload = pickDraft([
+    'categoryId',
+    'displayName',
+    'meaning',
+    'applicableWhen',
+    'notApplicableWhen',
+    'positiveExamples',
+    'negativeExamples',
+    'systemSelectable',
+    'manualSelectable',
+    'isEnabled',
+    'sortOrder',
+    'version'
+  ]);
+  for (const key of ['meaning', 'applicableWhen', 'notApplicableWhen', 'positiveExamples', 'negativeExamples']) {
+    if (formDraft[key] !== undefined) payload[key] = formDraft[key];
+  }
+  payload.categoryId = Number(payload.categoryId);
+  payload.synonyms = linesFrom(String(formDraft.synonymsText ?? '')).map((value) => value.replace(/，/g, ',')).flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean);
+  return payload;
 }
 
 function environmentPrefix(kind: 'skill' | 'image' | 'llm') {
@@ -2972,10 +3355,53 @@ function initialDraft(kind: FormKind, item?: AnyRecord): AnyRecord {
   };
   if (kind === 'datasource') return { name: item?.name ?? '', sheetId: item?.sheetId ?? '', sourceTable: item?.sourceTable ?? '', description: item?.description ?? '' };
   if (kind === 'quickSearch') return { contentType: item?.contentType ?? 'TEMPLATE', leadType: item?.leadType ?? 'GENERAL', title: item?.title ?? '', shortcutCode: item?.shortcutCode ?? '', content: item?.content ?? '', imageUrl: item?.imageUrl ?? '', sortOrder: item?.sortOrder ?? 99, enabled: item?.enabled ?? true };
-  if (kind === 'account') return { phone: item?.phone ?? item?.username ?? '', password: '', displayName: item?.displayName ?? '', role: item?.role ?? 'KEEPER', leaderId: item?.leaderId ?? '', isEnabled: item?.isEnabled ?? true };
+  if (kind === 'account') return {
+    phone: item?.phone ?? item?.username ?? '',
+    password: '',
+    displayName: item?.displayName ?? '',
+    role: item?.role ?? 'KEEPER',
+    leaderId: item?.leaderId ?? '',
+    isEnabled: item?.isEnabled ?? true,
+    tagManagementPermission: item?.role === 'ADMIN' || Array.isArray(item?.permissions) && item.permissions.includes('TAG_MANAGEMENT')
+  };
   if (kind === 'rule') return ruleDraft(item);
-  if (kind === 'tagCategory') return { categoryName: item?.categoryName ?? item?.name ?? '', categoryKey: item?.categoryKey ?? `custom_${suffix}`, boundField: item?.boundField ?? '', isEnabled: item?.isEnabled ?? true };
-  if (kind === 'tagValue') return { categoryId: item?.categoryId ?? item?.id ?? '', tagValue: item?.tagValue ?? `TAG_${suffix}`, displayName: item?.displayName ?? '', sortOrder: item?.sortOrder ?? 99, isEnabled: item?.isEnabled ?? true };
+  if (kind === 'tagCategory') return {
+    categoryKey: item?.categoryKey ?? '',
+    categoryName: item?.categoryName ?? '',
+    purpose: item?.purpose ?? '',
+    boundField: item?.boundField ?? '',
+    selectionMode: item?.selectionMode ?? 'SINGLE',
+    systemInferenceEnabled: item?.systemInferenceEnabled ?? false,
+    manualEditEnabled: item?.manualEditEnabled ?? true,
+    autoUpdateMode: item?.autoUpdateMode ?? 'RECORD_ONLY',
+    minConfidence: item?.minConfidence ?? 0.85,
+    minEvidenceMessages: item?.minEvidenceMessages ?? 1,
+    cooldownHours: item?.cooldownHours ?? 0,
+    uncertainPolicy: item?.uncertainPolicy ?? 'KEEP_CURRENT',
+    useForReply: item?.useForReply ?? true,
+    useForFilter: item?.useForFilter ?? true,
+    useForStatistics: item?.useForStatistics ?? true,
+    useForFollowupRules: item?.useForFollowupRules ?? true,
+    isEnabled: item?.isEnabled ?? true,
+    sortOrder: item?.sortOrder ?? 99,
+    version: item?.version
+  };
+  if (kind === 'tagValue') return {
+    categoryId: item?.categoryId ?? tagCategoryOptionsCache.value[0]?.id ?? '',
+    tagValue: item?.tagValue ?? '',
+    displayName: item?.displayName ?? '',
+    meaning: item?.meaning ?? '',
+    applicableWhen: item?.applicableWhen ?? '',
+    notApplicableWhen: item?.notApplicableWhen ?? '',
+    positiveExamples: item?.positiveExamples ?? '',
+    negativeExamples: item?.negativeExamples ?? '',
+    synonymsText: tagSynonymsText(item?.synonyms, ''),
+    systemSelectable: item?.systemSelectable ?? true,
+    manualSelectable: item?.manualSelectable ?? true,
+    sortOrder: item?.sortOrder ?? 99,
+    isEnabled: item?.isEnabled ?? true,
+    version: item?.version
+  };
   if (kind === 'version') return { version: item?.version ?? `1.0.${suffix}`, platform: item?.platform ?? 'WINDOWS', downloadUrl: item?.downloadUrl ?? '', changelog: item?.changelog ?? '', updateStrategy: item?.updateStrategy ?? 'OPTIONAL', gradualPercent: item?.gradualPercent ?? null, fileSize: item?.fileSize ?? 0 };
   if (kind === 'revokeVersion') return { reason: '', alternativeVersion: '' };
   if (kind === 'notice') return { title: item?.title ?? '', content: item?.content ?? '', level: item?.level ?? 'INFO', publishType: item?.publishType ?? 'IMMEDIATE', publishAt: item?.publishAt ?? '', expireDays: item?.expireDays ?? 1 };
@@ -3058,6 +3484,7 @@ function formMeta(kind: FormKind | null): { title: string; description: string; 
     { key: 'displayName', label: '姓名', type: 'text' },
     { key: 'role', label: '角色', type: 'select', options: [{ label: '管理员', value: 'ADMIN' }, { label: '组长', value: 'LEADER' }, { label: '管家', value: 'KEEPER' }] },
     { key: 'leaderId', label: '直属组长', type: 'select', options: leaderOptions(), disabled: formDraft.role !== 'KEEPER', help: formDraft.role === 'KEEPER' ? '管家必须绑定直属组长，用于客户数据隔离和组长通知。' : '只有管家角色需要选择直属组长。' },
+    { key: 'tagManagementPermission', label: '客户标签管理权限', type: 'checkbox', disabled: formDraft.role === 'ADMIN', help: formDraft.role === 'ADMIN' ? '管理员默认拥有此权限。' : '允许该账号进入后台，但只能管理客户标签与分层。' },
     { key: 'isEnabled', label: '启用', type: 'checkbox' }
   ] };
   }
@@ -3072,16 +3499,38 @@ function formMeta(kind: FormKind | null): { title: string; description: string; 
     { key: 'priority', label: '优先级（数字越大越先执行）', type: 'number', min: 1, max: 100, step: 1, help: '跟进规则当前按数字从大到小执行。建议紧急提醒 90，普通提醒 60，观察类 30。' },
     { key: 'enabled', label: '启用', type: 'checkbox' }
   ] };
-  if (kind === 'tagCategory') return { title: '标签分类', description: '分类绑定客户档案字段，用于筛选、分层和 AI 更新建议。', fields: [
+  if (kind === 'tagCategory') return { title: editingItem.value?.id ? '编辑标签分类' : '新增标签分类', description: '系统编号由后端自动生成，分类配置保存后立即进入统一标签字典。', fields: [
+    ...(editingItem.value?.id ? [{ key: 'categoryKey', label: '系统编号', type: 'text' as const, disabled: true, help: '系统编号只用于识别和兼容历史数据，不能人工修改。' }] : []),
     { key: 'categoryName', label: '分类名称', type: 'text', placeholder: '如：意向度 / 客户阶段 / 体型关注' },
-    { key: 'boundField', label: '绑定客户档案字段', type: 'select', options: tagBoundFieldOptions(), disabled: Boolean(editingItem.value?.id), help: '绑定后，该分类的标签值会写入对应客户档案字段。已创建分类暂不修改绑定字段。' },
+    { key: 'purpose', label: '分类用途', type: 'textarea', placeholder: '说明该分类用于什么业务判断' },
+    { key: 'selectionMode', label: '选择模式', type: 'select', options: [{ label: '单选', value: 'SINGLE' }, { label: '多选', value: 'MULTI' }] },
+    { key: 'systemInferenceEnabled', label: '允许系统判断', type: 'checkbox' },
+    { key: 'manualEditEnabled', label: '允许员工手动修改', type: 'checkbox' },
+    { key: 'autoUpdateMode', label: '自动更新模式', type: 'select', options: [{ label: '只新增', value: 'ADD_ONLY' }, { label: '替换当前值', value: 'REPLACE' }, { label: '只记录建议', value: 'RECORD_ONLY' }] },
+    { key: 'minConfidence', label: '最低把握程度', type: 'number', min: 0, max: 1, step: 0.01 },
+    { key: 'minEvidenceMessages', label: '最低有效消息数', type: 'number', min: 0, max: 1000, step: 1 },
+    { key: 'cooldownHours', label: '自动更新冷却时间（小时）', type: 'number', min: 0, max: 87600, step: 1 },
+    { key: 'uncertainPolicy', label: '不确定时处理', type: 'select', options: [{ label: '保留当前值', value: 'KEEP_CURRENT' }, { label: '设为待确认', value: 'SET_PENDING' }] },
+    { key: 'useForReply', label: '用于回复生成', type: 'checkbox' },
+    { key: 'useForFilter', label: '用于客户筛选', type: 'checkbox' },
+    { key: 'useForStatistics', label: '用于运营统计', type: 'checkbox' },
+    { key: 'useForFollowupRules', label: '用于跟进规则', type: 'checkbox' },
+    { key: 'sortOrder', label: '显示顺序', type: 'number', min: 0, max: 999999, step: 1 },
     { key: 'isEnabled', label: '启用', type: 'checkbox' }
   ] };
-  if (kind === 'tagValue') return { title: '标签值', description: '展示名可调整，代码值用于系统判断。', fields: [
+  if (kind === 'tagValue') return { title: editingItem.value?.id ? '编辑标签值' : '新增标签值', description: '系统编号由后端根据中文名称生成，运营人员只维护业务含义和使用边界。', fields: [
     { key: 'categoryId', label: '分类', type: 'select', options: tagCategoryOptions(), disabled: Boolean(editingItem.value?.id) },
-    { key: 'tagValue', label: '代码值', type: 'text', disabled: Boolean(editingItem.value?.id) },
-    { key: 'displayName', label: '展示名', type: 'text' },
-    { key: 'sortOrder', label: '排序', type: 'number' },
+    ...(editingItem.value?.id ? [{ key: 'tagValue', label: '系统编号', type: 'text' as const, disabled: true, help: '系统编号只读，用于规则和历史数据兼容。' }] : []),
+    { key: 'displayName', label: '标签名称', type: 'text' },
+    { key: 'meaning', label: '标签含义', type: 'textarea' },
+    { key: 'applicableWhen', label: '适用条件', type: 'textarea' },
+    { key: 'notApplicableWhen', label: '禁止条件', type: 'textarea' },
+    { key: 'positiveExamples', label: '正确例子', type: 'textarea' },
+    { key: 'negativeExamples', label: '错误例子', type: 'textarea' },
+    { key: 'synonymsText', label: '同义表达', type: 'textarea', placeholder: '每行一个同义表达，最多 50 个' },
+    { key: 'systemSelectable', label: '系统可选择', type: 'checkbox' },
+    { key: 'manualSelectable', label: '员工可选择', type: 'checkbox' },
+    { key: 'sortOrder', label: '显示顺序', type: 'number', min: 0, max: 999999, step: 1 },
     { key: 'isEnabled', label: '启用', type: 'checkbox' }
   ] };
   if (kind === 'version') return { title: '桌面版本', description: '发布前确认平台、策略和下载地址。', fields: [
@@ -3851,18 +4300,66 @@ async function batchDeleteRules() {
   }
 }
 
-function tagDraft(category: AnyRecord, tag: AnyRecord) {
-  return { ...tag, categoryId: category.id ?? tag.categoryId };
+async function openTagDetail(kind: 'category' | 'value', item: AnyRecord) {
+  tagDetailKind.value = kind;
+  tagDetail.value = null;
+  tagDetailLoading.value = true;
+  try {
+    tagDetail.value = recordFromResponse(await getJson<unknown>(tagDetailPath(kind, item.id)));
+  } catch (error) {
+    closeTagDetail();
+    noticeKind.value = 'error';
+    notice.value = humanizeError(error);
+  } finally {
+    tagDetailLoading.value = false;
+  }
 }
 
-async function toggleTagValue(category: AnyRecord, tag: AnyRecord) {
+function closeTagDetail() {
+  tagDetailKind.value = null;
+  tagDetail.value = null;
+  tagDetailLoading.value = false;
+}
+
+async function editTagEntity(kind: 'category' | 'value', item: AnyRecord) {
+  closeTagDetail();
+  loading.value = true;
+  try {
+    const detail = recordFromResponse(await getJson<unknown>(tagDetailPath(kind, item.id)));
+    openForm(kind === 'category' ? 'tagCategory' : 'tagValue', detail);
+  } catch (error) {
+    noticeKind.value = 'error';
+    notice.value = humanizeError(error);
+  } finally {
+    loading.value = false;
+  }
+}
+
+function tagDetailPath(kind: 'category' | 'value', id: unknown) {
+  return `/admin/api/v1/tags/${kind === 'category' ? 'categories' : 'values'}/${id}`;
+}
+
+async function toggleTagCategory(category: AnyRecord) {
   await runWithNotice(async () => {
-    await putJson(`/admin/api/v1/tags/values/${tag.id}/toggle`, { isEnabled: tag.isEnabled === false });
+    await putJson(`/admin/api/v1/tags/categories/${category.id}/toggle`, {
+      enabled: category.isEnabled === false,
+      version: category.version
+    });
+    await loadOrgRulesTags();
+  }, '标签分类状态已更新');
+}
+
+async function toggleTagValue(tag: AnyRecord) {
+  await runWithNotice(async () => {
+    await putJson(`/admin/api/v1/tags/values/${tag.id}/toggle`, {
+      enabled: tag.isEnabled === false,
+      version: tag.version
+    });
     await loadOrgRulesTags();
   }, '标签值状态已更新');
 }
 
-function confirmDeleteTagValue(category: AnyRecord, tag: AnyRecord) {
+function confirmDeleteTagValue(tag: AnyRecord) {
   if (window.confirm(`确认删除标签值「${tag.displayName || tag.tagValue}」？建议优先停用仍在使用的标签。`)) {
     void runWithNotice(async () => {
       await deleteJson(`/admin/api/v1/tags/values/${tag.id}`);
@@ -3895,6 +4392,118 @@ async function publishVersion(version: AnyRecord) {
     }
     await loadInsightOps();
   }, '版本已发布');
+}
+
+async function openTagMerge(kind: 'category' | 'value', item: AnyRecord) {
+  tagMerge.kind = kind;
+  tagMerge.source = null;
+  tagMerge.targetId = '';
+  tagMerge.targets = [];
+  tagMerge.preview = null;
+  tagMerge.error = '';
+  tagMerge.loading = true;
+  try {
+    const source = recordFromResponse(await getJson<unknown>(tagDetailPath(kind, item.id)));
+    tagMerge.source = source;
+    tagMerge.targets = (kind === 'category'
+      ? await fetchAllTagItems('/admin/api/v1/tags/categories', {
+          enabled: true,
+          merged: false,
+          selectionMode: source.selectionMode,
+          sortBy: 'sortOrder',
+          sortDirection: 'ASC'
+        })
+      : await fetchAllTagItems('/admin/api/v1/tags/values', {
+          categoryId: source.categoryId,
+          enabled: true,
+          merged: false,
+          sortBy: 'sortOrder',
+          sortDirection: 'ASC'
+        })).filter((target) => String(target.id) !== String(source.id));
+  } catch (error) {
+    tagMerge.error = humanizeError(error);
+  } finally {
+    tagMerge.loading = false;
+  }
+}
+
+function closeTagMerge() {
+  tagMerge.kind = null;
+  tagMerge.source = null;
+  tagMerge.targetId = '';
+  tagMerge.targets = [];
+  tagMerge.preview = null;
+  tagMerge.loading = false;
+  tagMerge.error = '';
+}
+
+async function previewTagMerge() {
+  const payload = tagMergePayload();
+  if (!tagMerge.kind || !tagMerge.source || !payload) return;
+  tagMerge.loading = true;
+  tagMerge.error = '';
+  try {
+    const path = `${tagDetailPath(tagMerge.kind, tagMerge.source.id)}/merge-preview`;
+    tagMerge.preview = recordFromResponse(await postJson<unknown>(path, payload));
+  } catch (error) {
+    tagMerge.preview = null;
+    tagMerge.error = humanizeError(error);
+  } finally {
+    tagMerge.loading = false;
+  }
+}
+
+async function executeTagMerge() {
+  const payload = tagMergePayload();
+  if (!tagMerge.kind || !tagMerge.source || !tagMerge.preview || !payload) return;
+  if (!window.confirm(`确认将「${tagMerge.preview.sourceName}」合并到「${tagMerge.preview.targetName}」？此操作会迁移客户、规则和历史引用。`)) return;
+  tagMerge.loading = true;
+  tagMerge.error = '';
+  try {
+    const path = `${tagDetailPath(tagMerge.kind, tagMerge.source.id)}/merge`;
+    await postJson(path, payload);
+    closeTagMerge();
+    await loadOrgRulesTags();
+    noticeKind.value = 'info';
+    notice.value = '标签合并完成';
+  } catch (error) {
+    tagMerge.error = humanizeError(error);
+    tagMerge.loading = false;
+  }
+}
+
+function tagMergePayload() {
+  const target = tagMerge.targets.find((item) => String(item.id) === tagMerge.targetId);
+  if (!tagMerge.source || !target) return null;
+  return {
+    targetId: Number(target.id),
+    sourceVersion: Number(tagMerge.source.version),
+    targetVersion: Number(target.version)
+  };
+}
+
+async function exportCurrentTags() {
+  await runWithNotice(async () => {
+    const categories = tagView.value === 'categories';
+    const path = categories
+      ? withQuery('/admin/api/v1/tags/categories/export', {
+          keyword: tagCategoryKeyword.value,
+          enabled: booleanFilter(tagCategoryEnabledFilter.value),
+          merged: booleanFilter(tagCategoryMergedFilter.value),
+          sortBy: tagCategorySortBy.value,
+          sortDirection: tagCategorySortDirection.value
+        })
+      : withQuery('/admin/api/v1/tags/values/export', {
+          categoryId: tagValueCategoryFilter.value,
+          keyword: tagValueKeyword.value,
+          enabled: booleanFilter(tagValueEnabledFilter.value),
+          merged: booleanFilter(tagValueMergedFilter.value),
+          sortBy: tagValueSortBy.value,
+          sortDirection: tagValueSortDirection.value
+        });
+    const download = await requestGetBlob(path);
+    downloadBlob(download.filename || (categories ? 'tag-categories.csv' : 'tag-values.csv'), download.blob);
+  }, '标签 CSV 已开始下载');
 }
 
 function confirmDeleteVersion(version: AnyRecord) {
@@ -4134,6 +4743,65 @@ function quickSearchListPath() {
   });
 }
 
+function tagCategoryListPath() {
+  return withQuery('/admin/api/v1/tags/categories', {
+    keyword: tagCategoryKeyword.value,
+    enabled: booleanFilter(tagCategoryEnabledFilter.value),
+    merged: booleanFilter(tagCategoryMergedFilter.value),
+    page: tagCategoryPageInfo.page,
+    size: tagCategoryPageInfo.size,
+    sortBy: tagCategorySortBy.value,
+    sortDirection: tagCategorySortDirection.value
+  });
+}
+
+function tagValueListPath() {
+  return withQuery('/admin/api/v1/tags/values', {
+    categoryId: tagValueCategoryFilter.value,
+    keyword: tagValueKeyword.value,
+    enabled: booleanFilter(tagValueEnabledFilter.value),
+    merged: booleanFilter(tagValueMergedFilter.value),
+    page: tagValuePageInfo.page,
+    size: tagValuePageInfo.size,
+    sortBy: tagValueSortBy.value,
+    sortDirection: tagValueSortDirection.value
+  });
+}
+
+function booleanFilter(value: string): boolean | '' {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return '';
+}
+
+async function refreshTagCategoryOptionsCache() {
+  tagCategoryOptionsCache.value = await fetchAllTagItems('/admin/api/v1/tags/categories', {
+    merged: false,
+    sortBy: 'sortOrder',
+    sortDirection: 'ASC'
+  });
+}
+
+async function fetchAllTagItems(path: string, query: Record<string, unknown>): Promise<AnyRecord[]> {
+  const items: AnyRecord[] = [];
+  let page = 1;
+  let totalPages = 1;
+  do {
+    const response = await getJson<unknown>(withQuery(path, { ...query, page, size: 100 }));
+    const data = recordFromResponse(response);
+    items.push(...listFrom(data));
+    totalPages = Math.max(1, Number(data.totalPages ?? 1));
+    page += 1;
+  } while (page <= totalPages);
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = String(item.id ?? JSON.stringify(item));
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function versionListPath() {
   return withQuery('/admin/api/v1/versions', {
     status: versionStatusFilter.value,
@@ -4182,32 +4850,11 @@ function quickSearchPayload(item: AnyRecord) {
   };
 }
 
-function tagValuePayload(category: AnyRecord, tag: AnyRecord) {
-  return {
-    categoryId: category.id ?? tag.categoryId,
-    displayName: tag.displayName,
-    sortOrder: tag.sortOrder ?? 99,
-    isEnabled: tag.isEnabled !== false
-  };
-}
-
 function tagCategoryOptions() {
-  return tagCategories.value.map((category) => ({
+  return tagCategoryOptionsCache.value.map((category) => ({
     label: tagCategoryOptionLabel(category),
     value: Number(category.id)
   })).filter((option) => Number.isFinite(option.value));
-}
-
-function tagBoundFieldOptions() {
-  const boundFields = new Set(
-    tagCategories.value
-      .filter((category) => !editingItem.value?.id || category.id !== editingItem.value?.id)
-      .map((category) => String(category.boundField || category.fieldName || ''))
-      .filter(Boolean)
-  );
-  return customerFields.value
-    .filter((field) => field.key && (!boundFields.has(String(field.key)) || String(field.key) === String(formDraft.boundField ?? '')))
-    .map((field) => ({ label: String(field.label || customerFieldLabel(field.key)), value: String(field.key) }));
 }
 
 function tagCategoryFieldText(category: AnyRecord) {
@@ -4223,6 +4870,62 @@ function tagCategoryOptionLabel(category: AnyRecord) {
 function tagCategoryName(category: AnyRecord) {
   const raw = String(category.categoryName || category.name || category.categoryKey || category.id || '');
   return TAG_CATEGORY_LABELS[raw] ?? customerFieldLabel(raw) ?? raw;
+}
+
+function tagCategoryLabelForValue(tag: AnyRecord) {
+  const category = tagCategoryOptionsCache.value.find((item) => String(item.id) === String(tag.categoryId));
+  return category?.categoryName || TAG_CATEGORY_LABELS[String(tag.categoryKey ?? '')] || tag.categoryKey || `分类 #${tag.categoryId}`;
+}
+
+function tagSelectionModeLabel(value: unknown) {
+  return String(value ?? '').toUpperCase() === 'MULTI' ? '多选' : '单选';
+}
+
+function tagAutoUpdateModeLabel(value: unknown) {
+  return ({ ADD_ONLY: '只新增', REPLACE: '替换当前值', RECORD_ONLY: '只记录建议' } as Record<string, string>)[String(value ?? '')] ?? '-';
+}
+
+function tagUncertainPolicyLabel(value: unknown) {
+  return ({ KEEP_CURRENT: '保留当前值', SET_PENDING: '设为待确认' } as Record<string, string>)[String(value ?? '')] ?? '-';
+}
+
+function tagSelectableText(tag: AnyRecord) {
+  const scopes = [];
+  if (tag.systemSelectable) scopes.push('系统');
+  if (tag.manualSelectable) scopes.push('员工');
+  return scopes.length ? `${scopes.join('、')}可选` : '均不可选';
+}
+
+function tagImpactText(impact: AnyRecord | null | undefined) {
+  return `客户 ${Number(impact?.customerCount ?? 0)} · 规则 ${Number(impact?.ruleCount ?? 0)} · 历史 ${Number(impact?.historyCount ?? 0)}`;
+}
+
+function tagStatusText(item: AnyRecord) {
+  if (item.mergedIntoId) return `已合并至 #${item.mergedIntoId}`;
+  return item.isEnabled ? '启用' : '停用';
+}
+
+function tagUsageText(category: AnyRecord) {
+  const usages = [];
+  if (category.useForReply) usages.push('回复生成');
+  if (category.useForFilter) usages.push('客户筛选');
+  if (category.useForStatistics) usages.push('运营统计');
+  if (category.useForFollowupRules) usages.push('跟进规则');
+  return usages.join('、') || '未启用业务用途';
+}
+
+function tagSynonymsText(value: unknown, fallback = '未填写') {
+  return Array.isArray(value) && value.length ? value.join('、') : fallback;
+}
+
+function booleanLabel(value: unknown) {
+  return value === true ? '是' : '否';
+}
+
+function tagMergeTargetLabel(target: AnyRecord) {
+  return tagMerge.kind === 'category'
+    ? `${target.categoryName}（${target.categoryKey}）`
+    : `${target.displayName}（${target.tagValue}）`;
 }
 
 function tagDisplayName(tag: AnyRecord) {

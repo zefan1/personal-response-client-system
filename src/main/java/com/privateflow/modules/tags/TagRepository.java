@@ -5,8 +5,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -34,6 +39,56 @@ public class TagRepository {
     return categories;
   }
 
+  public TagCategoryPage searchCategories(
+      String keyword,
+      Boolean enabled,
+      Boolean merged,
+      TagSelectionMode selectionMode,
+      Boolean builtin,
+      int page,
+      int size,
+      String sortBy,
+      String sortDirection) {
+    int safePage = Math.max(1, page);
+    int safeSize = Math.max(1, Math.min(size, 100));
+    List<Object> args = new ArrayList<>();
+    String where = categoryWhere(keyword, enabled, merged, selectionMode, builtin, args);
+    Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tag_categories c " + where, Long.class, args.toArray());
+    List<Object> pageArgs = new ArrayList<>(args);
+    pageArgs.add((safePage - 1) * safeSize);
+    pageArgs.add(safeSize);
+    List<Long> ids = jdbcTemplate.queryForList(
+        "SELECT c.id FROM tag_categories c " + where + " ORDER BY "
+            + categoryOrder(sortBy, sortDirection) + " LIMIT ?, ?",
+        Long.class,
+        pageArgs.toArray());
+    List<TagCategory> items = ids.stream().map(id -> findCategory(id).orElseThrow()).toList();
+    long safeTotal = total == null ? 0 : total;
+    return new TagCategoryPage(
+        safePage,
+        safeSize,
+        safeTotal,
+        Math.max(1, (int) Math.ceil(safeTotal / (double) safeSize)),
+        items);
+  }
+
+  public List<TagCategory> findCategoriesForExport(
+      String keyword,
+      Boolean enabled,
+      Boolean merged,
+      TagSelectionMode selectionMode,
+      Boolean builtin,
+      String sortBy,
+      String sortDirection) {
+    List<Object> args = new ArrayList<>();
+    String where = categoryWhere(keyword, enabled, merged, selectionMode, builtin, args);
+    List<Long> ids = jdbcTemplate.queryForList(
+        "SELECT c.id FROM tag_categories c " + where + " ORDER BY " + categoryOrder(sortBy, sortDirection),
+        Long.class,
+        args.toArray());
+    return ids.stream().map(id -> findCategory(id).orElseThrow()).toList();
+  }
+
   public Optional<TagCategory> findCategory(long id) {
     return jdbcTemplate.query("""
         SELECT id, category_key, category_name, purpose, bound_field, selection_mode,
@@ -55,6 +110,74 @@ public class TagRepository {
         FROM tag_values v JOIN tag_categories c ON c.id = v.category_id
         WHERE v.id = ? LIMIT 1
         """, this::mapValue, id).stream().findFirst();
+  }
+
+  public Optional<TagValue> findValueByCategoryAndCode(long categoryId, String tagValue) {
+    return jdbcTemplate.query("""
+        SELECT v.id, v.category_id, c.category_key, v.tag_value, v.display_name,
+               v.meaning, v.applicable_when, v.not_applicable_when,
+               v.positive_examples, v.negative_examples, v.synonyms_json,
+               v.system_selectable, v.manual_selectable, v.is_enabled,
+               v.sort_order, v.merged_into_id, v.version, v.created_at, v.updated_at
+        FROM tag_values v JOIN tag_categories c ON c.id = v.category_id
+        WHERE v.category_id = ? AND v.tag_value = ? LIMIT 1
+        """, this::mapValue, categoryId, tagValue).stream().findFirst();
+  }
+
+  public TagValuePage searchValues(
+      Long categoryId,
+      String keyword,
+      Boolean enabled,
+      Boolean merged,
+      Boolean systemSelectable,
+      Boolean manualSelectable,
+      int page,
+      int size,
+      String sortBy,
+      String sortDirection) {
+    int safePage = Math.max(1, page);
+    int safeSize = Math.max(1, Math.min(size, 100));
+    List<Object> args = new ArrayList<>();
+    String where = valueWhere(categoryId, keyword, enabled, merged, systemSelectable, manualSelectable, args);
+    Long total = jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM tag_values v JOIN tag_categories c ON c.id = v.category_id " + where,
+        Long.class,
+        args.toArray());
+    List<Object> pageArgs = new ArrayList<>(args);
+    pageArgs.add((safePage - 1) * safeSize);
+    pageArgs.add(safeSize);
+    List<Long> ids = jdbcTemplate.queryForList(
+        "SELECT v.id FROM tag_values v JOIN tag_categories c ON c.id = v.category_id " + where
+            + " ORDER BY " + valueOrder(sortBy, sortDirection) + " LIMIT ?, ?",
+        Long.class,
+        pageArgs.toArray());
+    List<TagValue> items = ids.stream().map(id -> findValue(id).orElseThrow()).toList();
+    long safeTotal = total == null ? 0 : total;
+    return new TagValuePage(
+        safePage,
+        safeSize,
+        safeTotal,
+        Math.max(1, (int) Math.ceil(safeTotal / (double) safeSize)),
+        items);
+  }
+
+  public List<TagValue> findValuesForExport(
+      Long categoryId,
+      String keyword,
+      Boolean enabled,
+      Boolean merged,
+      Boolean systemSelectable,
+      Boolean manualSelectable,
+      String sortBy,
+      String sortDirection) {
+    List<Object> args = new ArrayList<>();
+    String where = valueWhere(categoryId, keyword, enabled, merged, systemSelectable, manualSelectable, args);
+    List<Long> ids = jdbcTemplate.queryForList(
+        "SELECT v.id FROM tag_values v JOIN tag_categories c ON c.id = v.category_id " + where
+            + " ORDER BY " + valueOrder(sortBy, sortDirection),
+        Long.class,
+        args.toArray());
+    return ids.stream().map(id -> findValue(id).orElseThrow()).toList();
   }
 
   public boolean boundFieldExists(String boundField) {
@@ -79,6 +202,87 @@ public class TagRepository {
   public int valueCount(long categoryId) {
     Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tag_values WHERE category_id = ?", Integer.class, categoryId);
     return count == null ? 0 : count;
+  }
+
+  public List<TagValue> listValuesByCategory(long categoryId) {
+    return values(categoryId);
+  }
+
+  public TagImpact categoryImpact(long categoryId, String boundField) {
+    Map<String, Object> metrics = jdbcTemplate.queryForMap("""
+        SELECT
+          (SELECT COUNT(*) FROM customer_tag_assignments WHERE category_id = ?) AS assignment_count,
+          (SELECT COUNT(*) FROM customer_tag_assignments WHERE category_id = ? AND is_active = 1) AS active_assignment_count,
+          (SELECT COUNT(*) FROM tag_analysis_results WHERE category_id = ?) AS analysis_count,
+          (SELECT COUNT(*) FROM tag_legacy_value_mappings WHERE category_id = ?) AS legacy_mapping_count,
+          (SELECT COUNT(*) FROM system_tag_suggestions s JOIN tag_values v ON v.id = s.tag_value_id WHERE v.category_id = ?) AS suggestion_count,
+          (SELECT COUNT(*) FROM unmatched_legacy_tag_values WHERE category_id = ?) AS unmatched_count,
+          (SELECT COUNT(*) FROM customer_tag_category_locks WHERE category_id = ?) AS lock_count,
+          (SELECT COUNT(*) FROM personality_tags p JOIN tag_values v ON v.id = p.canonical_tag_value_id WHERE v.category_id = ?) AS personality_count
+        """, categoryId, categoryId, categoryId, categoryId, categoryId, categoryId, categoryId, categoryId);
+    Set<Long> customerIds = new LinkedHashSet<>(jdbcTemplate.queryForList(
+        "SELECT DISTINCT customer_id FROM customer_tag_assignments WHERE category_id = ?",
+        Long.class,
+        categoryId));
+    String legacyColumn = legacyColumn(boundField);
+    if (legacyColumn != null) {
+      customerIds.addAll(jdbcTemplate.queryForList(
+          "SELECT id FROM customers WHERE " + legacyColumn + " IS NOT NULL AND TRIM(" + legacyColumn + ") <> ''",
+          Long.class));
+    }
+    long assignments = number(metrics, "assignment_count");
+    long activeAssignments = number(metrics, "active_assignment_count");
+    long analysis = number(metrics, "analysis_count");
+    long suggestions = number(metrics, "suggestion_count");
+    long mappings = number(metrics, "legacy_mapping_count");
+    long unmatched = number(metrics, "unmatched_count");
+    long locks = number(metrics, "lock_count");
+    long personality = number(metrics, "personality_count");
+    return new TagImpact(
+        customerIds.size(),
+        0,
+        assignments + analysis + suggestions + mappings + unmatched + locks + personality,
+        activeAssignments,
+        analysis,
+        suggestions,
+        mappings,
+        unmatched,
+        locks);
+  }
+
+  public TagImpact valueImpact(TagValue value, TagCategory category) {
+    Map<String, Object> metrics = jdbcTemplate.queryForMap("""
+        SELECT
+          (SELECT COUNT(*) FROM customer_tag_assignments WHERE tag_value_id = ?) AS assignment_count,
+          (SELECT COUNT(*) FROM customer_tag_assignments WHERE tag_value_id = ? AND is_active = 1) AS active_assignment_count,
+          (SELECT COUNT(*) FROM tag_analysis_results WHERE tag_value_id = ?) AS analysis_count,
+          (SELECT COUNT(*) FROM tag_legacy_value_mappings WHERE tag_value_id = ?) AS legacy_mapping_count,
+          (SELECT COUNT(*) FROM system_tag_suggestions WHERE tag_value_id = ?) AS suggestion_count,
+          (SELECT COUNT(*) FROM unmatched_legacy_tag_values WHERE mapped_tag_value_id = ?) AS unmatched_count,
+          (SELECT COUNT(*) FROM personality_tags WHERE canonical_tag_value_id = ?) AS personality_count
+        """, value.id(), value.id(), value.id(), value.id(), value.id(), value.id(), value.id());
+    Set<Long> customerIds = new LinkedHashSet<>(jdbcTemplate.queryForList(
+        "SELECT DISTINCT customer_id FROM customer_tag_assignments WHERE tag_value_id = ?",
+        Long.class,
+        value.id()));
+    customerIds.addAll(legacyCustomerIds(value, category));
+    long assignments = number(metrics, "assignment_count");
+    long activeAssignments = number(metrics, "active_assignment_count");
+    long analysis = number(metrics, "analysis_count");
+    long suggestions = number(metrics, "suggestion_count");
+    long mappings = number(metrics, "legacy_mapping_count");
+    long unmatched = number(metrics, "unmatched_count");
+    long personality = number(metrics, "personality_count");
+    return new TagImpact(
+        customerIds.size(),
+        0,
+        assignments + analysis + suggestions + mappings + unmatched + personality,
+        activeAssignments,
+        analysis,
+        suggestions,
+        mappings,
+        unmatched,
+        0);
   }
 
   public long createCategory(String categoryKey, TagCategoryRequest request, int sortOrder) {
@@ -113,8 +317,8 @@ public class TagRepository {
     return id == null ? 0L : id;
   }
 
-  public void updateCategory(long id, TagCategoryRequest request) {
-    jdbcTemplate.update("""
+  public int updateCategory(long id, TagCategoryRequest request) {
+    return jdbcTemplate.update("""
         UPDATE tag_categories
         SET category_name = COALESCE(?, category_name),
             purpose = COALESCE(?, purpose),
@@ -134,10 +338,10 @@ public class TagRepository {
             sort_order = COALESCE(?, sort_order),
             version = version + 1,
             updated_at = NOW()
-        WHERE id = ?
+        WHERE id = ? AND version = ?
         """,
         blankToNull(request.categoryName()),
-        blankToNull(request.purpose()),
+        trimIfPresent(request.purpose()),
         enumName(request.selectionMode()),
         nullableBool(request.systemInferenceEnabled()),
         nullableBool(request.manualEditEnabled()),
@@ -152,7 +356,16 @@ public class TagRepository {
         nullableBool(request.useForFollowupRules()),
         request.isEnabled() == null ? null : (request.isEnabled() ? 1 : 0),
         request.sortOrder(),
-        id);
+        id,
+        request.version());
+  }
+
+  public int toggleCategory(long id, boolean enabled, Integer version) {
+    return jdbcTemplate.update("""
+        UPDATE tag_categories
+        SET is_enabled = ?, version = version + 1, updated_at = NOW()
+        WHERE id = ? AND version = ?
+        """, enabled ? 1 : 0, id, version);
   }
 
   public int deleteCategory(long id) {
@@ -184,8 +397,8 @@ public class TagRepository {
     return id == null ? 0L : id;
   }
 
-  public void updateValue(long id, TagValueRequest request) {
-    jdbcTemplate.update("""
+  public int updateValue(long id, TagValueRequest request) {
+    return jdbcTemplate.update("""
         UPDATE tag_values
         SET display_name = COALESCE(?, display_name),
             meaning = COALESCE(?, meaning),
@@ -200,24 +413,29 @@ public class TagRepository {
             sort_order = COALESCE(?, sort_order),
             version = version + 1,
             updated_at = NOW()
-        WHERE id = ?
+        WHERE id = ? AND version = ?
         """,
         blankToNull(request.displayName()),
-        blankToNull(request.meaning()),
-        blankToNull(request.applicableWhen()),
-        blankToNull(request.notApplicableWhen()),
-        blankToNull(request.positiveExamples()),
-        blankToNull(request.negativeExamples()),
+        trimIfPresent(request.meaning()),
+        trimIfPresent(request.applicableWhen()),
+        trimIfPresent(request.notApplicableWhen()),
+        trimIfPresent(request.positiveExamples()),
+        trimIfPresent(request.negativeExamples()),
         synonymsJson(request.synonyms(), null),
         nullableBool(request.systemSelectable()),
         nullableBool(request.manualSelectable()),
         request.isEnabled() == null ? null : (request.isEnabled() ? 1 : 0),
         request.sortOrder(),
-        id);
+        id,
+        request.version());
   }
 
-  public void toggleValue(long id, boolean enabled) {
-    jdbcTemplate.update("UPDATE tag_values SET is_enabled = ?, version = version + 1, updated_at = NOW() WHERE id = ?", enabled ? 1 : 0, id);
+  public int toggleValue(long id, boolean enabled, Integer version) {
+    return jdbcTemplate.update("""
+        UPDATE tag_values
+        SET is_enabled = ?, version = version + 1, updated_at = NOW()
+        WHERE id = ? AND version = ?
+        """, enabled ? 1 : 0, id, version);
   }
 
   public int deleteValue(long id) {
@@ -301,6 +519,7 @@ public class TagRepository {
         nullableLong(rs, "merged_into_id"),
         rs.getInt("version"),
         values,
+        TagImpact.empty(),
         rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime(),
         rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime());
   }
@@ -324,12 +543,17 @@ public class TagRepository {
         rs.getInt("sort_order"),
         nullableLong(rs, "merged_into_id"),
         rs.getInt("version"),
+        TagImpact.empty(),
         rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime(),
         rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime());
   }
 
   private String blankToNull(String value) {
     return value == null || value.isBlank() ? null : value.trim();
+  }
+
+  private String trimIfPresent(String value) {
+    return value == null ? null : value.trim();
   }
 
   private String nullableTrim(String value) {
@@ -382,5 +606,143 @@ public class TagRepository {
 
   private String toSnakeCase(String camel) {
     return camel.replaceAll("([a-z])([A-Z]+)", "$1_$2").toLowerCase();
+  }
+
+  private String categoryWhere(
+      String keyword,
+      Boolean enabled,
+      Boolean merged,
+      TagSelectionMode selectionMode,
+      Boolean builtin,
+      List<Object> args) {
+    StringBuilder where = new StringBuilder(" WHERE 1=1 ");
+    if (keyword != null && !keyword.isBlank()) {
+      String like = "%" + keyword.trim() + "%";
+      where.append(" AND (c.category_name LIKE ? OR c.category_key LIKE ? OR c.purpose LIKE ?) ");
+      args.add(like);
+      args.add(like);
+      args.add(like);
+    }
+    if (enabled != null) {
+      where.append(" AND c.is_enabled = ? ");
+      args.add(enabled ? 1 : 0);
+    }
+    if (merged != null) {
+      where.append(merged ? " AND c.merged_into_id IS NOT NULL " : " AND c.merged_into_id IS NULL ");
+    }
+    if (selectionMode != null) {
+      where.append(" AND c.selection_mode = ? ");
+      args.add(selectionMode.name());
+    }
+    if (builtin != null) {
+      where.append(" AND c.is_builtin = ? ");
+      args.add(builtin ? 1 : 0);
+    }
+    return where.toString();
+  }
+
+  private String valueWhere(
+      Long categoryId,
+      String keyword,
+      Boolean enabled,
+      Boolean merged,
+      Boolean systemSelectable,
+      Boolean manualSelectable,
+      List<Object> args) {
+    StringBuilder where = new StringBuilder(" WHERE 1=1 ");
+    if (categoryId != null) {
+      where.append(" AND v.category_id = ? ");
+      args.add(categoryId);
+    }
+    if (keyword != null && !keyword.isBlank()) {
+      String like = "%" + keyword.trim() + "%";
+      where.append(" AND (v.display_name LIKE ? OR v.tag_value LIKE ? OR v.meaning LIKE ? OR v.synonyms_json LIKE ?) ");
+      args.add(like);
+      args.add(like);
+      args.add(like);
+      args.add(like);
+    }
+    if (enabled != null) {
+      where.append(" AND v.is_enabled = ? ");
+      args.add(enabled ? 1 : 0);
+    }
+    if (merged != null) {
+      where.append(merged ? " AND v.merged_into_id IS NOT NULL " : " AND v.merged_into_id IS NULL ");
+    }
+    if (systemSelectable != null) {
+      where.append(" AND v.system_selectable = ? ");
+      args.add(systemSelectable ? 1 : 0);
+    }
+    if (manualSelectable != null) {
+      where.append(" AND v.manual_selectable = ? ");
+      args.add(manualSelectable ? 1 : 0);
+    }
+    return where.toString();
+  }
+
+  private String categoryOrder(String sortBy, String direction) {
+    String column = switch (sortBy == null ? "" : sortBy) {
+      case "categoryName" -> "c.category_name";
+      case "createdAt" -> "c.created_at";
+      case "updatedAt" -> "c.updated_at";
+      case "id" -> "c.id";
+      default -> "c.sort_order";
+    };
+    return column + sortDirection(direction) + ", c.id ASC";
+  }
+
+  private String valueOrder(String sortBy, String direction) {
+    String column = switch (sortBy == null ? "" : sortBy) {
+      case "displayName" -> "v.display_name";
+      case "createdAt" -> "v.created_at";
+      case "updatedAt" -> "v.updated_at";
+      case "id" -> "v.id";
+      default -> "v.sort_order";
+    };
+    return column + sortDirection(direction) + ", v.id ASC";
+  }
+
+  private String sortDirection(String direction) {
+    return "DESC".equalsIgnoreCase(direction) ? " DESC" : " ASC";
+  }
+
+  private long number(Map<String, Object> metrics, String key) {
+    Object value = metrics.get(key);
+    return value instanceof Number number ? number.longValue() : 0L;
+  }
+
+  private String legacyColumn(String boundField) {
+    if (boundField == null) {
+      return null;
+    }
+    return switch (boundField) {
+      case "personalityType" -> "personality_type";
+      case "bodyConcerns" -> "body_concerns";
+      case "worries" -> "worries";
+      case "intentLevel" -> "intent_level";
+      default -> null;
+    };
+  }
+
+  private Set<Long> legacyCustomerIds(TagValue value, TagCategory category) {
+    String column = legacyColumn(category.boundField());
+    if (column == null) {
+      return Set.of();
+    }
+    Set<String> candidates = new LinkedHashSet<>();
+    candidates.add(value.tagValue());
+    candidates.add(value.displayName());
+    candidates.addAll(value.synonyms());
+    Set<Long> ids = new LinkedHashSet<>();
+    jdbcTemplate.query(
+        "SELECT id, " + column + " AS legacy_value FROM customers WHERE " + column + " IS NOT NULL AND TRIM(" + column + ") <> ''",
+        rs -> {
+          String raw = rs.getString("legacy_value");
+          Set<String> tokens = new LinkedHashSet<>(Arrays.asList(raw.split("[\\s,，、;；|/]+")));
+          if (tokens.stream().map(String::trim).anyMatch(candidates::contains)) {
+            ids.add(rs.getLong("id"));
+          }
+        });
+    return ids;
   }
 }
