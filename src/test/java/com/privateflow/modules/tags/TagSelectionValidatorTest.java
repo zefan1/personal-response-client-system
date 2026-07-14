@@ -165,6 +165,26 @@ class TagSelectionValidatorTest {
   }
 
   @Test
+  void rejectsValueCodeThatExistsOnlyInAnotherCategoryAsCategoryMismatch() {
+    TagCategory selected = category(
+        1L, "selected", TagSelectionMode.SINGLE, true, true, true, null,
+        new BigDecimal("0.8000"), 1, List.of());
+    TagCategory other = category(
+        2L, "other", TagSelectionMode.SINGLE, true, true, true, null,
+        new BigDecimal("0.8000"), 1,
+        List.of(value(21L, 2L, "other", "SHARED_CODE", true, true, true, null)));
+
+    TagSelectionValidationResult result = validator(selected, other).validateCodes(
+        TagCandidatePurpose.MANUAL_ASSIGNMENT,
+        "selected",
+        List.of("SHARED_CODE"),
+        TagSelectionContext.empty());
+
+    assertRejected(result, "VALUE_CATEGORY_MISMATCH", "标签值不属于所选分类");
+    assertThat(result.values()).extracting(TagValue::id).containsExactly(21L);
+  }
+
+  @Test
   void rejectsPurposeNotAllowedByCategoryOrValue() {
     TagCategory category = category(
         1L, "system_off", TagSelectionMode.SINGLE, false, true, true, null,

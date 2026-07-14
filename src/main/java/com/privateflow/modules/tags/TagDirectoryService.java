@@ -42,7 +42,6 @@ public class TagDirectoryService {
           return previous;
         }
         TagDirectorySnapshot empty = TagDirectorySnapshot.empty(Instant.now());
-        current.set(empty);
         log.error("首次加载标签目录失败，返回明确空快照", ex);
         return empty;
       }

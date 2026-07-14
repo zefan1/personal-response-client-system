@@ -30,9 +30,7 @@ public class TagSelectionValidator {
         purpose,
         category,
         valueCodes,
-        code -> code == null
-            ? null
-            : snapshot.valuesByCategoryAndCode().get(new TagValueCode(categoryKey, code)),
+        code -> resolveByCode(snapshot, categoryKey, code),
         context);
   }
 
@@ -122,6 +120,21 @@ public class TagSelectionValidator {
       TagCategory category,
       List<TagValue> values) {
     return TagSelectionValidationResult.rejected(reason, category, values);
+  }
+
+  private TagValue resolveByCode(
+      TagDirectorySnapshot snapshot,
+      String categoryKey,
+      String valueCode) {
+    if (valueCode == null) {
+      return null;
+    }
+    TagValue exact = snapshot.valuesByCategoryAndCode().get(new TagValueCode(categoryKey, valueCode));
+    if (exact != null) {
+      return exact;
+    }
+    List<TagValue> globalMatches = snapshot.valuesByCode().get(valueCode);
+    return globalMatches == null || globalMatches.isEmpty() ? null : globalMatches.get(0);
   }
 
   private boolean isBlank(String value) {

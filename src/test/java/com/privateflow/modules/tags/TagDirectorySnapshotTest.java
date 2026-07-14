@@ -18,7 +18,9 @@ class TagDirectorySnapshotTest {
     TagValue value = value(11L, 1L, "intent_level", "HIGH", synonyms);
     List<TagValue> values = new ArrayList<>(List.of(value));
     TagCategory category = category(1L, "intent_level", values);
-    List<TagCategory> tree = new ArrayList<>(List.of(category));
+    TagValue otherValue = value(21L, 2L, "priority_level", "HIGH", List.of("优先客户"));
+    TagCategory otherCategory = category(2L, "priority_level", List.of(otherValue));
+    List<TagCategory> tree = new ArrayList<>(List.of(category, otherCategory));
 
     TagDirectorySnapshot snapshot = TagDirectorySnapshot.from(
         tree,
@@ -28,12 +30,15 @@ class TagDirectorySnapshotTest {
     values.clear();
     synonyms.clear();
 
-    assertThat(snapshot.categories()).hasSize(1);
+    assertThat(snapshot.categories()).hasSize(2);
     assertThat(snapshot.categoriesById()).containsEntry(1L, snapshot.categories().get(0));
     assertThat(snapshot.categoriesByKey()).containsEntry("intent_level", snapshot.categories().get(0));
     assertThat(snapshot.valuesById()).containsEntry(11L, snapshot.categories().get(0).values().get(0));
     assertThat(snapshot.valuesByCategoryAndCode())
         .containsEntry(new TagValueCode("intent_level", "HIGH"), snapshot.categories().get(0).values().get(0));
+    assertThat(snapshot.valuesByCode().get("HIGH"))
+        .extracting(TagValue::id)
+        .containsExactly(11L, 21L);
     assertThat(snapshot.refreshedAt()).isEqualTo(Instant.parse("2026-07-14T02:00:00Z"));
     assertThat(snapshot.categories().get(0).values().get(0).synonyms()).containsExactly("重点客户");
 
@@ -46,6 +51,9 @@ class TagDirectorySnapshotTest {
     assertThatThrownBy(() -> snapshot.categoriesByKey().clear()).isInstanceOf(UnsupportedOperationException.class);
     assertThatThrownBy(() -> snapshot.valuesById().clear()).isInstanceOf(UnsupportedOperationException.class);
     assertThatThrownBy(() -> snapshot.valuesByCategoryAndCode().clear())
+        .isInstanceOf(UnsupportedOperationException.class);
+    assertThatThrownBy(() -> snapshot.valuesByCode().clear()).isInstanceOf(UnsupportedOperationException.class);
+    assertThatThrownBy(() -> snapshot.valuesByCode().get("HIGH").clear())
         .isInstanceOf(UnsupportedOperationException.class);
   }
 

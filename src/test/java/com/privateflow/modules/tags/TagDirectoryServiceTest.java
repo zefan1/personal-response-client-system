@@ -29,17 +29,22 @@ class TagDirectoryServiceTest {
   }
 
   @Test
-  void initialLoadFailureReturnsExplicitEmptySnapshot() {
+  void initialLoadFailureReturnsEmptyWithoutCachingAndNextReadRetries() {
     TagRepository repository = mock(TagRepository.class);
     TagConfigProvider configProvider = mock(TagConfigProvider.class);
-    when(repository.listTree()).thenThrow(new IllegalStateException("database unavailable"));
+    when(repository.listTree())
+        .thenThrow(new IllegalStateException("database unavailable"))
+        .thenReturn(List.of(category(1L, "recovered")));
     TagDirectoryService service = new TagDirectoryService(repository, configProvider);
 
-    TagDirectorySnapshot snapshot = service.getSnapshot();
+    TagDirectorySnapshot failed = service.getSnapshot();
+    TagDirectorySnapshot recovered = service.getSnapshot();
 
-    assertThat(snapshot).isNotNull();
-    assertThat(snapshot.categories()).isEmpty();
-    assertThat(snapshot.refreshedAt()).isNotNull();
+    assertThat(failed).isNotNull();
+    assertThat(failed.categories()).isEmpty();
+    assertThat(failed.refreshedAt()).isNotNull();
+    assertThat(recovered.categoriesByKey()).containsKey("recovered");
+    verify(repository, times(2)).listTree();
   }
 
   @Test

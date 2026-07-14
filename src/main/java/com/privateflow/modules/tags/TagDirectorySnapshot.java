@@ -1,6 +1,7 @@
 package com.privateflow.modules.tags;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,6 +15,7 @@ public final class TagDirectorySnapshot {
   private final Map<String, TagCategory> categoriesByKey;
   private final Map<Long, TagValue> valuesById;
   private final Map<TagValueCode, TagValue> valuesByCategoryAndCode;
+  private final Map<String, List<TagValue>> valuesByCode;
   private final Instant refreshedAt;
 
   private TagDirectorySnapshot(List<TagCategory> source, Instant refreshedAt) {
@@ -24,6 +26,7 @@ public final class TagDirectorySnapshot {
     Map<String, TagCategory> nextCategoriesByKey = new LinkedHashMap<>();
     Map<Long, TagValue> nextValuesById = new LinkedHashMap<>();
     Map<TagValueCode, TagValue> nextValuesByCategoryAndCode = new LinkedHashMap<>();
+    Map<String, List<TagValue>> nextValuesByCode = new LinkedHashMap<>();
     for (TagCategory category : categories) {
       nextCategoriesById.put(category.id(), category);
       nextCategoriesByKey.put(category.categoryKey(), category);
@@ -32,12 +35,14 @@ public final class TagDirectorySnapshot {
         nextValuesByCategoryAndCode.put(
             new TagValueCode(category.categoryKey(), value.tagValue()),
             value);
+        nextValuesByCode.computeIfAbsent(value.tagValue(), ignored -> new ArrayList<>()).add(value);
       }
     }
     this.categoriesById = immutableMap(nextCategoriesById);
     this.categoriesByKey = immutableMap(nextCategoriesByKey);
     this.valuesById = immutableMap(nextValuesById);
     this.valuesByCategoryAndCode = immutableMap(nextValuesByCategoryAndCode);
+    this.valuesByCode = immutableListMap(nextValuesByCode);
   }
 
   public static TagDirectorySnapshot from(List<TagCategory> categories, Instant refreshedAt) {
@@ -66,6 +71,10 @@ public final class TagDirectorySnapshot {
 
   public Map<TagValueCode, TagValue> valuesByCategoryAndCode() {
     return valuesByCategoryAndCode;
+  }
+
+  public Map<String, List<TagValue>> valuesByCode() {
+    return valuesByCode;
   }
 
   public Instant refreshedAt() {
@@ -105,5 +114,11 @@ public final class TagDirectorySnapshot {
 
   private static <K, V> Map<K, V> immutableMap(Map<K, V> source) {
     return Collections.unmodifiableMap(new LinkedHashMap<>(source));
+  }
+
+  private static <K, V> Map<K, List<V>> immutableListMap(Map<K, List<V>> source) {
+    Map<K, List<V>> copy = new LinkedHashMap<>();
+    source.forEach((key, values) -> copy.put(key, List.copyOf(values)));
+    return Collections.unmodifiableMap(copy);
   }
 }
