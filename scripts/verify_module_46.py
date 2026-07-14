@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -5,6 +6,29 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def read(path):
     return (ROOT / path).read_text(encoding="utf-8")
+
+
+TAG_REPOSITORY_LEGACY_PATTERNS = [
+    ("usageCount", re.compile(r"\busageCount\b", re.IGNORECASE)),
+    ("legacyCustomerIds", re.compile(r"\blegacyCustomerIds\b", re.IGNORECASE)),
+    ("legacyColumn", re.compile(r"\blegacyColumn\b", re.IGNORECASE)),
+    ("FROM customers", re.compile(r"\bfrom\s+customers\b", re.IGNORECASE)),
+    (
+        "LIKE CONCAT('%', ?, '%')",
+        re.compile(
+            r"\blike\s+concat\s*\(\s*'%'\s*,\s*\?\s*,\s*'%'\s*\)",
+            re.IGNORECASE,
+        ),
+    ),
+]
+
+
+def tag_repository_legacy_errors(source):
+    return [
+        f"TagRepository still contains forbidden legacy usage pattern {label}"
+        for label, pattern in TAG_REPOSITORY_LEGACY_PATTERNS
+        if pattern.search(source)
+    ]
 
 
 errors = []
@@ -79,9 +103,7 @@ for token in [
     if token not in repo:
         errors.append(f"TagRepository missing {token}")
 
-for token in ["LIKE CONCAT('%', ?, '%')", "usageCount"]:
-    if token in repo:
-        errors.append(f"TagRepository still contains legacy usage pattern {token}")
+errors.extend(tag_repository_legacy_errors(repo))
 
 directory = read("src/main/java/com/privateflow/modules/tags/TagDirectoryService.java")
 for token in ["class TagDirectoryService", "repository.listTree()", "getSnapshot()"]:
@@ -154,7 +176,8 @@ for token in [
     if token not in progress:
         errors.append(f"progress missing {token}")
 
-if errors:
-    raise SystemExit("\n".join(errors))
+if __name__ == "__main__":
+    if errors:
+        raise SystemExit("\n".join(errors))
 
-print("module 46 verification passed")
+    print("module 46 verification passed")
