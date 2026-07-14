@@ -33,6 +33,14 @@ public class CustomerRepository {
     return customers.stream().findFirst();
   }
 
+  public Optional<Customer> findById(long id) {
+    List<Customer> customers = jdbcTemplate.query(
+        "SELECT * FROM customers WHERE id = ? LIMIT 1",
+        ROW_MAPPER,
+        id);
+    return customers.stream().findFirst();
+  }
+
   public List<Customer> searchByNickname(String nickname, int limit) {
     return jdbcTemplate.query(
         "SELECT * FROM customers WHERE phone NOT LIKE '%*%' AND nickname LIKE CONCAT('%', ?, '%') ORDER BY last_followup_at DESC LIMIT ?",
