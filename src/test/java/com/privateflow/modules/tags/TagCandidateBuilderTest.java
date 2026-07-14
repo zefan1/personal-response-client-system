@@ -1,6 +1,7 @@
 package com.privateflow.modules.tags;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +17,13 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 class TagCandidateBuilderTest {
+
+  @Test
+  void rejectsNullPurposeExplicitly() {
+    assertThatThrownBy(() -> builder().build(null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("标签候选用途不能为空");
+  }
 
   @Test
   void systemInferenceAppliesCategoryValueAndCommonStateSwitches() {

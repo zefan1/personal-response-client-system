@@ -13,6 +13,7 @@ public class TagCandidateBuilder {
   }
 
   public List<TagCategory> build(TagCandidatePurpose purpose) {
+    requirePurpose(purpose);
     return directoryService.getSnapshot().categories().stream()
         .filter(category -> isCategoryAllowed(purpose, category))
         .map(category -> category.withValues(category.values().stream()
@@ -23,7 +24,14 @@ public class TagCandidateBuilder {
   }
 
   boolean isAllowed(TagCandidatePurpose purpose, TagCategory category, TagValue value) {
+    requirePurpose(purpose);
     return isCategoryAllowed(purpose, category) && isValueAllowed(purpose, value);
+  }
+
+  private void requirePurpose(TagCandidatePurpose purpose) {
+    if (purpose == null) {
+      throw new IllegalArgumentException("标签候选用途不能为空");
+    }
   }
 
   private boolean isCategoryAllowed(TagCandidatePurpose purpose, TagCategory category) {

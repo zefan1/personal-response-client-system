@@ -2,6 +2,7 @@ package com.privateflow.modules.tags;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -12,6 +13,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class TagSelectionValidatorTest {
 
@@ -32,6 +34,7 @@ class TagSelectionValidatorTest {
     assertThat(result.accepted()).isTrue();
     assertThat(result.reasonCode()).isEqualTo("ACCEPTED");
     assertThat(result.message()).isEqualTo("标签选择校验通过");
+    assertThat(result.rejectedInput()).isNull();
     assertThat(result.category()).isEqualTo(category);
     assertThat(result.values()).extracting(TagValue::tagValue).containsExactly("HIGH");
   }
@@ -63,6 +66,25 @@ class TagSelectionValidatorTest {
         TagSelectionContext.empty());
 
     assertRejected(result, "CATEGORY_NOT_FOUND", "标签分类不存在");
+    assertRejectedInput(result, "missing");
+  }
+
+  @Test
+  void rejectsNullPurposeAsStructuredResult() {
+    TagDirectoryService directoryService = mock(TagDirectoryService.class);
+    TagSelectionValidator validator = new TagSelectionValidator(
+        directoryService,
+        new TagCandidateBuilder(directoryService));
+
+    TagSelectionValidationResult result = validator.validateCodes(
+        null,
+        "intent",
+        List.of("HIGH"),
+        TagSelectionContext.empty());
+
+    assertRejected(result, "PURPOSE_REQUIRED", "标签来源或用途不能为空");
+    assertThat(result.rejectedInput()).isNull();
+    verifyNoInteractions(directoryService);
   }
 
   @Test
@@ -76,6 +98,7 @@ class TagSelectionValidatorTest {
         TagCandidatePurpose.MANUAL_ASSIGNMENT, 1L, List.of(11L), TagSelectionContext.empty());
 
     assertRejected(result, "CATEGORY_DISABLED", "标签分类已停用");
+    assertRejectedInput(result, 1L);
   }
 
   @Test
@@ -89,6 +112,7 @@ class TagSelectionValidatorTest {
         TagCandidatePurpose.MANUAL_ASSIGNMENT, 1L, List.of(11L), TagSelectionContext.empty());
 
     assertRejected(result, "CATEGORY_MERGED", "标签分类已合并");
+    assertRejectedInput(result, 1L);
   }
 
   @Test
@@ -104,6 +128,7 @@ class TagSelectionValidatorTest {
         TagSelectionContext.empty());
 
     assertRejected(result, "VALUE_NOT_FOUND", "标签值不存在");
+    assertRejectedInput(result, "MISSING");
   }
 
   @Test
@@ -132,6 +157,7 @@ class TagSelectionValidatorTest {
         TagCandidatePurpose.MANUAL_ASSIGNMENT, 1L, List.of(11L), TagSelectionContext.empty());
 
     assertRejected(result, "VALUE_DISABLED", "标签值已停用");
+    assertRejectedInput(result, 11L);
   }
 
   @Test
@@ -145,6 +171,7 @@ class TagSelectionValidatorTest {
         TagCandidatePurpose.MANUAL_ASSIGNMENT, 1L, List.of(11L), TagSelectionContext.empty());
 
     assertRejected(result, "VALUE_MERGED", "标签值已合并");
+    assertRejectedInput(result, 11L);
   }
 
   @Test
@@ -162,6 +189,7 @@ class TagSelectionValidatorTest {
         TagCandidatePurpose.MANUAL_ASSIGNMENT, 1L, List.of(21L), TagSelectionContext.empty());
 
     assertRejected(result, "VALUE_CATEGORY_MISMATCH", "标签值不属于所选分类");
+    assertRejectedInput(result, 21L);
   }
 
   @Test
@@ -181,6 +209,7 @@ class TagSelectionValidatorTest {
         TagSelectionContext.empty());
 
     assertRejected(result, "VALUE_CATEGORY_MISMATCH", "标签值不属于所选分类");
+    assertRejectedInput(result, "SHARED_CODE");
     assertThat(result.values()).extracting(TagValue::id).containsExactly(21L);
   }
 
@@ -241,6 +270,22 @@ class TagSelectionValidatorTest {
   }
 
   @Test
+  void rejectsDuplicateNullValuesWithoutFallingThroughToMissingValue() {
+    TagCategory category = category(
+        1L, "multi", TagSelectionMode.MULTI, false, true, true, null,
+        new BigDecimal("0.8000"), 1, List.of());
+
+    TagSelectionValidationResult result = validator(category).validateCodes(
+        TagCandidatePurpose.MANUAL_ASSIGNMENT,
+        "multi",
+        Arrays.asList(null, null),
+        TagSelectionContext.empty());
+
+    assertRejected(result, "DUPLICATE_VALUES", "标签值不能重复");
+    assertThat(result.rejectedInput()).isNull();
+  }
+
+  @Test
   void systemInferenceRequiresEvidence() {
     TagSelectionValidationResult result = validateSystem(new TagSelectionContext(
         " ", 2, new BigDecimal("0.9000"), null));
@@ -270,6 +315,18 @@ class TagSelectionValidatorTest {
         "明确证据", 2, new BigDecimal("0.7900"), null));
 
     assertRejected(result, "CONFIDENCE_TOO_LOW", "系统推断置信度未达到分类阈值");
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"-0.0001", "1.0001"})
+  void systemInferenceRejectsConfidenceOutsideUnitInterval(String rawConfidence) {
+    BigDecimal confidence = new BigDecimal(rawConfidence);
+
+    TagSelectionValidationResult result = validateSystem(new TagSelectionContext(
+        "明确证据", 2, confidence, null));
+
+    assertRejected(result, "CONFIDENCE_OUT_OF_RANGE", "系统推断置信度必须在 0 到 1 之间");
+    assertRejectedInput(result, confidence);
   }
 
   @ParameterizedTest
@@ -309,7 +366,12 @@ class TagSelectionValidatorTest {
   private void assertRejected(TagSelectionValidationResult result, String reasonCode, String message) {
     assertThat(result.accepted()).isFalse();
     assertThat(result.reasonCode()).isEqualTo(reasonCode);
-    assertThat(result.message()).isEqualTo(message);
+    assertThat(result.message()).startsWith(message);
+  }
+
+  private void assertRejectedInput(TagSelectionValidationResult result, Object rejectedInput) {
+    assertThat(result.rejectedInput()).isEqualTo(rejectedInput);
+    assertThat(result.message()).contains(String.valueOf(rejectedInput));
   }
 
   private TagCategory category(

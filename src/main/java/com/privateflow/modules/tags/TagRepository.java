@@ -7,6 +7,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -35,8 +36,14 @@ public class TagRepository {
                is_builtin, is_enabled, sort_order, merged_into_id, version, created_at, updated_at
         FROM tag_categories
         ORDER BY sort_order ASC, id ASC
-        """, (rs, rowNum) -> mapCategory(rs, values(rs.getLong("id"))));
-    return categories;
+        """, (rs, rowNum) -> mapCategory(rs, List.of()));
+    Map<Long, List<TagValue>> valuesByCategory = new LinkedHashMap<>();
+    for (TagValue value : allValues()) {
+      valuesByCategory.computeIfAbsent(value.categoryId(), ignored -> new ArrayList<>()).add(value);
+    }
+    return categories.stream()
+        .map(category -> category.withValues(valuesByCategory.getOrDefault(category.id(), List.of())))
+        .toList();
   }
 
   public TagCategoryPage searchCategories(
@@ -477,6 +484,18 @@ public class TagRepository {
         WHERE v.category_id = ?
         ORDER BY v.sort_order ASC, v.id ASC
         """, this::mapValue, categoryId);
+  }
+
+  private List<TagValue> allValues() {
+    return jdbcTemplate.query("""
+        SELECT v.id, v.category_id, c.category_key, v.tag_value, v.display_name,
+               v.meaning, v.applicable_when, v.not_applicable_when,
+               v.positive_examples, v.negative_examples, v.synonyms_json,
+               v.system_selectable, v.manual_selectable, v.is_enabled,
+               v.sort_order, v.merged_into_id, v.version, v.created_at, v.updated_at
+        FROM tag_values v JOIN tag_categories c ON c.id = v.category_id
+        ORDER BY c.sort_order ASC, c.id ASC, v.sort_order ASC, v.id ASC
+        """, this::mapValue);
   }
 
   private TagCategory mapCategory(ResultSet rs, List<TagValue> values) throws SQLException {

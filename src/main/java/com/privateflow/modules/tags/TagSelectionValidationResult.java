@@ -7,7 +7,8 @@ public record TagSelectionValidationResult(
     TagSelectionValidationReason reason,
     String message,
     TagCategory category,
-    List<TagValue> values
+    List<TagValue> values,
+    Object rejectedInput
 ) {
 
   public TagSelectionValidationResult {
@@ -19,25 +20,28 @@ public record TagSelectionValidationResult(
   }
 
   static TagSelectionValidationResult accepted(TagCategory category, List<TagValue> values) {
-    return create(TagSelectionValidationReason.ACCEPTED, category, values);
+    return create(TagSelectionValidationReason.ACCEPTED, category, values, null);
   }
 
   static TagSelectionValidationResult rejected(
       TagSelectionValidationReason reason,
       TagCategory category,
-      List<TagValue> values) {
-    return create(reason, category, values);
+      List<TagValue> values,
+      Object rejectedInput) {
+    return create(reason, category, values, rejectedInput);
   }
 
   private static TagSelectionValidationResult create(
       TagSelectionValidationReason reason,
       TagCategory category,
-      List<TagValue> values) {
+      List<TagValue> values,
+      Object rejectedInput) {
     return new TagSelectionValidationResult(
         reason == TagSelectionValidationReason.ACCEPTED,
         reason,
-        reason.message(),
+        rejectedInput == null ? reason.message() : reason.message() + "，失败输入：" + rejectedInput,
         category,
-        values);
+        values,
+        rejectedInput);
   }
 }

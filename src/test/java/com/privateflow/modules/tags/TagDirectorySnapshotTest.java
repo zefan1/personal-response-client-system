@@ -13,6 +13,48 @@ import org.junit.jupiter.api.Test;
 class TagDirectorySnapshotTest {
 
   @Test
+  void rejectsDuplicateCategoryId() {
+    assertThatThrownBy(() -> TagDirectorySnapshot.from(
+        List.of(category(1L, "first", List.of()), category(1L, "second", List.of())),
+        Instant.parse("2026-07-14T02:00:00Z")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("标签目录存在重复分类 ID：1");
+  }
+
+  @Test
+  void rejectsDuplicateCategoryKey() {
+    assertThatThrownBy(() -> TagDirectorySnapshot.from(
+        List.of(category(1L, "duplicate", List.of()), category(2L, "duplicate", List.of())),
+        Instant.parse("2026-07-14T02:00:00Z")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("标签目录存在重复分类编码：duplicate");
+  }
+
+  @Test
+  void rejectsDuplicateValueId() {
+    TagValue first = value(11L, 1L, "first", "FIRST", List.of());
+    TagValue second = value(11L, 2L, "second", "SECOND", List.of());
+
+    assertThatThrownBy(() -> TagDirectorySnapshot.from(
+        List.of(category(1L, "first", List.of(first)), category(2L, "second", List.of(second))),
+        Instant.parse("2026-07-14T02:00:00Z")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("标签目录存在重复标签值 ID：11");
+  }
+
+  @Test
+  void rejectsDuplicateValueCodeWithinCategory() {
+    TagValue first = value(11L, 1L, "intent", "DUPLICATE", List.of());
+    TagValue second = value(12L, 1L, "intent", "DUPLICATE", List.of());
+
+    assertThatThrownBy(() -> TagDirectorySnapshot.from(
+        List.of(category(1L, "intent", List.of(first, second))),
+        Instant.parse("2026-07-14T02:00:00Z")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("标签目录存在重复分类值编码：intent/DUPLICATE");
+  }
+
+  @Test
   void createsDeeplyImmutableTreeAndIndexesByIdKeyAndCode() {
     List<String> synonyms = new ArrayList<>(List.of("重点客户"));
     TagValue value = value(11L, 1L, "intent_level", "HIGH", synonyms);

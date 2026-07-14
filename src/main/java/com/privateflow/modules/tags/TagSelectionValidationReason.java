@@ -5,6 +5,7 @@ public enum TagSelectionValidationReason {
   CATEGORY_NOT_FOUND("标签分类不存在"),
   CATEGORY_DISABLED("标签分类已停用"),
   CATEGORY_MERGED("标签分类已合并"),
+  PURPOSE_REQUIRED("标签来源或用途不能为空"),
   VALUE_NOT_FOUND("标签值不存在"),
   VALUE_DISABLED("标签值已停用"),
   VALUE_MERGED("标签值已合并"),
@@ -16,6 +17,7 @@ public enum TagSelectionValidationReason {
   EVIDENCE_REQUIRED("系统推断必须提供非空证据"),
   EVIDENCE_MESSAGES_INSUFFICIENT("有效证据消息数未达到分类要求"),
   CONFIDENCE_REQUIRED("系统推断必须提供置信度"),
+  CONFIDENCE_OUT_OF_RANGE("系统推断置信度必须在 0 到 1 之间"),
   CONFIDENCE_TOO_LOW("系统推断置信度未达到分类阈值"),
   BUSINESS_BASIS_REQUIRED("当前来源必须提供非空业务依据");
 

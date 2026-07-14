@@ -5,9 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 class TagRepositoryTest {
@@ -111,6 +114,33 @@ class TagRepositoryTest {
   }
 
   @Test
+  void listTreeLoadsAllCategoriesAndValuesWithExactlyTwoQueries() {
+    jdbcTemplate.update("""
+        INSERT INTO tag_categories (id, category_key, category_name, sort_order) VALUES
+          (1, 'first', '第一分类', 1),
+          (2, 'second', '第二分类', 2),
+          (3, 'third', '第三分类', 3)
+        """);
+    jdbcTemplate.update("""
+        INSERT INTO tag_values (id, category_id, tag_value, display_name, sort_order) VALUES
+          (11, 1, 'FIRST_B', '第一分类 B', 2),
+          (12, 1, 'FIRST_A', '第一分类 A', 1),
+          (21, 2, 'SECOND_A', '第二分类 A', 1),
+          (31, 3, 'THIRD_A', '第三分类 A', 1)
+        """);
+    CountingJdbcTemplate countingJdbcTemplate = new CountingJdbcTemplate(jdbcTemplate.getDataSource());
+    TagRepository countedRepository = new TagRepository(countingJdbcTemplate, new ObjectMapper());
+
+    List<TagCategory> tree = countedRepository.listTree();
+
+    assertThat(tree).extracting(TagCategory::categoryKey).containsExactly("first", "second", "third");
+    assertThat(tree.get(0).values()).extracting(TagValue::tagValue).containsExactly("FIRST_A", "FIRST_B");
+    assertThat(tree.get(1).values()).extracting(TagValue::tagValue).containsExactly("SECOND_A");
+    assertThat(tree.get(2).values()).extracting(TagValue::tagValue).containsExactly("THIRD_A");
+    assertThat(countingJdbcTemplate.queryCount()).isEqualTo(2);
+  }
+
+  @Test
   void createsAndUpdatesCompleteMetadataWithoutHardcodedLimits() {
     TagCategoryRequest categoryRequest = new TagCategoryRequest(
         "服务偏好",
@@ -174,5 +204,30 @@ class TagRepositoryTest {
     assertThat(updated.displayName()).isEqualTo("安静沟通");
     assertThat(updated.systemSelectable()).isFalse();
     assertThat(updated.version()).isEqualTo(1);
+  }
+
+  private static final class CountingJdbcTemplate extends JdbcTemplate {
+
+    private final AtomicInteger queryCount = new AtomicInteger();
+
+    private CountingJdbcTemplate(DataSource dataSource) {
+      super(dataSource);
+    }
+
+    @Override
+    public <T> List<T> query(String sql, RowMapper<T> rowMapper) {
+      queryCount.incrementAndGet();
+      return super.query(sql, rowMapper);
+    }
+
+    @Override
+    public <T> List<T> query(String sql, RowMapper<T> rowMapper, Object... args) {
+      queryCount.incrementAndGet();
+      return super.query(sql, rowMapper, args);
+    }
+
+    private int queryCount() {
+      return queryCount.get();
+    }
   }
 }

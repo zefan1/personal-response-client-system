@@ -3,6 +3,7 @@ package com.privateflow.modules.tags;
 import com.privateflow.common.events.ConfigChangedEvent;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +18,7 @@ public class TagDirectoryService {
   private final TagRepository repository;
   private final TagConfigProvider configProvider;
   private final AtomicReference<TagDirectorySnapshot> current = new AtomicReference<>();
+  private final AtomicReference<CompletableFuture<TagDirectorySnapshot>> initialLoad = new AtomicReference<>();
   private final Object refreshLock = new Object();
 
   public TagDirectoryService(TagRepository repository, TagConfigProvider configProvider) {
@@ -25,8 +27,30 @@ public class TagDirectoryService {
   }
 
   public TagDirectorySnapshot getSnapshot() {
-    TagDirectorySnapshot snapshot = current.get();
-    return snapshot == null ? refresh() : snapshot;
+    while (true) {
+      TagDirectorySnapshot snapshot = current.get();
+      if (snapshot != null) {
+        return snapshot;
+      }
+      CompletableFuture<TagDirectorySnapshot> inFlight = initialLoad.get();
+      if (inFlight != null) {
+        return inFlight.join();
+      }
+      CompletableFuture<TagDirectorySnapshot> started = new CompletableFuture<>();
+      if (!initialLoad.compareAndSet(null, started)) {
+        continue;
+      }
+      try {
+        TagDirectorySnapshot loaded = refresh();
+        started.complete(loaded);
+        return loaded;
+      } catch (RuntimeException | Error ex) {
+        started.completeExceptionally(ex);
+        throw ex;
+      } finally {
+        initialLoad.compareAndSet(started, null);
+      }
+    }
   }
 
   public TagDirectorySnapshot refresh() {

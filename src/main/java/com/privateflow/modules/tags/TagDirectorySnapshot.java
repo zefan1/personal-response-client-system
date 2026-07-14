@@ -28,13 +28,28 @@ public final class TagDirectorySnapshot {
     Map<TagValueCode, TagValue> nextValuesByCategoryAndCode = new LinkedHashMap<>();
     Map<String, List<TagValue>> nextValuesByCode = new LinkedHashMap<>();
     for (TagCategory category : categories) {
-      nextCategoriesById.put(category.id(), category);
-      nextCategoriesByKey.put(category.categoryKey(), category);
+      putUnique(
+          nextCategoriesById,
+          category.id(),
+          category,
+          "标签目录存在重复分类 ID：" + category.id());
+      putUnique(
+          nextCategoriesByKey,
+          category.categoryKey(),
+          category,
+          "标签目录存在重复分类编码：" + category.categoryKey());
       for (TagValue value : category.values()) {
-        nextValuesById.put(value.id(), value);
-        nextValuesByCategoryAndCode.put(
-            new TagValueCode(category.categoryKey(), value.tagValue()),
-            value);
+        putUnique(
+            nextValuesById,
+            value.id(),
+            value,
+            "标签目录存在重复标签值 ID：" + value.id());
+        TagValueCode valueCode = new TagValueCode(category.categoryKey(), value.tagValue());
+        putUnique(
+            nextValuesByCategoryAndCode,
+            valueCode,
+            value,
+            "标签目录存在重复分类值编码：" + valueCode.categoryKey() + "/" + valueCode.valueCode());
         nextValuesByCode.computeIfAbsent(value.tagValue(), ignored -> new ArrayList<>()).add(value);
       }
     }
@@ -120,5 +135,11 @@ public final class TagDirectorySnapshot {
     Map<K, List<V>> copy = new LinkedHashMap<>();
     source.forEach((key, values) -> copy.put(key, List.copyOf(values)));
     return Collections.unmodifiableMap(copy);
+  }
+
+  private static <K, V> void putUnique(Map<K, V> target, K key, V value, String message) {
+    if (target.putIfAbsent(key, value) != null) {
+      throw new IllegalArgumentException(message);
+    }
   }
 }
