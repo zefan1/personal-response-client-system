@@ -191,6 +191,9 @@ public class TagAdminService {
     int sortOrder = request.sortOrder() == null ? repository.valueCount(category.id()) + 1 : request.sortOrder();
     try {
       long id = repository.createValue(tagValue, request, sortOrder);
+      if (id == 0L) {
+        throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签分类已停用或已合并，不能创建标签值");
+      }
       publishAfterCommit("TAG_VALUE_CREATE", "value " + tagValue, false);
       return valueDetail(id);
     } catch (DuplicateKeyException ex) {

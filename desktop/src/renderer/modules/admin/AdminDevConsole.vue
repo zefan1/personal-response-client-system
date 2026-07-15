@@ -403,6 +403,8 @@ const availableTagCategoryIds = ref<number[]>([]);
 
 const TAG_CATEGORIES_PATH = '/admin/api/v1/tags/categories';
 const TAG_CATEGORY_PAGE_SIZE = 100;
+let tagCategoryRequestSequence = 0;
+let pendingOperations = 0;
 
 for (const section of sections) {
   for (const action of section.actions) {
@@ -432,13 +434,15 @@ async function loadSection(section: AdminSection) {
 }
 
 async function runRead(read: ReadEndpoint) {
+  const requestSequence = read.path === TAG_CATEGORIES_PATH ? ++tagCategoryRequestSequence : null;
   await runWithNotice(async () => {
     if (read.path === TAG_CATEGORIES_PATH) {
       clearAvailableTagCategories();
     }
     const response = read.path === TAG_CATEGORIES_PATH
-      ? await loadAvailableTagCategories()
+      ? await loadAvailableTagCategories(requestSequence as number)
       : await getJson<unknown>(read.path);
+    if (response == null) return;
     readResults[read.path] = response;
     if (read.path === TAG_CATEGORIES_PATH) {
       updateAvailableTagCategory(response);
@@ -446,7 +450,7 @@ async function runRead(read: ReadEndpoint) {
   }, `${read.name} 已刷新`);
 }
 
-async function loadAvailableTagCategories(): Promise<ApiResponse<unknown>> {
+async function loadAvailableTagCategories(requestSequence: number): Promise<ApiResponse<unknown> | null> {
   let page = 1;
   let totalPages = 1;
   let lastResponse: ApiResponse<unknown> | null = null;
@@ -460,13 +464,19 @@ async function loadAvailableTagCategories(): Promise<ApiResponse<unknown>> {
       size: String(TAG_CATEGORY_PAGE_SIZE)
     });
     const response = await getJson<unknown>(`${TAG_CATEGORIES_PATH}?${query.toString()}`);
+    if (requestSequence !== tagCategoryRequestSequence) return null;
     if (!response.success) {
       throw new Error(response.message || '标签分类读取失败');
     }
     lastResponse = response;
     const data = asRecord(response.data);
-    categories.push(...extractCategoryItems(data));
-    totalPages = readTotalPages(data);
+    const pageItems = extractCategoryItems(data);
+    const pageTotalPages = readTotalPages(data);
+    if (pageItems == null || pageTotalPages == null) {
+      throw new Error('标签分类分页数据不完整');
+    }
+    categories.push(...pageItems);
+    totalPages = pageTotalPages;
     page += 1;
   }
 
@@ -508,6 +518,7 @@ async function runAction(action: ActionEndpoint) {
 }
 
 async function runWithNotice(task: () => Promise<void>, successMessage: string) {
+  pendingOperations += 1;
   loading.value = true;
   notice.value = '';
   try {
@@ -518,7 +529,8 @@ async function runWithNotice(task: () => Promise<void>, successMessage: string) 
     noticeKind.value = 'error';
     notice.value = error instanceof Error ? error.message : String(error);
   } finally {
-    loading.value = false;
+    pendingOperations -= 1;
+    loading.value = pendingOperations > 0;
   }
 }
 
@@ -596,7 +608,7 @@ function clearAvailableTagCategories() {
 
 function availableTagCategoryIdsFromResponse(response: ApiResponse<unknown>): number[] {
   const data = asRecord(response.data);
-  return extractCategoryItems(data)
+  return (extractCategoryItems(data) ?? [])
     .map((candidate) => {
       const category = asRecord(candidate);
       if (!category) return null;
@@ -608,19 +620,19 @@ function availableTagCategoryIdsFromResponse(response: ApiResponse<unknown>): nu
     .filter((id): id is number => id != null);
 }
 
-function extractCategoryItems(data: Record<string, unknown> | null): unknown[] {
-  if (!data) return [];
+function extractCategoryItems(data: Record<string, unknown> | null): unknown[] | null {
+  if (!data) return null;
   const page = asRecord(data.page);
   const candidates = [data.items, data.categories, page?.items, page?.categories];
-  return candidates.find(Array.isArray) as unknown[] | undefined ?? [];
+  return candidates.find(Array.isArray) as unknown[] | undefined ?? null;
 }
 
-function readTotalPages(data: Record<string, unknown> | null): number {
-  if (!data) return 1;
+function readTotalPages(data: Record<string, unknown> | null): number | null {
+  if (!data) return null;
   const page = asRecord(data.page);
   const value = data.totalPages ?? page?.totalPages;
   const totalPages = Number(value);
-  return Number.isInteger(totalPages) && totalPages > 0 ? totalPages : 1;
+  return Number.isInteger(totalPages) && totalPages > 0 ? totalPages : null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

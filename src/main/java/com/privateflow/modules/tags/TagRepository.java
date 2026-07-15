@@ -378,14 +378,16 @@ public class TagRepository {
   }
 
   public long createValue(String tagValue, TagValueRequest request, int sortOrder) {
-    jdbcTemplate.update("""
+    int inserted = jdbcTemplate.update("""
         INSERT INTO tag_values (
           category_id, tag_value, display_name, meaning, applicable_when,
           not_applicable_when, positive_examples, negative_examples, synonyms_json,
           system_selectable, manual_selectable, is_enabled, sort_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        )
+        SELECT c.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        FROM tag_categories c
+        WHERE c.id = ? AND c.is_enabled = 1 AND c.merged_into_id IS NULL
         """,
-        request.categoryId(),
         tagValue,
         request.displayName().trim(),
         defaultString(request.meaning(), ""),
@@ -397,7 +399,11 @@ public class TagRepository {
         bool(request.systemSelectable(), false),
         bool(request.manualSelectable(), true),
         bool(request.isEnabled(), true),
-        sortOrder);
+        sortOrder,
+        request.categoryId());
+    if (inserted == 0) {
+      return 0L;
+    }
     Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     return id == null ? 0L : id;
   }

@@ -153,6 +153,21 @@ class TagAdminServiceTest {
   }
 
   @Test
+  void createValueRejectsCategoryThatBecameUnavailableBeforeInsert() {
+    when(repository.findCategory(1L)).thenReturn(Optional.of(category(true, List.of())));
+    when(repository.valueCount(1L)).thenReturn(0);
+    when(repository.valueExists(eq(1L), anyString())).thenReturn(false);
+    when(repository.createValue(anyString(), any(TagValueRequest.class), anyInt())).thenReturn(0L);
+
+    assertThatThrownBy(() -> service.createValue(
+        new TagValueRequest(1L, null, "新标签", true, 3)))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("标签分类已停用或已合并，不能创建标签值")
+        .extracting(ex -> ((ApiException) ex).getErrorCode())
+        .isEqualTo(ApiErrorCodes.BAD_REQUEST);
+  }
+
+  @Test
   void valueCodeIsGeneratedByBackendAndClientCodeIsIgnored() {
     TagValue created = value();
     when(repository.findCategory(1L)).thenReturn(Optional.of(category(true, List.of())));

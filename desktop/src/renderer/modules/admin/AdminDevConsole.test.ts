@@ -235,6 +235,65 @@ describe('AdminDevConsole', () => {
     app.unmount();
   });
 
+  it('does not let an older category refresh overwrite a newer refresh', async () => {
+    let categoryRequestCount = 0;
+    let resolveFirstRequest: ((response: unknown) => void) | undefined;
+    apiMocks.getJson.mockImplementation(async (path: string) => {
+      if (!path.startsWith('/admin/api/v1/tags/categories')) {
+        return { success: true, data: { items: [] }, errorCode: null, message: null };
+      }
+      categoryRequestCount += 1;
+      if (categoryRequestCount === 1) {
+        return new Promise((resolve) => {
+          resolveFirstRequest = resolve;
+        });
+      }
+      return {
+        success: true,
+        data: { items: [{ id: 73, isEnabled: true, mergedIntoId: null }], page: 1, totalPages: 1 },
+        errorCode: null,
+        message: null
+      };
+    });
+    const { app, host } = await mountDevConsole();
+
+    findButton(host, '跟进规则与标签').click();
+    findButton(host, '跟进规则与标签').click();
+    await flushRequests();
+    const panel = findActionPanel(host, '创建标签值');
+    expect(JSON.parse((panel.querySelector('textarea') as HTMLTextAreaElement).value).categoryId).toBe(73);
+
+    resolveFirstRequest?.({
+      success: true,
+      data: { items: [{ id: 72, isEnabled: true, mergedIntoId: null }], page: 1, totalPages: 1 },
+      errorCode: null,
+      message: null
+    });
+    await flushRequests();
+    expect(JSON.parse((panel.querySelector('textarea') as HTMLTextAreaElement).value).categoryId).toBe(73);
+
+    app.unmount();
+  });
+
+  it('does not publish categories from an incomplete successful page response', async () => {
+    apiMocks.getJson.mockImplementation(async (path: string) => path.startsWith('/admin/api/v1/tags/categories')
+      ? {
+          success: true,
+          data: { items: [{ id: 72, isEnabled: true, mergedIntoId: null }], page: 1 },
+          errorCode: null,
+          message: null
+        }
+      : { success: true, data: { items: [] }, errorCode: null, message: null });
+    const { app, host } = await mountDevConsole();
+
+    findButton(host, '跟进规则与标签').click();
+    await flushRequests();
+    const panel = findActionPanel(host, '创建标签值');
+    expect(JSON.parse((panel.querySelector('textarea') as HTMLTextAreaElement).value).categoryId).toBeNull();
+
+    app.unmount();
+  });
+
   it('resolves an arbitrary category id from the current backend candidates before submit', async () => {
     apiMocks.getJson.mockImplementation(async (path: string) => ({
       success: true,

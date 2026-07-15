@@ -123,6 +123,22 @@ class TagRepositoryTest {
   }
 
   @Test
+  void createValueSkipsDisabledOrMergedCategoriesAtInsertTime() {
+    jdbcTemplate.update("""
+        INSERT INTO tag_categories (id, category_key, category_name, is_enabled, merged_into_id)
+        VALUES (1, 'disabled', 'Disabled', 0, NULL), (2, 'merged', 'Merged', 1, 9)
+        """);
+    TagValueRequest disabledRequest = new TagValueRequest(
+        1L, null, "停用标签", null, null, null, null, null, null, false, true, true, 1);
+    TagValueRequest mergedRequest = new TagValueRequest(
+        2L, null, "合并标签", null, null, null, null, null, null, false, true, true, 1);
+
+    assertThat(repository.createValue("DISABLED", disabledRequest, 1)).isZero();
+    assertThat(repository.createValue("MERGED", mergedRequest, 1)).isZero();
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tag_values", Integer.class)).isZero();
+  }
+
+  @Test
   void listTreeLoadsAllCategoriesAndValuesWithExactlyTwoQueries() {
     jdbcTemplate.update("""
         INSERT INTO tag_categories (id, category_key, category_name, sort_order) VALUES
