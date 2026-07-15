@@ -226,6 +226,18 @@
             </div>
             <button class="secondary small" type="button" @click="openForm('llmEnv')">新增环境</button>
           </div>
+          <div class="ops-form-grid">
+            <label>
+              <span class="ops-label-title">测试线索类型</span>
+              <select v-model="llmProfileTestLeadType">
+                <option v-for="option in LLM_PROFILE_LEAD_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <label class="ops-form-span-2">
+              <span class="ops-label-title">档案分析测试消息</span>
+              <textarea v-model="llmProfileTestMessage" rows="4" placeholder="输入客户真实原话"></textarea>
+            </label>
+          </div>
           <div v-for="env in llmEnvironments" :key="env.id" class="ops-env-card">
             <div>
               <strong>{{ env.envName }}</strong>
@@ -237,11 +249,31 @@
                 {{ isActiveEnvironment(env) ? '当前使用' : '启用' }}
               </button>
               <button class="secondary small" type="button" @click="openForm('llmEnv', env)">编辑</button>
-              <button class="secondary small" type="button" @click="testLlmEnvironment(env)">测试连接</button>
+              <button class="secondary small" type="button" :disabled="loading || !llmProfileTestMessage.trim()" @click="testLlmEnvironment(env)">测试档案分析</button>
               <button class="secondary small danger" type="button" :disabled="!canDeleteEnvironment('llm', env)" @click="confirmDeleteEnvironment('llm', env)">删除</button>
             </div>
           </div>
           <p v-if="!llmEnvironments.length" class="ops-empty">暂无 LLM 环境，请先新增。</p>
+          <div v-if="Object.keys(llmProfileTestResults).length" class="ops-card-grid">
+            <article v-for="(result, key) in llmProfileTestResults" :key="key" class="ops-content-card">
+              <strong>{{ result.environmentName || key }}</strong>
+              <span>{{ result.model || '未知模型' }} · {{ result.responseTimeMs ? `${result.responseTimeMs}ms` : '已完成' }}</span>
+              <p>{{ summarizeSkillTest(result) }}</p>
+              <div v-if="result.profileAnalysis" class="ops-profile-test-details">
+                <p v-for="(update, field) in profileFieldUpdates(result)" :key="`llm-field-${String(field)}`">
+                  {{ profileFieldLine(String(field), update) }}
+                </p>
+                <div
+                  v-for="(decision, index) in profileTagDecisions(result)"
+                  :key="`llm-decision-${decision.categoryCode || index}`"
+                  class="ops-profile-test-decision"
+                >
+                  <p>{{ profileDecisionLine(decision) }}</p>
+                  <small>依据：{{ decision.evidence || '未提供' }}</small>
+                </div>
+              </div>
+            </article>
+          </div>
         </article>
 
         <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
@@ -1813,6 +1845,7 @@ const LEAD_TYPE_OPTIONS = [
   { label: '线索客资', value: 'XIAN_SUO' },
   { label: '待确认', value: 'PENDING' }
 ];
+const LLM_PROFILE_LEAD_TYPE_OPTIONS = LEAD_TYPE_OPTIONS.filter((option) => option.value !== 'GENERAL');
 
 const CUSTOMER_FIELD_LABELS: Record<string, string> = {
   phone: '手机号',
@@ -1947,6 +1980,8 @@ const skillSceneFilter = ref('');
 const skillLeadTypeFilter = ref('');
 const skillAnalyticsDays = ref(7);
 const skillTestMessage = ref('请基于当前客户状态生成一条跟进回复');
+const llmProfileTestLeadType = ref('PENDING');
+const llmProfileTestMessage = ref('客户明确说想了解适合自己的改善方案');
 const selectedPromptType = ref('format');
 const datasourceColumns = ref<Array<AnyRecord | string>>([]);
 const datasourceColumnStatus = ref<AnyRecord | null>(null);
@@ -2019,6 +2054,7 @@ const skillTestResults = reactive<Record<string, AnyRecord>>({});
 const skillEnvironments = ref<AnyRecord[]>([]);
 const imageEnvironments = ref<AnyRecord[]>([]);
 const llmEnvironments = ref<AnyRecord[]>([]);
+const llmProfileTestResults = reactive<Record<string, AnyRecord>>({});
 const llmRoutes = ref<AnyRecord[]>([]);
 const llmRouteScenes = ref<string[]>([]);
 const llmAnalytics = ref<AnyRecord | null>(null);
@@ -3910,9 +3946,24 @@ async function testImageEnvironment(env: AnyRecord) {
 
 async function testLlmEnvironment(env: AnyRecord) {
   await runWithNotice(async () => {
-    await postJson(`/admin/api/v1/llm-environments/${env.id}/test`, {});
+    const response = recordFromResponse(await postJson<unknown>(`/admin/api/v1/llm-environments/${env.id}/test`, {
+      scene: 'PROFILE_EXTRACTION',
+      leadType: llmProfileTestLeadType.value,
+      testMessage: llmProfileTestMessage.value.trim()
+    }));
+    if (response.success !== true) {
+      const detail = [response.errorMessage, response.suggestion].filter(Boolean).join('；');
+      throw new Error(detail || 'LLM 档案分析测试失败');
+    }
+    const result = response.result && typeof response.result === 'object' ? response.result as AnyRecord : {};
+    llmProfileTestResults[String(env.id)] = {
+      ...result,
+      environmentName: env.envName || `#${env.id}`,
+      responseTimeMs: response.elapsedMs,
+      success: response.success
+    };
     await loadSkillAi();
-  }, 'LLM 测试完成');
+  }, 'LLM 档案分析测试完成');
 }
 
 async function selectDatasource(item: AnyRecord) {

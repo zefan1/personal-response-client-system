@@ -19,6 +19,10 @@ import com.privateflow.modules.skill.ProfileAnalysisContext;
 import com.privateflow.modules.skill.ProfileAnalysisResult;
 import com.privateflow.modules.skill.ProfileUpdates;
 import com.privateflow.modules.skill.SkillGatewayService;
+import com.privateflow.modules.skill.TagAnalysisAction;
+import com.privateflow.modules.skill.TagAnalysisDecision;
+import com.privateflow.modules.skill.TagAnalysisResultType;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -59,13 +63,23 @@ class ProfileExtractionClientTest {
   }
 
   @Test
-  void usesLlmProfileUpdatesWhenAvailable() {
+  void usesCompleteLlmProfileAnalysisWhenAvailable() {
     ProfileUpdates llmUpdates = new ProfileUpdates(Map.of("bodyConcerns", new FieldUpdate("腹直肌分离", "HIGH")));
-    when(llmProfileExtractionService.tryExtract(any(ProfileExtractRequest.class))).thenReturn(Optional.of(llmUpdates));
+    TagAnalysisDecision llmDecision = new TagAnalysisDecision(
+        "custom_goal",
+        List.of("GOAL_B"),
+        new BigDecimal("0.95"),
+        "客户明确表达目标",
+        TagAnalysisResultType.UPDATE,
+        TagAnalysisAction.ADD);
+    ProfileAnalysisResult llmResult = new ProfileAnalysisResult(llmUpdates, List.of(llmDecision));
+    when(llmProfileExtractionService.tryExtract(any(ProfileExtractRequest.class))).thenReturn(Optional.of(llmResult));
 
     ProfileAnalysisResult result = client.extract("客户担心腹直肌", customer(), "keeper");
 
+    assertThat(result).isSameAs(llmResult);
     assertThat(result.profileUpdates().fields()).containsKey("bodyConcerns");
+    assertThat(result.tagDecisions()).containsExactly(llmDecision);
     verify(skillGatewayService, never()).extractProfile(any());
   }
 
@@ -73,6 +87,21 @@ class ProfileExtractionClientTest {
   void fallsBackToSkillWhenLlmDisabledOrFails() {
     ProfileUpdates skillUpdates = new ProfileUpdates(Map.of("intentLevel", new FieldUpdate("HIGH", "MEDIUM")));
     when(llmProfileExtractionService.tryExtract(any(ProfileExtractRequest.class))).thenReturn(Optional.empty());
+    when(llmProfileExtractionService.fallbackToSkill()).thenReturn(true);
+    when(skillGatewayService.extractProfile(any(ProfileExtractRequest.class)))
+        .thenReturn(new ProfileAnalysisResult(skillUpdates, List.of()));
+
+    ProfileAnalysisResult result = client.extract("客户想到店评估", customer(), "keeper");
+
+    assertThat(result.profileUpdates().fields()).containsKey("intentLevel");
+    verify(skillGatewayService).extractProfile(any(ProfileExtractRequest.class));
+  }
+
+  @Test
+  void fallsBackToSkillWhenLlmRoutingThrows() {
+    ProfileUpdates skillUpdates = new ProfileUpdates(Map.of("intentLevel", new FieldUpdate("HIGH", "MEDIUM")));
+    when(llmProfileExtractionService.tryExtract(any(ProfileExtractRequest.class)))
+        .thenThrow(new IllegalStateException("broken LLM route"));
     when(llmProfileExtractionService.fallbackToSkill()).thenReturn(true);
     when(skillGatewayService.extractProfile(any(ProfileExtractRequest.class)))
         .thenReturn(new ProfileAnalysisResult(skillUpdates, List.of()));

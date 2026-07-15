@@ -7,7 +7,6 @@ import com.privateflow.modules.profile.config.ProfileConfigProvider;
 import com.privateflow.modules.profile.infra.ProfileFieldRegistry;
 import com.privateflow.modules.skill.ProfileExtractRequest;
 import com.privateflow.modules.skill.ProfileAnalysisResult;
-import com.privateflow.modules.skill.ProfileUpdates;
 import com.privateflow.modules.skill.SkillGatewayService;
 import java.util.List;
 import org.slf4j.Logger;
@@ -59,9 +58,15 @@ public class ProfileExtractionClient {
           targetFields,
           caller,
           analysisContext);
-      java.util.Optional<ProfileUpdates> llmUpdates = llmProfileExtractionService.tryExtract(request);
-      if (llmUpdates.isPresent()) {
-        return new ProfileAnalysisResult(llmUpdates.orElseThrow(), List.of());
+      java.util.Optional<ProfileAnalysisResult> llmAnalysis;
+      try {
+        llmAnalysis = llmProfileExtractionService.tryExtract(request);
+      } catch (RuntimeException ex) {
+        log.warn("direct LLM profile extract failed, fallback decision continues, phone={}", customer.getPhone());
+        llmAnalysis = java.util.Optional.empty();
+      }
+      if (llmAnalysis.isPresent()) {
+        return llmAnalysis.orElseThrow();
       }
       if (!llmProfileExtractionService.fallbackToSkill()) {
         return ProfileAnalysisResult.empty();

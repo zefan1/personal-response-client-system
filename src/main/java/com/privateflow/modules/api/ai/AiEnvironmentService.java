@@ -12,18 +12,27 @@ import com.privateflow.modules.image.config.ImageConfig;
 import com.privateflow.modules.image.config.ImageConfigProvider;
 import com.privateflow.modules.image.parser.RecognitionResultParser;
 import com.privateflow.modules.llm.LlmConfig;
+import com.privateflow.modules.llm.LlmProfileExtractionService;
+import com.privateflow.modules.llm.LlmProfileExtractionTestResult;
 import com.privateflow.modules.llm.LlmResponse;
+import com.privateflow.modules.llm.LlmScene;
 import com.privateflow.modules.llm.LlmService;
+import com.privateflow.modules.profile.config.ProfileConfigProvider;
+import com.privateflow.modules.profile.service.ProfileAnalysisContextBuilder;
+import com.privateflow.modules.skill.ProfileAnalysisContext;
+import com.privateflow.modules.skill.ProfileExtractRequest;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import javax.imageio.ImageIO;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +49,9 @@ public class AiEnvironmentService {
   private final ObjectProvider<ConfigurableImageRecognitionClient> imageTestClientProvider;
   private final RecognitionResultParser recognitionResultParser;
   private final LlmService llmService;
+  private final ProfileAnalysisContextBuilder profileContextBuilder;
+  private final ProfileConfigProvider profileConfigProvider;
+  private final LlmProfileExtractionService profileExtractionService;
 
   public AiEnvironmentService(
       AiEnvironmentRepository repository,
@@ -49,6 +61,31 @@ public class AiEnvironmentService {
       ObjectProvider<ConfigurableImageRecognitionClient> imageTestClientProvider,
       RecognitionResultParser recognitionResultParser,
       LlmService llmService) {
+    this(
+        repository,
+        eventPublisher,
+        wsPushService,
+        imageConfigProvider,
+        imageTestClientProvider,
+        recognitionResultParser,
+        llmService,
+        null,
+        null,
+        null);
+  }
+
+  @Autowired
+  public AiEnvironmentService(
+      AiEnvironmentRepository repository,
+      ApplicationEventPublisher eventPublisher,
+      WsPushService wsPushService,
+      ImageConfigProvider imageConfigProvider,
+      ObjectProvider<ConfigurableImageRecognitionClient> imageTestClientProvider,
+      RecognitionResultParser recognitionResultParser,
+      LlmService llmService,
+      ProfileAnalysisContextBuilder profileContextBuilder,
+      ProfileConfigProvider profileConfigProvider,
+      LlmProfileExtractionService profileExtractionService) {
     this.repository = repository;
     this.eventPublisher = eventPublisher;
     this.wsPushService = wsPushService;
@@ -56,6 +93,9 @@ public class AiEnvironmentService {
     this.imageTestClientProvider = imageTestClientProvider;
     this.recognitionResultParser = recognitionResultParser;
     this.llmService = llmService;
+    this.profileContextBuilder = profileContextBuilder;
+    this.profileConfigProvider = profileConfigProvider;
+    this.profileExtractionService = profileExtractionService;
   }
 
   public List<AiEnvironment> list(AiEnvironmentType type) {
@@ -163,6 +203,70 @@ public class AiEnvironmentService {
     }
     repository.markLlmTest(id, false);
     return new ImageEnvironmentTestResponse(false, response.elapsedMs(), null, response.errorCode(), response.message(), "请检查 baseUrl、API Key、模型名和网络连通性");
+  }
+
+  public ImageEnvironmentTestResponse testLlm(long id, LlmEnvironmentTestRequest request) {
+    if (request == null || request.scene() == null) {
+      return testLlm(id);
+    }
+    if (request.scene() != LlmScene.PROFILE_EXTRACTION) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "当前只支持 PROFILE_EXTRACTION 在线测试");
+    }
+    if (request.testMessage() == null
+        || request.testMessage().isBlank()
+        || request.testMessage().length() > 2000) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "testMessage 必填且不能超过 2000 字符");
+    }
+    AiEnvironment environment = repository.find(AiEnvironmentType.LLM, id)
+        .orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "environment not found"));
+    if (profileContextBuilder == null || profileConfigProvider == null || profileExtractionService == null) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "LLM 档案分析测试组件未配置");
+    }
+    String leadType = request.leadType() == null ? "" : request.leadType().trim();
+    ProfileAnalysisContext context = profileContextBuilder.buildForOnlineTest(
+        leadType,
+        request.testMessage().trim());
+    ProfileExtractRequest profileRequest = new ProfileExtractRequest(
+        request.testMessage().trim(),
+        context.customerProfile(),
+        profileConfigProvider.get().extractFields(),
+        adminTestCaller(),
+        context);
+    LlmProfileExtractionTestResult result = profileExtractionService.test(
+        profileRequest,
+        llmConfig(environment, id));
+    repository.markLlmTest(id, result.success());
+    if (!result.success()) {
+      return new ImageEnvironmentTestResponse(
+          false,
+          result.elapsedMs(),
+          null,
+          result.errorCode(),
+          result.errorMessage(),
+          "请检查模型返回是否符合档案分析 Schema，以及候选标签和证据是否合法");
+    }
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("scene", LlmScene.PROFILE_EXTRACTION.name());
+    payload.put("model", result.model());
+    payload.put("protocol", result.protocol());
+    payload.put("profileAnalysis", result.profileAnalysis());
+    return new ImageEnvironmentTestResponse(true, result.elapsedMs(), Map.copyOf(payload), null, null, null);
+  }
+
+  private LlmConfig llmConfig(AiEnvironment environment, long id) {
+    return new LlmConfig(
+        environment.baseUrl(),
+        repository.decryptApiKey(AiEnvironmentType.LLM, id),
+        environment.model(),
+        protocol(environment.protocol()),
+        environment.timeoutMs() == null ? 10000 : environment.timeoutMs(),
+        environment.temperature() == null ? 0.2 : environment.temperature(),
+        environment.maxTokens() == null ? 1024 : environment.maxTokens());
+  }
+
+  private String adminTestCaller() {
+    String username = AuthContext.username();
+    return (username == null || username.isBlank() ? "ADMIN" : username) + ":LLM_PROFILE_TEST";
   }
 
   private void validate(AiEnvironmentType type, AiEnvironmentRequest request, boolean requireApiKey) {

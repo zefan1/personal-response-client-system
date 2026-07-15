@@ -16,6 +16,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.web.GlobalApiExceptionHandler;
+import com.privateflow.modules.llm.LlmScene;
+import com.privateflow.modules.skill.ProfileAnalysisResult;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -226,6 +228,35 @@ class AiConfigControllerTest {
     verify(environmentService).update(eq(AiEnvironmentType.LLM), eq(6L), any());
     verify(environmentService).activate(AiEnvironmentType.LLM, 6L);
     verify(environmentService).testLlm(6L);
+  }
+
+  @Test
+  void llmEnvironmentProfileTestAcceptsStructuredScenario() throws Exception {
+    LlmEnvironmentTestRequest request = new LlmEnvironmentTestRequest(
+        LlmScene.PROFILE_EXTRACTION,
+        "TUAN_GOU",
+        "客户明确说想改善核心力量");
+    when(environmentService.testLlm(eq(6L), any(LlmEnvironmentTestRequest.class)))
+        .thenReturn(new ImageEnvironmentTestResponse(
+            true,
+            135L,
+            Map.of(
+                "scene", "PROFILE_EXTRACTION",
+                "model", "gpt-4.1-mini",
+                "profileAnalysis", ProfileAnalysisResult.empty()),
+            null,
+            null,
+            null));
+
+    mockMvc.perform(post("/admin/api/v1/llm-environments/6/test")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.success").value(true))
+        .andExpect(jsonPath("$.data.result.scene").value("PROFILE_EXTRACTION"))
+        .andExpect(jsonPath("$.data.result.profileAnalysis.tagDecisions").isArray());
+
+    verify(environmentService).testLlm(eq(6L), any(LlmEnvironmentTestRequest.class));
   }
 
   @Test

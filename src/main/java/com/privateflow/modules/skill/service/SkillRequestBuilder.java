@@ -23,44 +23,20 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
 public class SkillRequestBuilder {
 
   private static final Logger log = LoggerFactory.getLogger(SkillRequestBuilder.class);
-  private static final String PROFILE_ANALYSIS_TASK = """
-      你是客户档案分析助手。请分析 profile_analysis_context 中的客户档案、当前标签、锁定分类和动态候选标签。
-      只能把 recentMessages 中 role=client 的客户原话或明确业务数据作为判断依据，不能把员工回复当作客户证据。
-      只能返回 target_fields 中的非标签档案字段；标签判断必须使用 candidateCategories 中当前提供的分类和标签编码。
-      UPDATE 表示证据充分且满足分类策略；信息不足返回 UNABLE_TO_DETERMINE；当前值仍正确返回 KEEP_CURRENT。
-      多选 ADD_ONLY 只能返回尚未存在的新增标签并使用 ADD；单选 REPLACE 使用 REPLACE；不修改时使用 NONE。
-      """;
-  private static final String PROFILE_ANALYSIS_OUTPUT_CONTRACT = """
-      Return JSON only with this exact top-level schema:
-      {
-        "profile_updates": {
-          "fields": {},
-          "tag_decisions": [
-            {
-              "category_code": "category code from candidateCategories",
-              "tag_codes": ["tag code from that category"],
-              "confidence": 0.95,
-              "evidence": "customer quote or business evidence",
-              "result_type": "UPDATE|UNABLE_TO_DETERMINE|KEEP_CURRENT",
-              "requested_action": "ADD|REPLACE|NONE"
-            }
-          ]
-        }
-      }
-      Use only enabled candidates supplied in profile_analysis_context. Do not return chain-of-thought.
-      """;
   private static final Pattern CUSTOMER_PLACEHOLDER = Pattern.compile("\\{\\{([A-Za-z][A-Za-z0-9_]*)}}");
   private final SkillConfigProvider configProvider;
   private final CustomerQueryService customerQueryService;
   private final TagCandidateBuilder tagCandidateBuilder;
   private final ObjectMapper objectMapper;
   private final SkillRuntimeRouter runtimeRouter;
+  private final ProfileAnalysisPromptBuilder profileAnalysisPromptBuilder;
 
   public SkillRequestBuilder(
       SkillConfigProvider configProvider,
@@ -68,11 +44,29 @@ public class SkillRequestBuilder {
       TagCandidateBuilder tagCandidateBuilder,
       ObjectMapper objectMapper,
       SkillRuntimeRouter runtimeRouter) {
+    this(
+        configProvider,
+        customerQueryService,
+        tagCandidateBuilder,
+        objectMapper,
+        runtimeRouter,
+        new ProfileAnalysisPromptBuilder());
+  }
+
+  @Autowired
+  public SkillRequestBuilder(
+      SkillConfigProvider configProvider,
+      CustomerQueryService customerQueryService,
+      TagCandidateBuilder tagCandidateBuilder,
+      ObjectMapper objectMapper,
+      SkillRuntimeRouter runtimeRouter,
+      ProfileAnalysisPromptBuilder profileAnalysisPromptBuilder) {
     this.configProvider = configProvider;
     this.customerQueryService = customerQueryService;
     this.tagCandidateBuilder = tagCandidateBuilder;
     this.objectMapper = objectMapper;
     this.runtimeRouter = runtimeRouter;
+    this.profileAnalysisPromptBuilder = profileAnalysisPromptBuilder;
   }
 
   public Map<String, Object> build(SkillRequest request) {
@@ -112,39 +106,22 @@ public class SkillRequestBuilder {
   public Map<String, Object> buildProfileExtract(ProfileExtractRequest request) {
     SkillConfig config = configProvider.get();
     ProfileAnalysisContext analysisContext = request.analysisContext();
+    ProfileAnalysisPromptBuilder.ProfileAnalysisPrompt prompt = profileAnalysisPromptBuilder.build(
+        request,
+        config.redLines());
     String leadType = String.valueOf(analysisContext.customerProfile().getOrDefault(
         "leadType",
         request.existingProfile() == null ? "" : request.existingProfile().getOrDefault("leadType", "")));
     Map<String, Object> payload = new HashMap<>();
     payload.put("scene", Scene.PROFILE_EXTRACT.name());
     payload.put("lead_type", normalizeLeadType(leadType));
-    payload.put("client_message", profileClientMessage(analysisContext));
-    payload.put("chat_context", analysisContext.recentMessages());
-    payload.put("customer", analysisContext.customerProfile());
-    payload.put("target_fields", request.targetFields() == null ? List.of() : request.targetFields());
-    payload.put("profile_analysis_context", analysisContext);
-    payload.put("system_prompt", buildProfileSystemPrompt(config));
+    payload.putAll(prompt.input());
+    payload.put("system_prompt", prompt.systemPrompt());
     runtimeRouter.route(Scene.PROFILE_EXTRACT, leadType, config).ifPresent(skillId -> {
       payload.put("skill_id", skillId);
       payload.put("skill_group_id", skillId);
     });
     return payload;
-  }
-
-  private String buildProfileSystemPrompt(SkillConfig config) {
-    String redLines = config.redLines() == null ? "" : config.redLines().strip();
-    return PROFILE_ANALYSIS_TASK.strip()
-        + (redLines.isBlank() ? "" : "\n\n业务红线：\n" + redLines)
-        + "\n\n"
-        + PROFILE_ANALYSIS_OUTPUT_CONTRACT.strip();
-  }
-
-  private String profileClientMessage(ProfileAnalysisContext context) {
-    return context.recentMessages().stream()
-        .filter(message -> "client".equals(message.role()))
-        .map(ProfileAnalysisContext.ConversationMessage::text)
-        .filter(text -> text != null && !text.isBlank())
-        .reduce("", (left, right) -> left.isBlank() ? right : left + "\n" + right);
   }
 
   public String requestSummary(String clientMessage, String phone) {

@@ -102,6 +102,37 @@ class SkillRequestBuilderProfileAnalysisTest {
     assertThat(payload.get("chat_context")).isEqualTo(context.recentMessages());
   }
 
+  @Test
+  void delegatesProfileInputAndContractToSharedPromptBuilder() {
+    SkillConfigProvider configProvider = mock(SkillConfigProvider.class);
+    SkillRuntimeRouter runtimeRouter = mock(SkillRuntimeRouter.class);
+    ProfileAnalysisPromptBuilder promptBuilder = mock(ProfileAnalysisPromptBuilder.class);
+    SkillConfig config = config();
+    ProfileExtractRequest request = request(context());
+    when(configProvider.get()).thenReturn(config);
+    when(promptBuilder.build(request, "不得夸大效果"))
+        .thenReturn(new ProfileAnalysisPromptBuilder.ProfileAnalysisPrompt(
+            "shared strict contract",
+            Map.of(
+                "client_message", "shared client evidence",
+                "profile_analysis_context", request.analysisContext())));
+    SkillRequestBuilder builder = new SkillRequestBuilder(
+        configProvider,
+        mock(CustomerQueryService.class),
+        mock(TagCandidateBuilder.class),
+        new ObjectMapper(),
+        runtimeRouter,
+        promptBuilder);
+
+    Map<String, Object> payload = builder.buildProfileExtract(request);
+
+    verify(promptBuilder).build(request, "不得夸大效果");
+    assertThat(payload)
+        .containsEntry("system_prompt", "shared strict contract")
+        .containsEntry("client_message", "shared client evidence")
+        .containsEntry("profile_analysis_context", request.analysisContext());
+  }
+
   private SkillRequestBuilder builder() {
     SkillConfigProvider configProvider = mock(SkillConfigProvider.class);
     SkillRuntimeRouter runtimeRouter = mock(SkillRuntimeRouter.class);

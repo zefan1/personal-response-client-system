@@ -106,8 +106,12 @@ public class AiConfigController {
   }
 
   @PostMapping("/admin/api/v1/llm-environments/{id}/test")
-  public ApiResponse<ImageEnvironmentTestResponse> testLlm(@PathVariable("id") long id) {
-    return ApiResponse.ok(environmentService.testLlm(id));
+  public ApiResponse<ImageEnvironmentTestResponse> testLlm(
+      @PathVariable("id") long id,
+      @RequestBody(required = false) LlmEnvironmentTestRequest request) {
+    return ApiResponse.ok(request == null
+        ? environmentService.testLlm(id)
+        : environmentService.testLlm(id, request));
   }
 
   @GetMapping("/admin/api/v1/skill-prompt/{type}/versions")

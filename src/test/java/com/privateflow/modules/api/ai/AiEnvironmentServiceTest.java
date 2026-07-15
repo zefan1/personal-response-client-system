@@ -15,9 +15,20 @@ import com.privateflow.modules.image.config.ImageConfig;
 import com.privateflow.modules.image.config.ImageConfigProvider;
 import com.privateflow.modules.image.parser.RecognitionResultParser;
 import com.privateflow.modules.llm.LlmConfig;
+import com.privateflow.modules.llm.LlmProfileExtractionService;
+import com.privateflow.modules.llm.LlmProfileExtractionTestResult;
 import com.privateflow.modules.llm.LlmResponse;
+import com.privateflow.modules.llm.LlmScene;
 import com.privateflow.modules.llm.LlmService;
+import com.privateflow.modules.profile.config.ProfileConfig;
+import com.privateflow.modules.profile.config.ProfileConfigProvider;
+import com.privateflow.modules.profile.service.ProfileAnalysisContextBuilder;
+import com.privateflow.modules.skill.ProfileAnalysisContext;
+import com.privateflow.modules.skill.ProfileAnalysisResult;
+import com.privateflow.modules.skill.ProfileExtractRequest;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -160,6 +171,77 @@ class AiEnvironmentServiceTest {
     assertThat(configCaptor.getValue().apiBaseUrl()).isEqualTo("https://llm.example.com");
     assertThat(configCaptor.getValue().apiKey()).isEqualTo("llm-secret");
     assertThat(configCaptor.getValue().model()).isEqualTo("gpt-4.1-mini");
+    verify(repository).markLlmTest(12L, true);
+  }
+
+  @Test
+  void testLlmProfileExtractionUsesSelectedEnvironmentAndProductionContext() {
+    AiEnvironmentRepository repository = mock(AiEnvironmentRepository.class);
+    LlmService llmService = mock(LlmService.class);
+    ProfileAnalysisContextBuilder contextBuilder = mock(ProfileAnalysisContextBuilder.class);
+    ProfileConfigProvider profileConfigProvider = mock(ProfileConfigProvider.class);
+    LlmProfileExtractionService profileExtractionService = mock(LlmProfileExtractionService.class);
+    ProfileAnalysisContext context = new ProfileAnalysisContext(
+        0,
+        0,
+        1,
+        List.of(new ProfileAnalysisContext.ConversationMessage("client", "客户真实原话", null)),
+        Map.of("leadType", "TUAN_GOU"),
+        List.of(),
+        List.of(),
+        List.of());
+    when(repository.find(AiEnvironmentType.LLM, 12L)).thenReturn(Optional.of(llmEnvironment(12L, false)));
+    when(repository.decryptApiKey(AiEnvironmentType.LLM, 12L)).thenReturn("llm-secret");
+    when(contextBuilder.buildForOnlineTest("TUAN_GOU", "客户真实原话")).thenReturn(context);
+    when(profileConfigProvider.get()).thenReturn(new ProfileConfig(
+        List.of("nickname", "bodyConcerns"),
+        8000,
+        5,
+        7,
+        "0 0 3 * * *",
+        20,
+        5,
+        500));
+    ProfileAnalysisResult analysis = ProfileAnalysisResult.empty();
+    when(profileExtractionService.test(any(ProfileExtractRequest.class), any(LlmConfig.class)))
+        .thenReturn(new LlmProfileExtractionTestResult(
+            true,
+            135L,
+            "gpt-4.1-mini",
+            "OPENAI_COMPATIBLE",
+            analysis,
+            null,
+            null));
+    AiEnvironmentService service = new AiEnvironmentService(
+        repository,
+        mock(ApplicationEventPublisher.class),
+        mock(WsPushService.class),
+        mock(ImageConfigProvider.class),
+        imageClientProvider(null),
+        new RecognitionResultParser(new ObjectMapper()),
+        llmService,
+        contextBuilder,
+        profileConfigProvider,
+        profileExtractionService);
+
+    ImageEnvironmentTestResponse response = service.testLlm(12L, new LlmEnvironmentTestRequest(
+        LlmScene.PROFILE_EXTRACTION,
+        "TUAN_GOU",
+        "客户真实原话"));
+
+    assertThat(response.success()).isTrue();
+    assertThat(response.elapsedMs()).isEqualTo(135L);
+    assertThat(response.result())
+        .containsEntry("scene", "PROFILE_EXTRACTION")
+        .containsEntry("model", "gpt-4.1-mini")
+        .containsEntry("profileAnalysis", analysis);
+    ArgumentCaptor<ProfileExtractRequest> requestCaptor = ArgumentCaptor.forClass(ProfileExtractRequest.class);
+    ArgumentCaptor<LlmConfig> configCaptor = ArgumentCaptor.forClass(LlmConfig.class);
+    verify(profileExtractionService).test(requestCaptor.capture(), configCaptor.capture());
+    assertThat(requestCaptor.getValue().analysisContext()).isSameAs(context);
+    assertThat(requestCaptor.getValue().targetFields()).containsExactly("nickname", "bodyConcerns");
+    assertThat(configCaptor.getValue().apiBaseUrl()).isEqualTo("https://llm.example.com");
+    assertThat(configCaptor.getValue().apiKey()).isEqualTo("llm-secret");
     verify(repository).markLlmTest(12L, true);
   }
 

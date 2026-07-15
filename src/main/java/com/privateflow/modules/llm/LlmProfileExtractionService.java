@@ -3,46 +3,42 @@ package com.privateflow.modules.llm;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
+import com.privateflow.modules.profile.service.TagAnalysisDecisionValidator;
+import com.privateflow.modules.skill.ProfileAnalysisResult;
 import com.privateflow.modules.skill.ProfileExtractRequest;
-import com.privateflow.modules.skill.ProfileUpdates;
-import com.privateflow.modules.skill.parser.SkillResponseParser;
-import java.util.LinkedHashMap;
+import com.privateflow.modules.skill.parser.SkillProfileAnalysisResponseParser;
+import com.privateflow.modules.skill.service.ProfileAnalysisPromptBuilder;
 import java.util.Map;
 import java.util.Optional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class LlmProfileExtractionService {
 
-  private static final Logger log = LoggerFactory.getLogger(LlmProfileExtractionService.class);
   private static final String ENABLED_KEY = "llm.profile_extraction.enabled";
   private static final String FALLBACK_KEY = "llm.profile_extraction.fallback_to_skill";
   private static final String SYSTEM_PROMPT_KEY = "llm.profile_extraction.system_prompt";
   private static final String TEMPERATURE_KEY = "llm.profile_extraction.temperature";
   private static final String MAX_TOKENS_KEY = "llm.profile_extraction.max_tokens";
-  private static final String DEFAULT_SYSTEM_PROMPT = """
-      You extract structured profile updates from a private-domain postpartum recovery sales conversation.
-      Return JSON only. Schema:
-      {"profile_updates":{"fields":{"fieldName":{"value":"","confidence":"HIGH|MEDIUM|LOW"}}}}
-      Use only target fields provided by the user. Extract only facts clearly supported by the conversation.
-      HIGH means explicit and safe to write automatically; MEDIUM means likely but needs human confirmation.
-      LOW or uncertain values should be omitted. Do not infer medical diagnosis.
-      """;
 
   private final LlmService llmService;
-  private final SkillResponseParser responseParser;
+  private final ProfileAnalysisPromptBuilder promptBuilder;
+  private final SkillProfileAnalysisResponseParser responseParser;
+  private final TagAnalysisDecisionValidator decisionValidator;
   private final SystemConfigRepository configRepository;
   private final ObjectMapper objectMapper;
 
   public LlmProfileExtractionService(
       LlmService llmService,
-      SkillResponseParser responseParser,
+      ProfileAnalysisPromptBuilder promptBuilder,
+      SkillProfileAnalysisResponseParser responseParser,
+      TagAnalysisDecisionValidator decisionValidator,
       SystemConfigRepository configRepository,
       ObjectMapper objectMapper) {
     this.llmService = llmService;
+    this.promptBuilder = promptBuilder;
     this.responseParser = responseParser;
+    this.decisionValidator = decisionValidator;
     this.configRepository = configRepository;
     this.objectMapper = objectMapper;
   }
@@ -55,82 +51,82 @@ public class LlmProfileExtractionService {
     return booleanConfig(FALLBACK_KEY, true);
   }
 
-  public Optional<ProfileUpdates> tryExtract(ProfileExtractRequest request) {
+  public Optional<ProfileAnalysisResult> tryExtract(ProfileExtractRequest request) {
     if (!enabled()) {
       return Optional.empty();
     }
-    LlmResponse response = llmService.generate(
+    String conversationText = request == null ? "" : request.conversationText();
+    Map<String, Object> existingProfile = request == null ? Map.of() : request.existingProfile();
+    return llmService.generateValidated(
         LlmScene.PROFILE_EXTRACTION,
         leadType(request),
         request == null ? "" : request.caller(),
-        requestSummary(request == null ? "" : request.conversationText(), request == null ? Map.of() : request.existingProfile()),
-        buildRequest(request));
+        requestSummary(conversationText, existingProfile),
+        buildRequest(request),
+        content -> decisionValidator.validate(
+            responseParser.parse(cleanJson(content)),
+            request));
+  }
+
+  public LlmProfileExtractionTestResult test(ProfileExtractRequest request, LlmConfig config) {
+    LlmResponse response = llmService.test(buildRequest(request), config);
     if (!response.success()) {
-      return Optional.empty();
+      return new LlmProfileExtractionTestResult(
+          false,
+          response.elapsedMs(),
+          response.model(),
+          response.protocol(),
+          null,
+          response.errorCode(),
+          response.message());
     }
-    ProfileUpdates updates = responseParser.parseProfileUpdatesOnly(cleanJson(response.content()));
-    if (updates.fields() == null || updates.fields().isEmpty()) {
-      return Optional.empty();
+    try {
+      ProfileAnalysisResult analysis = decisionValidator.validate(
+          responseParser.parse(cleanJson(response.content())),
+          request);
+      return new LlmProfileExtractionTestResult(
+          true,
+          response.elapsedMs(),
+          response.model(),
+          response.protocol(),
+          analysis,
+          null,
+          null);
+    } catch (RuntimeException ex) {
+      return new LlmProfileExtractionTestResult(
+          false,
+          response.elapsedMs(),
+          response.model(),
+          response.protocol(),
+          null,
+          LlmErrorCodes.RESPONSE_INVALID,
+          ex.getMessage());
     }
-    return Optional.of(updates);
   }
 
   private LlmRequest buildRequest(ProfileExtractRequest request) {
+    ProfileAnalysisPromptBuilder.ProfileAnalysisPrompt prompt = promptBuilder.build(
+        request,
+        additionalInstructions());
     return new LlmRequest(
-        systemPrompt(),
-        userPrompt(request),
+        prompt.systemPrompt(),
+        "Profile analysis input JSON:\n" + toJson(prompt.input()),
         java.util.List.of(),
         decimalConfig(TEMPERATURE_KEY),
         integerConfig(MAX_TOKENS_KEY));
   }
 
-  private String userPrompt(ProfileExtractRequest request) {
-    Map<String, Object> payload = new LinkedHashMap<>();
-    payload.put("conversationText", request == null ? "" : clip(request.conversationText(), 2500));
-    payload.put("existingProfile", sanitizedProfile(request == null ? Map.of() : request.existingProfile()));
-    payload.put("targetFields", request == null ? java.util.List.of() : request.targetFields());
-    return """
-        Extract profile updates from this conversation.
-        Input JSON:
-        %s
-        """.formatted(toJson(payload));
-  }
-
-  private Map<String, Object> sanitizedProfile(Map<String, Object> raw) {
-    Map<String, Object> result = new LinkedHashMap<>();
-    if (raw == null) {
-      return result;
-    }
-    raw.forEach((key, value) -> {
-      if (key == null || value == null || "phone".equalsIgnoreCase(key)) {
-        return;
-      }
-      if (value instanceof String text) {
-        if (!text.isBlank()) {
-          result.put(key, clip(text, 300));
-        }
-        return;
-      }
-      result.put(key, value);
-    });
-    Object phone = raw.get("phone");
-    if (phone instanceof String text && text.length() >= 4) {
-      result.put("phoneLast4", text.substring(text.length() - 4));
-    }
-    return result;
-  }
-
-  private String systemPrompt() {
+  private String additionalInstructions() {
     return configRepository.findValue(SYSTEM_PROMPT_KEY)
         .filter(value -> !value.isBlank())
-        .orElse(DEFAULT_SYSTEM_PROMPT);
+        .orElse("");
   }
 
   private String toJson(Object value) {
     try {
       return objectMapper.writeValueAsString(value);
     } catch (JsonProcessingException ex) {
-      return "{}";
+      throw new IllegalStateException("档案分析上下文序列化失败", ex);
     }
   }
 
@@ -157,7 +153,14 @@ public class LlmProfileExtractionService {
   }
 
   private String leadType(ProfileExtractRequest request) {
-    if (request == null || request.existingProfile() == null) {
+    if (request == null || request.analysisContext() == null) {
+      return "";
+    }
+    Object contextLeadType = request.analysisContext().customerProfile().get("leadType");
+    if (contextLeadType != null) {
+      return String.valueOf(contextLeadType);
+    }
+    if (request.existingProfile() == null) {
       return "";
     }
     Object value = request.existingProfile().get("leadType");
