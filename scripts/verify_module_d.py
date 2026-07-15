@@ -105,7 +105,7 @@ for token in ["customerQueryService.searchByNickname", "maxCandidates", "fuzzySe
         errors.append(f"FuzzyMatcher missing {token}")
 
 search = read("src/main/java/com/privateflow/modules/match/service/CustomerSearchService.java")
-for token in ["PhoneUtils.clean", "PhoneUtils.isValid", "customerQueryService.getByPhone", "customerQueryService.searchByNickname", "limit < 1 || limit > 50"]:
+for token in ["PhoneUtils.clean", "PhoneUtils.isValid", "customerQueryService.getByPhone", "customerQueryService.searchByKeyword", "limit < 1 || limit > 50"]:
     if token not in search:
         errors.append(f"CustomerSearchService missing {token}")
 
