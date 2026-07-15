@@ -110,11 +110,27 @@
 
 ## Step 6：直接 LLM 档案分析
 
-- [ ] 直接 LLM 使用与 Skill 完全相同的动态内容和返回结构。
-- [ ] 多 LLM 路由切换不改变标签 Schema。
-- [ ] 直接 LLM 和 Skill 经过同一后端校验器。
-- [ ] LLM 失败按配置回退 Skill；两条路径都失败时不修改标签。
-- [ ] 在完整闭环上线前保持 `llm.profile_extraction.enabled=false`。
+- [x] 直接 LLM 使用与 Skill 完全相同的动态内容和返回结构。
+- [x] 多 LLM 路由切换不改变标签 Schema。
+- [x] 直接 LLM 和 Skill 经过同一后端校验器。
+- [x] LLM 失败按配置回退 Skill；两条路径都失败时不修改标签。
+- [x] 在完整闭环上线前保持 `llm.profile_extraction.enabled=false`。
+
+### Step 6 验收记录（2026-07-15）
+
+- Step 6 核心代码恢复提交：`4597f4a feat: complete direct llm profile analysis`。
+- 新增共享 `ProfileAnalysisPromptBuilder`，Skill 与直接 LLM 使用相同固定任务、动态 `ProfileAnalysisContext` 输入和严格 `profile_updates.fields + tag_decisions` Schema；LLM 自定义 Prompt 只能追加要求，不能替换固定契约。
+- 直接 LLM 返回完整 `ProfileAnalysisResult`，严格复用 `SkillProfileAnalysisResponseParser` 和 `TagAnalysisDecisionValidator`；主 LLM HTTP 成功但 Schema/校验非法时按失败记录并继续备用候选。
+- 所有 LLM 候选失败、非法或路由异常时按 `fallback_to_skill` 进入 Skill；合法的直接 LLM 结果保留标签决策并阻止重复 Skill 调用。
+- 管理端支持对选定 LLM 环境执行只读 `PROFILE_EXTRACTION` 在线测试，使用生产动态候选和档案字段配置，结构化展示字段、标签动作、把握度和证据；失败时展示后端错误，不生成空结果卡。
+- Java 全量：365 tests，0 failures，0 errors，1 条条件式 MariaDB 测试跳过；Step 6 定向 10 个测试类、45 tests 全部通过。
+- 前端全量：36 个测试文件、254 tests，0 failures；`AdminConsole.test.ts` 34 tests；`npm run typecheck` 和 `npm run build` 通过。
+- 真实构建 smoke：`renderer_smoke=passed`、`electron_smoke=passed`，连接最终 Step 6 后端。
+- 静态核验：`verify_module_46.py`、`verify_module_d.py` 通过。
+- 数据库对齐：42 张表、24 张必需表、41 张迁移表，1,382 个 Repository 列引用，0 列/属性/枚举违规；Flyway V69，无新增迁移。
+- 真实 LLM 环境在线测试使用选定环境调用生产档案契约，真实不可达路径返回 `30-20004`，没有开启生产主开关。
+- 真实失败回退：临时开启档案 LLM 后发送确认返回 `accepted=true`；LLM PROFILE_EXTRACTION 调用记录 0→1、Skill PROFILE_EXTRACT 调用记录 2→3，两条路径均失败但全库和验收客户当前有效标签仍为 0；配置随后恢复。
+- 最终配置：`llm.profile_extraction.enabled=false`、`llm.reply_generation.enabled=false`、`llm.profile_extraction.fallback_to_skill=true`，未进入 Step 7/8/9。
 
 ## Step 7：自动更新、人工修改和锁定
 
