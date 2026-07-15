@@ -456,7 +456,7 @@ class ChatOrchestrationServiceTest {
   }
 
   @Test
-  void sendConfirmRecoversRawMessagesFromCurrentUsersRequestContext() {
+  void sendConfirmPrefersCurrentUsersRequestContextOverRequestBodyMessages() {
     SkillRequest previousRequest = new SkillRequest(
         Scene.CHAT_RECOGNIZE,
         "TUAN_GOU",
@@ -481,7 +481,7 @@ class ChatOrchestrationServiceTest {
         "私域客资管理表",
         "TUAN_GOU",
         "",
-        List.of(),
+        List.of(new ChatMessageDto("client", "请求体伪造内容", "13:00")),
         "员工最终发送的回复",
         "NEXT_STEP",
         null));

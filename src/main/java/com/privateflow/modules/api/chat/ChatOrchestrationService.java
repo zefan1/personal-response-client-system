@@ -303,12 +303,7 @@ public class ChatOrchestrationService {
   }
 
   private List<CustomerMessageSentEvent.ChatMessage> sendConfirmMessages(SendConfirmRequest request) {
-    if (request.rawMessages() != null && !request.rawMessages().isEmpty()) {
-      return request.rawMessages().stream()
-          .map(message -> new CustomerMessageSentEvent.ChatMessage(message.role(), message.text(), message.timestamp()))
-          .toList();
-    }
-    return contextStore.read(AuthContext.username(), request.phone())
+    List<CustomerMessageSentEvent.ChatMessage> storedMessages = contextStore.read(AuthContext.username(), request.phone())
         .map(RequestContext::request)
         .map(SkillRequest::chatContext)
         .orElse(List.of()).stream()
@@ -317,6 +312,16 @@ public class ChatOrchestrationService {
             firstNonBlank(message.get("text"), message.get("content")),
             message.get("timestamp")))
         .toList();
+    if (!storedMessages.isEmpty()) {
+      return storedMessages;
+    }
+    if (request.rawMessages() != null && !request.rawMessages().isEmpty()) {
+      return request.rawMessages().stream()
+          .filter(java.util.Objects::nonNull)
+          .map(message -> new CustomerMessageSentEvent.ChatMessage(message.role(), message.text(), message.timestamp()))
+          .toList();
+    }
+    return List.of();
   }
 
   private String regenerateWarning(int count) {
