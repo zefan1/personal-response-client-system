@@ -3515,6 +3515,28 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.ops-profile-test-details {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #e4e7ec;
+}
+
+.ops-profile-test-details p {
+  margin: 0;
+}
+
+.ops-profile-test-decision {
+  display: grid;
+  gap: 3px;
+}
+
+.ops-profile-test-decision small {
+  color: #667085;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .ops-image-preview {
   width: 120px;
   aspect-ratio: 4 / 3;

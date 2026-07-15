@@ -53,6 +53,13 @@ class SkillRequestBuilderProfileAnalysisTest {
         .containsEntry("profile_analysis_context", context)
         .containsEntry("customer", context.customerProfile());
     assertThat(payload.get("chat_context")).isEqualTo(context.recentMessages());
+    assertThat(String.valueOf(payload.get("system_prompt")))
+        .contains("profile_updates")
+        .contains("tag_decisions")
+        .contains("category_code")
+        .contains("tag_codes")
+        .contains("result_type")
+        .contains("requested_action");
     String json = new ObjectMapper().writeValueAsString(payload);
     assertThat(json)
         .contains("自定义目标")
@@ -60,6 +67,63 @@ class SkillRequestBuilderProfileAnalysisTest {
         .contains("客户真实原话")
         .doesNotContain("18800001111")
         .doesNotContain("keeper-1");
+  }
+
+  @Test
+  void usesDedicatedProfilePromptInsteadOfReplyGenerationPrompt() {
+    SkillRequestBuilder builder = builder();
+
+    Map<String, Object> payload = builder.buildProfileExtract(request(context()));
+
+    assertThat(String.valueOf(payload.get("system_prompt")))
+        .contains("客户档案分析")
+        .contains("role=client")
+        .doesNotContain("生成 3 条不同方向的回复建议");
+  }
+
+  @Test
+  void usesOnlyCustomerMessagesAsProfileClientMessage() {
+    SkillRequestBuilder builder = builder();
+    ProfileAnalysisContext context = new ProfileAnalysisContext(
+        7L,
+        4,
+        1,
+        List.of(
+            new ProfileAnalysisContext.ConversationMessage("client", "客户真实原话", "12:00"),
+            new ProfileAnalysisContext.ConversationMessage("keeper", "员工回复内容", "12:01")),
+        Map.of("leadType", "TUAN_GOU"),
+        List.of(),
+        List.of(),
+        List.of());
+
+    Map<String, Object> payload = builder.buildProfileExtract(request(context));
+
+    assertThat(payload.get("client_message")).isEqualTo("客户真实原话");
+    assertThat(payload.get("chat_context")).isEqualTo(context.recentMessages());
+  }
+
+  private SkillRequestBuilder builder() {
+    SkillConfigProvider configProvider = mock(SkillConfigProvider.class);
+    SkillRuntimeRouter runtimeRouter = mock(SkillRuntimeRouter.class);
+    SkillConfig config = config();
+    when(configProvider.get()).thenReturn(config);
+    when(runtimeRouter.route(Scene.PROFILE_EXTRACT, "TUAN_GOU", config))
+        .thenReturn(Optional.of("profile-skill"));
+    return new SkillRequestBuilder(
+        configProvider,
+        mock(CustomerQueryService.class),
+        mock(TagCandidateBuilder.class),
+        new ObjectMapper(),
+        runtimeRouter);
+  }
+
+  private ProfileExtractRequest request(ProfileAnalysisContext context) {
+    return new ProfileExtractRequest(
+        "旧摘要不应覆盖结构化聊天",
+        Map.of("leadType", "TUAN_GOU"),
+        List.of("nickname"),
+        "keeper-1",
+        context);
   }
 
   private ProfileAnalysisContext context() {
@@ -108,7 +172,7 @@ class SkillRequestBuilderProfileAnalysisTest {
         "legacy-tuan",
         "legacy-xiansuo",
         "legacy-default",
-        "{{available_tags}}\n{{red_lines}}\n{{scene}}",
+        "请生成 3 条不同方向的回复建议。\n{{available_tags}}\n{{red_lines}}\n{{scene}}",
         "不得夸大效果",
         0.3,
         15,

@@ -1,5 +1,6 @@
 package com.privateflow.modules.profile.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -13,10 +14,11 @@ import com.privateflow.modules.profile.config.ProfileConfig;
 import com.privateflow.modules.profile.config.ProfileConfigProvider;
 import com.privateflow.modules.profile.infra.AuditLogRepository;
 import com.privateflow.modules.profile.infra.ProfileWriter;
-import com.privateflow.modules.skill.ProfileUpdates;
+import com.privateflow.modules.skill.ProfileAnalysisResult;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class ProfileUpdateOrchestratorTest {
 
@@ -43,7 +45,7 @@ class ProfileUpdateOrchestratorTest {
     customer.setPhone("18800001111");
     customer.setVersion(1);
     when(customerQueryService.getByPhone("18800001111")).thenReturn(customer);
-    when(extractionClient.extract(any(), any(), any(), any())).thenReturn(ProfileUpdates.empty());
+    when(extractionClient.extract(any(), any(), any(), any())).thenReturn(ProfileAnalysisResult.empty());
     when(confidenceRouter.route(any())).thenReturn(new RoutedProfileUpdates(Map.of(), Map.of()));
     when(configProvider.get()).thenReturn(new ProfileConfig(
         List.of(), 8000, 5, 7, "0 0 3 * * *", 20, 5, 500));
@@ -66,5 +68,56 @@ class ProfileUpdateOrchestratorTest {
     orchestrator.handleEvent(event);
 
     verify(extractionClient).extract(eq("客户真实摘要"), eq(messages), eq(customer), eq("keeper-1"));
+  }
+
+  @Test
+  void doesNotUseEmployeeSentTextAsFallbackProfileEvidence() {
+    EventDeduplicator deduplicator = mock(EventDeduplicator.class);
+    CustomerQueryService customerQueryService = mock(CustomerQueryService.class);
+    ProfileExtractionClient extractionClient = mock(ProfileExtractionClient.class);
+    ConfidenceRouter confidenceRouter = mock(ConfidenceRouter.class);
+    ProfileWriter profileWriter = mock(ProfileWriter.class);
+    SuggestionQueueManager suggestionQueueManager = mock(SuggestionQueueManager.class);
+    ProfileConfigProvider configProvider = mock(ProfileConfigProvider.class);
+    AuditLogRepository auditLogRepository = mock(AuditLogRepository.class);
+    ProfileUpdateOrchestrator orchestrator = new ProfileUpdateOrchestrator(
+        deduplicator,
+        customerQueryService,
+        extractionClient,
+        confidenceRouter,
+        profileWriter,
+        suggestionQueueManager,
+        configProvider,
+        auditLogRepository);
+    Customer customer = new Customer();
+    customer.setPhone("18800001111");
+    customer.setVersion(1);
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(customer);
+    when(extractionClient.extract(any(), any(), any(), any())).thenReturn(ProfileAnalysisResult.empty());
+    when(confidenceRouter.route(any())).thenReturn(new RoutedProfileUpdates(Map.of(), Map.of()));
+    when(configProvider.get()).thenReturn(new ProfileConfig(
+        List.of(), 8000, 5, 7, "0 0 3 * * *", 20, 5, 500));
+    List<CustomerMessageSentEvent.ChatMessage> messages = List.of(
+        new CustomerMessageSentEvent.ChatMessage("keeper", "员工历史回复", "12:00"));
+    CustomerMessageSentEvent event = new CustomerMessageSentEvent(
+        "18800001111",
+        "Alice",
+        false,
+        "私域客资管理表",
+        "TUAN_GOU",
+        "",
+        messages,
+        "员工最终发送内容",
+        "NEXT_STEP",
+        null,
+        "keeper-1");
+
+    orchestrator.handleEvent(event);
+
+    verify(extractionClient).extract(eq(""), eq(messages), eq(customer), eq("keeper-1"));
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<Map<String, Object>> updates = ArgumentCaptor.forClass(Map.class);
+    verify(profileWriter).write(eq("18800001111"), updates.capture(), eq(1), eq(true));
+    assertThat(updates.getValue()).containsEntry("followupNotes", "");
   }
 }

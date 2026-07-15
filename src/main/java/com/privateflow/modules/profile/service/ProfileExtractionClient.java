@@ -6,6 +6,7 @@ import com.privateflow.modules.llm.LlmProfileExtractionService;
 import com.privateflow.modules.profile.config.ProfileConfigProvider;
 import com.privateflow.modules.profile.infra.ProfileFieldRegistry;
 import com.privateflow.modules.skill.ProfileExtractRequest;
+import com.privateflow.modules.skill.ProfileAnalysisResult;
 import com.privateflow.modules.skill.ProfileUpdates;
 import com.privateflow.modules.skill.SkillGatewayService;
 import java.util.List;
@@ -36,11 +37,11 @@ public class ProfileExtractionClient {
     this.contextBuilder = contextBuilder;
   }
 
-  public ProfileUpdates extract(String conversationText, Customer customer, String caller) {
+  public ProfileAnalysisResult extract(String conversationText, Customer customer, String caller) {
     return extract(conversationText, List.of(), customer, caller);
   }
 
-  public ProfileUpdates extract(
+  public ProfileAnalysisResult extract(
       String conversationText,
       List<CustomerMessageSentEvent.ChatMessage> rawMessages,
       Customer customer,
@@ -48,23 +49,27 @@ public class ProfileExtractionClient {
     try {
       List<String> targetFields = configProvider.get().extractFields();
       var existingProfile = fieldRegistry.toProfileMap(customer);
+      var analysisContext = contextBuilder.build(customer, existingProfile, rawMessages);
+      if (analysisContext.effectiveMessageCount() <= 0) {
+        return ProfileAnalysisResult.empty();
+      }
       ProfileExtractRequest request = new ProfileExtractRequest(
           conversationText,
           existingProfile,
           targetFields,
           caller,
-          contextBuilder.build(customer, existingProfile, rawMessages));
+          analysisContext);
       java.util.Optional<ProfileUpdates> llmUpdates = llmProfileExtractionService.tryExtract(request);
       if (llmUpdates.isPresent()) {
-        return llmUpdates.orElseThrow();
+        return new ProfileAnalysisResult(llmUpdates.orElseThrow(), List.of());
       }
       if (!llmProfileExtractionService.fallbackToSkill()) {
-        return ProfileUpdates.empty();
+        return ProfileAnalysisResult.empty();
       }
       return skillGatewayService.extractProfile(request);
     } catch (RuntimeException ex) {
       log.warn("profile extract degraded to empty updates, phone={}", customer == null ? null : customer.getPhone());
-      return ProfileUpdates.empty();
+      return ProfileAnalysisResult.empty();
     }
   }
 }

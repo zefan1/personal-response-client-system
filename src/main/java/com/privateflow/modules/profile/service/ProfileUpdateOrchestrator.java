@@ -8,7 +8,7 @@ import com.privateflow.modules.profile.config.ProfileConfigProvider;
 import com.privateflow.modules.profile.infra.AuditLogRepository;
 import com.privateflow.modules.profile.infra.ProfileWriter;
 import com.privateflow.modules.skill.FieldUpdate;
-import com.privateflow.modules.skill.ProfileUpdates;
+import com.privateflow.modules.skill.ProfileAnalysisResult;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -66,8 +66,12 @@ public class ProfileUpdateOrchestrator {
         log.info("customer missing, skip profile update, phone={}", event.phone());
         return;
       }
-      ProfileUpdates updates = extractionClient.extract(conversation, event.rawMessages(), customer, event.operator());
-      RoutedProfileUpdates routed = confidenceRouter.route(updates);
+      ProfileAnalysisResult analysis = extractionClient.extract(
+          conversation,
+          event.rawMessages(),
+          customer,
+          event.operator());
+      RoutedProfileUpdates routed = confidenceRouter.route(analysis.profileUpdates());
       Map<String, Object> autoWrite = new LinkedHashMap<>();
       routed.high().forEach((field, update) -> autoWrite.put(field, update.value()));
       autoWrite.put("lastFollowupAt", java.time.LocalDateTime.now());
@@ -99,9 +103,6 @@ public class ProfileUpdateOrchestrator {
           builder.append(message.text()).append('\n');
         }
       }
-    }
-    if (builder.isEmpty() && event.sentText() != null) {
-      builder.append(event.sentText());
     }
     String text = builder.toString().trim();
     int limit = configProvider.get().fallbackSummaryChars();

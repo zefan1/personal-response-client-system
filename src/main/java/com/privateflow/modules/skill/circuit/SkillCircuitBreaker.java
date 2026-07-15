@@ -1,9 +1,11 @@
 package com.privateflow.modules.skill.circuit;
 
+import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.config.SkillConfig;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -16,91 +18,109 @@ import org.springframework.stereotype.Component;
 public class SkillCircuitBreaker {
 
   private static final Logger log = LoggerFactory.getLogger(SkillCircuitBreaker.class);
-  private final ConcurrentHashMap<Long, AtomicInteger> successes = new ConcurrentHashMap<>();
-  private final ConcurrentHashMap<Long, AtomicInteger> failures = new ConcurrentHashMap<>();
-  private final AtomicReference<CircuitState> state = new AtomicReference<>(CircuitState.CLOSED);
-  private final AtomicBoolean halfOpenProbeInFlight = new AtomicBoolean(false);
+  private final ConcurrentHashMap<Scene, SceneCircuit> circuits = new ConcurrentHashMap<>();
   private final SkillConfigProvider configProvider;
-  private volatile Instant openedAt;
 
   public SkillCircuitBreaker(SkillConfigProvider configProvider) {
     this.configProvider = configProvider;
   }
 
-  public boolean allowRequest() {
+  public boolean allowRequest(Scene scene) {
     SkillConfig config = configProvider.get();
-    CircuitState current = state.get();
+    SceneCircuit circuit = circuit(scene);
+    CircuitState current = circuit.state.get();
     if (current == CircuitState.CLOSED) {
       return true;
     }
     if (current == CircuitState.OPEN) {
-      if (openedAt != null && Instant.now().isAfter(openedAt.plusSeconds(config.circuitBreakerOpenS()))) {
-        state.set(CircuitState.HALF_OPEN);
+      if (circuit.openedAt != null
+          && Instant.now().isAfter(circuit.openedAt.plusSeconds(config.circuitBreakerOpenS()))) {
+        circuit.state.set(CircuitState.HALF_OPEN);
       } else {
         return false;
       }
     }
-    return halfOpenProbeInFlight.compareAndSet(false, true);
+    return circuit.halfOpenProbeInFlight.compareAndSet(false, true);
   }
 
-  public void recordSuccess() {
-    successes.computeIfAbsent(epochSecond(), ignored -> new AtomicInteger()).incrementAndGet();
-    if (state.get() == CircuitState.HALF_OPEN) {
-      successes.clear();
-      failures.clear();
-      halfOpenProbeInFlight.set(false);
-      state.set(CircuitState.CLOSED);
-      log.info("Skill circuit breaker closed after successful probe");
+  public void recordSuccess(Scene scene) {
+    SceneCircuit circuit = circuit(scene);
+    circuit.successes.computeIfAbsent(epochSecond(), ignored -> new AtomicInteger()).incrementAndGet();
+    if (circuit.state.get() == CircuitState.HALF_OPEN) {
+      circuit.successes.clear();
+      circuit.failures.clear();
+      circuit.halfOpenProbeInFlight.set(false);
+      circuit.state.set(CircuitState.CLOSED);
+      log.info("Skill circuit breaker closed after successful probe, scene={}", scene);
       return;
     }
-    halfOpenProbeInFlight.set(false);
-    evaluate();
+    circuit.halfOpenProbeInFlight.set(false);
+    evaluate(scene, circuit);
   }
 
-  public void recordFailure() {
-    failures.computeIfAbsent(epochSecond(), ignored -> new AtomicInteger()).incrementAndGet();
-    if (state.get() == CircuitState.HALF_OPEN) {
-      open();
-      halfOpenProbeInFlight.set(false);
+  public void recordFailure(Scene scene) {
+    SceneCircuit circuit = circuit(scene);
+    circuit.failures.computeIfAbsent(epochSecond(), ignored -> new AtomicInteger()).incrementAndGet();
+    if (circuit.state.get() == CircuitState.HALF_OPEN) {
+      open(scene, circuit);
+      circuit.halfOpenProbeInFlight.set(false);
       return;
     }
-    halfOpenProbeInFlight.set(false);
-    evaluate();
+    circuit.halfOpenProbeInFlight.set(false);
+    evaluate(scene, circuit);
   }
 
   public CircuitState state() {
-    return state.get();
+    if (circuits.values().stream().anyMatch(circuit -> circuit.state.get() == CircuitState.OPEN)) {
+      return CircuitState.OPEN;
+    }
+    if (circuits.values().stream().anyMatch(circuit -> circuit.state.get() == CircuitState.HALF_OPEN)) {
+      return CircuitState.HALF_OPEN;
+    }
+    return CircuitState.CLOSED;
   }
 
-  public int totalCalls() {
-    cleanup();
-    return sum(successes) + sum(failures);
+  public CircuitState state(Scene scene) {
+    return circuit(scene).state.get();
   }
 
-  public double failureRate() {
-    cleanup();
-    int total = totalCalls();
-    return total == 0 ? 0.0 : (double) sum(failures) / total;
+  public int totalCalls(Scene scene) {
+    SceneCircuit circuit = circuit(scene);
+    cleanup(circuit);
+    return sum(circuit.successes) + sum(circuit.failures);
   }
 
-  private void evaluate() {
+  public double failureRate(Scene scene) {
+    SceneCircuit circuit = circuit(scene);
+    cleanup(circuit);
+    int total = sum(circuit.successes) + sum(circuit.failures);
+    return total == 0 ? 0.0 : (double) sum(circuit.failures) / total;
+  }
+
+  private void evaluate(Scene scene, SceneCircuit circuit) {
     SkillConfig config = configProvider.get();
-    int total = totalCalls();
-    if (state.get() == CircuitState.CLOSED && total >= config.circuitBreakerMinCalls() && failureRate() > config.circuitBreakerFailureRate()) {
-      open();
+    int total = totalCalls(scene);
+    if (circuit.state.get() == CircuitState.CLOSED
+        && total >= config.circuitBreakerMinCalls()
+        && failureRate(scene) > config.circuitBreakerFailureRate()) {
+      open(scene, circuit);
     }
   }
 
-  private void open() {
-    openedAt = Instant.now();
-    state.set(CircuitState.OPEN);
-    log.warn("Skill circuit breaker opened, failureRate={}, totalCalls={}", failureRate(), totalCalls());
+  private void open(Scene scene, SceneCircuit circuit) {
+    circuit.openedAt = Instant.now();
+    circuit.state.set(CircuitState.OPEN);
+    log.warn(
+        "Skill circuit breaker opened, scene={}, failureRate={}, totalCalls={}",
+        scene,
+        failureRate(scene),
+        totalCalls(scene));
   }
 
-  private void cleanup() {
+  private void cleanup(SceneCircuit circuit) {
     long min = epochSecond() - configProvider.get().circuitBreakerWindowS();
-    successes.keySet().removeIf(key -> key < min);
-    failures.keySet().removeIf(key -> key < min);
+    circuit.successes.keySet().removeIf(key -> key < min);
+    circuit.failures.keySet().removeIf(key -> key < min);
   }
 
   private int sum(Map<Long, AtomicInteger> buckets) {
@@ -109,5 +129,17 @@ public class SkillCircuitBreaker {
 
   private long epochSecond() {
     return Instant.now().getEpochSecond();
+  }
+
+  private SceneCircuit circuit(Scene scene) {
+    return circuits.computeIfAbsent(Objects.requireNonNull(scene, "scene"), ignored -> new SceneCircuit());
+  }
+
+  private static final class SceneCircuit {
+    private final ConcurrentHashMap<Long, AtomicInteger> successes = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, AtomicInteger> failures = new ConcurrentHashMap<>();
+    private final AtomicReference<CircuitState> state = new AtomicReference<>(CircuitState.CLOSED);
+    private final AtomicBoolean halfOpenProbeInFlight = new AtomicBoolean(false);
+    private volatile Instant openedAt;
   }
 }

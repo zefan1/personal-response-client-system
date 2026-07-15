@@ -76,8 +76,9 @@ public class ProfileAnalysisContextBuilder {
             tag.tagDisplayName(),
             tag.sourceType()))
         .toList();
-    List<ProfileAnalysisContext.ConversationMessage> recentMessages = recentMessages(rawMessages);
-    int effectiveMessageCount = (int) recentMessages.stream()
+    List<ProfileAnalysisContext.ConversationMessage> normalizedMessages = normalizeMessages(rawMessages);
+    List<ProfileAnalysisContext.ConversationMessage> recentMessages = recentMessages(normalizedMessages);
+    int effectiveMessageCount = (int) normalizedMessages.stream()
         .filter(message -> "client".equals(message.role()))
         .count();
     return new ProfileAnalysisContext(
@@ -88,6 +89,27 @@ public class ProfileAnalysisContextBuilder {
         sanitizeProfile(existingProfile),
         currentTags,
         lockedCategories,
+        candidates);
+  }
+
+  public ProfileAnalysisContext buildForOnlineTest(String leadType, String testMessage) {
+    List<ProfileAnalysisContext.ConversationMessage> recentMessages = recentMessages(normalizeMessages(List.of(
+        new CustomerMessageSentEvent.ChatMessage("client", testMessage, null))));
+    Map<String, Object> profile = leadType == null || leadType.isBlank()
+        ? Map.of()
+        : Map.of("leadType", leadType.trim());
+    List<ProfileAnalysisContext.CategoryCandidate> candidates = candidateBuilder
+        .build(TagCandidatePurpose.SYSTEM_INFERENCE).stream()
+        .map(this::categoryCandidate)
+        .toList();
+    return new ProfileAnalysisContext(
+        0,
+        0,
+        recentMessages.size(),
+        recentMessages,
+        profile,
+        List.of(),
+        List.of(),
         candidates);
   }
 
@@ -117,7 +139,7 @@ public class ProfileAnalysisContextBuilder {
         value.synonyms());
   }
 
-  private List<ProfileAnalysisContext.ConversationMessage> recentMessages(
+  private List<ProfileAnalysisContext.ConversationMessage> normalizeMessages(
       List<CustomerMessageSentEvent.ChatMessage> rawMessages) {
     if (rawMessages == null || rawMessages.isEmpty()) {
       return List.of();
@@ -136,8 +158,13 @@ public class ProfileAnalysisContextBuilder {
           clip(message.text().trim(), MAX_MESSAGE_CHARS),
           message.timestamp()));
     }
-    int fromIndex = Math.max(0, normalized.size() - MAX_RECENT_MESSAGES);
-    return List.copyOf(normalized.subList(fromIndex, normalized.size()));
+    return List.copyOf(normalized);
+  }
+
+  private List<ProfileAnalysisContext.ConversationMessage> recentMessages(
+      List<ProfileAnalysisContext.ConversationMessage> normalizedMessages) {
+    int fromIndex = Math.max(0, normalizedMessages.size() - MAX_RECENT_MESSAGES);
+    return List.copyOf(normalizedMessages.subList(fromIndex, normalizedMessages.size()));
   }
 
   private String normalizeRole(String role) {

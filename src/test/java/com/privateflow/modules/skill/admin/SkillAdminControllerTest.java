@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.web.GlobalApiExceptionHandler;
+import com.privateflow.modules.skill.ProfileAnalysisResult;
 import com.privateflow.modules.skill.ProfileUpdates;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillResponse;
@@ -150,7 +151,7 @@ class SkillAdminControllerTest {
   void testBindingReturnsSuggestionsAndRawResponse() throws Exception {
     Suggestion suggestion = new Suggestion("hello", "OPENING", "acceptance");
     SkillResponse raw = new SkillResponse(List.of(suggestion), null, null, ProfileUpdates.empty());
-    when(service.test(eq(4L), any())).thenReturn(new SkillTestResponse(List.of(suggestion), 123L, raw));
+    when(service.test(eq(4L), any())).thenReturn(new SkillTestResponse(List.of(suggestion), 123L, raw, null));
 
     mockMvc.perform(post("/admin/api/v1/skills/4/test")
             .contentType(MediaType.APPLICATION_JSON)
@@ -160,6 +161,25 @@ class SkillAdminControllerTest {
         .andExpect(jsonPath("$.data.responseTimeMs").value(123))
         .andExpect(jsonPath("$.data.suggestions[0].text").value("hello"))
         .andExpect(jsonPath("$.data.rawResponse.suggestions[0].direction").value("OPENING"));
+  }
+
+  @Test
+  void profileTestBindingReturnsStructuredProfileAnalysis() throws Exception {
+    when(service.test(eq(4L), any())).thenReturn(new SkillTestResponse(
+        List.of(),
+        88L,
+        null,
+        ProfileAnalysisResult.empty()));
+
+    mockMvc.perform(post("/admin/api/v1/skills/4/test")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"testMessage\":\"customer evidence\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.data.responseTimeMs").value(88))
+        .andExpect(jsonPath("$.data.suggestions").isEmpty())
+        .andExpect(jsonPath("$.data.profileAnalysis.profileUpdates.fields").isMap())
+        .andExpect(jsonPath("$.data.profileAnalysis.tagDecisions").isArray());
   }
 
   @Test

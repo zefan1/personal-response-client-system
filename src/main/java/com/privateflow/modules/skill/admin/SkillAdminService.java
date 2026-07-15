@@ -7,10 +7,16 @@ import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.ws.WsMessage;
 import com.privateflow.modules.api.ws.WsPushService;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
+import com.privateflow.modules.profile.service.ProfileAnalysisContextBuilder;
+import com.privateflow.modules.profile.service.TagAnalysisDecisionValidator;
+import com.privateflow.modules.skill.ProfileAnalysisContext;
+import com.privateflow.modules.skill.ProfileAnalysisResult;
+import com.privateflow.modules.skill.ProfileExtractRequest;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.client.SkillHttpClient;
+import com.privateflow.modules.skill.parser.SkillProfileAnalysisResponseParser;
 import com.privateflow.modules.skill.parser.SkillResponseParser;
 import com.privateflow.modules.skill.service.SkillRequestBuilder;
 import java.util.LinkedHashMap;
@@ -36,6 +42,9 @@ public class SkillAdminService {
   private final SkillRequestBuilder requestBuilder;
   private final SkillHttpClient skillHttpClient;
   private final SkillResponseParser responseParser;
+  private final ProfileAnalysisContextBuilder profileContextBuilder;
+  private final SkillProfileAnalysisResponseParser profileResponseParser;
+  private final TagAnalysisDecisionValidator decisionValidator;
   private final ApplicationEventPublisher eventPublisher;
   private final WsPushService wsPushService;
   private final SystemConfigRepository configRepository;
@@ -47,6 +56,9 @@ public class SkillAdminService {
       SkillRequestBuilder requestBuilder,
       SkillHttpClient skillHttpClient,
       SkillResponseParser responseParser,
+      ProfileAnalysisContextBuilder profileContextBuilder,
+      SkillProfileAnalysisResponseParser profileResponseParser,
+      TagAnalysisDecisionValidator decisionValidator,
       ApplicationEventPublisher eventPublisher,
       WsPushService wsPushService,
       SystemConfigRepository configRepository,
@@ -56,6 +68,9 @@ public class SkillAdminService {
     this.requestBuilder = requestBuilder;
     this.skillHttpClient = skillHttpClient;
     this.responseParser = responseParser;
+    this.profileContextBuilder = profileContextBuilder;
+    this.profileResponseParser = profileResponseParser;
+    this.decisionValidator = decisionValidator;
     this.eventPublisher = eventPublisher;
     this.wsPushService = wsPushService;
     this.configRepository = configRepository;
@@ -130,6 +145,17 @@ public class SkillAdminService {
       throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "testMessage 必填且不能超过 " + maxChars + " 字符");
     }
     long start = System.currentTimeMillis();
+    SkillTestResponse response = binding.scene() == Scene.PROFILE_EXTRACT
+        ? testProfileExtract(binding, request, start)
+        : testReplies(binding, request, start);
+    bindingRepository.markTested(id);
+    return response;
+  }
+
+  private SkillTestResponse testReplies(
+      SkillSceneBinding binding,
+      SkillTestRequest request,
+      long start) {
     SkillRequest skillRequest = new SkillRequest(
         binding.scene(),
         binding.leadType(),
@@ -144,9 +170,38 @@ public class SkillAdminService {
     payload.put("skill_id", binding.skillId());
     String raw = skillHttpClient.call(payload, testTimeoutMs());
     SkillResponse response = responseParser.parseReplies(raw);
-    long elapsed = System.currentTimeMillis() - start;
-    bindingRepository.markTested(id);
-    return new SkillTestResponse(response.suggestions(), elapsed, response);
+    return new SkillTestResponse(
+        response.suggestions(),
+        System.currentTimeMillis() - start,
+        response);
+  }
+
+  private SkillTestResponse testProfileExtract(
+      SkillSceneBinding binding,
+      SkillTestRequest request,
+      long start) {
+    String caller = AuthContext.username() + ":ADMIN_TEST";
+    ProfileAnalysisContext context = profileContextBuilder.buildForOnlineTest(
+        binding.leadType(),
+        request.testMessage());
+    ProfileExtractRequest profileRequest = new ProfileExtractRequest(
+        request.testMessage(),
+        context.customerProfile(),
+        List.of(),
+        caller,
+        context);
+    Map<String, Object> payload = requestBuilder.buildProfileExtract(profileRequest);
+    payload.put("skill_id", binding.skillId());
+    payload.put("skill_group_id", binding.skillId());
+    String raw = skillHttpClient.call(payload, testTimeoutMs());
+    ProfileAnalysisResult analysis = decisionValidator.validate(
+        profileResponseParser.parse(raw),
+        profileRequest);
+    return new SkillTestResponse(
+        List.of(),
+        System.currentTimeMillis() - start,
+        null,
+        analysis);
   }
 
   private int testMessageMaxChars() {

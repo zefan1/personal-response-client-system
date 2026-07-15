@@ -17,7 +17,8 @@ public class MockSkillHttpClient implements SkillHttpClient {
               "fields": {
                 "body_concerns": {"value": "腹直肌分离", "confidence": "HIGH"},
                 "intent_level": {"value": "MEDIUM", "confidence": "MEDIUM"}
-              }
+              },
+              "tag_decisions": []
             }
           }
           """;

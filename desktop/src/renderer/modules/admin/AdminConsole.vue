@@ -134,6 +134,19 @@
               <strong>{{ result.skillName || key }}</strong>
               <span>{{ result.responseTimeMs ? `${result.responseTimeMs}ms` : '已完成' }}</span>
               <p>{{ summarizeSkillTest(result) }}</p>
+              <div v-if="result.profileAnalysis" class="ops-profile-test-details">
+                <p v-for="(update, field) in profileFieldUpdates(result)" :key="`field-${String(field)}`">
+                  {{ profileFieldLine(String(field), update) }}
+                </p>
+                <div
+                  v-for="(decision, index) in profileTagDecisions(result)"
+                  :key="`decision-${decision.categoryCode || index}`"
+                  class="ops-profile-test-decision"
+                >
+                  <p>{{ profileDecisionLine(decision) }}</p>
+                  <small>依据：{{ decision.evidence || '未提供' }}</small>
+                </div>
+              </div>
             </article>
           </div>
           <p v-else class="ops-empty">还没有测试结果。先在上方列表选择一条绑定测试。</p>
@@ -5286,10 +5299,48 @@ function translateValue(value: unknown): string {
 }
 
 function summarizeSkillTest(value: AnyRecord) {
+  if (value.profileAnalysis) {
+    return `档案字段 ${Object.keys(profileFieldUpdates(value)).length} 项 · 标签判断 ${profileTagDecisions(value).length} 项`;
+  }
   const suggestions = listFrom(value, 'suggestions');
   if (suggestions.length) return suggestions.map((item) => item.text || item.content || item.reply || summarizeObject(item)).join('；');
   if (value.rawResponse) return summarizeObject(value.rawResponse);
   return summarizeObject(value);
+}
+
+function profileFieldUpdates(value: AnyRecord): AnyRecord {
+  const analysis = value?.profileAnalysis;
+  const profileUpdates = analysis && typeof analysis === 'object' ? analysis.profileUpdates : null;
+  const fields = profileUpdates && typeof profileUpdates === 'object' ? profileUpdates.fields : null;
+  return fields && typeof fields === 'object' && !Array.isArray(fields) ? fields : {};
+}
+
+function profileTagDecisions(value: AnyRecord): AnyRecord[] {
+  const decisions = value?.profileAnalysis?.tagDecisions;
+  return Array.isArray(decisions) ? decisions : [];
+}
+
+function profileFieldLine(field: string, update: AnyRecord) {
+  return `档案字段 ${field}：${summarizeValue(update?.value)}（${String(update?.confidence ?? '-')}）`;
+}
+
+function profileDecisionLine(decision: AnyRecord) {
+  const tags = Array.isArray(decision?.tagCodes) && decision.tagCodes.length
+    ? decision.tagCodes.join('、')
+    : '无标签变更';
+  return `${decision?.categoryCode || '未知分类'}：${profileResultTypeLabel(decision?.resultType)} · ${profileActionLabel(decision?.requestedAction)} · ${tags} · ${percentLabel(Number(decision?.confidence ?? 0))}`;
+}
+
+function profileResultTypeLabel(value: unknown) {
+  return ({
+    UPDATE: '更新',
+    UNABLE_TO_DETERMINE: '无法判断',
+    KEEP_CURRENT: '保持当前值'
+  } as Record<string, string>)[String(value ?? '')] ?? String(value ?? '-');
+}
+
+function profileActionLabel(value: unknown) {
+  return ({ ADD: '新增', REPLACE: '替换', NONE: '不修改' } as Record<string, string>)[String(value ?? '')] ?? String(value ?? '-');
 }
 
 function textSnippet(value: unknown) {

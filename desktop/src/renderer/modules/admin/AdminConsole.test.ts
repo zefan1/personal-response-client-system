@@ -575,6 +575,71 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
+  it('renders structured profile analysis details from the Skill online test', async () => {
+    apiMocks.getJson.mockImplementation(async (path: string) => {
+      const basePath = path.split('?')[0];
+      const data = basePath === '/admin/api/v1/skills'
+        ? {
+            items: [{
+              id: 3,
+              scene: 'PROFILE_EXTRACT',
+              leadType: 'PENDING',
+              skillId: 'skill_profile',
+              skillName: '档案提取助手',
+              priority: 70,
+              enabled: true
+            }]
+          }
+        : apiData[path] ?? apiData[basePath] ?? { items: [] };
+      return { success: true, data, errorCode: null, message: null };
+    });
+    apiMocks.postJson.mockImplementation(async (path: string) => {
+      if (path === '/admin/api/v1/skills/3/test') {
+        return {
+          success: true,
+          data: {
+            responseTimeMs: 88,
+            suggestions: [],
+            rawResponse: null,
+            profileAnalysis: {
+              profileUpdates: {
+                fields: {
+                  nickname: { value: 'Alice', confidence: 'HIGH' }
+                }
+              },
+              tagDecisions: [{
+                categoryCode: 'custom_goal',
+                tagCodes: ['GOAL_B'],
+                confidence: 0.95,
+                evidence: '客户明确表达目标',
+                resultType: 'UPDATE',
+                requestedAction: 'ADD'
+              }]
+            }
+          },
+          errorCode: null,
+          message: null
+        };
+      }
+      return { success: true, data: {}, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+    const textarea = host.querySelector('textarea') as HTMLTextAreaElement;
+    setInputValue(textarea, '客户明确表达目标');
+    const row = [...host.querySelectorAll('.ops-table-row')]
+      .find((item) => item.textContent?.includes('档案提取助手')) as HTMLElement;
+
+    findButton(row, '测试').click();
+    await flushSave();
+
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/skills/3/test', { testMessage: '客户明确表达目标' });
+    expect(host.textContent).toContain('档案字段 nickname：Alice（HIGH）');
+    expect(host.textContent).toContain('custom_goal：更新 · 新增 · GOAL_B · 95%');
+    expect(host.textContent).toContain('依据：客户明确表达目标');
+
+    app.unmount();
+  });
+
   it('saves configuration center prompt, external gateway, and runtime config keys', async () => {
     const { app, host } = await mountConsole();
 

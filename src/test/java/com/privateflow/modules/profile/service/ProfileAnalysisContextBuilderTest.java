@@ -24,9 +24,43 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 class ProfileAnalysisContextBuilderTest {
+
+  @Test
+  void buildsDynamicSyntheticContextForProfileOnlineTest() {
+    TagCategory dynamic = category(
+        1L,
+        "custom_goal",
+        "Custom goal",
+        TagSelectionMode.MULTI,
+        TagAutoUpdateMode.ADD_ONLY,
+        List.of(value(11L, 1L, "custom_goal", "GOAL_A", "Goal A")));
+    TagDirectoryService directoryService = mock(TagDirectoryService.class);
+    when(directoryService.getSnapshot()).thenReturn(TagDirectorySnapshot.from(
+        List.of(dynamic),
+        Instant.parse("2026-07-15T04:00:00Z")));
+    ProfileAnalysisContextBuilder builder = new ProfileAnalysisContextBuilder(
+        new TagCandidateBuilder(directoryService),
+        directoryService,
+        mock(CustomerTagFoundationRepository.class));
+
+    ProfileAnalysisContext context = builder.buildForOnlineTest("TUAN_GOU", "customer evidence");
+
+    assertThat(context.customerId()).isZero();
+    assertThat(context.effectiveMessageCount()).isEqualTo(1);
+    assertThat(context.customerProfile()).containsEntry("leadType", "TUAN_GOU");
+    assertThat(context.recentMessages()).singleElement().satisfies(message -> {
+      assertThat(message.role()).isEqualTo("client");
+      assertThat(message.text()).isEqualTo("customer evidence");
+    });
+    assertThat(context.currentTags()).isEmpty();
+    assertThat(context.lockedCategories()).isEmpty();
+    assertThat(context.candidateCategories()).singleElement().satisfies(category ->
+        assertThat(category.categoryCode()).isEqualTo("custom_goal"));
+  }
 
   @Test
   void buildsSanitizedDynamicContextAndExcludesLockedCategoriesFromCandidates() {
@@ -121,6 +155,28 @@ class ProfileAnalysisContextBuilderTest {
         assertThat(tag.synonyms()).containsExactly("核心目标");
       });
     });
+  }
+
+  @Test
+  void countsAllValidCustomerMessagesBeforeTruncatingRecentContext() {
+    TagDirectoryService directoryService = mock(TagDirectoryService.class);
+    when(directoryService.getSnapshot()).thenReturn(TagDirectorySnapshot.from(
+        List.of(),
+        Instant.parse("2026-07-15T04:00:00Z")));
+    ProfileAnalysisContextBuilder builder = new ProfileAnalysisContextBuilder(
+        new TagCandidateBuilder(directoryService),
+        directoryService,
+        mock(CustomerTagFoundationRepository.class));
+    List<CustomerMessageSentEvent.ChatMessage> messages = IntStream.rangeClosed(1, 12)
+        .mapToObj(index -> new CustomerMessageSentEvent.ChatMessage(
+            "client", "客户消息 " + index, "12:" + index))
+        .collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
+    messages.add(new CustomerMessageSentEvent.ChatMessage("keeper", "员工回复", "12:13"));
+
+    ProfileAnalysisContext context = builder.build(customer(), Map.of(), messages);
+
+    assertThat(context.effectiveMessageCount()).isEqualTo(12);
+    assertThat(context.recentMessages()).hasSize(10);
   }
 
   private Customer customer() {
