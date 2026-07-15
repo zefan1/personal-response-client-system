@@ -2,12 +2,13 @@
 
 时间：2026-07-13  
 对应方案：`dev-progress/tag_skill_llm_closed_loop_plan_055.md`  
-当前状态：Step 1、Step 2、Step 3、Step 4 已完成，Step 5 尚未开始。
+当前状态：Step 1、Step 2、Step 3、Step 4、Step 5 已完成，Step 6 尚未开始。
 
 ## 生产级约束
 
 - [x] 接手前版本已提交并推送 GitHub，恢复点为 `2f9f7fd`。
 - [x] Step 4 独立分支恢复点为 `1a17b8a`；`main`/`origin/main` 保留 `b1d3527`，未被覆盖；`uploads/` 未跟踪且未提交。
+- [x] Step 5 独立分支代码恢复点为 `ddcf1cc`；当前分支为 `feature/tag-step5-skill-profile-analysis`，Step 4 远程恢复点未被覆盖。
 - [x] Step 1 只读检查，没有修改客户数据、数据库结构、当前标签和 LLM 开关。
 - [x] 每次修改同时追踪数据库、Repository、Service、API、前端、Skill、LLM、规则、统计、导入导出和测试。
 - [x] 真实数据库为唯一结构事实，任何迁移前后都核对列、类型、NULL、默认值、索引和外键。
@@ -87,12 +88,25 @@
 
 ## Step 5：Skill 档案分析
 
-- [ ] Skill 动态读取允许系统判断的分类和值及全部说明。
-- [ ] 请求包含最近有效聊天、当前档案、当前有效标签、人工锁定分类和分类更新策略。
-- [ ] 返回统一结构：分类编码、标签编码、把握度、证据、结果类型和多选动作。
-- [ ] 支持无法判断、保持当前值和多选仅新增。
-- [ ] Skill 返回字典外、停用、跨分类或无证据值时拒绝更新。
-- [ ] 在线测试、调用日志、超时、熔断和失败回退同步验证。
+- [x] Skill 动态读取允许系统判断的分类和值及全部说明。
+- [x] 请求包含最近有效聊天、当前档案、当前有效标签、人工锁定分类和分类更新策略。
+- [x] 返回统一结构：分类编码、标签编码、把握度、证据、结果类型和多选动作。
+- [x] 支持无法判断、保持当前值和多选仅新增。
+- [x] Skill 返回字典外、停用、跨分类或无证据值时拒绝更新。
+- [x] 在线测试、调用日志、超时、熔断和失败回退同步验证。
+
+### Step 5 验收记录（2026-07-15）
+
+- Step 5 代码恢复提交：`ddcf1cc feat: complete skill profile analysis`。
+- Java 全量：358 tests，0 failures，0 errors，1 条条件式 MariaDB 测试跳过。
+- Step 5 后端定向：14 个测试类、62 tests，0 failures，0 errors。
+- 前端全量：36 个测试文件、253 tests，0 failures；`npm run typecheck` 和 `npm run build` 通过。
+- 真实构建 smoke：`renderer_smoke=passed`、`electron_smoke=passed`，均连接最新 Step 5 后端。
+- 静态核验：`verify_module_46.py`、`verify_module_d.py` 通过。
+- 数据库对齐：42 张表、24 张必需表、41 张迁移表，1,382 个 Repository 列引用，0 列/属性/枚举违规。
+- 真实数据库：`private_domain_assistant_smoke`，Flyway V69，无待迁移；当前有效统一标签分配 0 条。
+- 真实运行：PROFILE_EXTRACT 在线测试使用临时绑定进入真实外部失败路径后返回错误，临时绑定已删除；发送确认在 Skill 失败时仍返回 accepted，PROFILE_EXTRACT 失败调用记录从 0 增至 1，未写入标签。
+- `llm.profile_extraction.enabled=false`、`llm.reply_generation.enabled=false`，未提前进入 Step 6/7/8。
 
 ## Step 6：直接 LLM 档案分析
 
