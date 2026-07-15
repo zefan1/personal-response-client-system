@@ -77,6 +77,7 @@
 
 - Java 全量：`mvn test`，326 tests，0 failures，0 errors，1 条条件式 MariaDB 测试跳过。
 - 前端全量：`npm test`，36 个测试文件、252 tests，0 failures；`npm run typecheck` 通过；`npm run build` 通过。
+- 真实构建 smoke：`npm run renderer:smoke`、`npm run electron:smoke` 均连接最新 8082 后端并通过。
 - Step 4 定向：`AdminDevConsole.test.ts` 9/9；`TagAdminServiceTest` 15/15；`TagRepositoryTest` 7/7。
 - 静态核验：`python scripts/verify_module_46.py`、`python scripts/verify_module_d.py` 通过。
 - 数据库对齐：42 张表、24 张必需表、41 张迁移表，1,382 个 Repository 列引用，0 列/属性/枚举违规。

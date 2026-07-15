@@ -27,6 +27,7 @@
 
 - Java 全量：326 tests，0 failures，0 errors；1 条条件式 MariaDB 测试跳过。
 - 前端全量：36 个测试文件、252 tests，0 failures；类型检查和生产构建通过。
+- Electron 真实构建：`renderer_smoke=passed`、`electron_smoke=passed`，均连接当前 Step 4 后端。
 - Step 4 定向：前端调试台 9/9；`TagAdminServiceTest` 15/15；`TagRepositoryTest` 7/7。
 - `verify_module_46.py` 和 `verify_module_d.py` 通过。
 - `verify_database_alignment.py`：42 tables、24 required、41 migration tables、1,382 Repository 列引用，0 violations。
