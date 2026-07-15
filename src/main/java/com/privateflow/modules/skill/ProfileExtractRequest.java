@@ -7,6 +7,18 @@ public record ProfileExtractRequest(
     String conversationText,
     Map<String, Object> existingProfile,
     List<String> targetFields,
-    String caller
+    String caller,
+    ProfileAnalysisContext analysisContext
 ) {
+  public ProfileExtractRequest(
+      String conversationText,
+      Map<String, Object> existingProfile,
+      List<String> targetFields,
+      String caller) {
+    this(conversationText, existingProfile, targetFields, caller, ProfileAnalysisContext.empty());
+  }
+
+  public ProfileExtractRequest {
+    analysisContext = analysisContext == null ? ProfileAnalysisContext.empty() : analysisContext;
+  }
 }

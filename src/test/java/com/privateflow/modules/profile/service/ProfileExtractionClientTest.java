@@ -7,12 +7,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.modules.llm.LlmProfileExtractionService;
 import com.privateflow.modules.profile.config.ProfileConfig;
 import com.privateflow.modules.profile.config.ProfileConfigProvider;
 import com.privateflow.modules.profile.infra.ProfileFieldRegistry;
 import com.privateflow.modules.skill.FieldUpdate;
 import com.privateflow.modules.skill.ProfileExtractRequest;
+import com.privateflow.modules.skill.ProfileAnalysisContext;
 import com.privateflow.modules.skill.ProfileUpdates;
 import com.privateflow.modules.skill.SkillGatewayService;
 import java.util.List;
@@ -26,12 +28,14 @@ class ProfileExtractionClientTest {
 
   private SkillGatewayService skillGatewayService;
   private LlmProfileExtractionService llmProfileExtractionService;
+  private ProfileAnalysisContextBuilder contextBuilder;
   private ProfileExtractionClient client;
 
   @BeforeEach
   void setUp() {
     skillGatewayService = Mockito.mock(SkillGatewayService.class);
     llmProfileExtractionService = Mockito.mock(LlmProfileExtractionService.class);
+    contextBuilder = Mockito.mock(ProfileAnalysisContextBuilder.class);
     ProfileConfigProvider configProvider = Mockito.mock(ProfileConfigProvider.class);
     when(configProvider.get()).thenReturn(new ProfileConfig(
         List.of("bodyConcerns", "intentLevel"),
@@ -46,7 +50,8 @@ class ProfileExtractionClientTest {
         skillGatewayService,
         new ProfileFieldRegistry(),
         configProvider,
-        llmProfileExtractionService);
+        llmProfileExtractionService,
+        contextBuilder);
   }
 
   @Test
@@ -84,9 +89,29 @@ class ProfileExtractionClientTest {
     verify(skillGatewayService, never()).extractProfile(any());
   }
 
+  @Test
+  void attachesSharedAnalysisContextBuiltFromRecentMessages() {
+    ProfileAnalysisContext analysisContext = new ProfileAnalysisContext(
+        7L, 1, 1, List.of(), Map.of("nickname", "测试客户"), List.of(), List.of(), List.of());
+    when(contextBuilder.build(any(), any(), any())).thenReturn(analysisContext);
+    when(llmProfileExtractionService.tryExtract(any(ProfileExtractRequest.class))).thenReturn(Optional.empty());
+    when(llmProfileExtractionService.fallbackToSkill()).thenReturn(true);
+    when(skillGatewayService.extractProfile(any(ProfileExtractRequest.class))).thenReturn(ProfileUpdates.empty());
+    List<CustomerMessageSentEvent.ChatMessage> messages = List.of(
+        new CustomerMessageSentEvent.ChatMessage("client", "客户真实原话", "12:00"));
+
+    client.extract("摘要", messages, customer(), "keeper");
+
+    org.mockito.ArgumentCaptor<ProfileExtractRequest> captor = org.mockito.ArgumentCaptor.forClass(ProfileExtractRequest.class);
+    verify(skillGatewayService).extractProfile(captor.capture());
+    assertThat(captor.getValue().analysisContext()).isSameAs(analysisContext);
+    verify(contextBuilder).build(any(Customer.class), any(), org.mockito.ArgumentMatchers.eq(messages));
+  }
+
   private Customer customer() {
     Customer customer = new Customer();
     customer.setPhone("18800001111");
+    customer.setId(7L);
     customer.setNickname("测试客户");
     customer.setLeadType("TUAN_GOU");
     customer.setVersion(1);

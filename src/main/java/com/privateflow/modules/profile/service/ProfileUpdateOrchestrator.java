@@ -66,7 +66,7 @@ public class ProfileUpdateOrchestrator {
         log.info("customer missing, skip profile update, phone={}", event.phone());
         return;
       }
-      ProfileUpdates updates = extractionClient.extract(conversation, customer, event.operator());
+      ProfileUpdates updates = extractionClient.extract(conversation, event.rawMessages(), customer, event.operator());
       RoutedProfileUpdates routed = confidenceRouter.route(updates);
       Map<String, Object> autoWrite = new LinkedHashMap<>();
       routed.high().forEach((field, update) -> autoWrite.put(field, update.value()));

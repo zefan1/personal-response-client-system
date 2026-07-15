@@ -1,5 +1,6 @@
 package com.privateflow.modules.profile.service;
 
+import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.llm.LlmProfileExtractionService;
 import com.privateflow.modules.profile.config.ProfileConfigProvider;
@@ -20,26 +21,39 @@ public class ProfileExtractionClient {
   private final ProfileFieldRegistry fieldRegistry;
   private final ProfileConfigProvider configProvider;
   private final LlmProfileExtractionService llmProfileExtractionService;
+  private final ProfileAnalysisContextBuilder contextBuilder;
 
   public ProfileExtractionClient(
       SkillGatewayService skillGatewayService,
       ProfileFieldRegistry fieldRegistry,
       ProfileConfigProvider configProvider,
-      LlmProfileExtractionService llmProfileExtractionService) {
+      LlmProfileExtractionService llmProfileExtractionService,
+      ProfileAnalysisContextBuilder contextBuilder) {
     this.skillGatewayService = skillGatewayService;
     this.fieldRegistry = fieldRegistry;
     this.configProvider = configProvider;
     this.llmProfileExtractionService = llmProfileExtractionService;
+    this.contextBuilder = contextBuilder;
   }
 
   public ProfileUpdates extract(String conversationText, Customer customer, String caller) {
+    return extract(conversationText, List.of(), customer, caller);
+  }
+
+  public ProfileUpdates extract(
+      String conversationText,
+      List<CustomerMessageSentEvent.ChatMessage> rawMessages,
+      Customer customer,
+      String caller) {
     try {
       List<String> targetFields = configProvider.get().extractFields();
+      var existingProfile = fieldRegistry.toProfileMap(customer);
       ProfileExtractRequest request = new ProfileExtractRequest(
           conversationText,
-          fieldRegistry.toProfileMap(customer),
+          existingProfile,
           targetFields,
-          caller);
+          caller,
+          contextBuilder.build(customer, existingProfile, rawMessages));
       java.util.Optional<ProfileUpdates> llmUpdates = llmProfileExtractionService.tryExtract(request);
       if (llmUpdates.isPresent()) {
         return llmUpdates.orElseThrow();

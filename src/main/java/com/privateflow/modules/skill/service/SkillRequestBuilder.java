@@ -5,6 +5,7 @@ import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.LeadTypes;
 import com.privateflow.modules.skill.ProfileExtractRequest;
+import com.privateflow.modules.skill.ProfileAnalysisContext;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.config.SkillConfig;
@@ -84,16 +85,40 @@ public class SkillRequestBuilder {
 
   public Map<String, Object> buildProfileExtract(ProfileExtractRequest request) {
     SkillConfig config = configProvider.get();
+    ProfileAnalysisContext analysisContext = request.analysisContext();
+    String leadType = String.valueOf(analysisContext.customerProfile().getOrDefault(
+        "leadType",
+        request.existingProfile() == null ? "" : request.existingProfile().getOrDefault("leadType", "")));
     Map<String, Object> payload = new HashMap<>();
     payload.put("scene", Scene.PROFILE_EXTRACT.name());
-    payload.put("lead_type", null);
-    payload.put("client_message", request.conversationText());
-    payload.put("chat_context", List.of());
-    payload.put("customer", request.existingProfile() == null ? Map.of() : request.existingProfile());
+    payload.put("lead_type", normalizeLeadType(leadType));
+    payload.put("client_message", profileClientMessage(analysisContext));
+    payload.put("chat_context", analysisContext.recentMessages());
+    payload.put("customer", analysisContext.customerProfile());
     payload.put("target_fields", request.targetFields() == null ? List.of() : request.targetFields());
-    payload.put("system_prompt", buildSystemPrompt(Scene.PROFILE_EXTRACT, config, request.existingProfile() == null ? Map.of() : request.existingProfile()));
-    payload.put("skill_group_id", config.defaultSkillId());
+    payload.put("profile_analysis_context", analysisContext);
+    payload.put("system_prompt", buildProfileSystemPrompt(config, analysisContext.customerProfile()));
+    runtimeRouter.route(Scene.PROFILE_EXTRACT, leadType, config).ifPresent(skillId -> {
+      payload.put("skill_id", skillId);
+      payload.put("skill_group_id", skillId);
+    });
     return payload;
+  }
+
+  private String buildProfileSystemPrompt(SkillConfig config, Map<String, Object> customer) {
+    String template = config.systemPromptTemplate();
+    String prompt = template
+        .replace("{{red_lines}}", config.redLines() == null ? "" : config.redLines())
+        .replace("{{available_tags}}", "请严格使用 profile_analysis_context.candidateCategories 中的动态标签")
+        .replace("{{scene}}", Scene.PROFILE_EXTRACT.name());
+    return replaceCustomerPlaceholders(prompt, customer);
+  }
+
+  private String profileClientMessage(ProfileAnalysisContext context) {
+    return context.recentMessages().stream()
+        .map(ProfileAnalysisContext.ConversationMessage::text)
+        .filter(text -> text != null && !text.isBlank())
+        .reduce("", (left, right) -> left.isBlank() ? right : left + "\n" + right);
   }
 
   public String requestSummary(String clientMessage, String phone) {
