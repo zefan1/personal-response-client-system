@@ -30,6 +30,9 @@ import com.privateflow.modules.tablewrite.ManualSaveResult;
 import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
 import com.privateflow.modules.tablewrite.TableWriteException;
 import com.privateflow.modules.tablewrite.service.ManualSaveHandler;
+import com.privateflow.modules.tags.CustomerTagDecisionResult;
+import com.privateflow.modules.tags.CustomerTagUpdateResult;
+import com.privateflow.modules.tags.CustomerTagUpdateService;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +49,7 @@ class CustomerControllerTest {
   private ManualEditHandler manualEditHandler;
   private SuggestionQueueManager suggestionQueueManager;
   private ManualSaveHandler manualSaveHandler;
+  private CustomerTagUpdateService customerTagUpdateService;
   private MockMvc mockMvc;
   private ObjectMapper objectMapper;
 
@@ -56,13 +60,15 @@ class CustomerControllerTest {
     manualEditHandler = org.mockito.Mockito.mock(ManualEditHandler.class);
     suggestionQueueManager = org.mockito.Mockito.mock(SuggestionQueueManager.class);
     manualSaveHandler = org.mockito.Mockito.mock(ManualSaveHandler.class);
+    customerTagUpdateService = org.mockito.Mockito.mock(CustomerTagUpdateService.class);
     mockMvc = MockMvcBuilders
         .standaloneSetup(new CustomerController(
             customerSearchService,
             customerProfileService,
             manualEditHandler,
             suggestionQueueManager,
-            manualSaveHandler))
+            manualSaveHandler,
+            customerTagUpdateService))
         .build();
     objectMapper = new ObjectMapper();
   }
@@ -133,6 +139,33 @@ class CustomerControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.written").value(true))
         .andExpect(jsonPath("$.data.updatedFields[0]").value("nickname"));
+  }
+
+  @Test
+  void manualTagUpdateAndLockDelegateToUnifiedTagService() throws Exception {
+    when(customerTagUpdateService.applyManual(eq("13800000000"), eq(1L), any()))
+        .thenReturn(new CustomerTagUpdateResult(
+            3,
+            true,
+            List.of(new CustomerTagDecisionResult(1L, "intent_level", "REPLACE", true, "人工标签修改完成"))));
+    when(customerTagUpdateService.applyLock(eq("13800000000"), eq(1L), any()))
+        .thenReturn(new CustomerTagUpdateResult(
+            4,
+            true,
+            List.of(new CustomerTagDecisionResult(1L, "intent_level", "UNLOCK", true, "分类已解除锁定"))));
+
+    mockMvc.perform(put("/api/v1/customers/13800000000/tags/1")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"version\":2,\"tagValueIds\":[12],\"reason\":\"客户明确确认购买\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.customerVersion").value(3))
+        .andExpect(jsonPath("$.data.decisions[0].updated").value(true));
+    mockMvc.perform(put("/api/v1/customers/13800000000/tags/1/lock")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"version\":3,\"locked\":false,\"reason\":\"重新允许自动判断\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.customerVersion").value(4))
+        .andExpect(jsonPath("$.data.decisions[0].action").value("UNLOCK"));
   }
 
   @Test

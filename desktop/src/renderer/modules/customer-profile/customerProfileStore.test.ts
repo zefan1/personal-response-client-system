@@ -4,6 +4,7 @@ import type { SaveProfileInput, SaveResult } from '../save-to-table/types';
 
 const getJsonMock = vi.fn();
 const postJsonMock = vi.fn();
+const putJsonMock = vi.fn();
 const saveProfileMock = vi.fn();
 const syncProfileToTableMock = vi.fn();
 const recoverPendingSaveMock = vi.fn();
@@ -18,7 +19,8 @@ const handleCustomerProfileLoadedMock = vi.fn();
 
 vi.mock('../../shared/apiClient', () => ({
   getJson: getJsonMock,
-  postJson: postJsonMock
+  postJson: postJsonMock,
+  putJson: putJsonMock
 }));
 
 vi.mock('../save-to-table/saveToTableService', () => ({
@@ -165,6 +167,24 @@ describe('customerProfileStore', () => {
       sourceFrom: 'FOLLOWUP_LIST'
     }]);
     expect(JSON.parse(localStorage.getItem('customer_cache:18800001111') ?? '{}').fullProfile.customer.nickname).toBe('Online');
+  });
+
+  it('saves customer tags with the current optimistic version and refreshes the profile', async () => {
+    const { profile } = await freshStore();
+    profile.customerProfileState.profile = view('18800001111', { version: 7 });
+    putJsonMock.mockResolvedValue({
+      success: true,
+      data: { customerVersion: 8, updated: true, decisions: [] }
+    });
+    getJsonMock.mockResolvedValue({ success: true, data: view('18800001111', { version: 8 }) });
+
+    await profile.saveCustomerTags(1, [12], '客户明确确认购买');
+
+    expect(putJsonMock).toHaveBeenCalledWith(
+      '/api/v1/customers/18800001111/tags/1',
+      { version: 7, tagValueIds: [12], reason: '客户明确确认购买' },
+      5000);
+    expect(profile.customerProfileState.profile?.customer.version).toBe(8);
   });
 
   it('falls back to cached profile data when online profile loading fails', async () => {
@@ -471,6 +491,7 @@ describe('customerProfileStore', () => {
 function resetMocks(): void {
   getJsonMock.mockReset();
   postJsonMock.mockReset();
+  putJsonMock.mockReset();
   saveProfileMock.mockReset();
   syncProfileToTableMock.mockReset();
   recoverPendingSaveMock.mockReset();
@@ -514,7 +535,10 @@ function view(phone: string, patch: Partial<CustomerProfileView['customer']> = {
       version: 7,
       ...patch
     },
-    pendingSuggestions
+    pendingSuggestions,
+    currentTags: [],
+    tagLocks: [],
+    editableTagCategories: []
   };
 }
 

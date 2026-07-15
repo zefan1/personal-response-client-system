@@ -71,6 +71,9 @@ public class TagSelectionValidator {
     if (category.mergedIntoId() != null) {
       return rejected(TagSelectionValidationReason.CATEGORY_MERGED, category, List.of(), categoryInput);
     }
+    if (!candidateBuilder.isCategoryAllowed(purpose, category)) {
+      return rejected(TagSelectionValidationReason.PURPOSE_NOT_ALLOWED, category, List.of(), categoryInput);
+    }
 
     List<T> requested = requestedValues == null ? List.of() : new ArrayList<>(requestedValues);
     HashSet<T> seen = new HashSet<>();

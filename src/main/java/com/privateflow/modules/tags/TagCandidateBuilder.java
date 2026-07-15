@@ -34,7 +34,7 @@ public class TagCandidateBuilder {
     }
   }
 
-  private boolean isCategoryAllowed(TagCandidatePurpose purpose, TagCategory category) {
+  boolean isCategoryAllowed(TagCandidatePurpose purpose, TagCategory category) {
     if (!category.isEnabled() || category.mergedIntoId() != null) {
       return false;
     }

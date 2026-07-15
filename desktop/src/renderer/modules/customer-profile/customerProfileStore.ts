@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import { getJson, postJson } from '../../shared/apiClient';
+import { getJson, postJson, putJson } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
 import { getAlertsByPhone, loadAlertsByPhone } from '../abnormal-alert/alertStore';
@@ -21,6 +21,8 @@ import type {
   AbnormalAlertPayload,
   Customer,
   CustomerProfileView,
+  CustomerTagsUpdatedPayload,
+  CustomerTagUpdateResult,
   CustomerSearchResult,
   CustomerSummary,
   ProfileSuggestion,
@@ -29,7 +31,7 @@ import type {
   StageSuggestPayload
 } from './types';
 
-type SectionKey = 'intent' | 'body' | 'followup' | 'suggestions' | 'appointment';
+type SectionKey = 'intent' | 'body' | 'followup' | 'tags' | 'suggestions' | 'appointment';
 type TableSyncStatusLevel = 'pending' | 'syncing' | 'success' | 'retrying' | 'skipped';
 
 type TableSyncStatus = {
@@ -68,10 +70,14 @@ export const customerProfileState = reactive({
   activeReplySessionId: '',
   generating: false,
   suggestions: [] as ProfileSuggestion[],
+  tagEditingCategoryId: null as number | null,
+  tagSavingCategoryId: null as number | null,
+  tagDrafts: {} as Record<number, number[]>,
   sectionCollapsed: {
     intent: false,
     body: false,
     followup: false,
+    tags: false,
     suggestions: false,
     appointment: false
   } as Record<SectionKey, boolean>,
@@ -423,6 +429,91 @@ export function handleSendConfirmed(payload: { phone?: string }): void {
   }
 }
 
+export function beginTagEdit(categoryId: number): void {
+  const current = customerProfileState.profile?.currentTags ?? [];
+  customerProfileState.tagEditingCategoryId = categoryId;
+  customerProfileState.tagDrafts[categoryId] = current
+    .filter((tag) => tag.categoryId === categoryId)
+    .map((tag) => tag.tagValueId);
+}
+
+export function cancelTagEdit(): void {
+  customerProfileState.tagEditingCategoryId = null;
+}
+
+export async function saveCustomerTags(
+  categoryId: number,
+  tagValueIds: number[],
+  reason = ''
+): Promise<void> {
+  const profile = customerProfileState.profile;
+  const phone = currentProfilePhone();
+  const version = profile?.customer.version;
+  if (!profile || !phone || version === null || version === undefined) {
+    customerProfileState.toast = '客户档案版本缺失，请刷新后重试';
+    return;
+  }
+  const normalizedIds = Array.from(new Set(tagValueIds.filter((value) => Number.isFinite(value) && value > 0)));
+  customerProfileState.tagSavingCategoryId = categoryId;
+  try {
+    const response = await putJson<CustomerTagUpdateResult>(
+      `/api/v1/customers/${encodeURIComponent(phone)}/tags/${categoryId}`,
+      { version, tagValueIds: normalizedIds, reason },
+      SAVE_TIMEOUT_MS
+    );
+    if (!response.success || !response.data) {
+      customerProfileState.toast = response.message || '标签保存失败，请刷新后重试';
+      return;
+    }
+    customerProfileState.tagEditingCategoryId = null;
+    await openProfile(phone, 'PROFILE_CARD');
+    customerProfileState.toast = '客户标签已保存';
+  } catch (error) {
+    customerProfileState.toast = error instanceof Error ? error.message : '标签保存失败，请稍后重试';
+  } finally {
+    customerProfileState.tagSavingCategoryId = null;
+  }
+}
+
+export async function updateCustomerTagLock(
+  categoryId: number,
+  locked: boolean,
+  reason = ''
+): Promise<void> {
+  const profile = customerProfileState.profile;
+  const phone = currentProfilePhone();
+  const version = profile?.customer.version;
+  if (!profile || !phone || version === null || version === undefined) {
+    customerProfileState.toast = '客户档案版本缺失，请刷新后重试';
+    return;
+  }
+  customerProfileState.tagSavingCategoryId = categoryId;
+  try {
+    const response = await putJson<CustomerTagUpdateResult>(
+      `/api/v1/customers/${encodeURIComponent(phone)}/tags/${categoryId}/lock`,
+      { version, locked, reason },
+      SAVE_TIMEOUT_MS
+    );
+    if (!response.success || !response.data) {
+      customerProfileState.toast = response.message || '标签锁定状态保存失败';
+      return;
+    }
+    await openProfile(phone, 'PROFILE_CARD');
+    customerProfileState.toast = locked ? '分类已锁定' : '分类已解除锁定';
+  } catch (error) {
+    customerProfileState.toast = error instanceof Error ? error.message : '标签锁定状态保存失败';
+  } finally {
+    customerProfileState.tagSavingCategoryId = null;
+  }
+}
+
+export function handleCustomerTagsUpdated(payload: CustomerTagsUpdatedPayload): void {
+  const phone = currentProfilePhone();
+  if (payload.phone && phone && isSamePhone(payload.phone, phone)) {
+    void openProfile(phone, 'PROFILE_CARD');
+  }
+}
+
 export function cleanupCustomerProfileStore(): void {
   if (searchTimer) {
     window.clearTimeout(searchTimer);
@@ -475,6 +566,8 @@ function renderProfile(profile: CustomerProfileView, fromCache: boolean, offline
   customerProfileState.offline = offline;
   customerProfileState.cachedAt = cachedAt;
   customerProfileState.suggestions = (profile.pendingSuggestions ?? []).map((item) => ({ ...item, resolved: false, resolving: false }));
+  customerProfileState.tagEditingCategoryId = null;
+  customerProfileState.tagDrafts = {};
   customerProfileState.pendingSaveBanner = getPendingSave(phone) ? '上次编辑内容未保存成功，系统将在稍后自动重试' : '';
   resetSectionState();
 }
@@ -528,6 +621,7 @@ function resetSectionState(): void {
   customerProfileState.sectionCollapsed.intent = false;
   customerProfileState.sectionCollapsed.body = false;
   customerProfileState.sectionCollapsed.followup = false;
+  customerProfileState.sectionCollapsed.tags = false;
   customerProfileState.sectionCollapsed.suggestions = customerProfileState.suggestions.length === 0;
   customerProfileState.sectionCollapsed.appointment = false;
 }

@@ -9,6 +9,8 @@ import com.privateflow.modules.profile.infra.AuditLogRepository;
 import com.privateflow.modules.profile.infra.ProfileWriter;
 import com.privateflow.modules.skill.FieldUpdate;
 import com.privateflow.modules.skill.ProfileAnalysisResult;
+import com.privateflow.modules.tags.AutomaticCustomerTagUpdateRequest;
+import com.privateflow.modules.tags.CustomerTagUpdateService;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -27,6 +29,7 @@ public class ProfileUpdateOrchestrator {
   private final ConfidenceRouter confidenceRouter;
   private final ProfileWriter profileWriter;
   private final SuggestionQueueManager suggestionQueueManager;
+  private final CustomerTagUpdateService customerTagUpdateService;
   private final ProfileConfigProvider configProvider;
   private final AuditLogRepository auditLogRepository;
 
@@ -37,6 +40,7 @@ public class ProfileUpdateOrchestrator {
       ConfidenceRouter confidenceRouter,
       ProfileWriter profileWriter,
       SuggestionQueueManager suggestionQueueManager,
+      CustomerTagUpdateService customerTagUpdateService,
       ProfileConfigProvider configProvider,
       AuditLogRepository auditLogRepository) {
     this.deduplicator = deduplicator;
@@ -45,6 +49,7 @@ public class ProfileUpdateOrchestrator {
     this.confidenceRouter = confidenceRouter;
     this.profileWriter = profileWriter;
     this.suggestionQueueManager = suggestionQueueManager;
+    this.customerTagUpdateService = customerTagUpdateService;
     this.configProvider = configProvider;
     this.auditLogRepository = auditLogRepository;
   }
@@ -76,10 +81,29 @@ public class ProfileUpdateOrchestrator {
       routed.high().forEach((field, update) -> autoWrite.put(field, update.value()));
       autoWrite.put("lastFollowupAt", java.time.LocalDateTime.now());
       autoWrite.put("followupNotes", fallbackSummary(event));
+      Integer writtenVersion = null;
       try {
-        profileWriter.write(event.phone(), autoWrite, customer.getVersion(), true);
+        writtenVersion = profileWriter.write(event.phone(), autoWrite, customer.getVersion(), true);
       } catch (ProfileUpdateException ex) {
         log.warn("profile auto update skipped by conflict, phone={}", event.phone());
+      }
+      if (writtenVersion != null
+          && customer.getId() != null
+          && !analysis.tagDecisions().isEmpty()) {
+        try {
+          customerTagUpdateService.applyAutomatic(new AutomaticCustomerTagUpdateRequest(
+              customer.getId(),
+              event.phone(),
+              writtenVersion,
+              effectiveCustomerMessageCount(event),
+              event.operator(),
+              analysis.tagDecisions()));
+        } catch (RuntimeException ex) {
+          log.warn(
+              "automatic customer tag update failed, normal profile flow continues, phone={}, reason={}",
+              event.phone(),
+              ex.getMessage());
+        }
       }
       suggestionQueueManager.enqueue(event.phone(), customer, routed.medium());
       auditLogRepository.log("UPDATE_PROFILE", "SYSTEM", "customer", event.phone(), "auto profile update");
@@ -107,5 +131,18 @@ public class ProfileUpdateOrchestrator {
     String text = builder.toString().trim();
     int limit = configProvider.get().fallbackSummaryChars();
     return text.length() > limit ? text.substring(0, limit) : text;
+  }
+
+  private int effectiveCustomerMessageCount(CustomerMessageSentEvent event) {
+    if (event.rawMessages() == null) {
+      return 0;
+    }
+    return (int) event.rawMessages().stream()
+        .filter(message -> message != null
+            && message.text() != null
+            && !message.text().isBlank()
+            && ("client".equalsIgnoreCase(message.role())
+                || "customer".equalsIgnoreCase(message.role())))
+        .count();
   }
 }

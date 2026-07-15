@@ -23,6 +23,10 @@ import com.privateflow.modules.tablewrite.ManualSaveResult;
 import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
 import com.privateflow.modules.tablewrite.TableWriteException;
 import com.privateflow.modules.tablewrite.service.ManualSaveHandler;
+import com.privateflow.modules.tags.CustomerTagLockUpdateRequest;
+import com.privateflow.modules.tags.CustomerTagUpdateResult;
+import com.privateflow.modules.tags.CustomerTagUpdateService;
+import com.privateflow.modules.tags.ManualCustomerTagUpdateRequest;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -47,18 +51,21 @@ public class CustomerController {
   private final ManualEditHandler manualEditHandler;
   private final SuggestionQueueManager suggestionQueueManager;
   private final ManualSaveHandler manualSaveHandler;
+  private final CustomerTagUpdateService customerTagUpdateService;
 
   public CustomerController(
       CustomerSearchService customerSearchService,
       CustomerProfileService customerProfileService,
       ManualEditHandler manualEditHandler,
       SuggestionQueueManager suggestionQueueManager,
-      ManualSaveHandler manualSaveHandler) {
+      ManualSaveHandler manualSaveHandler,
+      CustomerTagUpdateService customerTagUpdateService) {
     this.customerSearchService = customerSearchService;
     this.customerProfileService = customerProfileService;
     this.manualEditHandler = manualEditHandler;
     this.suggestionQueueManager = suggestionQueueManager;
     this.manualSaveHandler = manualSaveHandler;
+    this.customerTagUpdateService = customerTagUpdateService;
   }
 
   @GetMapping("/search")
@@ -103,6 +110,22 @@ public class CustomerController {
       @PathVariable("phone") String phone,
       @RequestBody ManualProfileUpdateRequest request) {
     return ApiResponse.ok(manualEditHandler.update(phone, request));
+  }
+
+  @PutMapping("/{phone}/tags/{categoryId}")
+  public ApiResponse<CustomerTagUpdateResult> updateTags(
+      @PathVariable("phone") String phone,
+      @PathVariable("categoryId") long categoryId,
+      @RequestBody ManualCustomerTagUpdateRequest request) {
+    return ApiResponse.ok(customerTagUpdateService.applyManual(phone, categoryId, request));
+  }
+
+  @PutMapping("/{phone}/tags/{categoryId}/lock")
+  public ApiResponse<CustomerTagUpdateResult> updateTagLock(
+      @PathVariable("phone") String phone,
+      @PathVariable("categoryId") long categoryId,
+      @RequestBody CustomerTagLockUpdateRequest request) {
+    return ApiResponse.ok(customerTagUpdateService.applyLock(phone, categoryId, request));
   }
 
   @PostMapping("/{phone}/suggestions/batch-resolve")

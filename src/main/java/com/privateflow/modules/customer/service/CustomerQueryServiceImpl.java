@@ -1,6 +1,7 @@
 package com.privateflow.modules.customer.service;
 
 import com.privateflow.common.events.ConfigChangedEvent;
+import com.privateflow.common.events.CustomerTagsUpdatedEvent;
 import com.privateflow.common.events.ProfileUpdatedEvent;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
@@ -119,6 +120,11 @@ public class CustomerQueryServiceImpl implements CustomerQueryService {
 
   @EventListener
   public void onProfileUpdated(ProfileUpdatedEvent event) {
+    refreshCache(event.phone());
+  }
+
+  @EventListener
+  public void onCustomerTagsUpdated(CustomerTagsUpdatedEvent event) {
     refreshCache(event.phone());
   }
 

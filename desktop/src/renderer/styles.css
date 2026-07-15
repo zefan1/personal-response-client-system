@@ -2449,6 +2449,80 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.tag-category-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.tag-category-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.tag-category-item:first-child {
+  padding-top: 0;
+}
+
+.tag-category-item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.tag-category-header,
+.tag-category-actions,
+.tag-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-category-header {
+  justify-content: space-between;
+}
+
+.tag-category-header > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tag-category-key,
+.tag-lock-state {
+  color: #667085;
+  font-size: 12px;
+}
+
+.tag-lock-state {
+  color: #b54708;
+}
+
+.tag-current-values {
+  margin: 0;
+  color: #344054;
+  overflow-wrap: anywhere;
+}
+
+.tag-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.tag-editor select {
+  width: 100%;
+  min-height: 36px;
+}
+
+.tag-editor select[multiple] {
+  min-height: 96px;
+}
+
 .multiline {
   white-space: pre-wrap;
 }
@@ -2461,6 +2535,17 @@ textarea {
 
   .profile-summary,
   .profile-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tag-category-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tag-editor {
+    display: flex;
     align-items: stretch;
     flex-direction: column;
   }

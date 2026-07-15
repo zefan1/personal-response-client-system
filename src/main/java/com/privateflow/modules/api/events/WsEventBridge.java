@@ -3,6 +3,7 @@ package com.privateflow.modules.api.events;
 import com.privateflow.common.events.FollowupWsMessageReadyEvent;
 import com.privateflow.common.events.ImageServiceStatusEvent;
 import com.privateflow.common.events.ProfileSuggestionsReadyEvent;
+import com.privateflow.common.events.CustomerTagsUpdatedEvent;
 import com.privateflow.modules.api.alert.SystemAlertRepository;
 import com.privateflow.modules.api.ws.WsMessage;
 import com.privateflow.modules.api.ws.WsPushService;
@@ -33,6 +34,16 @@ public class WsEventBridge {
         "phone", event.phone(),
         "suggestionCount", event.suggestionCount(),
         "suggestions", event.suggestions() == null ? List.of() : event.suggestions())));
+  }
+
+  @EventListener
+  public void onCustomerTagsUpdated(CustomerTagsUpdatedEvent event) {
+    wsPushService.broadcastWs(WsMessage.unsaved("CUSTOMER_TAGS_UPDATED", Map.of(
+        "phone", event.phone(),
+        "customerId", event.customerId(),
+        "customerVersion", event.customerVersion(),
+        "source", event.source() == null ? "UNKNOWN" : event.source(),
+        "decisions", event.result() == null ? List.of() : event.result().decisions())));
   }
 
   @EventListener

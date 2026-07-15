@@ -110,6 +110,58 @@
         <p class="field-value multiline">{{ customer.followupNotes || '-' }}</p>
         <p class="reason">下次跟进：{{ formatDate(customer.nextFollowupAt) }} · {{ customer.nextFollowupDir || '-' }}</p>
       </ProfileSection>
+      <ProfileSection title="客户标签" section-key="tags">
+        <div v-if="(state.profile?.editableTagCategories ?? []).length" class="tag-category-list">
+          <article v-for="category in state.profile?.editableTagCategories ?? []" :key="category.id" class="tag-category-item">
+            <div class="tag-category-header">
+              <div>
+                <strong>{{ category.categoryName }}</strong>
+                <span class="tag-category-key">{{ category.categoryKey }}</span>
+                <span v-if="isCategoryLocked(category.id)" class="tag-lock-state">已锁定</span>
+              </div>
+              <div class="tag-category-actions">
+                <button
+                  class="secondary small"
+                  type="button"
+                  :disabled="state.tagSavingCategoryId === category.id"
+                  @click="toggleTagEdit(category)"
+                >{{ state.tagEditingCategoryId === category.id ? '取消' : '编辑' }}</button>
+                <button
+                  class="secondary small"
+                  type="button"
+                  :disabled="state.tagSavingCategoryId === category.id"
+                  @click="toggleCategoryLock(category.id)"
+                >{{ isCategoryLocked(category.id) ? '解除锁定' : '锁定分类' }}</button>
+              </div>
+            </div>
+            <p class="tag-current-values">{{ currentTagNames(category.id) || '未设置' }}</p>
+            <div v-if="state.tagEditingCategoryId === category.id" class="tag-editor">
+              <select
+                :multiple="category.selectionMode === 'MULTI'"
+                :value="draftSelection(category)"
+                @change="onTagSelectionChange(category, $event)"
+              >
+                <option v-if="category.selectionMode === 'SINGLE'" :value="0">移除当前标签</option>
+                <option
+                  v-for="value in category.values.filter((item) => item.isEnabled && item.manualSelectable)"
+                  :key="value.id"
+                  :value="value.id"
+                >{{ value.displayName || value.tagValue }}</option>
+              </select>
+              <div class="tag-editor-actions">
+                <button
+                  class="primary small"
+                  type="button"
+                  :disabled="state.tagSavingCategoryId === category.id"
+                  @click="saveCustomerTags(category.id, state.tagDrafts[category.id] ?? [], '员工在客户档案中修改')"
+                >保存标签</button>
+                <button class="secondary small" type="button" @click="cancelTagEdit">取消</button>
+              </div>
+            </div>
+          </article>
+        </div>
+        <p v-else class="empty-panel">暂无可手工维护的标签分类</p>
+      </ProfileSection>
       <ProfileSection :title="`AI 更新建议 (${state.suggestions.length})`" section-key="suggestions">
         <div v-if="state.suggestions.length" class="suggestion-list">
           <article
@@ -161,6 +213,8 @@ import { eventBus } from '../../shared/eventBus';
 import {
   appendProfileSuggestions,
   appendStageSuggestion,
+  beginTagEdit,
+  cancelTagEdit,
   cancelEditMode,
   chooseCandidate,
   cleanupCustomerProfileStore,
@@ -169,18 +223,30 @@ import {
   dismissCandidates,
   enterEditMode,
   generateReplyFromProfile,
+  handleCustomerTagsUpdated,
   handleProfileAbnormalAlert,
   handleSendConfirmed,
   handleStageUpdated,
   openProfile,
   resolveProfileSuggestion,
+  saveCustomerTags,
   saveProfileEdits,
   scheduleSearch,
   searchImmediately,
   skipTableSync,
-  showCandidates
+  showCandidates,
+  updateCustomerTagLock
 } from './customerProfileStore';
-import type { AbnormalAlertPayload, Customer, ProfileSuggestion, RecognizeMultiplePayload, SourceFrom, StageSuggestPayload } from './types';
+import type {
+  AbnormalAlertPayload,
+  Customer,
+  CustomerTagCategory,
+  CustomerTagsUpdatedPayload,
+  ProfileSuggestion,
+  RecognizeMultiplePayload,
+  SourceFrom,
+  StageSuggestPayload
+} from './types';
 
 const customer = computed(() => state.profile?.customer ?? {} as Customer);
 const summaryText = computed(() => `${customer.value.nickname || '-'} · ${maskPhone(customer.value.phone || '')} · ${customer.value.customerStage || '-'}`);
@@ -223,6 +289,7 @@ onMounted(() => {
   disposers.push(eventBus.on<AbnormalAlertPayload>('abnormal:alert', handleProfileAbnormalAlert));
   disposers.push(eventBus.on<{ phone?: string; newStage?: string }>('stage:updated', handleStageUpdated));
   disposers.push(eventBus.on<{ phone?: string }>('reply:send-confirmed', handleSendConfirmed));
+  disposers.push(eventBus.on<CustomerTagsUpdatedPayload>('CUSTOMER_TAGS_UPDATED', handleCustomerTagsUpdated));
 });
 
 onBeforeUnmount(() => {
@@ -311,6 +378,44 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
+function toggleTagEdit(category: CustomerTagCategory): void {
+  if (state.tagEditingCategoryId === category.id) {
+    cancelTagEdit();
+    return;
+  }
+  beginTagEdit(category.id);
+}
+
+function currentTagNames(categoryId: number): string {
+  return (state.profile?.currentTags ?? [])
+    .filter((tag) => tag.categoryId === categoryId)
+    .map((tag) => tag.tagDisplayName || tag.tagValue)
+    .join('、');
+}
+
+function isCategoryLocked(categoryId: number): boolean {
+  return (state.profile?.tagLocks ?? []).some((lock) => lock.categoryId === categoryId && lock.locked);
+}
+
+function toggleCategoryLock(categoryId: number): void {
+  const locked = isCategoryLocked(categoryId);
+  void updateCustomerTagLock(
+    categoryId,
+    !locked,
+    locked ? '员工解除分类锁定' : '员工锁定分类');
+}
+
+function draftSelection(category: CustomerTagCategory): number | number[] {
+  const values = state.tagDrafts[category.id] ?? [];
+  return category.selectionMode === 'SINGLE' ? values[0] ?? 0 : values;
+}
+
+function onTagSelectionChange(category: CustomerTagCategory, event: Event): void {
+  const select = event.target as HTMLSelectElement;
+  const values = Array.from(select.selectedOptions).map((option) => Number(option.value));
+  state.tagDrafts[category.id] = category.selectionMode === 'SINGLE' ? values.slice(0, 1) : values;
+}
+
 function suggestionKey(suggestion: ProfileSuggestion): string {
   return `${suggestion.id ?? suggestion.suggestionId ?? suggestion.fieldName}-${String(suggestion.suggestedValue)}`;
 }
@@ -339,7 +444,7 @@ const ProfileSection = defineComponent({
       required: true
     },
     sectionKey: {
-      type: String as PropType<'intent' | 'body' | 'followup' | 'suggestions' | 'appointment'>,
+      type: String as PropType<'intent' | 'body' | 'followup' | 'tags' | 'suggestions' | 'appointment'>,
       required: true
     }
   },

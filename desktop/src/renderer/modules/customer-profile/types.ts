@@ -79,6 +79,80 @@ export type CustomerProfileView = {
   customer: Customer;
   phoneFull?: string | null;
   pendingSuggestions?: ProfileSuggestion[];
+  currentTags?: CustomerTag[];
+  tagLocks?: CustomerTagLock[];
+  editableTagCategories?: CustomerTagCategory[];
+};
+
+export type CustomerTag = {
+  assignmentId: number;
+  customerId: number;
+  customerVersion: number;
+  categoryId: number;
+  categoryKey: string;
+  categoryName: string;
+  categorySelectionMode: 'SINGLE' | 'MULTI';
+  tagValueId: number;
+  tagValue: string;
+  tagDisplayName: string;
+  sourceType: string;
+  confidence?: number | null;
+  evidenceText?: string | null;
+  manualLocked: boolean;
+  lockedBy?: string | null;
+  lockedAt?: string | null;
+};
+
+export type CustomerTagLock = {
+  id: number;
+  customerId: number;
+  categoryId: number;
+  locked: boolean;
+  lockedBy: string;
+  lockReason?: string | null;
+  lockedAt?: string | null;
+  unlockedBy?: string | null;
+  unlockedAt?: string | null;
+  version: number;
+};
+
+export type CustomerTagValue = {
+  id: number;
+  categoryId: number;
+  tagValue: string;
+  displayName: string;
+  meaning?: string | null;
+  manualSelectable: boolean;
+  isEnabled: boolean;
+};
+
+export type CustomerTagCategory = {
+  id: number;
+  categoryKey: string;
+  categoryName: string;
+  selectionMode: 'SINGLE' | 'MULTI';
+  manualEditEnabled: boolean;
+  values: CustomerTagValue[];
+};
+
+export type CustomerTagUpdateResult = {
+  customerVersion: number;
+  updated: boolean;
+  decisions: Array<{
+    categoryId: number;
+    categoryKey: string;
+    action: string;
+    updated: boolean;
+    reason: string;
+  }>;
+};
+
+export type CustomerTagsUpdatedPayload = {
+  phone: string;
+  customerId: number;
+  customerVersion: number;
+  source: string;
+  decisions: CustomerTagUpdateResult['decisions'];
 };
 
 export type CustomerSearchResult = {

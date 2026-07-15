@@ -8,7 +8,14 @@ import com.privateflow.modules.match.CustomerMatchException;
 import com.privateflow.modules.match.util.PhoneUtils;
 import com.privateflow.modules.profile.CustomerProfileView;
 import com.privateflow.modules.profile.service.SuggestionQueueManager;
+import com.privateflow.modules.tags.CustomerTagCategoryLock;
+import com.privateflow.modules.tags.CustomerTagFoundationRepository;
+import com.privateflow.modules.tags.TagCandidateBuilder;
+import com.privateflow.modules.tags.TagCandidatePurpose;
+import com.privateflow.modules.tags.TagCategory;
+import java.util.List;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @Service
 public class CustomerProfileService {
@@ -16,14 +23,28 @@ public class CustomerProfileService {
   private final CustomerQueryService customerQueryService;
   private final SuggestionQueueManager suggestionQueueManager;
   private final CustomerAccessService customerAccessService;
+  private final CustomerTagFoundationRepository tagRepository;
+  private final TagCandidateBuilder candidateBuilder;
+
+  @Autowired
+  public CustomerProfileService(
+      CustomerQueryService customerQueryService,
+      SuggestionQueueManager suggestionQueueManager,
+      CustomerAccessService customerAccessService,
+      CustomerTagFoundationRepository tagRepository,
+      TagCandidateBuilder candidateBuilder) {
+    this.customerQueryService = customerQueryService;
+    this.suggestionQueueManager = suggestionQueueManager;
+    this.customerAccessService = customerAccessService;
+    this.tagRepository = tagRepository;
+    this.candidateBuilder = candidateBuilder;
+  }
 
   public CustomerProfileService(
       CustomerQueryService customerQueryService,
       SuggestionQueueManager suggestionQueueManager,
       CustomerAccessService customerAccessService) {
-    this.customerQueryService = customerQueryService;
-    this.suggestionQueueManager = suggestionQueueManager;
-    this.customerAccessService = customerAccessService;
+    this(customerQueryService, suggestionQueueManager, customerAccessService, null, null);
   }
 
   public CustomerProfileView getProfile(String rawPhone) {
@@ -41,7 +62,14 @@ public class CustomerProfileService {
       }
       Customer copy = copy(customer);
       copy.setPhone(PhoneUtils.mask(customer.getPhone()));
-      return new CustomerProfileView(copy, phone, suggestionQueueManager.listPending(phone));
+      TagExtension extension = loadTagExtension(customer);
+      return new CustomerProfileView(
+          copy,
+          phone,
+          suggestionQueueManager.listPending(phone),
+          extension.currentTags(),
+          extension.locks(),
+          extension.editableCategories());
     } catch (CustomerMatchException ex) {
       throw ex;
     } catch (RuntimeException ex) {
@@ -49,6 +77,29 @@ public class CustomerProfileService {
           CustomerMatchErrorCodes.MATCH_FAILED,
           "客户档案查询服务暂不可用",
           ex);
+    }
+  }
+
+  private TagExtension loadTagExtension(Customer customer) {
+    if (tagRepository == null || candidateBuilder == null || customer.getId() == null) {
+      return TagExtension.empty();
+    }
+    try {
+      return new TagExtension(
+          List.copyOf(tagRepository.findCurrentTagDetails(customer.getId())),
+          List.copyOf(tagRepository.findCategoryLocks(customer.getId())),
+          List.copyOf(candidateBuilder.build(TagCandidatePurpose.MANUAL_ASSIGNMENT)));
+    } catch (RuntimeException ex) {
+      return TagExtension.empty();
+    }
+  }
+
+  private record TagExtension(
+      List<com.privateflow.modules.tags.CustomerTagQueryDto> currentTags,
+      List<CustomerTagCategoryLock> locks,
+      List<TagCategory> editableCategories) {
+    private static TagExtension empty() {
+      return new TagExtension(List.of(), List.of(), List.of());
     }
   }
 

@@ -5,6 +5,7 @@ import type { CustomerProfileView, CustomerSummary } from './types';
 const mocks = vi.hoisted(() => ({
   getJson: vi.fn(),
   postJson: vi.fn(),
+  putJson: vi.fn(),
   cleanupExpiredPendingSaves: vi.fn(),
   cleanupSaveToTableService: vi.fn(),
   getPendingSave: vi.fn(),
@@ -20,7 +21,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../shared/apiClient', () => ({
   getJson: mocks.getJson,
-  postJson: mocks.postJson
+  postJson: mocks.postJson,
+  putJson: mocks.putJson
 }));
 
 vi.mock('../save-to-table/saveToTableService', () => ({

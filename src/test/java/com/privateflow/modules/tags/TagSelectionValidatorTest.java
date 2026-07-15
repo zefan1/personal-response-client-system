@@ -231,6 +231,21 @@ class TagSelectionValidatorTest {
   }
 
   @Test
+  void rejectsSystemInferenceDisabledCategoryBeforeResolvingRequestedValues() {
+    TagCategory category = category(
+        1L, "system_off", TagSelectionMode.SINGLE, false, true, true, null,
+        new BigDecimal("0.8000"), 1, List.of());
+
+    TagSelectionValidationResult result = validator(category).validateCodes(
+        TagCandidatePurpose.SYSTEM_INFERENCE,
+        "system_off",
+        List.of("MISSING"),
+        new TagSelectionContext("明确证据", 1, new BigDecimal("0.9000"), null));
+
+    assertRejected(result, "PURPOSE_NOT_ALLOWED", "当前来源或用途不允许选择该标签");
+  }
+
+  @Test
   void singleCategoryRequiresExactlyOneValue() {
     TagCategory category = category(
         1L, "single", TagSelectionMode.SINGLE, false, true, true, null,
