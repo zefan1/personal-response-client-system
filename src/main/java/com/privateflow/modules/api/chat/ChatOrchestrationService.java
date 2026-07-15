@@ -7,6 +7,7 @@ import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
+import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.image.ImageRecognitionException;
 import com.privateflow.modules.image.ImageRecognitionService;
 import com.privateflow.modules.image.Message;
@@ -35,10 +36,13 @@ import org.springframework.stereotype.Service;
 @Service
 public class ChatOrchestrationService {
 
+  private static final int FALLBACK_CONVERSATION_SUMMARY_MAX_CHARS = 2000;
+
   private final ImageRecognitionService imageRecognitionService;
   private final CustomerMatchService customerMatchService;
   private final SkillGatewayService skillGatewayService;
   private final CustomerQueryService customerQueryService;
+  private final CustomerAccessService customerAccessService;
   private final RequestContextStore contextStore;
   private final ApplicationEventPublisher eventPublisher;
   private final AuditLogger auditLogger;
@@ -52,6 +56,7 @@ public class ChatOrchestrationService {
       CustomerMatchService customerMatchService,
       SkillGatewayService skillGatewayService,
       CustomerQueryService customerQueryService,
+      CustomerAccessService customerAccessService,
       RequestContextStore contextStore,
       ApplicationEventPublisher eventPublisher,
       AuditLogger auditLogger,
@@ -63,6 +68,7 @@ public class ChatOrchestrationService {
     this.customerMatchService = customerMatchService;
     this.skillGatewayService = skillGatewayService;
     this.customerQueryService = customerQueryService;
+    this.customerAccessService = customerAccessService;
     this.contextStore = contextStore;
     this.eventPublisher = eventPublisher;
     this.auditLogger = auditLogger;
@@ -82,9 +88,10 @@ public class ChatOrchestrationService {
     MatchResult match = match(nickname, phone, request.leadType(), request.sourceTable());
     Customer customer = firstCustomer(match);
     String clientMessage = buildClientMessage(request, recognized);
-    GeneratedReplies generated = generateSkill(Scene.CHAT_RECOGNIZE, request.leadType(), customer, phone, clientMessage, List.of(), messages(request, recognized));
+    List<Map<String, String>> chatContext = messages(request, recognized);
+    GeneratedReplies generated = generateSkill(Scene.CHAT_RECOGNIZE, request.leadType(), customer, phone, clientMessage, List.of(), chatContext);
     String responsePhone = customer == null ? phone : customer.getPhone();
-    saveContext(responsePhone, clientMessage, generated.skill(), Scene.CHAT_RECOGNIZE, customer, request.leadType(), 0);
+    saveContext(responsePhone, clientMessage, generated.skill(), Scene.CHAT_RECOGNIZE, customer, request.leadType(), chatContext, 0);
     auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", responsePhone, "chat recognize");
     return new ChatResponse(responsePhone, nickname, match.matchType() == MatchType.NONE, match, generated.skill(), null, generated.source());
   }
@@ -100,7 +107,7 @@ public class ChatOrchestrationService {
     Scene scene = "OPENING".equalsIgnoreCase(request.scene()) ? Scene.OPENING : Scene.ACTIVE_REPLY;
     String clientMessage = blank(request.clientMessage()) ? customer.getFollowupNotes() : request.clientMessage();
     GeneratedReplies generated = generateSkill(scene, customer.getLeadType(), customer, customer.getPhone(), clientMessage, List.of(), List.of());
-    saveContext(customer.getPhone(), clientMessage, generated.skill(), scene, customer, customer.getLeadType(), 0);
+    saveContext(customer.getPhone(), clientMessage, generated.skill(), scene, customer, customer.getLeadType(), List.of(), 0);
     return new ChatResponse(customer.getPhone(), customer.getNickname(), false, null, generated.skill(), null, generated.source());
   }
 
@@ -137,9 +144,8 @@ public class ChatOrchestrationService {
     if (request == null || blank(request.phone()) || blank(request.sentText())) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "phone and sentText are required");
     }
-    List<CustomerMessageSentEvent.ChatMessage> rawMessages = request.rawMessages() == null ? List.of() : request.rawMessages().stream()
-        .map(message -> new CustomerMessageSentEvent.ChatMessage(message.role(), message.text(), message.timestamp()))
-        .toList();
+    requireSendConfirmAccess(request);
+    List<CustomerMessageSentEvent.ChatMessage> rawMessages = sendConfirmMessages(request);
     String conversationSummary = conversationSummary(request, rawMessages);
     CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest = request.followupSuggest() == null
         ? llmFollowupSuggestionService.trySuggest(new LlmFollowupSuggestionInput(
@@ -180,7 +186,36 @@ public class ChatOrchestrationService {
         request.sentText(),
         request.selectedDirection(),
         AuthContext.username()))
-        .orElse(request.sentText());
+        .orElseGet(() -> customerMessageSummary(rawMessages));
+  }
+
+  private void requireSendConfirmAccess(SendConfirmRequest request) {
+    Customer customer = customerQueryService.getByPhone(request.phone());
+    if (customer != null) {
+      if (!customerAccessService.canAccess(customer)) {
+        throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权操作该客户");
+      }
+      return;
+    }
+    if (!request.isNewCustomer()) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "客户不存在");
+    }
+    if (contextStore.read(AuthContext.username(), request.phone()).isEmpty()) {
+      throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权创建该客户记录");
+    }
+  }
+
+  private String customerMessageSummary(List<CustomerMessageSentEvent.ChatMessage> rawMessages) {
+    if (rawMessages == null || rawMessages.isEmpty()) {
+      return "";
+    }
+    String summary = rawMessages.stream()
+        .filter(message -> message != null && !blank(message.text()))
+        .filter(message -> "client".equalsIgnoreCase(message.role()) || "customer".equalsIgnoreCase(message.role()))
+        .map(CustomerMessageSentEvent.ChatMessage::text)
+        .map(String::trim)
+        .reduce("", (left, right) -> left.isBlank() ? right : left + "\n" + right);
+    return summary.substring(0, Math.min(summary.length(), FALLBACK_CONVERSATION_SUMMARY_MAX_CHARS));
   }
 
   private RecognitionResult recognizeImage(String imageBase64) {
@@ -243,11 +278,45 @@ public class ChatOrchestrationService {
     return ChatReplySource.skill();
   }
 
-  private void saveContext(String phone, String clientMessage, SkillResponse skill, Scene scene, Customer customer, String leadType, int regenerateCount) {
+  private void saveContext(
+      String phone,
+      String clientMessage,
+      SkillResponse skill,
+      Scene scene,
+      Customer customer,
+      String leadType,
+      List<Map<String, String>> chatContext,
+      int regenerateCount) {
     if (!blank(phone)) {
-      SkillRequest skillRequest = new SkillRequest(scene, leadType, phone, clientMessage, customerMap(customer), Map.of(), List.of(), List.of(), AuthContext.username());
+      SkillRequest skillRequest = new SkillRequest(
+          scene,
+          leadType,
+          phone,
+          clientMessage,
+          customerMap(customer),
+          Map.of(),
+          List.of(),
+          chatContext == null ? List.of() : List.copyOf(chatContext),
+          AuthContext.username());
       contextStore.save(AuthContext.username(), phone, new RequestContext(skillRequest, skill, regenerateCount));
     }
+  }
+
+  private List<CustomerMessageSentEvent.ChatMessage> sendConfirmMessages(SendConfirmRequest request) {
+    if (request.rawMessages() != null && !request.rawMessages().isEmpty()) {
+      return request.rawMessages().stream()
+          .map(message -> new CustomerMessageSentEvent.ChatMessage(message.role(), message.text(), message.timestamp()))
+          .toList();
+    }
+    return contextStore.read(AuthContext.username(), request.phone())
+        .map(RequestContext::request)
+        .map(SkillRequest::chatContext)
+        .orElse(List.of()).stream()
+        .map(message -> new CustomerMessageSentEvent.ChatMessage(
+            message.get("role"),
+            firstNonBlank(message.get("text"), message.get("content")),
+            message.get("timestamp")))
+        .toList();
   }
 
   private String regenerateWarning(int count) {
@@ -277,12 +346,19 @@ public class ChatOrchestrationService {
 
   private List<Map<String, String>> messages(ChatRecognizeRequest request, RecognitionResult recognized) {
     if (request.rawMessages() != null && !request.rawMessages().isEmpty()) {
-      return request.rawMessages().stream().map(m -> Map.of("role", nvl(m.role()), "text", nvl(m.text()))).toList();
+      return request.rawMessages().stream().map(m -> messageMap(m.role(), m.text(), m.timestamp())).toList();
     }
     if (recognized == null || recognized.messages() == null) {
       return List.of();
     }
-    return recognized.messages().stream().map(m -> Map.of("role", nvl(m.role()), "text", nvl(m.text()))).toList();
+    return recognized.messages().stream().map(m -> messageMap(m.role(), m.text(), null)).toList();
+  }
+
+  private Map<String, String> messageMap(String role, String text, String timestamp) {
+    return Map.of(
+        "role", nvl(role),
+        "text", nvl(text),
+        "timestamp", nvl(timestamp));
   }
 
   private Map<String, Object> customerMap(Customer customer) {

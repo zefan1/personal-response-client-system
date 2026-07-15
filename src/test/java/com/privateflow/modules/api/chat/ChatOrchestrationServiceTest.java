@@ -15,10 +15,13 @@ import com.privateflow.modules.api.Role;
 import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.auth.AuthUser;
+import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
+import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.image.ImageErrorCodes;
 import com.privateflow.modules.image.ImageRecognitionException;
 import com.privateflow.modules.image.ImageRecognitionService;
+import com.privateflow.modules.image.RecognitionResult;
 import com.privateflow.modules.llm.LlmReplyGenerationService;
 import com.privateflow.modules.llm.LlmFollowupSuggestionInput;
 import com.privateflow.modules.llm.LlmFollowupSuggestionService;
@@ -53,6 +56,8 @@ class ChatOrchestrationServiceTest {
   private LlmSummaryService llmSummaryService;
   private ApplicationEventPublisher eventPublisher;
   private AuditLogger auditLogger;
+  private CustomerQueryService customerQueryService;
+  private CustomerAccessService customerAccessService;
   private ChatOrchestrationService service;
 
   @BeforeEach
@@ -68,16 +73,22 @@ class ChatOrchestrationServiceTest {
     llmSummaryService = org.mockito.Mockito.mock(LlmSummaryService.class);
     eventPublisher = org.mockito.Mockito.mock(ApplicationEventPublisher.class);
     auditLogger = org.mockito.Mockito.mock(AuditLogger.class);
+    customerQueryService = org.mockito.Mockito.mock(CustomerQueryService.class);
+    customerAccessService = org.mockito.Mockito.mock(CustomerAccessService.class);
     when(skillConfigProvider.get()).thenReturn(skillConfig(3));
     when(llmReplyGenerationService.tryGenerate(any())).thenReturn(Optional.empty());
     when(llmReplyGenerationService.fallbackToSkill()).thenReturn(true);
     when(llmFollowupSuggestionService.trySuggest(any())).thenReturn(Optional.empty());
     when(llmSummaryService.trySummarize(any())).thenReturn(Optional.empty());
+    Customer accessibleCustomer = customer("18800001111");
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(accessibleCustomer);
+    when(customerAccessService.canAccess(accessibleCustomer)).thenReturn(true);
     service = new ChatOrchestrationService(
         imageRecognitionService,
         customerMatchService,
         skillGatewayService,
-        org.mockito.Mockito.mock(CustomerQueryService.class),
+        customerQueryService,
+        customerAccessService,
         contextStore,
         eventPublisher,
         auditLogger,
@@ -109,6 +120,36 @@ class ChatOrchestrationServiceTest {
     assertEquals(ImageErrorCodes.IMAGE_RECOGNITION_FAILED, exception.getErrorCode());
     verify(customerMatchService, never()).match(any());
     verify(skillGatewayService, never()).generateReplies(any());
+  }
+
+  @Test
+  void recognizePersistsRawMessagesForLaterSendConfirmation() {
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice",
+        "18800004444",
+        List.of(),
+        "12:00"));
+    when(customerMatchService.match(any())).thenReturn(com.privateflow.modules.match.MatchResult.none());
+    when(skillGatewayService.generateReplies(any())).thenReturn(new SkillResponse(
+        List.of(new Suggestion("reply", "NEXT_STEP", "reason")),
+        null,
+        null,
+        null));
+
+    service.recognize(new ChatRecognizeRequest(
+        Base64.getEncoder().encodeToString("image".getBytes()),
+        "客户想了解项目",
+        "Alice",
+        "TUAN_GOU",
+        "私域客资管理表",
+        List.of(
+            new ChatMessageDto("client", "客户真实原话", "12:00"),
+            new ChatMessageDto("keeper", "员工上一轮回复", "12:01"))));
+
+    org.mockito.ArgumentCaptor<RequestContext> captor = org.mockito.ArgumentCaptor.forClass(RequestContext.class);
+    verify(contextStore).save(eq("keeper-1"), eq("18800004444"), captor.capture());
+    assertEquals(2, captor.getValue().request().chatContext().size());
+    assertEquals("客户真实原话", captor.getValue().request().chatContext().get(0).get("text"));
   }
 
   @Test
@@ -295,6 +336,163 @@ class ChatOrchestrationServiceTest {
     assertEquals("客户仍在考虑，明天继续确认到店时间", captor.getValue().conversationSummary());
   }
 
+  @Test
+  void sendConfirmRejectsInaccessibleCustomerBeforeAnyExternalOrEventSideEffect() {
+    Customer inaccessible = customer("18800002222");
+    when(customerQueryService.getByPhone("18800002222")).thenReturn(inaccessible);
+    when(customerAccessService.canAccess(inaccessible)).thenReturn(false);
+
+    ApiException exception = assertThrows(ApiException.class, () -> service.sendConfirm(new SendConfirmRequest(
+        "18800002222",
+        "无权客户",
+        false,
+        "私域客资管理表",
+        "TUAN_GOU",
+        "",
+        List.of(new ChatMessageDto("client", "客户原话", "12:00")),
+        "员工发送内容",
+        "NEXT_STEP",
+        null)));
+
+    assertEquals("80-10003", exception.getErrorCode());
+    verify(llmSummaryService, never()).trySummarize(any());
+    verify(llmFollowupSuggestionService, never()).trySuggest(any());
+    verify(eventPublisher, never()).publishEvent(any());
+    verify(auditLogger, never()).log(eq("SEND_CONFIRM"), any(), any(), any(), any());
+  }
+
+  @Test
+  void sendConfirmRejectsUnrecognizedNewCustomerBeforeAnySideEffect() {
+    when(customerQueryService.getByPhone("18800003333")).thenReturn(null);
+    when(contextStore.read("keeper-1", "18800003333")).thenReturn(Optional.empty());
+
+    ApiException exception = assertThrows(ApiException.class, () -> service.sendConfirm(new SendConfirmRequest(
+        "18800003333",
+        "新客户",
+        true,
+        "私域客资管理表",
+        "TUAN_GOU",
+        "",
+        List.of(new ChatMessageDto("client", "客户想了解项目", "12:00")),
+        "员工发送内容",
+        "NEXT_STEP",
+        null)));
+
+    assertEquals("80-10003", exception.getErrorCode());
+    verify(eventPublisher, never()).publishEvent(any());
+    verify(auditLogger, never()).log(eq("SEND_CONFIRM"), any(), any(), any(), any());
+  }
+
+  @Test
+  void sendConfirmAllowsNewCustomerFromCurrentUsersRecognizeContext() {
+    when(customerQueryService.getByPhone("18800003333")).thenReturn(null);
+    when(contextStore.read("keeper-1", "18800003333"))
+        .thenReturn(Optional.of(org.mockito.Mockito.mock(RequestContext.class)));
+
+    Map<String, Object> result = service.sendConfirm(new SendConfirmRequest(
+        "18800003333",
+        "新客户",
+        true,
+        "私域客资管理表",
+        "TUAN_GOU",
+        "",
+        List.of(new ChatMessageDto("client", "客户想了解项目", "12:00")),
+        "员工发送内容",
+        "NEXT_STEP",
+        null));
+
+    assertEquals(true, result.get("accepted"));
+    verify(eventPublisher).publishEvent(any(CustomerMessageSentEvent.class));
+  }
+
+  @Test
+  void sendConfirmFallsBackToOnlyRealCustomerMessagesWhenSummaryLlmIsUnavailable() {
+    SendConfirmRequest request = new SendConfirmRequest(
+        "18800001111",
+        "Alice",
+        false,
+        "私域客资管理表",
+        "TUAN_GOU",
+        "",
+        List.of(
+            new ChatMessageDto("client", "客户说我再考虑一下", "12:00"),
+            new ChatMessageDto("keeper", "员工说可以慢慢考虑", "12:01"),
+            new ChatMessageDto("customer", "客户说下周再联系", "12:02"),
+            new ChatMessageDto("staff", "员工说好的", "12:03")),
+        "员工最终发送的回复",
+        "NEXT_STEP",
+        null);
+
+    service.sendConfirm(request);
+
+    org.mockito.ArgumentCaptor<CustomerMessageSentEvent> captor = org.mockito.ArgumentCaptor.forClass(CustomerMessageSentEvent.class);
+    verify(eventPublisher).publishEvent(captor.capture());
+    String summary = captor.getValue().conversationSummary();
+    org.junit.jupiter.api.Assertions.assertTrue(summary.contains("客户说我再考虑一下"));
+    org.junit.jupiter.api.Assertions.assertTrue(summary.contains("客户说下周再联系"));
+    org.junit.jupiter.api.Assertions.assertFalse(summary.contains("员工说可以慢慢考虑"));
+    org.junit.jupiter.api.Assertions.assertFalse(summary.contains("员工说好的"));
+    org.junit.jupiter.api.Assertions.assertFalse(summary.contains("员工最终发送的回复"));
+    assertEquals(4, captor.getValue().rawMessages().size());
+  }
+
+  @Test
+  void sendConfirmKeepsSummaryEmptyWhenThereAreNoCustomerMessages() {
+    service.sendConfirm(new SendConfirmRequest(
+        "18800001111",
+        "Alice",
+        false,
+        "私域客资管理表",
+        "TUAN_GOU",
+        "",
+        List.of(new ChatMessageDto("keeper", "员工跟进内容", "12:01")),
+        "员工最终发送的回复",
+        "NEXT_STEP",
+        null));
+
+    org.mockito.ArgumentCaptor<CustomerMessageSentEvent> captor = org.mockito.ArgumentCaptor.forClass(CustomerMessageSentEvent.class);
+    verify(eventPublisher).publishEvent(captor.capture());
+    assertEquals("", captor.getValue().conversationSummary());
+  }
+
+  @Test
+  void sendConfirmRecoversRawMessagesFromCurrentUsersRequestContext() {
+    SkillRequest previousRequest = new SkillRequest(
+        Scene.CHAT_RECOGNIZE,
+        "TUAN_GOU",
+        "18800001111",
+        "客户想了解项目",
+        Map.of(),
+        Map.of(),
+        List.of(),
+        List.of(
+            Map.of("role", "client", "text", "客户真实原话", "timestamp", "12:00"),
+            Map.of("role", "keeper", "text", "员工上一轮回复", "timestamp", "12:01")),
+        "keeper-1");
+    when(contextStore.read("keeper-1", "18800001111")).thenReturn(Optional.of(new RequestContext(
+        previousRequest,
+        new SkillResponse(List.of(), null, null, null),
+        0)));
+
+    service.sendConfirm(new SendConfirmRequest(
+        "18800001111",
+        "Alice",
+        false,
+        "私域客资管理表",
+        "TUAN_GOU",
+        "",
+        List.of(),
+        "员工最终发送的回复",
+        "NEXT_STEP",
+        null));
+
+    org.mockito.ArgumentCaptor<CustomerMessageSentEvent> captor = org.mockito.ArgumentCaptor.forClass(CustomerMessageSentEvent.class);
+    verify(eventPublisher).publishEvent(captor.capture());
+    assertEquals(2, captor.getValue().rawMessages().size());
+    assertEquals("客户真实原话", captor.getValue().rawMessages().get(0).text());
+    assertEquals("客户真实原话", captor.getValue().conversationSummary());
+  }
+
   private SkillConfig skillConfig(int regenerateMaxCount) {
     return new SkillConfig(
         "",
@@ -316,5 +514,13 @@ class ChatOrchestrationServiceTest {
         15,
         8000,
         regenerateMaxCount);
+  }
+
+  private Customer customer(String phone) {
+    Customer customer = new Customer();
+    customer.setPhone(phone);
+    customer.setNickname("测试客户");
+    customer.setAssignedKeeper("keeper-1");
+    return customer;
   }
 }
