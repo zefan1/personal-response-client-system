@@ -2,11 +2,12 @@
 
 时间：2026-07-13  
 对应方案：`dev-progress/tag_skill_llm_closed_loop_plan_055.md`  
-当前状态：Step 1、Step 2、Step 3 已完成，Step 4 尚未开始。
+当前状态：Step 1、Step 2、Step 3、Step 4 已完成，Step 5 尚未开始。
 
 ## 生产级约束
 
 - [x] 接手前版本已提交并推送 GitHub，恢复点为 `2f9f7fd`。
+- [x] Step 4 独立分支恢复点为 `1a17b8a`；`main`/`origin/main` 保留 `b1d3527`，未被覆盖；`uploads/` 未跟踪且未提交。
 - [x] Step 1 只读检查，没有修改客户数据、数据库结构、当前标签和 LLM 开关。
 - [x] 每次修改同时追踪数据库、Repository、Service、API、前端、Skill、LLM、规则、统计、导入导出和测试。
 - [x] 真实数据库为唯一结构事实，任何迁移前后都核对列、类型、NULL、默认值、索引和外键。
@@ -64,13 +65,24 @@
 
 ## Step 4：统一标签读取和校验
 
-- [ ] 建立唯一标签目录查询服务和缓存快照。
-- [ ] 建立统一候选构建器，供 Skill、直接 LLM、人工修改、导入、规则和测试复用。
-- [ ] 建立统一结果校验器：分类存在/启用、标签存在/启用、归属正确、来源允许、数量正确、证据完整。
-- [ ] 建立统一客户当前有效标签查询、历史查询和权限过滤。
-- [ ] 替换 `TagRepository.usageCount` 的旧字段 LIKE 判断。
-- [ ] 清除业务代码中的第二套标签列表和前端内置标签字典依赖。
-- [ ] 保留昵称前缀 `match.tag_removal_rules` 功能，但与客户业务标签明确隔离。
+- [x] 建立唯一标签目录查询服务和缓存快照。
+- [x] 建立统一候选构建器，供 Skill、直接 LLM、人工修改、导入、规则和测试复用。
+- [x] 建立统一结果校验器：分类存在/启用、标签存在/启用、归属正确、来源允许、数量正确、证据完整。
+- [x] 建立统一客户当前有效标签查询、历史查询和权限过滤。
+- [x] 替换 `TagRepository.usageCount` 的旧字段 LIKE 判断。
+- [x] 清除业务代码中的第二套标签列表和前端内置标签字典依赖。
+- [x] 保留昵称前缀 `match.tag_removal_rules` 功能，但与客户业务标签明确隔离。
+
+### Step 4 验收记录（2026-07-15）
+
+- Java 全量：`mvn test`，326 tests，0 failures，0 errors，1 条条件式 MariaDB 测试跳过。
+- 前端全量：`npm test`，36 个测试文件、252 tests，0 failures；`npm run typecheck` 通过；`npm run build` 通过。
+- Step 4 定向：`AdminDevConsole.test.ts` 9/9；`TagAdminServiceTest` 15/15；`TagRepositoryTest` 7/7。
+- 静态核验：`python scripts/verify_module_46.py`、`python scripts/verify_module_d.py` 通过。
+- 数据库对齐：42 张表、24 张必需表、41 张迁移表，1,382 个 Repository 列引用，0 列/属性/枚举违规。
+- 真实数据库：`private_domain_assistant_smoke`，Flyway V69；4 个分类、27 个标签值、当前统一分配 0 条；`llm.profile_extraction.enabled=false`、`llm.reply_generation.enabled=false`。
+- 真实接口：管理员登录、健康接口、动态分类分页、标签值分页、非法分类创建拒绝均已验证；非法 `categoryId` 返回 404 / `90-10007`，没有写入。
+- 当前运行地址：后端 `http://127.0.0.1:8082`（真实数据库、真实外部模式）；前端 `http://127.0.0.1:5174/`。健康总状态受既有 WeCom/image 外部告警影响为 DOWN，但 DB/Redis UP，Flyway 无待迁移。
 
 ## Step 5：Skill 档案分析
 
