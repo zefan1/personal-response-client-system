@@ -182,7 +182,7 @@ public class TagAdminService {
   @Transactional
   public TagValue createValue(TagValueRequest request) {
     validateValueCreate(request);
-    TagCategory category = requireEditableCategory(request.categoryId());
+    TagCategory category = requireValueCategory(request.categoryId());
     int maxValues = configProvider.get().valueMaxPerCategory();
     if (repository.valueCount(category.id()) >= maxValues) {
       throw new ApiException(TagErrorCodes.VALUE_LIMIT_EXCEEDED, "每个分类最多只能创建 " + maxValues + " 个标签");
@@ -623,6 +623,14 @@ public class TagAdminService {
     return category;
   }
 
+  private TagCategory requireValueCategory(Long id) {
+    TagCategory category = requireEditableCategory(id);
+    if (!category.isEnabled()) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "标签分类已停用，不能创建或修改标签值");
+    }
+    return category;
+  }
+
   private TagValue requireValue(long id) {
     return repository.findValue(id)
         .orElseThrow(() -> new ApiException(TagErrorCodes.VALUE_NOT_FOUND, "标签不存在或已被删除"));
@@ -633,7 +641,7 @@ public class TagAdminService {
     if (value.mergedIntoId() != null) {
       throw new ApiException(TagErrorCodes.MERGED_ITEM_READ_ONLY, "已合并标签只能查看历史信息，不能继续修改");
     }
-    requireEditableCategory(value.categoryId());
+    requireValueCategory(value.categoryId());
     return value;
   }
 

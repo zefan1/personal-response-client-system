@@ -17,6 +17,7 @@ import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.ws.WsPushService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.privateflow.modules.api.ApiErrorCodes;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -106,6 +107,49 @@ class TagAdminServiceTest {
     assertThatThrownBy(() -> service.createValue(new TagValueRequest(1L, "NEW_TAG", "新标签", true, 3)))
         .isInstanceOf(ApiException.class)
         .hasMessage("每个分类最多只能创建 2 个标签");
+  }
+
+  @Test
+  void createValueRejectsMissingCategoryFromDatabase() {
+    assertThatThrownBy(() -> service.createValue(
+        new TagValueRequest(999L, null, "新标签", true, 3)))
+        .isInstanceOf(ApiException.class)
+        .extracting(ex -> ((ApiException) ex).getErrorCode())
+        .isEqualTo(TagErrorCodes.CATEGORY_NOT_FOUND);
+
+    verify(repository).findCategory(999L);
+    verify(repository, never()).createValue(anyString(), any(TagValueRequest.class), anyInt());
+  }
+
+  @Test
+  void createValueRejectsDisabledCategory() {
+    when(repository.findCategory(1L)).thenReturn(Optional.of(
+        category(1L, "intent_level", "意向等级", "intentLevel", false, false, 0, List.of())));
+
+    assertThatThrownBy(() -> service.createValue(
+        new TagValueRequest(1L, null, "新标签", true, 3)))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("标签分类已停用，不能创建或修改标签值")
+        .extracting(ex -> ((ApiException) ex).getErrorCode())
+        .isEqualTo(ApiErrorCodes.BAD_REQUEST);
+
+    verify(repository, never()).valueCount(anyLong());
+    verify(repository, never()).createValue(anyString(), any(TagValueRequest.class), anyInt());
+  }
+
+  @Test
+  void createValueRejectsMergedCategory() {
+    when(repository.findCategory(1L)).thenReturn(Optional.of(mergedCategory()));
+
+    assertThatThrownBy(() -> service.createValue(
+        new TagValueRequest(1L, null, "新标签", true, 3)))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("已合并分类只能查看历史信息，不能继续修改")
+        .extracting(ex -> ((ApiException) ex).getErrorCode())
+        .isEqualTo(TagErrorCodes.MERGED_ITEM_READ_ONLY);
+
+    verify(repository, never()).valueCount(anyLong());
+    verify(repository, never()).createValue(anyString(), any(TagValueRequest.class), anyInt());
   }
 
   @Test
@@ -227,6 +271,15 @@ class TagAdminServiceTest {
         TagAutoUpdateMode.RECORD_ONLY, new BigDecimal("0.8500"), 1, 0,
         TagUncertainPolicy.KEEP_CURRENT, true, true, true, true, builtin, enabled,
         1, null, version, values, TagImpact.empty(), now, now);
+  }
+
+  private TagCategory mergedCategory() {
+    LocalDateTime now = LocalDateTime.of(2026, 7, 13, 12, 0);
+    return new TagCategory(
+        1L, "intent_level", "意向等级", "", "intentLevel", TagSelectionMode.SINGLE, false, true,
+        TagAutoUpdateMode.RECORD_ONLY, new BigDecimal("0.8500"), 1, 0,
+        TagUncertainPolicy.KEEP_CURRENT, true, true, true, true, false, true,
+        1, 2L, 0, List.of(), TagImpact.empty(), now, now);
   }
 
   private TagValue value() {

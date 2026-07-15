@@ -399,6 +399,10 @@ const readResults = reactive<Record<string, unknown>>({});
 const actionResults = reactive<Record<string, unknown>>({});
 const actionState = reactive<ActionState>({});
 const availableTagCategoryId = ref<number | null>(null);
+const availableTagCategoryIds = ref<number[]>([]);
+
+const TAG_CATEGORIES_PATH = '/admin/api/v1/tags/categories';
+const TAG_CATEGORY_PAGE_SIZE = 100;
 
 for (const section of sections) {
   for (const action of section.actions) {
@@ -429,12 +433,56 @@ async function loadSection(section: AdminSection) {
 
 async function runRead(read: ReadEndpoint) {
   await runWithNotice(async () => {
-    const response = await getJson<unknown>(read.path);
+    if (read.path === TAG_CATEGORIES_PATH) {
+      clearAvailableTagCategories();
+    }
+    const response = read.path === TAG_CATEGORIES_PATH
+      ? await loadAvailableTagCategories()
+      : await getJson<unknown>(read.path);
     readResults[read.path] = response;
-    if (read.path === '/admin/api/v1/tags/categories') {
+    if (read.path === TAG_CATEGORIES_PATH) {
       updateAvailableTagCategory(response);
     }
   }, `${read.name} 已刷新`);
+}
+
+async function loadAvailableTagCategories(): Promise<ApiResponse<unknown>> {
+  let page = 1;
+  let totalPages = 1;
+  let lastResponse: ApiResponse<unknown> | null = null;
+  const categories: unknown[] = [];
+
+  while (page <= totalPages) {
+    const query = new URLSearchParams({
+      enabled: 'true',
+      merged: 'false',
+      page: String(page),
+      size: String(TAG_CATEGORY_PAGE_SIZE)
+    });
+    const response = await getJson<unknown>(`${TAG_CATEGORIES_PATH}?${query.toString()}`);
+    lastResponse = response;
+    const data = asRecord(response.data);
+    categories.push(...extractCategoryItems(data));
+    totalPages = readTotalPages(data);
+    page += 1;
+  }
+
+  if (!lastResponse) {
+    throw new Error('标签分类读取失败');
+  }
+  const data = asRecord(lastResponse.data) ?? {};
+  return {
+    ...lastResponse,
+    data: {
+      ...data,
+      items: categories,
+      categories,
+      page: 1,
+      size: TAG_CATEGORY_PAGE_SIZE,
+      total: data.total ?? categories.length,
+      totalPages
+    }
+  };
 }
 
 async function runAction(action: ActionEndpoint) {
@@ -506,17 +554,23 @@ function actionRequestBody(action: ActionEndpoint) {
     throw new Error('创建标签值的请求体必须是 JSON 对象');
   }
   const sanitized = { ...(body as Record<string, unknown>) };
-  if (sanitized.categoryId == null || sanitized.categoryId === '') {
-    sanitized.categoryId = availableTagCategoryId.value;
+  const requestedCategoryId = Number(sanitized.categoryId);
+  const categoryId = availableTagCategoryIds.value.includes(requestedCategoryId)
+    ? requestedCategoryId
+    : availableTagCategoryId.value;
+  if (categoryId == null) {
+    throw new Error('没有可用的标签分类，请先创建并启用未合并的分类');
   }
+  sanitized.categoryId = categoryId;
   delete sanitized.tagValue;
   return sanitized;
 }
 
 function updateAvailableTagCategory(response: ApiResponse<unknown>) {
-  const categoryId = firstAvailableTagCategoryId(response);
+  const categoryIds = availableTagCategoryIdsFromResponse(response);
+  availableTagCategoryIds.value = categoryIds;
+  const categoryId = categoryIds[0] ?? null;
   availableTagCategoryId.value = categoryId;
-  if (categoryId == null) return;
   const action = sections
     .find((section) => section.key === 'rules-tags')
     ?.actions.find((item) => item.pathTemplate === '/admin/api/v1/tags/values' && item.method === 'POST');
@@ -524,28 +578,52 @@ function updateAvailableTagCategory(response: ApiResponse<unknown>) {
   const body = safeParseActionBody(action);
   if (!body || Array.isArray(body) || typeof body !== 'object') return;
   const record = body as Record<string, unknown>;
-  if (record.categoryId != null && record.categoryId !== '') return;
-  record.categoryId = categoryId;
+  if (categoryId == null) {
+    delete record.categoryId;
+  } else {
+    record.categoryId = categoryId;
+  }
   actionState[action.name].body = JSON.stringify(record, null, 2);
 }
 
-function firstAvailableTagCategoryId(response: ApiResponse<unknown>): number | null {
-  const data = response.data;
-  if (!data || typeof data !== 'object') return null;
-  const record = data as Record<string, unknown>;
-  const page = record.page && typeof record.page === 'object' ? record.page as Record<string, unknown> : null;
-  const candidates = [record.items, record.categories, page?.items, page?.categories]
-    .find(Array.isArray) as unknown[] | undefined;
-  if (!candidates) return null;
-  for (const candidate of candidates) {
-    if (!candidate || typeof candidate !== 'object') continue;
-    const category = candidate as Record<string, unknown>;
-    const enabled = category.isEnabled === true || category.enabled === true;
-    const merged = category.merged === true || category.mergedIntoId != null;
-    const id = Number(category.id ?? category.categoryId);
-    if (enabled && !merged && Number.isInteger(id) && id > 0) return id;
-  }
-  return null;
+function clearAvailableTagCategories() {
+  availableTagCategoryIds.value = [];
+  availableTagCategoryId.value = null;
+}
+
+function availableTagCategoryIdsFromResponse(response: ApiResponse<unknown>): number[] {
+  const data = asRecord(response.data);
+  return extractCategoryItems(data)
+    .map((candidate) => {
+      const category = asRecord(candidate);
+      if (!category) return null;
+      const enabled = category.isEnabled === true || category.enabled === true;
+      const merged = category.merged === true || category.mergedIntoId != null;
+      const id = Number(category.id ?? category.categoryId);
+      return enabled && !merged && Number.isInteger(id) && id > 0 ? id : null;
+    })
+    .filter((id): id is number => id != null);
+}
+
+function extractCategoryItems(data: Record<string, unknown> | null): unknown[] {
+  if (!data) return [];
+  const page = asRecord(data.page);
+  const candidates = [data.items, data.categories, page?.items, page?.categories];
+  return candidates.find(Array.isArray) as unknown[] | undefined ?? [];
+}
+
+function readTotalPages(data: Record<string, unknown> | null): number {
+  if (!data) return 1;
+  const page = asRecord(data.page);
+  const value = data.totalPages ?? page?.totalPages;
+  const totalPages = Number(value);
+  return Number.isInteger(totalPages) && totalPages > 0 ? totalPages : 1;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function editableFields(action: ActionEndpoint): EditableField[] {
