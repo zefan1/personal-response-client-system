@@ -205,6 +205,36 @@ describe('AdminDevConsole', () => {
     app.unmount();
   });
 
+  it('does not publish partial category candidates when a later page fails', async () => {
+    apiMocks.getJson.mockImplementation(async (path: string) => {
+      if (!path.startsWith('/admin/api/v1/tags/categories')) {
+        return { success: true, data: { items: [] }, errorCode: null, message: null };
+      }
+      const page = Number(new URL(path, 'http://localhost').searchParams.get('page'));
+      return page === 1
+        ? {
+            success: true,
+            data: { items: [{ id: 72, isEnabled: true, mergedIntoId: null }], page: 1, totalPages: 2 },
+            errorCode: null,
+            message: null
+          }
+        : {
+            success: false,
+            data: { items: [], page: 2, totalPages: 2 },
+            errorCode: 'CATEGORY_READ_FAILED',
+            message: '分类读取失败'
+          };
+    });
+    const { app, host } = await mountDevConsole();
+
+    findButton(host, '跟进规则与标签').click();
+    await flushRequests();
+    const panel = findActionPanel(host, '创建标签值');
+    expect(JSON.parse((panel.querySelector('textarea') as HTMLTextAreaElement).value).categoryId).toBeNull();
+
+    app.unmount();
+  });
+
   it('resolves an arbitrary category id from the current backend candidates before submit', async () => {
     apiMocks.getJson.mockImplementation(async (path: string) => ({
       success: true,

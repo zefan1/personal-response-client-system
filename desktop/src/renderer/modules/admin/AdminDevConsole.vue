@@ -460,6 +460,9 @@ async function loadAvailableTagCategories(): Promise<ApiResponse<unknown>> {
       size: String(TAG_CATEGORY_PAGE_SIZE)
     });
     const response = await getJson<unknown>(`${TAG_CATEGORIES_PATH}?${query.toString()}`);
+    if (!response.success) {
+      throw new Error(response.message || '标签分类读取失败');
+    }
     lastResponse = response;
     const data = asRecord(response.data);
     categories.push(...extractCategoryItems(data));

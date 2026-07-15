@@ -129,7 +129,7 @@ class TagAdminServiceTest {
     assertThatThrownBy(() -> service.createValue(
         new TagValueRequest(1L, null, "新标签", true, 3)))
         .isInstanceOf(ApiException.class)
-        .hasMessage("标签分类已停用，不能创建或修改标签值")
+        .hasMessage("标签分类已停用，不能创建标签值")
         .extracting(ex -> ((ApiException) ex).getErrorCode())
         .isEqualTo(ApiErrorCodes.BAD_REQUEST);
 
