@@ -9,8 +9,9 @@
 
 - 当前开发分支：`feature/tag-step7-auto-profile-update-locking`。
 - Step 6 基线：`6f6259e docs: record direct llm profile analysis`。
+- Step 7 代码与验收提交：`22bc0da feat: complete tag auto update and locking`。
 - 主分支 `main` 和 `origin/main` 保持不变；主服务仍使用独立工作树运行。
-- 本断点文档与 Step 7 代码将在当前分支提交，供后续继续接手。
+- 本断点文档已随 Step 7 分支提交，供后续继续接手。
 
 ## 本断点完成内容
 
