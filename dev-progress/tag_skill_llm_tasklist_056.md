@@ -198,3 +198,12 @@
 - [ ] 后端、前端重启后无需手工脚本即可立即使用。
 - [ ] 真实部署环境再次执行只读结构与历史值核验后再放量。
 - [ ] 更新 Tasklist、最终断点、测试命令、通过数量、服务地址和运行状态。
+
+## Step 9A 完成记录：客户搜索与统一标签筛选
+
+- [x] 统一 `CustomerFilter`、动态 FILTER 目录校验、SINGLE/MULTI 和 ANY/ALL/AND/OR 语义。
+- [x] COUNT、分页、排序、标签摘要和数据权限复用同一 QuerySpec。
+- [x] 保留 GET 兼容入口，新增 POST 结构化客户搜索入口。
+- [x] 管理后台客户列表接入动态分类和值选择，并序列化统一 POST body。
+- [x] Java 403 tests 通过，桌面 36 个 Vitest 文件/256 tests 通过，typecheck、build、renderer smoke、electron smoke 通过。
+- [x] 未新增数据库迁移；`system_tag_suggestions` PENDING 记录、LLM 开关和 Step 8 行为未修改。
