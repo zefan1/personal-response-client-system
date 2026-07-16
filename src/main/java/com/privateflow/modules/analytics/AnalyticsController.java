@@ -3,6 +3,8 @@ package com.privateflow.modules.analytics;
 import com.privateflow.modules.match.ApiResponse;
 import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -10,9 +12,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class AnalyticsController {
 
   private final AnalyticsService service;
+  private final TagAnalyticsService tagAnalyticsService;
 
-  public AnalyticsController(AnalyticsService service) {
+  public AnalyticsController(
+      AnalyticsService service,
+      TagAnalyticsService tagAnalyticsService) {
     this.service = service;
+    this.tagAnalyticsService = tagAnalyticsService;
+  }
+
+  @PostMapping("/admin/api/v1/analytics/tags")
+  public ApiResponse<TagAnalyticsResponse> tags(
+      @RequestBody(required = false) TagAnalyticsRequest request) {
+    return ApiResponse.ok(tagAnalyticsService.analyze(request));
   }
 
   @GetMapping("/admin/api/v1/analytics/overview")

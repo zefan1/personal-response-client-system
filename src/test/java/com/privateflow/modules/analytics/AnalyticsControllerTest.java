@@ -3,31 +3,66 @@ package com.privateflow.modules.analytics;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.web.GlobalApiExceptionHandler;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class AnalyticsControllerTest {
 
   private AnalyticsService service;
+  private TagAnalyticsService tagAnalyticsService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     service = org.mockito.Mockito.mock(AnalyticsService.class);
+    tagAnalyticsService = org.mockito.Mockito.mock(TagAnalyticsService.class);
     mockMvc = MockMvcBuilders
-        .standaloneSetup(new AnalyticsController(service))
+        .standaloneSetup(new AnalyticsController(service, tagAnalyticsService))
         .setControllerAdvice(new GlobalApiExceptionHandler())
         .build();
+  }
+
+  @Test
+  void tagAnalyticsBindsStructuredPostBody() throws Exception {
+    TagAnalyticsWindow window = new TagAnalyticsWindow(
+        LocalDateTime.of(2026, 7, 1, 0, 0),
+        LocalDateTime.of(2026, 7, 16, 23, 59),
+        TagTrendGranularity.DAY);
+    when(tagAnalyticsService.analyze(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(TagAnalyticsResponse.empty(window));
+
+    mockMvc.perform(post("/admin/api/v1/analytics/tags")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {
+                  "customerFilter":{"sourceChannels":["企微"],"assignedKeepers":["keeper-1"]},
+                  "teamLeaderIds":[9],
+                  "tagFrom":"2026-07-01T00:00:00",
+                  "tagTo":"2026-07-16T23:59:00",
+                  "granularity":"DAY"
+                }
+                """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.data.summary.activeAssignmentCount").value(0))
+        .andExpect(jsonPath("$.data.appliedWindow.granularity").value("DAY"));
+
+    verify(tagAnalyticsService).analyze(org.mockito.ArgumentMatchers.argThat(request ->
+        request.teamLeaderIds().equals(List.of(9L))
+            && request.customerFilter().sourceChannels().equals(List.of("企微"))));
   }
 
   @Test
