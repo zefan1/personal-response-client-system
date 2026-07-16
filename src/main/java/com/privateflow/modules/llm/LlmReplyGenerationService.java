@@ -23,11 +23,16 @@ public class LlmReplyGenerationService {
   private static final String SYSTEM_PROMPT_KEY = "llm.reply_generation.system_prompt";
   private static final String TEMPERATURE_KEY = "llm.reply_generation.temperature";
   private static final String MAX_TOKENS_KEY = "llm.reply_generation.max_tokens";
+  private static final String REPLY_TAG_GUIDANCE =
+      "【当前客户标签使用规则】标签只用于调整回复方向、优先级和语气。"
+          + "不得向客户描述内部标签、系统判断、把握度、证据、来源或锁定状态。"
+          + "标签与客户当前消息或真实业务事实冲突时，以当前消息和真实业务事实为准。";
   private static final String DEFAULT_SYSTEM_PROMPT = """
       You generate reply suggestions for a private-domain postpartum recovery sales assistant.
       Return JSON only. Schema:
       {"suggestions":[{"text":"ready-to-send reply","direction":"OPENING|NEXT_STEP|ANSWER|SOFT_CLOSE","reason":"short reason"}],"customer_analysis":{"intent":"","emotion":"","personality_type_suggest":"","confidence":""},"followup_suggest":{"next_contact_at":"","next_contact_direction":""}}
       Rules: suggestions must contain exactly 3 items; text should be ready to send to the customer; use Simplified Chinese unless the customer used another language; be warm, concise and professional; do not invent medical diagnosis or guarantees; avoid exposing internal notes.
+      Current customer tags may guide reply direction, priority and tone only; never disclose internal tag names, system judgments, confidence, evidence, source or lock state.
       """;
 
   private final LlmService llmService;
@@ -92,11 +97,12 @@ public class LlmReplyGenerationService {
     payload.put("clientMessage", nvl(request.clientMessage()));
     payload.put("chatContext", sanitizeChatContext(request.chatContext()));
     payload.put("previousSuggestions", request.previousSuggestions() == null ? List.of() : request.previousSuggestions());
-    return """
+    payload.put("currentTags", request.currentTags() == null ? List.of() : request.currentTags());
+    return ("""
         Generate reply suggestions for this customer conversation.
         Input JSON:
         %s
-        """.formatted(toJson(payload));
+        """.formatted(toJson(payload))) + "\n" + REPLY_TAG_GUIDANCE;
   }
 
   private Map<String, Object> sanitizedCustomer(Map<String, Object> raw, String phone) {
@@ -141,9 +147,10 @@ public class LlmReplyGenerationService {
   }
 
   private String systemPrompt() {
-    return configRepository.findValue(SYSTEM_PROMPT_KEY)
+    String configured = configRepository.findValue(SYSTEM_PROMPT_KEY)
         .filter(value -> !value.isBlank())
         .orElse(DEFAULT_SYSTEM_PROMPT);
+    return configured + "\n" + REPLY_TAG_GUIDANCE;
   }
 
   private String toJson(Object value) {

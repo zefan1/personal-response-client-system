@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.skill.Scene;
+import com.privateflow.modules.skill.ReplyTagSnapshot;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.config.SkillConfig;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
@@ -67,5 +68,63 @@ class SkillRequestBuilderTest {
         .contains("阶段=待联系")
         .doesNotContain("{{");
     assertThat(payload).containsEntry("skill_id", "skill-bound").containsEntry("skill_group_id", "skill-bound");
+  }
+
+  @Test
+  void includesCurrentReplyTagsAndNonDisclosureGuidance() {
+    SkillConfigProvider configProvider = Mockito.mock(SkillConfigProvider.class);
+    SkillRuntimeRouter router = Mockito.mock(SkillRuntimeRouter.class);
+    when(configProvider.get()).thenReturn(new SkillConfig(
+        "",
+        "",
+        "LAST_FOUR",
+        "",
+        10000,
+        30,
+        0.5,
+        5,
+        30,
+        "fallback",
+        "",
+        "",
+        "",
+        "reply prompt",
+        "",
+        0.3,
+        15,
+        8000,
+        3));
+    SkillRequestBuilder builder = new SkillRequestBuilder(
+        configProvider,
+        Mockito.mock(CustomerQueryService.class),
+        Mockito.mock(TagCandidateBuilder.class),
+        new ObjectMapper(),
+        router);
+    ReplyTagSnapshot tag = new ReplyTagSnapshot(
+        "personality_type",
+        "性格类型",
+        "LOYALIST",
+        "忠诚型",
+        "重视安全感",
+        "MANUAL",
+        "客户证据",
+        true);
+
+    Map<String, Object> payload = builder.build(new SkillRequest(
+        Scene.ACTIVE_REPLY,
+        "TUAN_GOU",
+        "18800001111",
+        "hello",
+        Map.of(),
+        Map.of(),
+        List.of(),
+        List.of(),
+        "keeper",
+        List.of(tag)));
+
+    assertThat(payload).containsEntry("current_tags", List.of(tag));
+    assertThat(payload.get("system_prompt").toString())
+        .contains("标签只用于调整回复方向")
+        .contains("不得向客户描述内部标签");
   }
 }

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import com.privateflow.modules.skill.Scene;
+import com.privateflow.modules.skill.ReplyTagSnapshot;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.parser.SkillResponseParser;
@@ -73,6 +74,46 @@ class LlmReplyGenerationServiceTest {
     assertThat(captor.getValue().maxTokens()).isEqualTo(777);
     assertThat(captor.getValue().userPrompt()).doesNotContain("18800001111");
     assertThat(captor.getValue().userPrompt()).contains("1111");
+  }
+
+  @Test
+  void includesCurrentReplyTagsAndNonDisclosureGuidanceInPrompt() {
+    when(llmService.generate(eq(LlmScene.REPLY_GENERATION), eq("TUAN_GOU"), eq("keeper"), any(), any()))
+        .thenReturn(LlmResponse.failed(LlmErrorCodes.CONFIG_MISSING, "missing", "", "OPENAI_COMPATIBLE", 1));
+    ReplyTagSnapshot tag = new ReplyTagSnapshot(
+        "personality_type",
+        "性格类型",
+        "LOYALIST",
+        "忠诚型",
+        "重视安全感",
+        "MANUAL",
+        "客户证据",
+        true);
+    SkillRequest request = new SkillRequest(
+        Scene.ACTIVE_REPLY,
+        "TUAN_GOU",
+        "18800001111",
+        "hello",
+        Map.of("nickname", "Alice", "phone", "18800001111"),
+        Map.of(),
+        List.of(),
+        List.of(),
+        "keeper",
+        List.of(tag));
+
+    assertThat(service.tryGenerate(request)).isEmpty();
+
+    ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(llmService).generate(eq(LlmScene.REPLY_GENERATION), eq("TUAN_GOU"), eq("keeper"), any(), captor.capture());
+    assertThat(captor.getValue().userPrompt())
+        .contains("currentTags")
+        .contains("忠诚型")
+        .contains("重视安全感")
+        .contains("标签只用于调整回复方向")
+        .doesNotContain("18800001111");
+    assertThat(captor.getValue().systemPrompt())
+        .contains("标签只用于调整回复方向")
+        .contains("不得向客户描述内部标签");
   }
 
   @Test

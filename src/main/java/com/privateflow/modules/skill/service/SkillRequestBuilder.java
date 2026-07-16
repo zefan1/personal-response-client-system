@@ -30,6 +30,10 @@ import org.springframework.stereotype.Component;
 public class SkillRequestBuilder {
 
   private static final Logger log = LoggerFactory.getLogger(SkillRequestBuilder.class);
+  private static final String REPLY_TAG_GUIDANCE =
+      "【当前客户标签使用规则】标签只用于调整回复方向、优先级和语气。"
+          + "不得向客户描述内部标签、系统判断、把握度、证据、来源或锁定状态。"
+          + "标签与客户当前消息或真实业务事实冲突时，以当前消息和业务事实为准。";
   private static final Pattern CUSTOMER_PLACEHOLDER = Pattern.compile("\\{\\{([A-Za-z][A-Za-z0-9_]*)}}");
   private final SkillConfigProvider configProvider;
   private final CustomerQueryService customerQueryService;
@@ -96,6 +100,7 @@ public class SkillRequestBuilder {
     payload.put("customer", customer);
     payload.put("system_prompt", buildSystemPrompt(request.scene(), config, customer));
     payload.put("previous_suggestions", request.previousSuggestions());
+    payload.put("current_tags", request.currentTags());
     runtimeRouter.route(request.scene(), request.leadType(), config).ifPresent(skillId -> {
       payload.put("skill_id", skillId);
       payload.put("skill_group_id", skillId);
@@ -151,7 +156,7 @@ public class SkillRequestBuilder {
         .replace("{{red_lines}}", config.redLines() == null ? "" : config.redLines())
         .replace("{{available_tags}}", availableTags())
         .replace("{{scene}}", scene.name());
-    return replaceCustomerPlaceholders(prompt, customer);
+    return replaceCustomerPlaceholders(prompt, customer) + "\\n" + REPLY_TAG_GUIDANCE;
   }
 
   private String replaceCustomerPlaceholders(String prompt, Map<String, Object> customer) {
