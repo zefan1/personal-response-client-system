@@ -245,6 +245,37 @@ class TagAnalyticsRepositoryTest {
         });
   }
 
+  @Test
+  void reportsCurrentGapsAndEventWindowNoUpdateReasons() {
+    seedCustomer(1, "企微", "万江店", "keeper-1", "2026-07-16 10:00:00");
+    seedCustomer(2, "企微", "万江店", "keeper-1", "2026-07-16 10:00:00");
+    seedAnalysisRun(201, 2, "REJECTED", "2026-07-14 09:00:00", "客户版本冲突");
+    seedAnalysisResult(301, 201, 10, null, "UNABLE_TO_DETERMINE", "NONE", "REJECTED", "证据不足");
+    seedCustomer(3, "企微", "万江店", "keeper-1", "2026-07-16 10:00:00");
+    seedAnalysisRun(202, 3, "NO_CHANGE", "2026-07-15 09:00:00", null);
+    seedAnalysisResult(302, 202, 10, null, "KEEP_CURRENT", "NONE", "REJECTED", "保持当前标签");
+    jdbcTemplate.update("INSERT INTO unmatched_legacy_tag_values (customer_id, status, raw_value) VALUES (3, 'PENDING', '旧标签')");
+
+    seedCustomer(4, "企微", "万江店", "keeper-1", "2026-07-16 10:00:00");
+    seedCategory(10, "intent_level", "意向等级", "intentLevel", 1, null, 1);
+    seedValue(101, 10, "HIGH", "高意向", 1, null);
+    seedAssignment(1004, 4, 10, 101, 1, "SYSTEM_INFERENCE", "2026-07-11 09:00:00", null);
+    seedCustomer(5, "企微", "万江店", "keeper-1", "2026-07-16 10:00:00");
+
+    TagAnalyticsResponse response = repository.analyze(allSpec(), allSpec(), window());
+
+    assertThat(response.summary().systemDecidedNoUpdateCount()).isEqualTo(2);
+    assertThat(response.unupdatedReasons()).extracting(TagAnalyticsResponse.ReasonRow::reasonCode)
+        .contains("NO_ANALYSIS", "LATEST_RUN_REJECTED", "LATEST_RUN_NO_CHANGE",
+            "UNMATCHED_LEGACY_VALUE", "CUSTOMER_UPDATED_AFTER_TAG_CHANGE");
+    assertThat(response.unupdatedReasons().stream()
+        .filter(row -> row.reasonCode().equals("LATEST_RUN_REJECTED"))
+        .findFirst()).get().satisfies(row -> {
+          assertThat(row.scope()).isEqualTo("EVENT_WINDOW");
+          assertThat(row.sampleReason()).contains("客户版本冲突");
+        });
+  }
+
   private CustomerQuerySpec allSpec() {
     return new CustomerQuerySpec(" WHERE 1=1", List.of(), "c.id ASC");
   }
@@ -296,5 +327,29 @@ class TagAnalyticsRepositoryTest {
           source_type, created_at, invalidated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, id, customerId, categoryId, valueId, active, sourceType, createdAt, invalidatedAt);
+  }
+
+  private void seedAnalysisRun(long id, long customerId, String status, String finishedAt, String errorMessage) {
+    jdbcTemplate.update("""
+        INSERT INTO tag_analysis_runs (id, customer_id, status, error_message, finished_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, id, customerId, status, errorMessage, finishedAt, finishedAt);
+  }
+
+  private void seedAnalysisResult(
+      long id,
+      long runId,
+      long categoryId,
+      Long valueId,
+      String resultType,
+      String requestedAction,
+      String validationStatus,
+      String validationReason) {
+    jdbcTemplate.update("""
+        INSERT INTO tag_analysis_results (
+          id, analysis_run_id, category_id, tag_value_id, result_type,
+          requested_action, validation_status, validation_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, id, runId, categoryId, valueId, resultType, requestedAction, validationStatus, validationReason);
   }
 }

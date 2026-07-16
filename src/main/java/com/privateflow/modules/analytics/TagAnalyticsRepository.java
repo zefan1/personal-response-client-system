@@ -51,14 +51,14 @@ public class TagAnalyticsRepository {
             snapshot.coverageRate(),
             events.systemAddedCount(),
             events.manualAddedOrChangedCount(),
-            snapshot.systemDecidedNoUpdateCount()),
+            events.systemDecidedNoUpdateCount()),
         loadCategories(customerSpec),
         loadTags(customerSpec),
         loadStores(customerSpec),
         loadTeams(customerSpec),
         loadEmployees(customerSpec),
         loadTagSources(customerSpec, window),
-        List.of(),
+        loadUnupdatedReasons(customerSpec, window),
         loadTrend(customerSpec, window),
         loadFilterOptions(optionSpec),
         new TagAnalyticsResponse.AppliedWindow(window.from(), window.to(), window.granularity()));
@@ -117,7 +117,124 @@ public class TagAnalyticsRepository {
           row.put("manual", rs.getLong("manual_count"));
           return row;
         }, eventArgs(spec, window.from(), window.to()));
-    return new EventSummary(counts.getOrDefault("system", 0L), counts.getOrDefault("manual", 0L));
+    long systemDecidedNoUpdateCount = jdbcTemplate.queryForObject("""
+        SELECT COUNT(ar.id)
+        FROM customers c
+        JOIN tag_analysis_runs r ON r.customer_id = c.id
+        JOIN tag_analysis_results ar ON ar.analysis_run_id = r.id
+        """ + spec.whereClause() + """
+          AND r.finished_at >= ? AND r.finished_at <= ?
+          AND (r.status <> 'COMPLETED' OR ar.validation_status = 'REJECTED' OR ar.requested_action = 'NONE')
+        """, Long.class, eventArgs(spec, window.from(), window.to()));
+    return new EventSummary(
+        counts.getOrDefault("system", 0L),
+        counts.getOrDefault("manual", 0L),
+        systemDecidedNoUpdateCount == 0 ? 0L : systemDecidedNoUpdateCount);
+  }
+
+  private List<TagAnalyticsResponse.ReasonRow> loadUnupdatedReasons(
+      CustomerQuerySpec spec,
+      TagAnalyticsWindow window) {
+    long noAnalysis = countCustomers(spec,
+        " AND NOT EXISTS (SELECT 1 FROM tag_analysis_runs r WHERE r.customer_id = c.id)");
+    long rejected = countLatestRunCustomers(spec, window, "REJECTED");
+    long noChange = countLatestRunCustomers(spec, window, "NO_CHANGE");
+    long unmatched = countCustomers(spec, """
+        AND EXISTS (
+          SELECT 1 FROM unmatched_legacy_tag_values u
+          WHERE u.customer_id = c.id AND u.status = 'PENDING'
+        )
+        """);
+    long updatedAfterTagChange = countCustomers(spec, """
+        AND EXISTS (SELECT 1 FROM customer_tag_assignments a0 WHERE a0.customer_id = c.id)
+        AND c.updated_at > (
+          SELECT MAX(COALESCE(a1.invalidated_at, a1.created_at))
+          FROM customer_tag_assignments a1 WHERE a1.customer_id = c.id
+        )
+        """);
+    return List.of(
+        new TagAnalyticsResponse.ReasonRow(
+            "NO_ANALYSIS", "未进行分析", "CURRENT_GAP", noAnalysis, 0, null),
+        new TagAnalyticsResponse.ReasonRow(
+            "LATEST_RUN_REJECTED", "最近一次分析被拒绝", "EVENT_WINDOW", rejected,
+            countLatestRunDecisions(spec, window, "REJECTED"),
+            sampleLatestReason(spec, window, "REJECTED")),
+        new TagAnalyticsResponse.ReasonRow(
+            "LATEST_RUN_NO_CHANGE", "最近一次分析无变化", "EVENT_WINDOW", noChange,
+            countLatestRunDecisions(spec, window, "NO_CHANGE"),
+            sampleLatestReason(spec, window, "NO_CHANGE")),
+        new TagAnalyticsResponse.ReasonRow(
+            "UNMATCHED_LEGACY_VALUE", "存在未匹配旧标签", "CURRENT_GAP", unmatched, 0, null),
+        new TagAnalyticsResponse.ReasonRow(
+            "CUSTOMER_UPDATED_AFTER_TAG_CHANGE", "标签变化后客户再次更新", "CURRENT_GAP",
+            updatedAfterTagChange, 0, null));
+  }
+
+  private long countCustomers(CustomerQuerySpec spec, String condition) {
+    Long count = jdbcTemplate.queryForObject(
+        "SELECT COUNT(DISTINCT c.id) FROM customers c " + spec.whereClause() + condition,
+        Long.class,
+        spec.args().toArray());
+    return count == null ? 0L : count;
+  }
+
+  private long countLatestRunCustomers(CustomerQuerySpec spec, TagAnalyticsWindow window, String status) {
+    String condition = """
+        AND EXISTS (
+          SELECT 1 FROM tag_analysis_runs r
+          WHERE r.id = (SELECT MAX(r2.id) FROM tag_analysis_runs r2 WHERE r2.customer_id = c.id)
+            AND r.finished_at >= ? AND r.finished_at <= ? AND r.status = ?
+        )
+        """;
+    List<Object> args = new ArrayList<>(spec.args());
+    args.add(window.from());
+    args.add(window.to());
+    args.add(status);
+    Long count = jdbcTemplate.queryForObject(
+        "SELECT COUNT(DISTINCT c.id) FROM customers c " + spec.whereClause() + condition,
+        Long.class,
+        args.toArray());
+    return count == null ? 0L : count;
+  }
+
+  private long countLatestRunDecisions(CustomerQuerySpec spec, TagAnalyticsWindow window, String status) {
+    String query = """
+        SELECT COUNT(ar.id)
+        FROM customers c
+        JOIN tag_analysis_runs r ON r.customer_id = c.id
+        JOIN tag_analysis_results ar ON ar.analysis_run_id = r.id
+        """ + spec.whereClause() + """
+          AND r.id = (SELECT MAX(r2.id) FROM tag_analysis_runs r2 WHERE r2.customer_id = c.id)
+          AND r.finished_at >= ? AND r.finished_at <= ? AND r.status = ?
+        """;
+    List<Object> args = new ArrayList<>(spec.args());
+    args.add(window.from());
+    args.add(window.to());
+    args.add(status);
+    Long count = jdbcTemplate.queryForObject(query, Long.class, args.toArray());
+    return count == null ? 0L : count;
+  }
+
+  private String sampleLatestReason(CustomerQuerySpec spec, TagAnalyticsWindow window, String status) {
+    String query = """
+        SELECT COALESCE(NULLIF(TRIM(r.error_message), ''),
+                        NULLIF(TRIM(ar.validation_reason), ''),
+                        ar.result_type) AS sample_reason
+        FROM customers c
+        JOIN tag_analysis_runs r ON r.customer_id = c.id
+        JOIN tag_analysis_results ar ON ar.analysis_run_id = r.id
+        """ + spec.whereClause() + """
+          AND r.id = (SELECT MAX(r2.id) FROM tag_analysis_runs r2 WHERE r2.customer_id = c.id)
+          AND r.finished_at >= ? AND r.finished_at <= ? AND r.status = ?
+        ORDER BY r.finished_at DESC, r.id DESC, ar.id ASC
+        LIMIT 1
+        """;
+    List<Object> args = new ArrayList<>(spec.args());
+    args.add(window.from());
+    args.add(window.to());
+    args.add(status);
+    List<String> reasons = jdbcTemplate.queryForList(query, String.class, args.toArray());
+    return reasons.isEmpty() ? null : reasons.get(0);
   }
 
   private List<TagAnalyticsResponse.SourceRow> loadTagSources(
@@ -352,7 +469,10 @@ public class TagAnalyticsRepository {
     };
   }
 
-  private record EventSummary(long systemAddedCount, long manualAddedOrChangedCount) {
+  private record EventSummary(
+      long systemAddedCount,
+      long manualAddedOrChangedCount,
+      long systemDecidedNoUpdateCount) {
   }
 
   private static final class MutableTrend {
