@@ -1741,6 +1741,94 @@
               {{ versionUploadState.message }}
             </span>
           </div>
+          <section v-if="activeForm === 'rule'" class="ops-rule-tag-editor">
+            <div class="ops-form-section-head">
+              <div>
+                <strong>动态标签条件</strong>
+                <small>只显示启用且允许用于跟进规则的标签分类和值。</small>
+              </div>
+              <label class="ops-rule-tag-logic">
+                <span class="ops-label-title">分类组之间</span>
+                <select v-model="formDraft.tagGroupOperator">
+                  <option value="AND">AND</option>
+                  <option value="OR">OR</option>
+                </select>
+              </label>
+            </div>
+            <div
+              v-for="(condition, index) in formDraft.tagConditions"
+              :key="condition.key ?? index"
+              class="ops-rule-tag-condition"
+            >
+              <label>
+                <span class="ops-label-title">标签分类</span>
+                <select class="rule-tag-category" v-model="condition.categoryId" @change="resetRuleTagValues(condition)">
+                  <option value="">请选择分类</option>
+                  <option v-for="category in followupRuleTagCategories()" :key="category.id" :value="String(category.id)">
+                    {{ category.categoryName }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                <span class="ops-label-title">标签值</span>
+                <select class="rule-tag-values" v-model="condition.valueIds" multiple :disabled="!condition.categoryId">
+                  <option
+                    v-for="value in followupRuleAllTagValues()"
+                    :key="`${value.categoryId}-${value.id}`"
+                    :value="String(value.id)"
+                    :hidden="String(value.categoryId) !== String(condition.categoryId)"
+                  >
+                    {{ value.displayName || value.tagValue }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                <span class="ops-label-title">分类内匹配</span>
+                <select class="rule-tag-match" v-model="condition.match">
+                  <option value="ANY">ANY：命中任意一个</option>
+                  <option value="ALL">ALL：必须全部命中</option>
+                </select>
+              </label>
+              <button v-if="formDraft.tagConditions.length > 1" class="secondary small" type="button" @click="removeRuleTagCondition(index)">删除</button>
+            </div>
+            <button class="secondary small rule-tag-add-button" type="button" @click="addRuleTagCondition">添加标签条件</button>
+            <p v-if="formDraft.legacyTagRule" class="warn-text">这是旧文本标签规则。保留原格式保存；选择正式分类和值后才会升级为目录引用。</p>
+          </section>
+          <section
+            v-if="activeForm === 'rule'"
+            v-show="formDraft.actionType === 'TAG_CHANGE'"
+            class="ops-rule-tag-action"
+          >
+            <div class="ops-form-section-head">
+              <div>
+                <strong>正式标签建议目标</strong>
+                <small>选择目录目标后，系统会保存分类 ID、标签值 ID 和正式名称。</small>
+              </div>
+            </div>
+            <label>
+              <span class="ops-label-title">正式标签分类</span>
+              <select class="rule-tag-action-category" v-model="formDraft.tagCategoryId" @change="resetRuleActionValue">
+                <option value="">使用旧文本规则</option>
+                <option v-for="category in followupRuleTagCategories()" :key="category.id" :value="String(category.id)">
+                  {{ category.categoryName }}
+                </option>
+              </select>
+            </label>
+            <label>
+              <span class="ops-label-title">正式标签值</span>
+              <select class="rule-tag-action-value" v-model="formDraft.tagValueId" :disabled="!formDraft.tagCategoryId">
+                <option value="">请选择标签值</option>
+                <option
+                  v-for="value in followupRuleAllTagValues()"
+                  :key="`${value.categoryId}-${value.id}`"
+                  :value="String(value.id)"
+                  :hidden="String(value.categoryId) !== String(formDraft.tagCategoryId)"
+                >
+                  {{ value.displayName || value.tagValue }}
+                </option>
+              </select>
+            </label>
+          </section>
           <label v-for="field in activeFormFields" :key="field.key" :class="{ 'ops-form-span-2': field.type === 'textarea' }">
             <span class="ops-label-title">{{ field.label }}</span>
             <div v-if="activeForm === 'quickSearch' && field.key === 'content'" class="ops-variable-bar">
@@ -2944,6 +3032,7 @@ async function loadOrgRulesTags() {
     }
     if (activeSectionKey.value === 'followup-rules') {
       applyRuleList(await getJson<unknown>(ruleListPath()));
+      await refreshTagCategoryOptionsCache();
       return;
     }
     await loadTags();
@@ -4570,16 +4659,47 @@ function buildRulePayload() {
   if (formDraft.leadType && formDraft.leadType !== 'GENERAL') {
     conditions.unshift({ field: 'leadType', op: 'EQ', value: formDraft.leadType });
   }
+  const tagConditions = Array.isArray(formDraft.tagConditions) ? formDraft.tagConditions : [];
+  tagConditions.forEach((condition: AnyRecord) => {
+    const categoryId = Number(condition.categoryId);
+    const valueIds = (Array.isArray(condition.valueIds) ? condition.valueIds : [])
+      .map(Number)
+      .filter((value: number) => Number.isFinite(value) && value > 0);
+    if (Number.isFinite(categoryId) && categoryId > 0 && valueIds.length) {
+      conditions.push({
+        field: 'tag',
+        op: 'MATCH',
+        categoryId,
+        valueIds,
+        match: condition.match === 'ALL' ? 'ALL' : 'ANY'
+      });
+    }
+  });
   const conditionJson = JSON.stringify({
-    operator: 'AND',
+    operator: formDraft.tagGroupOperator === 'OR' ? 'OR' : 'AND',
     conditions
   });
+  const formalCategory = followupRuleTagCategories()
+    .find((category) => String(category.id) === String(formDraft.tagCategoryId));
+  const formalValue = formalCategory
+    ? followupRuleTagValues(formalCategory.id)
+        .find((value) => String(value.id) === String(formDraft.tagValueId))
+    : null;
   const actionConfig = {
     alertLevel: formDraft.alertLevel || (formDraft.actionType === 'ALERT' ? 'WARN' : 'NORMAL'),
     reminderType: formDraft.reminderType || (formDraft.actionType === 'TAG_CHANGE' ? 'TAG_SUGGESTION' : 'OVERDUE'),
     ...(formDraft.actionType === 'TAG_CHANGE' ? { tagName: formDraft.tagName || '系统标签建议' } : {}),
     ...(formDraft.actionType === 'NOTIFY_LEADER' ? { reason: formDraft.reason || '跟进规则触发' } : {})
   };
+  if (formDraft.actionType === 'TAG_CHANGE' && formalCategory && formalValue) {
+    Object.assign(actionConfig, {
+      tagCategoryId: Number(formalCategory.id),
+      tagCategoryKey: formalCategory.categoryKey,
+      tagValueId: Number(formalValue.id),
+      tagValue: formalValue.tagValue,
+      tagName: formalValue.displayName || formalValue.tagValue
+    });
+  }
   return {
     name: formDraft.name,
     conditionJson,
@@ -5263,6 +5383,28 @@ function quickSearchPayload(item: AnyRecord) {
   };
 }
 
+function followupRuleTagCategories() {
+  return tagCategoryOptionsCache.value.filter((category) => {
+    const values = Array.isArray(category.values) ? category.values : [];
+    return category?.isEnabled !== false
+      && !category?.mergedIntoId
+      && category?.useForFollowupRules !== false
+      && values.some((value) => value?.isEnabled !== false && !value?.mergedIntoId);
+  });
+}
+
+function followupRuleTagValues(categoryId: unknown) {
+  const category = followupRuleTagCategories()
+    .find((item) => String(item.id) === String(categoryId));
+  return (Array.isArray(category?.values) ? category.values : [])
+    .filter((value: AnyRecord) => value?.isEnabled !== false && !value?.mergedIntoId);
+}
+
+function followupRuleAllTagValues() {
+  return followupRuleTagCategories().flatMap((category) =>
+    followupRuleTagValues(category.id).map((value) => ({ ...value, categoryId: category.id })));
+}
+
 function tagCategoryOptions() {
   return tagCategoryOptionsCache.value.map((category) => ({
     label: tagCategoryOptionLabel(category),
@@ -5462,6 +5604,35 @@ function noticeLevelLabel(value: unknown) {
   return ({ INFO: '普通', WARN: '提醒', ERROR: '故障' } as Record<string, string>)[String(value ?? '').toUpperCase()] ?? String(value ?? '-');
 }
 
+let ruleTagConditionSequence = 0;
+
+function ruleTagConditionDraft(value?: AnyRecord) {
+  return {
+    key: `rule-tag-${++ruleTagConditionSequence}`,
+    categoryId: value?.categoryId ? String(value.categoryId) : '',
+    valueIds: (Array.isArray(value?.valueIds) ? value.valueIds : []).map(String),
+    match: value?.match === 'ALL' ? 'ALL' : 'ANY'
+  };
+}
+
+function addRuleTagCondition() {
+  if (!Array.isArray(formDraft.tagConditions)) formDraft.tagConditions = [];
+  formDraft.tagConditions.push(ruleTagConditionDraft());
+}
+
+function removeRuleTagCondition(index: number) {
+  if (!Array.isArray(formDraft.tagConditions) || formDraft.tagConditions.length <= 1) return;
+  formDraft.tagConditions.splice(index, 1);
+}
+
+function resetRuleTagValues(condition: AnyRecord) {
+  condition.valueIds = [];
+}
+
+function resetRuleActionValue() {
+  formDraft.tagValueId = '';
+}
+
 function ruleDraft(item?: AnyRecord) {
   const parsed = parseRuleCondition(item?.conditionJson);
   const action = parseRuleAction(item?.actionConfig);
@@ -5473,6 +5644,13 @@ function ruleDraft(item?: AnyRecord) {
     alertLevel: action.alertLevel ?? 'WARN',
     reminderType: action.reminderType ?? (item?.actionType === 'TAG_CHANGE' ? 'TAG_SUGGESTION' : 'OVERDUE'),
     tagName: action.tagName ?? '',
+    tagGroupOperator: parsed.tagGroupOperator,
+    tagConditions: parsed.tagConditions.length
+      ? parsed.tagConditions.map((condition) => ruleTagConditionDraft(condition))
+      : [ruleTagConditionDraft()],
+    tagCategoryId: action.tagCategoryId ? String(action.tagCategoryId) : '',
+    tagValueId: action.tagValueId ? String(action.tagValueId) : '',
+    legacyTagRule: item?.actionType === 'TAG_CHANGE' && !action.tagValueId && Boolean(action.tagName),
     reason: action.reason ?? '',
     priority: item?.priority ?? 90,
     enabled: item?.enabled ?? true
@@ -5480,17 +5658,47 @@ function ruleDraft(item?: AnyRecord) {
 }
 
 function parseRuleCondition(value: unknown) {
-  const fallback: { leadType?: string; thresholdHours?: number } = {};
+  const fallback: {
+    leadType?: string;
+    thresholdHours?: number;
+    tagGroupOperator: 'AND' | 'OR';
+    tagConditions: AnyRecord[];
+  } = { tagGroupOperator: 'AND', tagConditions: [] };
   if (!value) return fallback;
   try {
     const parsed = JSON.parse(String(value));
     const conditions = Array.isArray(parsed.conditions) ? parsed.conditions : [];
     const leadType = conditions.find((item: AnyRecord) => item.field === 'leadType')?.value ?? 'GENERAL';
     const threshold = conditions.find((item: AnyRecord) => ['hoursSinceLastFollowup', 'lastFollowupHours'].includes(item.field))?.value;
-    return { leadType, thresholdHours: Number(threshold) || undefined };
+    const tagConditions: AnyRecord[] = [];
+    collectRuleTagConditions(parsed, tagConditions);
+    return {
+      leadType,
+      thresholdHours: Number(threshold) || undefined,
+      tagGroupOperator: parsed.operator === 'OR' ? 'OR' : 'AND',
+      tagConditions
+    } as const;
   } catch {
     return fallback;
   }
+}
+
+function collectRuleTagConditions(node: unknown, result: AnyRecord[]) {
+  if (Array.isArray(node)) {
+    node.forEach((item) => collectRuleTagConditions(item, result));
+    return;
+  }
+  if (!node || typeof node !== 'object') return;
+  const item = node as AnyRecord;
+  if (item.field === 'tag' && item.op === 'MATCH') {
+    result.push({
+      categoryId: item.categoryId,
+      valueIds: Array.isArray(item.valueIds) ? item.valueIds : [],
+      match: item.match === 'ALL' ? 'ALL' : 'ANY'
+    });
+    return;
+  }
+  Object.values(item).forEach((child) => collectRuleTagConditions(child, result));
 }
 
 function parseRuleAction(value: unknown) {

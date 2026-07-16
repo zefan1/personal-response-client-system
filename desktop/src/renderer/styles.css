@@ -3280,6 +3280,44 @@ textarea {
   grid-template-columns: 1fr;
 }
 
+.ops-rule-tag-editor,
+.ops-rule-tag-action {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.ops-form-section-head,
+.ops-rule-tag-condition {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+}
+
+.ops-form-section-head {
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+}
+
+.ops-rule-tag-condition {
+  grid-template-columns: minmax(150px, 1fr) minmax(180px, 1.2fr) minmax(150px, 1fr) auto;
+  padding-top: 10px;
+  border-top: 1px solid #e4e7ec;
+}
+
+.ops-rule-tag-condition select[multiple] {
+  min-height: 76px;
+}
+
+.ops-rule-tag-editor > small,
+.ops-rule-tag-action small,
+.ops-form-section-head small {
+  color: #667085;
+  line-height: 1.35;
+}
+
 .ops-form-span-2 {
   grid-column: 1 / -1;
 }
@@ -3927,7 +3965,9 @@ textarea {
 
   .ops-filter-bar.tag-filters,
   .ops-filter-bar.tag-value-filters,
-  .ops-tag-detail-grid {
+  .ops-tag-detail-grid,
+  .ops-form-section-head,
+  .ops-rule-tag-condition {
     grid-template-columns: 1fr;
   }
 

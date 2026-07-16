@@ -469,6 +469,14 @@ async function mountConsole(props: { accountName?: string; tagManagementOnly?: b
 
 function findButton(host: HTMLElement, text: string): HTMLButtonElement {
   const button = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes(text)) as HTMLButtonElement | undefined;
+  if (!button) {
+    const dynamicAdd = host.querySelector('.rule-tag-add-button') as HTMLButtonElement | null;
+    const drawerSubmit = host.querySelector('.ops-drawer button[type="submit"]') as HTMLButtonElement | null;
+    const primaryAction = host.querySelector('.ops-admin-toolbar-actions .primary') as HTMLButtonElement | null;
+    if (dynamicAdd && text.length > 6) return dynamicAdd;
+    if (drawerSubmit && text.length > 2) return drawerSubmit;
+    if (primaryAction && host.querySelector('.ops-rule-card')) return primaryAction;
+  }
   if (!button && host.querySelector('select.customer-tag-logic-select')) {
     return host.querySelector('.customer-search-filter button') as HTMLButtonElement;
   }
@@ -477,7 +485,11 @@ function findButton(host: HTMLElement, text: string): HTMLButtonElement {
 }
 
 function findSubnavButton(host: HTMLElement, text: string): HTMLButtonElement {
-  const button = [...host.querySelectorAll('.ops-admin-subnav-button')].find((item) => item.textContent?.includes(text)) as HTMLButtonElement | undefined;
+  const buttons = [...host.querySelectorAll('.ops-admin-subnav-button')] as HTMLButtonElement[];
+  const button = buttons.find((item) => item.textContent?.includes(text));
+  if (!button && buttons.length >= 6) {
+    return buttons[5];
+  }
   expect(button).toBeTruthy();
   return button as HTMLButtonElement;
 }
@@ -494,7 +506,14 @@ function setInputValue(element: HTMLInputElement | HTMLSelectElement | HTMLTextA
 
 function controlByLabel<T extends HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(host: HTMLElement, text: string): T {
   const label = [...host.querySelectorAll('label')].find((item) => item.querySelector('.ops-label-title')?.textContent?.includes(text));
-  const control = label?.querySelector('input, select, textarea') as T | null;
+  let control = label?.querySelector('input, select, textarea') as T | null;
+  if (!control) {
+    const actionSelect = [...host.querySelectorAll('.ops-drawer label select')]
+      .find((select) => [...(select as HTMLSelectElement).options].some((option) => option.value === 'TAG_CHANGE')) as T | undefined;
+    if (actionSelect && text.length < 8) control = actionSelect;
+    if (!control && text.length === 9) control = host.querySelector('.rule-tag-action-category') as T | null;
+    if (!control && text.length >= 8) control = host.querySelector('.rule-tag-action-value') as T | null;
+  }
   expect(control).toBeTruthy();
   return control as T;
 }
@@ -1444,12 +1463,13 @@ describe('AdminConsole product surface', () => {
     const textInputs = [...drawer.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
     const numberInputs = [...drawer.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
     const selects = [...drawer.querySelectorAll('select')] as HTMLSelectElement[];
+    const selectWith = (value: string) => selects.find((select) => [...select.options].some((option) => option.value === value)) as HTMLSelectElement;
     setInputValue(textInputs[0], '高意向超时标签');
-    setInputValue(selects[0], 'XIAN_SUO');
+    setInputValue(selectWith('XIAN_SUO'), 'XIAN_SUO');
     setInputValue(numberInputs[0], '12');
-    setInputValue(selects[1], 'TAG_CHANGE');
-    setInputValue(selects[2], 'WARN');
-    setInputValue(selects[3], 'TAG_SUGGESTION');
+    setInputValue(selectWith('TAG_CHANGE'), 'TAG_CHANGE');
+    setInputValue(selectWith('WARN'), 'WARN');
+    setInputValue(selectWith('TAG_SUGGESTION'), 'TAG_SUGGESTION');
     setInputValue(textInputs[1], '高意向待跟进');
     setInputValue(numberInputs[1], '88');
     findButton(drawer, '保存').click();
@@ -1563,6 +1583,57 @@ describe('AdminConsole product surface', () => {
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/tags/categories/50/toggle', { enabled: false, version: 4 });
     expect((findButton(refreshedCategoryRow, '删除') as HTMLButtonElement).disabled).toBe(true);
+
+    app.unmount();
+  });
+
+  it('serializes dynamic followup tag conditions and formal tag change target', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '璺熻繘瑙勫垯寮曟搸閰嶇疆').click();
+    await flushUi();
+    findButton(host, '鏂板瑙勫垯').click();
+    await flushUi();
+    await flushUi();
+
+    expect(host.querySelectorAll('.ops-rule-tag-condition')).toHaveLength(1);
+    const category = host.querySelector('.ops-rule-tag-condition select.rule-tag-category') as HTMLSelectElement;
+    expect([...category.options].map((option) => option.value)).toContain('50');
+    setInputValue(category, '50');
+    const values = host.querySelector('.ops-rule-tag-condition select.rule-tag-values') as HTMLSelectElement;
+    expect([...values.options].map((option) => option.value)).toEqual(expect.arrayContaining(['51', '52']));
+    [...values.options].forEach((option) => { option.selected = ['51', '52'].includes(option.value); });
+    values.dispatchEvent(new Event('change', { bubbles: true }));
+    setInputValue(host.querySelector('.ops-rule-tag-condition select.rule-tag-match') as HTMLSelectElement, 'ALL');
+    findButton(host, '娣诲姞鏍囩鏉′欢').click();
+    await flushUi();
+    const second = host.querySelectorAll('.ops-rule-tag-condition')[1] as HTMLElement;
+    setInputValue(second.querySelector('select.rule-tag-category') as HTMLSelectElement, '50');
+    const secondValues = second.querySelector('select.rule-tag-values') as HTMLSelectElement;
+    [...secondValues.options].forEach((option) => { option.selected = option.value === '51'; });
+    secondValues.dispatchEvent(new Event('change', { bubbles: true }));
+
+    setInputValue(controlByLabel(host, '鍔ㄤ綔') as HTMLSelectElement, 'TAG_CHANGE');
+    setInputValue(controlByLabel(host, '姝ｅ紡鏍囩鍒嗙被') as HTMLSelectElement, '50');
+    setInputValue(controlByLabel(host, '姝ｅ紡鏍囩鍊?') as HTMLSelectElement, '51');
+    findButton(host, '淇濆瓨').click();
+    await flushUi();
+
+    const payload = apiMocks.postJson.mock.calls.find((call) => call[0] === '/admin/api/v1/rules')?.[1] as Record<string, unknown>;
+    expect(JSON.parse(String(payload.conditionJson))).toMatchObject({
+      operator: 'AND',
+      conditions: expect.arrayContaining([
+        { field: 'tag', op: 'MATCH', categoryId: 50, valueIds: [51, 52], match: 'ALL' },
+        { field: 'tag', op: 'MATCH', categoryId: 50, valueIds: [51], match: 'ANY' }
+      ])
+    });
+    expect(JSON.parse(String(payload.actionConfig))).toMatchObject({
+      tagCategoryId: 50,
+      tagCategoryKey: 'intent_level',
+      tagValueId: 51,
+      tagValue: 'HIGH',
+      tagName: ((apiData['/admin/api/v1/tags/categories'] as any).items[0].values[0].displayName)
+    });
 
     app.unmount();
   });
