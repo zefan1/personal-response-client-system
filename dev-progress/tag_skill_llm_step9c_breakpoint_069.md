@@ -2,7 +2,7 @@
 
 日期：2026-07-16
 分支：`feature/tag-step8-reply-tag-context`
-实现代码 HEAD（断点文档提交前）：`fb79a1c`
+实现代码 HEAD（最终补强提交后）：`ab7d0e2`
 状态：Step 9C 已完成；Step 9D 未开始
 
 ## 本轮结果
@@ -48,6 +48,7 @@
 - `fb7f299` `feat: persist validated followup tag suggestions`
 - `4c5278a` `test: cover formal followup tag references`
 - `fb79a1c` `feat: configure followup tag rules in admin`
+- `ab7d0e2` `fix: tighten formal followup tag suggestions`
 
 ## 验证记录
 
