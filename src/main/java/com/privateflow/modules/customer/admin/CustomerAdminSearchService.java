@@ -2,15 +2,35 @@ package com.privateflow.modules.customer.admin;
 
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
 public class CustomerAdminSearchService {
 
   private final CustomerAdminSearchRepository repository;
+  private final CustomerFilterValidator filterValidator;
+  private final CustomerAccessScopeResolver accessScopeResolver;
 
   public CustomerAdminSearchService(CustomerAdminSearchRepository repository) {
     this.repository = repository;
+    this.filterValidator = null;
+    this.accessScopeResolver = null;
+  }
+
+  @Autowired
+  public CustomerAdminSearchService(
+      CustomerAdminSearchRepository repository,
+      CustomerFilterValidator filterValidator,
+      CustomerAccessScopeResolver accessScopeResolver) {
+    this.repository = repository;
+    this.filterValidator = filterValidator;
+    this.accessScopeResolver = accessScopeResolver;
+  }
+
+  public CustomerAdminSearchPage search(CustomerSearchRequest request) {
+    CustomerFilter filter = filterValidator.validate(request == null ? null : request.toFilter());
+    return repository.search(filter, accessScopeResolver.currentScope());
   }
 
   public CustomerAdminSearchPage search(String keyword, int page, int size) {

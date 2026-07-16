@@ -2,6 +2,8 @@ package com.privateflow.modules.customer.admin;
 
 import com.privateflow.modules.match.ApiResponse;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -20,5 +22,10 @@ public class CustomerAdminSearchController {
       @RequestParam(value = "page", defaultValue = "1") int page,
       @RequestParam(value = "page_size", defaultValue = "20") int pageSize) {
     return ApiResponse.ok(service.search(keyword, page, pageSize));
+  }
+
+  @PostMapping("/admin/api/v1/customers/search")
+  public ApiResponse<CustomerAdminSearchPage> search(@RequestBody CustomerSearchRequest request) {
+    return ApiResponse.ok(service.search(request));
   }
 }
