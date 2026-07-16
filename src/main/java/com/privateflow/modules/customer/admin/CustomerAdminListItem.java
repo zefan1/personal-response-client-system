@@ -54,4 +54,12 @@ public record CustomerAdminListItem(
   public CustomerAdminListItem {
     tags = tags == null ? List.of() : List.copyOf(tags);
   }
+
+  public CustomerAdminListItem withTags(List<CustomerTagSummary> nextTags) {
+    return new CustomerAdminListItem(
+        id, phone, nickname, sourceChannel, leadType, assignedKeeper, intendedStore,
+        intendedProject, customerStage, intentLevel, lastFollowupAt, nextFollowupAt,
+        appointmentDate, appointmentStore, appointmentItem, arrived, sourceTable,
+        updatedAt, nextTags);
+  }
 }
