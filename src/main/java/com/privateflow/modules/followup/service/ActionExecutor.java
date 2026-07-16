@@ -78,6 +78,11 @@ public class ActionExecutor {
           if (validation == null || !validation.accepted()) {
             continue;
           }
+          if (validation.values().size() == 1
+              && validation.values().get(0).displayName() != null
+              && !validation.values().get(0).displayName().isBlank()) {
+            tagName = validation.values().get(0).displayName();
+          }
           suggestionId = tagSuggestionRepository.upsertPending(
               customer.getPhone(),
               categoryId,

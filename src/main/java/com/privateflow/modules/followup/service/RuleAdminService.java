@@ -174,10 +174,18 @@ public class RuleAdminService {
         || action.path("tagValueId").asLong() <= 0) {
       throw new FollowupException(FollowupErrorCodes.BAD_REQUEST, "正式标签建议目标缺少有效的分类或标签值 ID");
     }
-    validateTagSelection(request.name(), action, List.of(action.path("tagValueId").asLong()));
+    TagSelectionValidationResult result = validateTagSelection(
+        request.name(), action, List.of(action.path("tagValueId").asLong()));
+    if (result.category() != null) {
+      validateCatalogText(action, "tagCategoryKey", result.category().categoryKey());
+    }
+    if (result.values().size() == 1) {
+      validateCatalogText(action, "tagValue", result.values().get(0).tagValue());
+      validateCatalogText(action, "tagName", result.values().get(0).displayName());
+    }
   }
 
-  private void validateTagSelection(String ruleName, JsonNode node, List<Long> valueIds) {
+  private TagSelectionValidationResult validateTagSelection(String ruleName, JsonNode node, List<Long> valueIds) {
     long categoryId = node.path(node.has("tagCategoryId") ? "tagCategoryId" : "categoryId").asLong();
     TagSelectionValidationResult result = tagSelectionValidator.validateIds(
         TagCandidatePurpose.FOLLOWUP_RULE,
@@ -187,6 +195,16 @@ public class RuleAdminService {
     if (result == null || !result.accepted()) {
       String message = result == null ? "标签目录校验没有返回结果" : result.message();
       throw new FollowupException(FollowupErrorCodes.BAD_REQUEST, "标签分类/值校验失败：" + message);
+    }
+    return result;
+  }
+
+  private void validateCatalogText(JsonNode action, String field, String expected) {
+    String actual = action.path(field).asText("");
+    if (!actual.isBlank() && expected != null && !expected.equals(actual)) {
+      throw new FollowupException(
+          FollowupErrorCodes.BAD_REQUEST,
+          "正式标签建议目标字段与标签目录不一致：" + field);
     }
   }
 

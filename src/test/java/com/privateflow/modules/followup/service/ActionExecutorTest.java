@@ -19,6 +19,8 @@ import com.privateflow.modules.followup.infra.TagSuggestionRepository;
 import com.privateflow.modules.tags.TagCandidatePurpose;
 import com.privateflow.modules.tags.TagSelectionValidationResult;
 import com.privateflow.modules.tags.TagSelectionValidator;
+import com.privateflow.modules.tags.TagValue;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -35,22 +37,25 @@ class ActionExecutorTest {
     TagSelectionValidator validator = Mockito.mock(TagSelectionValidator.class);
     TagSelectionValidationResult accepted = Mockito.mock(TagSelectionValidationResult.class);
     when(accepted.accepted()).thenReturn(true);
+    when(accepted.values()).thenReturn(List.of(new TagValue(
+        51L, 50L, "intent_level", "HIGH", "目录高意向", true, 1,
+        LocalDateTime.now(), LocalDateTime.now())));
     when(validator.validateIds(eq(TagCandidatePurpose.FOLLOWUP_RULE), eq(50L), eq(List.of(51L)), any()))
         .thenReturn(accepted);
     when(config.get()).thenReturn(new com.privateflow.modules.followup.config.FollowupConfig(
         "", "", 30, 24, 72, 24, 7, 14, 24, 1000, 120, 1, 7, 600, 48));
-    when(suggestions.upsertPending("13800000000", 50L, 51L, "高意向", 9L, 7)).thenReturn(77L);
+    when(suggestions.upsertPending("13800000000", 50L, 51L, "目录高意向", 9L, 7)).thenReturn(77L);
     ActionExecutor executor = new ActionExecutor(
         new ObjectMapper(), reminderLogs, suggestions, config, events, validator);
     Customer customer = customer();
 
     executor.execute(customer, List.of(new RuleMatch(new FollowupRule(
         9L, "formal", "{}", ActionType.TAG_CHANGE,
-        "{\"tagCategoryId\":50,\"tagValueId\":51,\"tagName\":\"高意向\"}",
+        "{\"tagCategoryId\":50,\"tagValueId\":51,\"tagName\":\"旧名称\"}",
         10, true, false, null, null))));
 
-    verify(suggestions).upsertPending("13800000000", 50L, 51L, "高意向", 9L, 7);
-    verify(suggestions, never()).upsertPending(eq("13800000000"), eq("高意向"), anyLong(), anyInt());
+    verify(suggestions).upsertPending("13800000000", 50L, 51L, "目录高意向", 9L, 7);
+    verify(suggestions, never()).upsertPending(eq("13800000000"), eq("旧名称"), anyLong(), anyInt());
     verify(reminderLogs).markSent("13800000000", 9L, ReminderType.TAG_SUGGESTION);
   }
 

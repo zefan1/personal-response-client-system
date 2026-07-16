@@ -30,20 +30,20 @@ public class TagSuggestionRepository {
     return count != null && count > 0;
   }
 
-  public Optional<Long> findPending(String phone, long tagValueId) {
+  public Optional<Long> findPending(String phone, long tagValueId, long ruleId) {
     return jdbcTemplate.query("""
         SELECT id FROM system_tag_suggestions
-        WHERE phone = ? AND tag_value_id = ? AND status = 'PENDING'
+        WHERE phone = ? AND tag_value_id = ? AND rule_id = ? AND status = 'PENDING'
         LIMIT 1
-        """, (rs, rowNum) -> rs.getLong("id"), phone, tagValueId).stream().findFirst();
+        """, (rs, rowNum) -> rs.getLong("id"), phone, tagValueId, ruleId).stream().findFirst();
   }
 
-  public boolean ignoredRecently(String phone, long tagValueId, int dedupDays) {
+  public boolean ignoredRecently(String phone, long tagValueId, long ruleId, int dedupDays) {
     Integer count = jdbcTemplate.queryForObject("""
         SELECT COUNT(*) FROM system_tag_suggestions
-        WHERE phone = ? AND tag_value_id = ? AND status = 'IGNORED'
+        WHERE phone = ? AND tag_value_id = ? AND rule_id = ? AND status = 'IGNORED'
           AND ignored_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-        """, Integer.class, phone, tagValueId, dedupDays);
+        """, Integer.class, phone, tagValueId, ruleId, dedupDays);
     return count != null && count > 0;
   }
 
@@ -71,11 +71,11 @@ public class TagSuggestionRepository {
       String tagName,
       long ruleId,
       int dedupDays) {
-    Optional<Long> existing = findPending(phone, tagValueId);
+    Optional<Long> existing = findPending(phone, tagValueId, ruleId);
     if (existing.isPresent()) {
       return existing.get();
     }
-    if (ignoredRecently(phone, tagValueId, dedupDays)) {
+    if (ignoredRecently(phone, tagValueId, ruleId, dedupDays)) {
       return null;
     }
     jdbcTemplate.update("""

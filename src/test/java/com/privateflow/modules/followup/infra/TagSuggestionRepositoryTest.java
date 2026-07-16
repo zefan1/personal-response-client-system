@@ -25,6 +25,9 @@ class TagSuggestionRepositoryTest {
 
     repository.upsertPending("13800000000", 50L, 51L, "高意向", 9L, 7);
 
+    verify(jdbc).query(
+        contains("rule_id = ?"), any(RowMapper.class),
+        eq("13800000000"), eq(51L), eq(9L));
     verify(jdbc).update(
         contains("tag_value_id"),
         eq("13800000000"), eq("13800000000"), eq("高意向"), eq(51L), eq(9L));
