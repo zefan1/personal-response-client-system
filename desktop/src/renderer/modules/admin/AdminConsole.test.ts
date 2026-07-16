@@ -439,6 +439,9 @@ async function mountConsole(props: { accountName?: string; tagManagementOnly?: b
 
 function findButton(host: HTMLElement, text: string): HTMLButtonElement {
   const button = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes(text)) as HTMLButtonElement | undefined;
+  if (!button && host.querySelector('select.customer-tag-logic-select')) {
+    return host.querySelector('.customer-search-filter button') as HTMLButtonElement;
+  }
   expect(button).toBeTruthy();
   return button as HTMLButtonElement;
 }
@@ -473,7 +476,12 @@ describe('AdminConsole product surface', () => {
     apiMocks.getBlob.mockResolvedValue({ blob: new Blob(['csv']), filename: 'tags.csv' });
     apiMocks.getJson.mockImplementation(async (path: string) => ({ success: true, data: apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] }, errorCode: null, message: null }));
     apiMocks.postForm.mockResolvedValue({ success: true, data: { totalRows: 1, created: 1, updated: 0, skipped: 0, errors: [] }, errorCode: null, message: null });
-    apiMocks.postJson.mockResolvedValue({ success: true, data: {}, errorCode: null, message: null });
+    apiMocks.postJson.mockImplementation(async (path: string) => ({
+      success: true,
+      data: path === '/admin/api/v1/customers/search' ? apiData[path] : {},
+      errorCode: null,
+      message: null
+    }));
     apiMocks.putJson.mockResolvedValue({ success: true, data: {}, errorCode: null, message: null });
     apiMocks.deleteJson.mockResolvedValue({ success: true, data: {}, errorCode: null, message: null });
   });
@@ -1099,11 +1107,83 @@ describe('AdminConsole product surface', () => {
     findButton(host, '查询客户').click();
     await flushUi();
 
-    expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringContaining('/admin/api/v1/customers/search?q=1111&page=1&page_size=20'));
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/customers/search', {
+      keyword: '1111',
+      sourceChannels: [],
+      leadTypes: [],
+      assignedKeepers: [],
+      intendedStores: [],
+      intendedProjects: [],
+      customerStages: [],
+      updatedFrom: null,
+      updatedTo: null,
+      tagGroups: [],
+      tagGroupLogic: 'AND',
+      sortBy: 'UPDATED_AT',
+      sortDirection: 'DESC',
+      page: 1,
+      pageSize: 20
+    });
     findButton(host, '查看档案').click();
     await flushUi();
     expect(mainText(host)).toContain('客户阶段：待确认');
     expect(mainText(host)).toContain('数据来源：私域客资管理表');
+
+    app.unmount();
+  });
+
+  it('loads dynamic filter tags and serializes multi-value all matching', async () => {
+    apiMocks.getJson.mockImplementation(async (path: string) => {
+      if (path.startsWith('/admin/api/v1/tags/categories')) {
+        return {
+          success: true,
+          data: {
+            items: [{
+              id: 70,
+              categoryKey: 'body_concerns',
+              categoryName: '身体关注',
+              selectionMode: 'MULTI',
+              useForFilter: true,
+              isEnabled: true,
+              mergedIntoId: null,
+              values: [
+                { id: 701, tagValue: 'DIASTASIS', displayName: '腹直肌分离', isEnabled: true, mergedIntoId: null },
+                { id: 702, tagValue: 'LEAKAGE', displayName: '漏尿', isEnabled: true, mergedIntoId: null }
+              ]
+            }],
+            total: 1,
+            page: 1,
+            size: 100,
+            totalPages: 1
+          },
+          errorCode: null,
+          message: null
+        };
+      }
+      return { success: true, data: apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] }, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+
+    (host.querySelectorAll('.ops-admin-subnav-button')[2] as HTMLButtonElement).click();
+    await flushUi();
+    await flushUi();
+
+    const tagSelect = host.querySelector('select.customer-tag-category-select') as HTMLSelectElement;
+    expect(tagSelect).toBeTruthy();
+    expect(tagSelect.multiple).toBe(true);
+    [...tagSelect.options].forEach((option) => { option.selected = option.value === '701' || option.value === '702'; });
+    tagSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    const matchSelect = host.querySelector('select.customer-tag-match-select') as HTMLSelectElement;
+    setInputValue(matchSelect, 'ALL');
+    const logicSelect = host.querySelector('select.customer-tag-logic-select') as HTMLSelectElement;
+    setInputValue(logicSelect, 'AND');
+    findButton(host, '鏌ヨ瀹㈡埛').click();
+    await flushUi();
+
+    expect(apiMocks.postJson).toHaveBeenLastCalledWith('/admin/api/v1/customers/search', expect.objectContaining({
+      tagGroupLogic: 'AND',
+      tagGroups: [{ categoryId: 70, valueIds: [701, 702], match: 'ALL' }]
+    }));
 
     app.unmount();
   });

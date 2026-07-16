@@ -3181,6 +3181,46 @@ textarea {
   grid-template-columns: minmax(260px, 1fr) auto;
 }
 
+.customer-tag-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin: 10px 0 14px;
+  padding: 12px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #fcfcfd;
+}
+
+.customer-tag-filter-group,
+.customer-tag-logic {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.customer-tag-filter-group label,
+.customer-tag-logic {
+  display: grid;
+  gap: 5px;
+  color: #475467;
+  font-size: 12px;
+}
+
+.customer-tag-category-select {
+  min-width: 170px;
+}
+
+.customer-tag-category-select[multiple] {
+  min-height: 72px;
+}
+
+.customer-tag-match-select,
+.customer-tag-logic-select {
+  min-width: 104px;
+}
+
 .customer-search-detail p {
   margin: 6px 0 0;
 }

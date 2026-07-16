@@ -778,6 +778,37 @@
             <input v-model="customerSearchKeyword" placeholder="例如：1111、王女士、万江店" @keyup.enter="resetCustomerSearchPageAndLoad" />
             <button class="primary small" type="button" :disabled="loading" @click="resetCustomerSearchPageAndLoad">查询客户</button>
           </div>
+          <div v-if="customerFilterCategories.length" class="customer-tag-filters">
+            <label class="customer-tag-logic">
+              <span>标签分类组合</span>
+              <select v-model="customerTagGroupLogic" class="customer-tag-logic-select">
+                <option value="AND">全部分类</option>
+                <option value="OR">任一分类</option>
+              </select>
+            </label>
+            <div v-for="category in customerFilterCategories" :key="category.id" class="customer-tag-filter-group">
+              <label>
+                <span>{{ category.categoryName || category.categoryKey }}</span>
+                <select
+                  v-model="customerTagSelections[String(category.id)]"
+                  class="customer-tag-category-select"
+                  :multiple="String(category.selectionMode).toUpperCase() === 'MULTI'"
+                  :size="String(category.selectionMode).toUpperCase() === 'MULTI' ? Math.min(4, Math.max(2, (category.values || []).length)) : 1"
+                >
+                  <option v-for="value in category.values || []" :key="value.id" :value="String(value.id)">
+                    {{ value.displayName || value.tagValue }}
+                  </option>
+                </select>
+              </label>
+              <label v-if="String(category.selectionMode).toUpperCase() === 'MULTI'">
+                <span>匹配方式</span>
+                <select v-model="customerTagMatchModes[String(category.id)]" class="customer-tag-match-select">
+                  <option value="ANY">任一标签</option>
+                  <option value="ALL">全部标签</option>
+                </select>
+              </label>
+            </div>
+          </div>
           <div class="ops-table">
             <div class="ops-table-row head customer-search">
               <span>客户</span>
@@ -1987,6 +2018,9 @@ const datasourceColumns = ref<Array<AnyRecord | string>>([]);
 const datasourceColumnStatus = ref<AnyRecord | null>(null);
 const mappingCompare = ref<AnyRecord | null>(null);
 const customerSearchKeyword = ref('');
+const customerTagGroupLogic = ref<'AND' | 'OR'>('AND');
+const customerTagSelections = reactive<Record<string, string | string[]>>({});
+const customerTagMatchModes = reactive<Record<string, 'ANY' | 'ALL'>>({});
 const quickSearchKeyword = ref('');
 const quickSearchType = ref('');
 const quickSearchEnabledFilter = ref('');
@@ -2477,6 +2511,13 @@ const runtimeModePillClass = computed(() => runtimeMode.value.mockExternals === 
 const auditDownloadUrl = computed(() => String(auditExportJob.value?.downloadUrl ?? ''));
 const accountTotalPages = computed(() => Math.max(1, Number(accountPageInfo.totalPages || Math.ceil(accountPageInfo.total / Math.max(1, accountPageInfo.size)) || 1)));
 const customerSearchTotalPages = computed(() => Math.max(1, Number(customerSearchPageInfo.totalPages || Math.ceil(customerSearchPageInfo.total / Math.max(1, customerSearchPageInfo.size)) || 1)));
+const customerFilterCategories = computed(() => tagCategoryOptionsCache.value.filter((category) => {
+  const values = Array.isArray(category.values) ? category.values : [];
+  return category.isEnabled !== false
+    && !category.mergedIntoId
+    && category.useForFilter !== false
+    && values.some((value) => value?.isEnabled !== false && !value?.mergedIntoId);
+}));
 const ruleTotalPages = computed(() => Math.max(1, Number(rulePageInfo.totalPages || Math.ceil(rulePageInfo.total / Math.max(1, rulePageInfo.size)) || 1)));
 const quickSearchTotalPages = computed(() => Math.max(1, Number(quickSearchPageInfo.totalPages || Math.ceil(quickSearchPageInfo.total / Math.max(1, quickSearchPageInfo.size)) || 1)));
 const versionTotalPages = computed(() => Math.max(1, Number(versionPageInfo.totalPages || Math.ceil(versionPageInfo.total / Math.max(1, versionPageInfo.size)) || 1)));
@@ -2638,9 +2679,10 @@ async function loadDataContent() {
       getJson<unknown>('/admin/api/v1/customer-fields'),
       getJson<unknown>('/admin/api/v1/datasources/sync-status'),
       getJson<unknown>('/admin/api/v1/datasources/import-logs'),
-      getJson<unknown>(customerSearchListPath()),
+      requestPostJson<unknown>('/admin/api/v1/customers/search', customerSearchRequest()),
       getJson<unknown>(quickSearchListPath())
     ]);
+    void refreshTagCategoryOptionsCache();
     datasources.value = listFromResponse(dsList);
     customerFields.value = normalizeCustomerFields(fieldList);
     syncStatuses.value = listFromResponse(syncList);
@@ -4717,6 +4759,40 @@ function customerSearchListPath() {
   });
 }
 
+function customerSearchRequest() {
+  const tagGroups = customerFilterCategories.value.flatMap((category) => {
+    const raw = customerTagSelections[String(category.id)];
+    const values = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value));
+    if (!values.length) return [];
+    return [{
+      categoryId: Number(category.id),
+      valueIds: values,
+      match: String(category.selectionMode).toUpperCase() === 'MULTI'
+        ? (customerTagMatchModes[String(category.id)] || 'ANY')
+        : 'ANY'
+    }];
+  });
+  return {
+    keyword: customerSearchKeyword.value,
+    sourceChannels: [],
+    leadTypes: [],
+    assignedKeepers: [],
+    intendedStores: [],
+    intendedProjects: [],
+    customerStages: [],
+    updatedFrom: null,
+    updatedTo: null,
+    tagGroups,
+    tagGroupLogic: customerTagGroupLogic.value,
+    sortBy: 'UPDATED_AT',
+    sortDirection: 'DESC',
+    page: customerSearchPageInfo.page,
+    pageSize: customerSearchPageInfo.size
+  };
+}
+
 function ruleListPath() {
   return withQuery('/admin/api/v1/rules', {
     keyword: ruleKeyword.value,
@@ -4773,6 +4849,15 @@ async function refreshTagCategoryOptionsCache() {
     merged: false,
     sortBy: 'sortOrder',
     sortDirection: 'ASC'
+  });
+  tagCategoryOptionsCache.value.forEach((category) => {
+    const key = String(category.id);
+    if (customerTagSelections[key] === undefined) {
+      customerTagSelections[key] = String(category.selectionMode).toUpperCase() === 'MULTI' ? [] : '';
+    }
+    if (customerTagMatchModes[key] === undefined) {
+      customerTagMatchModes[key] = 'ANY';
+    }
   });
 }
 
