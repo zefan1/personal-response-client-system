@@ -179,8 +179,8 @@
 - [ ] 分页、导出和数据权限与列表查询使用同一查询条件。
 - [x] 统计当前有效标签数量、门店/团队/员工/时间范围、来源、未更新原因和趋势。
 - [x] `AnalyticsRepository` 移除写死 `intent_level IN ('HIGH','MEDIUM')` 的标签语义依赖。
-- [ ] 跟进规则创建/编辑从动态标签目录选择分类和值。
-- [ ] 规则保存和执行都校验标签状态；停用暂停命中，合并更新引用。
+- [x] 跟进规则创建/编辑从动态标签目录选择分类和值。
+- [x] 规则保存和执行都校验标签状态；停用暂停命中，合并更新引用。
 - [ ] 处理现有 `system_tag_suggestions` 6 条 PENDING 记录，不丢原文且不计正式统计。
 - [ ] CSV 导入、外部表格同步和写回使用统一标签校验。
 - [ ] 无法识别值写入未匹配记录；外部失败不覆盖本地有效标签。
@@ -220,5 +220,19 @@
 - [x] Java 全量 414 tests：0 failures、0 errors、1 conditional skip；桌面 37 个 Vitest 文件/261 tests 全部通过。
 - [x] `npm run typecheck`、`npm run build`、`renderer_smoke=passed`、`electron_smoke=passed`。
 - [x] 未新增数据库迁移；6 条 `system_tag_suggestions.status=PENDING` 原文/状态未修改；两个 LLM 开关保持 `false`；Step 8 行为未修改。
-- [ ] Step 9C 跟进规则动态标签条件尚未开始。
+- [x] Step 9C 跟进规则动态标签条件已完成。
+- [ ] Step 9D CSV/外部表格同步/写回统一标签校验尚未开始。
+
+## Step 9C 完成记录：跟进规则动态标签条件
+
+- [x] 条件新增 `field=tag/op=MATCH`，分类内支持 `ANY/ALL`，根条件继续支持 `AND/OR` 和旧 `orGroups`。
+- [x] 同一客户的多条规则共享一次当前有效标签上下文；停用、合并或关闭 `use_for_followup_rules` 后不再命中。
+- [x] 规则保存时使用 `TagSelectionValidator` 的 `FOLLOWUP_RULE` 用途校验分类和值；旧普通字段规则保持兼容。
+- [x] 新 `TAG_CHANGE` 目标使用正式分类和值，运行时再次校验并写入 `tag_value_id`、`validation_status=VALIDATED` 的 PENDING 建议。
+- [x] 旧的只有 `tagName` 的内置/历史规则继续使用 `UNVALIDATED_RULE_TEXT` 路径，不强制回填。
+- [x] 标签合并引用覆盖条件 `valueIds/categoryId` 和动作 `tagCategoryId/tagValueId/tagValue/tagName`。
+- [x] 管理后台接入动态标签条件组、ANY/ALL、AND/OR 和正式标签建议目标；旧文本规则显示兼容状态。
+- [x] 后端 followup/tags 定向 128 tests：0 failures、0 errors、1 conditional skip；AdminConsole 38 tests 通过。
+- [x] `npm run typecheck`、`npm run build` 通过。
+- [x] 未新增数据库迁移；未写入或更新现有 6 条 PENDING 建议；两个 LLM 开关保持关闭；Step 8 行为未修改。
 - [ ] Step 9D CSV/外部表格同步/写回统一标签校验尚未开始。
