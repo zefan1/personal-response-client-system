@@ -32,6 +32,7 @@ import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillGatewayService;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.SkillResponse;
+import com.privateflow.modules.skill.ReplyTagSnapshot;
 import com.privateflow.modules.skill.Suggestion;
 import com.privateflow.modules.skill.config.SkillConfig;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
@@ -58,6 +59,7 @@ class ChatOrchestrationServiceTest {
   private AuditLogger auditLogger;
   private CustomerQueryService customerQueryService;
   private CustomerAccessService customerAccessService;
+  private ReplyTagSnapshotBuilder replyTagSnapshotBuilder;
   private ChatOrchestrationService service;
 
   @BeforeEach
@@ -75,6 +77,7 @@ class ChatOrchestrationServiceTest {
     auditLogger = org.mockito.Mockito.mock(AuditLogger.class);
     customerQueryService = org.mockito.Mockito.mock(CustomerQueryService.class);
     customerAccessService = org.mockito.Mockito.mock(CustomerAccessService.class);
+    replyTagSnapshotBuilder = org.mockito.Mockito.mock(ReplyTagSnapshotBuilder.class);
     when(skillConfigProvider.get()).thenReturn(skillConfig(3));
     when(llmReplyGenerationService.tryGenerate(any())).thenReturn(Optional.empty());
     when(llmReplyGenerationService.fallbackToSkill()).thenReturn(true);
@@ -89,6 +92,7 @@ class ChatOrchestrationServiceTest {
         skillGatewayService,
         customerQueryService,
         customerAccessService,
+        replyTagSnapshotBuilder,
         contextStore,
         eventPublisher,
         auditLogger,
@@ -150,6 +154,94 @@ class ChatOrchestrationServiceTest {
     verify(contextStore).save(eq("keeper-1"), eq("18800004444"), captor.capture());
     assertEquals(2, captor.getValue().request().chatContext().size());
     assertEquals("客户真实原话", captor.getValue().request().chatContext().get(0).get("text"));
+  }
+
+  @Test
+  void generatePassesCurrentReplyTagsToTheReplyRequest() {
+    Customer customer = customer("18800001111");
+    customer.setId(5L);
+    ReplyTagSnapshot tag = replyTag("LOYALIST", "\\u5fe0\\u8bda\\u578b");
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(customer);
+    when(replyTagSnapshotBuilder.build(5L)).thenReturn(List.of(tag));
+    when(skillGatewayService.generateReplies(any())).thenReturn(new SkillResponse(
+        List.of(new Suggestion("skill reply", "NEXT_STEP", "reason")),
+        null,
+        null,
+        null));
+
+    service.generate(new GenerateRequest("18800001111", "ACTIVE_REPLY", "hello"));
+
+    org.mockito.ArgumentCaptor<SkillRequest> captor =
+        org.mockito.ArgumentCaptor.forClass(SkillRequest.class);
+    verify(skillGatewayService).generateReplies(captor.capture());
+    assertEquals(List.of(tag), captor.getValue().currentTags());
+  }
+
+  @Test
+  void tagReadFailureKeepsReplyFlowAndRecordsDegradation() {
+    Customer customer = customer("18800001111");
+    customer.setId(5L);
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(customer);
+    when(replyTagSnapshotBuilder.build(5L))
+        .thenThrow(new IllegalStateException("directory unavailable"));
+    when(skillGatewayService.generateReplies(any())).thenReturn(new SkillResponse(
+        List.of(new Suggestion("ordinary reply", "NEXT_STEP", "reason")),
+        null,
+        null,
+        null));
+
+    ChatResponse response = service.generate(
+        new GenerateRequest("18800001111", "ACTIVE_REPLY", "hello"));
+
+    assertEquals("ordinary reply", response.skill().suggestions().get(0).text());
+    verify(auditLogger).log(
+        "CUSTOMER_TAGS_READ_DEGRADED",
+        "keeper-1",
+        "CUSTOMER",
+        "18800001111",
+        "directory unavailable");
+  }
+
+  @Test
+  void regenerateReloadsLatestCustomerTagsInsteadOfReusingStoredSnapshot() {
+    Customer latest = customer("18800001111");
+    latest.setId(5L);
+    latest.setNickname("Latest");
+    ReplyTagSnapshot oldTag = replyTag("LOYALIST", "\\u5fe0\\u8bda\\u578b");
+    ReplyTagSnapshot latestTag = replyTag("DECISIVE", "\\u679c\\u65ad\\u578b");
+    SkillRequest previous = new SkillRequest(
+        Scene.ACTIVE_REPLY,
+        "TUAN_GOU",
+        "18800001111",
+        "hello",
+        Map.of("nickname", "Alice"),
+        Map.of(),
+        List.of(),
+        List.of(),
+        "keeper",
+        List.of(oldTag));
+    SkillResponse previousResponse = new SkillResponse(
+        List.of(new Suggestion("old", "NEXT_STEP", "reason")),
+        null,
+        null,
+        null);
+    when(contextStore.read("keeper-1", "18800001111"))
+        .thenReturn(Optional.of(new RequestContext(previous, previousResponse, 0)));
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(latest);
+    when(replyTagSnapshotBuilder.build(5L)).thenReturn(List.of(latestTag));
+    when(skillGatewayService.generateReplies(any())).thenReturn(new SkillResponse(
+        List.of(new Suggestion("new", "NEXT_STEP", "reason")),
+        null,
+        null,
+        null));
+
+    service.regenerate(new RegenerateRequest("18800001111"));
+
+    org.mockito.ArgumentCaptor<SkillRequest> captor =
+        org.mockito.ArgumentCaptor.forClass(SkillRequest.class);
+    verify(skillGatewayService).generateReplies(captor.capture());
+    assertEquals(List.of(latestTag), captor.getValue().currentTags());
+    assertEquals("Latest", captor.getValue().customer().get("nickname"));
   }
 
   @Test
@@ -522,5 +614,17 @@ class ChatOrchestrationServiceTest {
     customer.setNickname("测试客户");
     customer.setAssignedKeeper("keeper-1");
     return customer;
+  }
+
+  private ReplyTagSnapshot replyTag(String value, String displayName) {
+    return new ReplyTagSnapshot(
+        "personality_type",
+        "\\u6027\\u683c\\u7c7b\\u578b",
+        value,
+        displayName,
+        "\\u91cd\\u89c6\\u5b89\\u5168\\u611f",
+        "MANUAL",
+        "\\u5ba2\\u6237\\u8bc1\\u636e",
+        true);
   }
 }

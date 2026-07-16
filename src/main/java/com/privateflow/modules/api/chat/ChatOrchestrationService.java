@@ -26,16 +26,20 @@ import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillGatewayService;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.SkillResponse;
+import com.privateflow.modules.skill.ReplyTagSnapshot;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ChatOrchestrationService {
 
+  private static final Logger log = LoggerFactory.getLogger(ChatOrchestrationService.class);
   private static final int FALLBACK_CONVERSATION_SUMMARY_MAX_CHARS = 2000;
 
   private final ImageRecognitionService imageRecognitionService;
@@ -43,6 +47,7 @@ public class ChatOrchestrationService {
   private final SkillGatewayService skillGatewayService;
   private final CustomerQueryService customerQueryService;
   private final CustomerAccessService customerAccessService;
+  private final ReplyTagSnapshotBuilder replyTagSnapshotBuilder;
   private final RequestContextStore contextStore;
   private final ApplicationEventPublisher eventPublisher;
   private final AuditLogger auditLogger;
@@ -57,6 +62,7 @@ public class ChatOrchestrationService {
       SkillGatewayService skillGatewayService,
       CustomerQueryService customerQueryService,
       CustomerAccessService customerAccessService,
+      ReplyTagSnapshotBuilder replyTagSnapshotBuilder,
       RequestContextStore contextStore,
       ApplicationEventPublisher eventPublisher,
       AuditLogger auditLogger,
@@ -69,6 +75,7 @@ public class ChatOrchestrationService {
     this.skillGatewayService = skillGatewayService;
     this.customerQueryService = customerQueryService;
     this.customerAccessService = customerAccessService;
+    this.replyTagSnapshotBuilder = replyTagSnapshotBuilder;
     this.contextStore = contextStore;
     this.eventPublisher = eventPublisher;
     this.auditLogger = auditLogger;
@@ -91,7 +98,7 @@ public class ChatOrchestrationService {
     List<Map<String, String>> chatContext = messages(request, recognized);
     GeneratedReplies generated = generateSkill(Scene.CHAT_RECOGNIZE, request.leadType(), customer, phone, clientMessage, List.of(), chatContext);
     String responsePhone = customer == null ? phone : customer.getPhone();
-    saveContext(responsePhone, clientMessage, generated.skill(), Scene.CHAT_RECOGNIZE, customer, request.leadType(), chatContext, 0);
+    saveContext(responsePhone, generated, 0);
     auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", responsePhone, "chat recognize");
     return new ChatResponse(responsePhone, nickname, match.matchType() == MatchType.NONE, match, generated.skill(), null, generated.source());
   }
@@ -107,7 +114,7 @@ public class ChatOrchestrationService {
     Scene scene = "OPENING".equalsIgnoreCase(request.scene()) ? Scene.OPENING : Scene.ACTIVE_REPLY;
     String clientMessage = blank(request.clientMessage()) ? customer.getFollowupNotes() : request.clientMessage();
     GeneratedReplies generated = generateSkill(scene, customer.getLeadType(), customer, customer.getPhone(), clientMessage, List.of(), List.of());
-    saveContext(customer.getPhone(), clientMessage, generated.skill(), scene, customer, customer.getLeadType(), List.of(), 0);
+    saveContext(customer.getPhone(), generated, 0);
     return new ChatResponse(customer.getPhone(), customer.getNickname(), false, null, generated.skill(), null, generated.source());
   }
 
@@ -120,22 +127,27 @@ public class ChatOrchestrationService {
       return generate(new GenerateRequest(request.phone(), "ACTIVE_REPLY", null));
     }
     SkillRequest previous = context.request();
+    Customer latest = customerQueryService.getByPhone(request.phone());
+    if (latest == null) {
+      return generate(new GenerateRequest(request.phone(), "ACTIVE_REPLY", null));
+    }
     List<String> previousSuggestions = context.response() == null || context.response().suggestions() == null
         ? List.of()
         : context.response().suggestions().stream().map(s -> s.text()).toList();
     SkillRequest next = new SkillRequest(
         Scene.REGENERATE,
         previous.leadType(),
-        previous.phone(),
+        latest.getPhone(),
         previous.clientMessage(),
-        previous.customer(),
+        customerMap(latest),
         previous.systemPrompt(),
         previousSuggestions,
         previous.chatContext(),
-        AuthContext.username());
+        AuthContext.username(),
+        loadReplyTags(latest));
     GeneratedReplies generated = generateReplies(next);
     int count = context.regenerateCount() + 1;
-    contextStore.save(AuthContext.username(), request.phone(), new RequestContext(next, generated.skill(), count));
+    contextStore.save(AuthContext.username(), request.phone(), new RequestContext(generated.request(), generated.skill(), count));
     String warning = regenerateWarning(count);
     return new ChatResponse(request.phone(), null, false, null, generated.skill(), warning, generated.source());
   }
@@ -251,19 +263,23 @@ public class ChatOrchestrationService {
         Map.of(),
         previousSuggestions,
         chatContext,
-        AuthContext.username());
+        AuthContext.username(),
+        loadReplyTags(customer));
     return generateReplies(skillRequest);
   }
 
   private GeneratedReplies generateReplies(SkillRequest skillRequest) {
     return llmReplyGenerationService.tryGenerate(skillRequest)
-        .map(skill -> new GeneratedReplies(skill, ChatReplySource.llm()))
+        .map(skill -> new GeneratedReplies(skillRequest, skill, ChatReplySource.llm()))
         .orElseGet(() -> {
           if (!llmReplyGenerationService.fallbackToSkill()) {
-            return new GeneratedReplies(new SkillResponse(List.of(), null, null, null), ChatReplySource.fallback("LLM 回复生成失败，且未启用 Skill 回落"));
+            return new GeneratedReplies(
+                skillRequest,
+                new SkillResponse(List.of(), null, null, null),
+                ChatReplySource.fallback("LLM 回复生成失败，且未启用 Skill 回落"));
           }
           SkillResponse skill = skillGatewayService.generateReplies(skillRequest);
-          return new GeneratedReplies(skill, replySourceForSkill(skill));
+          return new GeneratedReplies(skillRequest, skill, replySourceForSkill(skill));
         });
   }
 
@@ -278,27 +294,36 @@ public class ChatOrchestrationService {
     return ChatReplySource.skill();
   }
 
-  private void saveContext(
-      String phone,
-      String clientMessage,
-      SkillResponse skill,
-      Scene scene,
-      Customer customer,
-      String leadType,
-      List<Map<String, String>> chatContext,
-      int regenerateCount) {
-    if (!blank(phone)) {
-      SkillRequest skillRequest = new SkillRequest(
-          scene,
-          leadType,
+  private List<ReplyTagSnapshot> loadReplyTags(Customer customer) {
+    if (customer == null || customer.getId() == null) {
+      return List.of();
+    }
+    try {
+      return replyTagSnapshotBuilder.build(customer.getId());
+    } catch (ApiException ex) {
+      throw ex;
+    } catch (RuntimeException ex) {
+      String phone = customer.getPhone();
+      log.warn(
+          "reply tag snapshot load failed, phoneLast4={}, reason={}",
+          lastFour(phone),
+          ex.getMessage());
+      auditLogger.log(
+          "CUSTOMER_TAGS_READ_DEGRADED",
+          AuthContext.username(),
+          "CUSTOMER",
           phone,
-          clientMessage,
-          customerMap(customer),
-          Map.of(),
-          List.of(),
-          chatContext == null ? List.of() : List.copyOf(chatContext),
-          AuthContext.username());
-      contextStore.save(AuthContext.username(), phone, new RequestContext(skillRequest, skill, regenerateCount));
+          clip(ex.getMessage(), 500));
+      return List.of();
+    }
+  }
+
+  private void saveContext(String phone, GeneratedReplies generated, int regenerateCount) {
+    if (!blank(phone)) {
+      contextStore.save(
+          AuthContext.username(),
+          phone,
+          new RequestContext(generated.request(), generated.skill(), regenerateCount));
     }
   }
 
@@ -390,6 +415,20 @@ public class ChatOrchestrationService {
     return value == null ? "" : value;
   }
 
-  private record GeneratedReplies(SkillResponse skill, ChatReplySource source) {
+  private String lastFour(String phone) {
+    if (phone == null || phone.isBlank()) {
+      return "";
+    }
+    return phone.length() <= 4 ? phone : phone.substring(phone.length() - 4);
+  }
+
+  private String clip(String value, int maxLength) {
+    if (value == null) {
+      return "";
+    }
+    return value.length() <= maxLength ? value : value.substring(0, maxLength);
+  }
+
+  private record GeneratedReplies(SkillRequest request, SkillResponse skill, ChatReplySource source) {
   }
 }
