@@ -8,6 +8,8 @@ import com.privateflow.modules.followup.FollowupException;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import org.springframework.stereotype.Component;
 
@@ -16,8 +18,9 @@ public class ConditionEvaluator {
 
   private static final Set<String> FIELD_WHITELIST = Set.of(
       "leadType", "intentLevel", "customerStage", "lastFollowupHours",
-      "noMessageDays", "messageKeywords", "appointmentDate", "sourceTable");
-  private static final Set<String> OP_WHITELIST = Set.of("EQ", "NEQ", "GT", "LT", "GTE", "LTE", "CONTAINS", "BETWEEN");
+      "noMessageDays", "messageKeywords", "appointmentDate", "sourceTable", "tag");
+  private static final Set<String> OP_WHITELIST = Set.of(
+      "EQ", "NEQ", "GT", "LT", "GTE", "LTE", "CONTAINS", "BETWEEN", "MATCH");
   private final ObjectMapper objectMapper;
 
   public ConditionEvaluator(ObjectMapper objectMapper) {
@@ -25,9 +28,13 @@ public class ConditionEvaluator {
   }
 
   public boolean matches(Customer customer, String conditionJson) {
+    return matches(customer, conditionJson, FollowupTagContext.empty());
+  }
+
+  public boolean matches(Customer customer, String conditionJson, FollowupTagContext tagContext) {
     try {
       JsonNode root = objectMapper.readTree(conditionJson);
-      return evalNode(customer, root, 0);
+      return evalNode(customer, root, tagContext == null ? FollowupTagContext.empty() : tagContext, 0);
     } catch (FollowupException ex) {
       throw ex;
     } catch (Exception ex) {
@@ -39,7 +46,7 @@ public class ConditionEvaluator {
     validateNode(root, 0);
   }
 
-  private boolean evalNode(Customer customer, JsonNode node, int depth) {
+  private boolean evalNode(Customer customer, JsonNode node, FollowupTagContext tagContext, int depth) {
     if (depth > 2) {
       throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "条件组合过于复杂，请拆分为多条规则");
     }
@@ -47,24 +54,24 @@ public class ConditionEvaluator {
     JsonNode conditions = node.path("conditions");
     JsonNode orGroups = node.path("orGroups");
     if (orGroups.isArray()) {
-      boolean mainMatched = conditions.isArray() && evalAndGroup(customer, conditions, depth);
+      boolean mainMatched = conditions.isArray() && evalAndGroup(customer, conditions, tagContext, depth);
       if (mainMatched) {
         return true;
       }
       for (JsonNode group : orGroups) {
         JsonNode groupConditions = group.path("conditions");
-        if (groupConditions.isArray() && evalAndGroup(customer, groupConditions, depth + 1)) {
+        if (groupConditions.isArray() && evalAndGroup(customer, groupConditions, tagContext, depth + 1)) {
           return true;
         }
       }
       return false;
     }
     if (!conditions.isArray()) {
-      return evalLeaf(customer, node);
+      return evalLeaf(customer, node, tagContext);
     }
     if ("OR".equalsIgnoreCase(operator)) {
       for (JsonNode child : conditions) {
-        if (evalNode(customer, child, depth + 1)) {
+        if (evalNode(customer, child, tagContext, depth + 1)) {
           return true;
         }
       }
@@ -73,12 +80,12 @@ public class ConditionEvaluator {
     if (!operator.isBlank() && !"AND".equalsIgnoreCase(operator)) {
       throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "规则组合操作符不合法");
     }
-    return evalAndGroup(customer, conditions, depth);
+    return evalAndGroup(customer, conditions, tagContext, depth);
   }
 
-  private boolean evalAndGroup(Customer customer, JsonNode conditions, int depth) {
+  private boolean evalAndGroup(Customer customer, JsonNode conditions, FollowupTagContext tagContext, int depth) {
     for (JsonNode child : conditions) {
-      if (!evalNode(customer, child, depth + 1)) {
+      if (!evalNode(customer, child, tagContext, depth + 1)) {
         return false;
       }
     }
@@ -110,6 +117,9 @@ public class ConditionEvaluator {
       return;
     }
     validateLeaf(node);
+    if ("tag".equals(text(node.path("field"))) || "MATCH".equals(text(node.path("op")))) {
+      validateTagLeaf(node);
+    }
   }
 
   private void validateLeaf(JsonNode node) {
@@ -120,10 +130,13 @@ public class ConditionEvaluator {
     }
   }
 
-  private boolean evalLeaf(Customer customer, JsonNode node) {
+  private boolean evalLeaf(Customer customer, JsonNode node, FollowupTagContext tagContext) {
     String field = text(node.path("field"));
     String op = text(node.path("op"));
     validateLeaf(node);
+    if ("tag".equals(field) || "MATCH".equals(op)) {
+      validateTagLeaf(node);
+    }
     Object actual = value(customer, field);
     JsonNode expected = node.path("value");
     return switch (op) {
@@ -135,8 +148,40 @@ public class ConditionEvaluator {
       case "LTE" -> number(actual) <= expected.asDouble();
       case "CONTAINS" -> containsAny(string(actual), expected.asText(""));
       case "BETWEEN" -> appointmentBetween(customer.getAppointmentDate(), expected);
+      case "MATCH" -> matchesTag(tagContext, node);
       default -> false;
     };
+  }
+
+  private void validateTagLeaf(JsonNode node) {
+    if (!"tag".equals(text(node.path("field"))) || !"MATCH".equals(text(node.path("op")))) {
+      throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "鏍囩鏉′欢蹇呴』浣跨敤 tag/MATCH");
+    }
+    if (!node.path("categoryId").canConvertToLong() || node.path("categoryId").asLong() <= 0) {
+      throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "鏍囩鏉′欢鍒嗙被 ID 涓嶅悎娉?");
+    }
+    JsonNode valueIds = node.path("valueIds");
+    if (!valueIds.isArray() || valueIds.isEmpty()) {
+      throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "鏍囩鏉′欢鍊?ID 涓嶈兘涓虹┖");
+    }
+    for (JsonNode valueId : valueIds) {
+      if (!valueId.canConvertToLong() || valueId.asLong() <= 0) {
+        throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "鏍囩鏉′欢鍊?ID 涓嶅悎娉?");
+      }
+    }
+    String match = text(node.path("match"));
+    if (!"ANY".equals(match) && !"ALL".equals(match)) {
+      throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "鏍囩鏉′欢 match 鍙敮鎸?ANY/ALL");
+    }
+  }
+
+  private boolean matchesTag(FollowupTagContext tagContext, JsonNode node) {
+    List<Long> valueIds = new ArrayList<>();
+    node.path("valueIds").forEach(value -> valueIds.add(value.asLong()));
+    long categoryId = node.path("categoryId").asLong();
+    return "ALL".equals(text(node.path("match")))
+        ? tagContext.containsAll(categoryId, valueIds)
+        : tagContext.containsAny(categoryId, valueIds);
   }
 
   private Object value(Customer customer, String field) {
