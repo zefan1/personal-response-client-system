@@ -11,6 +11,27 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class AnalyticsRepository {
 
+  private static final String CONFIRMED_INTENT_TAG = """
+       AND EXISTS (
+         SELECT 1
+         FROM customer_tag_assignments intent_assignment
+         JOIN tag_categories intent_category
+           ON intent_category.id = intent_assignment.category_id
+          AND intent_category.bound_field = 'intentLevel'
+          AND intent_category.is_enabled = 1
+          AND intent_category.merged_into_id IS NULL
+          AND intent_category.use_for_statistics = 1
+         JOIN tag_values intent_value
+           ON intent_value.id = intent_assignment.tag_value_id
+          AND intent_value.category_id = intent_assignment.category_id
+          AND intent_value.tag_value IN ('HIGH', 'MEDIUM')
+          AND intent_value.is_enabled = 1
+          AND intent_value.merged_into_id IS NULL
+         WHERE intent_assignment.customer_id = c.id
+           AND intent_assignment.is_active = 1
+       )
+      """;
+
   private final JdbcTemplate jdbcTemplate;
 
   public AnalyticsRepository(JdbcTemplate jdbcTemplate) {
@@ -65,9 +86,15 @@ public class AnalyticsRepository {
       result.put("xianSuo", funnel("XIAN_SUO", scope, List.of(
           new Step("assignedCustomers", "assigned customers", ""),
           new Step("firstContact", "first contact", " AND followup_notes IS NOT NULL AND followup_notes <> ''"),
-          new Step("intentConfirmed", "intent confirmed", " AND followup_notes IS NOT NULL AND followup_notes <> '' AND intent_level IN ('HIGH', 'MEDIUM')"),
-          new Step("purchased", "purchased", " AND followup_notes IS NOT NULL AND followup_notes <> '' AND intent_level IN ('HIGH', 'MEDIUM') AND purchased_project IS NOT NULL AND purchased_project <> ''"),
-          new Step("arrived", "arrived", " AND followup_notes IS NOT NULL AND followup_notes <> '' AND intent_level IN ('HIGH', 'MEDIUM') AND purchased_project IS NOT NULL AND purchased_project <> '' AND (arrived = '\u662f' OR customer_stage LIKE '%\u5df2\u5b8c\u6210%' OR customer_stage LIKE '%\u5230\u5e97%')"))));
+          new Step("intentConfirmed", "intent confirmed",
+              " AND followup_notes IS NOT NULL AND followup_notes <> ''" + CONFIRMED_INTENT_TAG),
+          new Step("purchased", "purchased",
+              " AND followup_notes IS NOT NULL AND followup_notes <> ''" + CONFIRMED_INTENT_TAG
+                  + " AND purchased_project IS NOT NULL AND purchased_project <> ''"),
+          new Step("arrived", "arrived",
+              " AND followup_notes IS NOT NULL AND followup_notes <> ''" + CONFIRMED_INTENT_TAG
+                  + " AND purchased_project IS NOT NULL AND purchased_project <> ''"
+                  + " AND (arrived = '\u662f' OR customer_stage LIKE '%\u5df2\u5b8c\u6210%' OR customer_stage LIKE '%\u5230\u5e97%')"))));
     }
     return result;
   }
