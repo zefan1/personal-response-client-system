@@ -34,7 +34,8 @@ class CustomerAdminSearchControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.total").value(11))
         .andExpect(jsonPath("$.data.items[0].nickname").value("王女士"))
-        .andExpect(jsonPath("$.data.items[0].phone").value("13800001111"));
+        .andExpect(jsonPath("$.data.items[0].phone").value("13800001111"))
+        .andExpect(jsonPath("$.data.items[0].tags").isArray());
 
     verify(service).search("1111", 2, 10);
   }
