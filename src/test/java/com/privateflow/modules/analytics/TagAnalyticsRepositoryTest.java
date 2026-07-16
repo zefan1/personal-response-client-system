@@ -1,6 +1,7 @@
 package com.privateflow.modules.analytics;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.privateflow.modules.customer.admin.CustomerAccessScope;
 import com.privateflow.modules.customer.admin.CustomerFilter;
@@ -217,6 +218,31 @@ class TagAnalyticsRepositoryTest {
     assertThat(response.filterOptions().teams())
         .extracting(TagAnalyticsResponse.TeamOption::leaderId)
         .containsExactly(9L);
+  }
+
+  @Test
+  void aggregatesAddedInvalidatedAndNetTrendInsideEventWindow() {
+    seedCustomer(1, "企微", "万江店", "keeper-1", "2026-07-16 10:00:00");
+    seedCategory(10, "intent_level", "意向等级", "intentLevel", 1, null, 1);
+    seedValue(101, 10, "HIGH", "高意向", 1, null);
+    seedAssignment(1001, 1, 10, 101, 0, "SYSTEM_INFERENCE", "2026-07-11 09:00:00", "2026-07-13 09:00:00");
+    seedAssignment(1002, 1, 10, 101, 1, "MANUAL", "2026-07-14 09:00:00", null);
+    jdbcTemplate.update("INSERT INTO system_tag_suggestions (id, customer_id, tag_value_id, status) VALUES (2, 1, 101, 'PENDING')");
+
+    TagAnalyticsResponse response = repository.analyze(allSpec(), allSpec(), window());
+
+    assertThat(response.summary().systemAddedCount()).isEqualTo(1);
+    assertThat(response.summary().manualAddedOrChangedCount()).isEqualTo(1);
+    assertThat(response.tagSources()).extracting(
+        TagAnalyticsResponse.SourceRow::sourceType,
+        TagAnalyticsResponse.SourceRow::addedAssignmentCount)
+        .containsExactly(tuple("MANUAL", 1L), tuple("SYSTEM_INFERENCE", 1L));
+    assertThat(response.trend()).hasSize(7);
+    assertThat(response.trend().stream().filter(row -> row.date().toString().equals("2026-07-13")).findFirst())
+        .get().satisfies(row -> {
+          assertThat(row.invalidatedAssignmentCount()).isEqualTo(1);
+          assertThat(row.netChange()).isEqualTo(-1);
+        });
   }
 
   private CustomerQuerySpec allSpec() {

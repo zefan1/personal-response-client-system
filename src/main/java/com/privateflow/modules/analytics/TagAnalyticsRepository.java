@@ -1,6 +1,9 @@
 package com.privateflow.modules.analytics;
 
 import com.privateflow.modules.customer.admin.CustomerQuerySpec;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +22,15 @@ public class TagAnalyticsRepository {
         AND tv.is_enabled = 1 AND tv.merged_into_id IS NULL
       """;
 
+  private static final String TAG_EVENT_FROM = """
+      FROM customers c
+      JOIN customer_tag_assignments a ON a.customer_id = c.id
+      JOIN tag_categories tc ON tc.id = a.category_id
+        AND tc.is_enabled = 1 AND tc.merged_into_id IS NULL AND tc.use_for_statistics = 1
+      JOIN tag_values tv ON tv.id = a.tag_value_id AND tv.category_id = a.category_id
+        AND tv.is_enabled = 1 AND tv.merged_into_id IS NULL
+      """;
+
   private final JdbcTemplate jdbcTemplate;
 
   public TagAnalyticsRepository(JdbcTemplate jdbcTemplate) {
@@ -29,16 +41,25 @@ public class TagAnalyticsRepository {
       CustomerQuerySpec customerSpec,
       CustomerQuerySpec optionSpec,
       TagAnalyticsWindow window) {
+    TagAnalyticsResponse.Summary snapshot = loadSnapshotSummary(customerSpec);
+    EventSummary events = loadEventSummary(customerSpec, window);
     return new TagAnalyticsResponse(
-        loadSnapshotSummary(customerSpec),
+        new TagAnalyticsResponse.Summary(
+            snapshot.matchedCustomerCount(),
+            snapshot.taggedCustomerCount(),
+            snapshot.activeAssignmentCount(),
+            snapshot.coverageRate(),
+            events.systemAddedCount(),
+            events.manualAddedOrChangedCount(),
+            snapshot.systemDecidedNoUpdateCount()),
         loadCategories(customerSpec),
         loadTags(customerSpec),
         loadStores(customerSpec),
         loadTeams(customerSpec),
         loadEmployees(customerSpec),
+        loadTagSources(customerSpec, window),
         List.of(),
-        List.of(),
-        List.of(),
+        loadTrend(customerSpec, window),
         loadFilterOptions(optionSpec),
         new TagAnalyticsResponse.AppliedWindow(window.from(), window.to(), window.granularity()));
   }
@@ -82,6 +103,91 @@ public class TagAnalyticsRepository {
         0,
         0,
         0);
+  }
+
+  private EventSummary loadEventSummary(CustomerQuerySpec spec, TagAnalyticsWindow window) {
+    Map<String, Long> counts = jdbcTemplate.queryForObject("""
+        SELECT
+          COALESCE(SUM(CASE WHEN a.source_type = 'SYSTEM_INFERENCE' THEN 1 ELSE 0 END), 0) AS system_count,
+          COALESCE(SUM(CASE WHEN a.source_type = 'MANUAL' THEN 1 ELSE 0 END), 0) AS manual_count
+        """ + TAG_EVENT_FROM + spec.whereClause() + " AND a.created_at >= ? AND a.created_at <= ?",
+        (rs, rowNum) -> {
+          Map<String, Long> row = new LinkedHashMap<>();
+          row.put("system", rs.getLong("system_count"));
+          row.put("manual", rs.getLong("manual_count"));
+          return row;
+        }, eventArgs(spec, window.from(), window.to()));
+    return new EventSummary(counts.getOrDefault("system", 0L), counts.getOrDefault("manual", 0L));
+  }
+
+  private List<TagAnalyticsResponse.SourceRow> loadTagSources(
+      CustomerQuerySpec spec,
+      TagAnalyticsWindow window) {
+    return jdbcTemplate.query("""
+        SELECT a.source_type,
+               COUNT(*) AS added_assignment_count,
+               COUNT(DISTINCT c.id) AS affected_customer_count
+        """ + TAG_EVENT_FROM + spec.whereClause() + " AND a.created_at >= ? AND a.created_at <= ?" + """
+        GROUP BY a.source_type
+        ORDER BY added_assignment_count DESC, a.source_type ASC
+        """, (rs, rowNum) -> new TagAnalyticsResponse.SourceRow(
+            rs.getString("source_type"),
+            sourceLabel(rs.getString("source_type")),
+            rs.getLong("added_assignment_count"),
+            rs.getLong("affected_customer_count")),
+        eventArgs(spec, window.from(), window.to()));
+  }
+
+  private List<TagAnalyticsResponse.TrendRow> loadTrend(
+      CustomerQuerySpec spec,
+      TagAnalyticsWindow window) {
+    Map<LocalDate, MutableTrend> values = new HashMap<>();
+    jdbcTemplate.query("""
+        SELECT DATE(a.created_at) AS event_day,
+               COUNT(*) AS added_assignment_count,
+               COALESCE(SUM(CASE WHEN a.source_type = 'SYSTEM_INFERENCE' THEN 1 ELSE 0 END), 0) AS system_count,
+               COALESCE(SUM(CASE WHEN a.source_type = 'MANUAL' THEN 1 ELSE 0 END), 0) AS manual_count
+        """ + TAG_EVENT_FROM + spec.whereClause() + " AND a.created_at >= ? AND a.created_at <= ?" + """
+        GROUP BY DATE(a.created_at)
+        """, rs -> {
+          LocalDate date = rs.getDate("event_day").toLocalDate();
+          MutableTrend item = values.computeIfAbsent(date, ignored -> new MutableTrend());
+          item.addedAssignmentCount += rs.getLong("added_assignment_count");
+          item.systemAddedCount += rs.getLong("system_count");
+          item.manualAddedOrChangedCount += rs.getLong("manual_count");
+        }, eventArgs(spec, window.from(), window.to()));
+    jdbcTemplate.query("""
+        SELECT DATE(a.invalidated_at) AS event_day,
+               COUNT(*) AS invalidated_assignment_count
+        """ + TAG_EVENT_FROM + spec.whereClause() + " AND a.invalidated_at >= ? AND a.invalidated_at <= ?" + """
+        GROUP BY DATE(a.invalidated_at)
+        """, rs -> {
+          LocalDate date = rs.getDate("event_day").toLocalDate();
+          MutableTrend item = values.computeIfAbsent(date, ignored -> new MutableTrend());
+          item.invalidatedAssignmentCount += rs.getLong("invalidated_assignment_count");
+        }, eventArgs(spec, window.from(), window.to()));
+
+    List<TagAnalyticsResponse.TrendRow> rows = new ArrayList<>();
+    for (LocalDate date = window.from().toLocalDate();
+         !date.isAfter(window.to().toLocalDate());
+         date = date.plusDays(1)) {
+      MutableTrend item = values.getOrDefault(date, new MutableTrend());
+      rows.add(new TagAnalyticsResponse.TrendRow(
+          date,
+          item.addedAssignmentCount,
+          item.invalidatedAssignmentCount,
+          item.addedAssignmentCount - item.invalidatedAssignmentCount,
+          item.systemAddedCount,
+          item.manualAddedOrChangedCount));
+    }
+    return rows;
+  }
+
+  private Object[] eventArgs(CustomerQuerySpec spec, java.time.LocalDateTime from, java.time.LocalDateTime to) {
+    List<Object> args = new ArrayList<>(spec.args());
+    args.add(from);
+    args.add(to);
+    return args.toArray();
   }
 
   private List<TagAnalyticsResponse.CategoryRow> loadCategories(CustomerQuerySpec spec) {
@@ -244,5 +350,15 @@ public class TagAnalyticsRepository {
       case "LEGACY_MIGRATION" -> "历史迁移";
       default -> sourceType == null || sourceType.isBlank() ? "未知来源" : sourceType;
     };
+  }
+
+  private record EventSummary(long systemAddedCount, long manualAddedOrChangedCount) {
+  }
+
+  private static final class MutableTrend {
+    private long addedAssignmentCount;
+    private long invalidatedAssignmentCount;
+    private long systemAddedCount;
+    private long manualAddedOrChangedCount;
   }
 }
