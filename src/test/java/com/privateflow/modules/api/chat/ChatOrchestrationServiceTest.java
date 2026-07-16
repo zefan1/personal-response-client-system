@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.privateflow.common.events.CustomerMessageSentEvent;
+import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.Role;
 import com.privateflow.modules.api.audit.AuditLogger;
@@ -200,6 +201,23 @@ class ChatOrchestrationServiceTest {
         "CUSTOMER",
         "18800001111",
         "directory unavailable");
+  }
+
+  @Test
+  void tagAccessApiExceptionIsNotDegraded() {
+    Customer customer = customer("18800001111");
+    customer.setId(5L);
+    ApiException forbidden = new ApiException(ApiErrorCodes.FORBIDDEN, "forbidden");
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(customer);
+    when(replyTagSnapshotBuilder.build(5L)).thenThrow(forbidden);
+
+    ApiException actual = assertThrows(
+        ApiException.class,
+        () -> service.generate(new GenerateRequest("18800001111", "ACTIVE_REPLY", "hello")));
+
+    assertEquals(ApiErrorCodes.FORBIDDEN, actual.getErrorCode());
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(auditLogger, never()).log(eq("CUSTOMER_TAGS_READ_DEGRADED"), any(), any(), any(), any());
   }
 
   @Test
