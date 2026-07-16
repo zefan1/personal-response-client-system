@@ -155,12 +155,23 @@
 
 ## Step 8：回复生成读取最新标签
 
-- [ ] `ChatOrchestrationService` 不再只传 5 个基础字段，加入当前有效标签快照。
-- [ ] Skill 回复和直接 LLM 回复读取同一标签快照及中文含义。
-- [ ] 换一组重新读取最新标签，不复用过期标签上下文。
-- [ ] 回复只受标签调整方向和语气，不暴露内部判断。
-- [ ] 标签读取异常时正常生成普通回复并记录降级原因。
-- [ ] 在线测试、回复来源、调用日志和自动化测试同步更新。
+- [x] `ChatOrchestrationService` 不再只传 5 个基础字段，加入当前有效标签快照。
+- [x] Skill 回复和直接 LLM 回复读取同一标签快照及中文含义。
+- [x] 换一组重新读取最新标签，不复用过期标签上下文。
+- [x] 回复只受标签调整方向和语气，不暴露内部判断。
+- [x] 标签读取异常时正常生成普通回复并记录降级原因。
+- [x] 在线测试、回复来源、调用日志和自动化测试同步更新。
+
+### Step 8 验收记录：2026-07-16
+
+- 代码提交：`845022a`、`83dff53`、`ab90789`、`21c818d`、`cf74e9d`。
+- Java 全量：`mvn -q test`，390 tests，0 failures，0 errors，1 conditional skip。
+- 前端全量：36 个 Vitest 文件、255 tests；`npm run typecheck`、`npm run build`、`renderer_smoke=passed`、`electron_smoke=passed`。
+- 定向回归：ReplyTagSnapshotBuilder 3/3；ChatOrchestrationService 19/19；SkillRequestBuilder、LlmReplyGenerationService 和 SkillGatewayServiceImplCircuit 组合测试通过。
+- 真实运行：临时后端 `http://127.0.0.1:8082` 使用 `private_domain_assistant_smoke`、Flyway V69、`MOCK_EXTERNALS=false`；客户 `13900000001` 先人工设置 `LOYALIST` 后生成返回 `SKILL`，再设置 `DECISIVE` 后 regenerate 返回 `SKILL`；随后移除标签并解除分类锁定，最终当前标签为空且锁定为 false。受控 fake Skill provider 仅用于本次外部 HTTP 验收，之后已停止；Skill 配置已恢复为空。
+- 运行配置：`llm.reply_generation.enabled=false`、`llm.profile_extraction.enabled=false`，未修改数据库结构、搜索、统计、跟进规则、导入、同步或导出。
+- 服务状态：主后端 `8080` 和前端 `5173`/`5174` 保持运行；临时后端 `8082` 已停止。
+- Step 9 未开始。
 
 ## Step 9：搜索、统计、规则和数据交换
 
