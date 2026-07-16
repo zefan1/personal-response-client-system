@@ -344,4 +344,36 @@ describe('AdminDevConsole', () => {
 
     app.unmount();
   });
+
+  it('posts the structured tag analytics example', async () => {
+    const { app, host } = await mountDevConsole();
+
+    findButton(host, '数据分析').click();
+    for (let index = 0; index < 12; index += 1) {
+      await flushUi();
+    }
+    const panel = findActionPanel(host, '标签统计');
+    findButton(panel, '执行').click();
+    await flushRequests();
+
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/analytics/tags', {
+      customerFilter: {
+        sourceChannels: [],
+        leadTypes: [],
+        assignedKeepers: [],
+        intendedStores: [],
+        intendedProjects: [],
+        customerStages: [],
+        updatedFrom: null,
+        updatedTo: null,
+        tagGroups: [],
+        tagGroupLogic: 'AND'
+      },
+      teamLeaderIds: [],
+      tagFrom: null,
+      tagTo: null,
+      granularity: 'DAY'
+    });
+    app.unmount();
+  });
 });

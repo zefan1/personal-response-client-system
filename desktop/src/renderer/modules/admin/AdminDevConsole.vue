@@ -345,7 +345,31 @@ const sections: AdminSection[] = [
       { name: '风险', method: 'GET', path: '/admin/api/v1/analytics/risks' },
       { name: '内容排行', method: 'GET', path: '/admin/api/v1/analytics/content-ranking' }
     ],
-    actions: []
+    actions: [
+      {
+        name: '标签统计',
+        method: 'POST',
+        pathTemplate: '/admin/api/v1/analytics/tags',
+        body: {
+          customerFilter: {
+            sourceChannels: [],
+            leadTypes: [],
+            assignedKeepers: [],
+            intendedStores: [],
+            intendedProjects: [],
+            customerStages: [],
+            updatedFrom: null,
+            updatedTo: null,
+            tagGroups: [],
+            tagGroupLogic: 'AND'
+          },
+          teamLeaderIds: [],
+          tagFrom: null,
+          tagTo: null,
+          granularity: 'DAY'
+        }
+      }
+    ]
   },
   {
     key: 'ops',
