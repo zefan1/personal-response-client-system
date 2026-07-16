@@ -175,16 +175,16 @@
 
 ## Step 9：搜索、统计、规则和数据交换
 
-- [ ] 客户搜索支持动态分类、单/多标签、任一/全部组合及现有条件组合。
+- [x] 客户搜索支持动态分类、单/多标签、任一/全部组合及现有条件组合。
 - [ ] 分页、导出和数据权限与列表查询使用同一查询条件。
-- [ ] 统计当前有效标签数量、门店/团队/员工/时间范围、来源、未更新原因和趋势。
-- [ ] `AnalyticsRepository` 移除写死 `intent_level IN ('HIGH','MEDIUM')` 的标签语义依赖。
+- [x] 统计当前有效标签数量、门店/团队/员工/时间范围、来源、未更新原因和趋势。
+- [x] `AnalyticsRepository` 移除写死 `intent_level IN ('HIGH','MEDIUM')` 的标签语义依赖。
 - [ ] 跟进规则创建/编辑从动态标签目录选择分类和值。
 - [ ] 规则保存和执行都校验标签状态；停用暂停命中，合并更新引用。
 - [ ] 处理现有 `system_tag_suggestions` 6 条 PENDING 记录，不丢原文且不计正式统计。
 - [ ] CSV 导入、外部表格同步和写回使用统一标签校验。
 - [ ] 无法识别值写入未匹配记录；外部失败不覆盖本地有效标签。
-- [ ] 导出提供中文名称和内部编码。
+- [x] 标签统计导出提供中文名称和内部编码。
 
 ## Step 10：全量测试和真实运行验收
 
@@ -207,3 +207,18 @@
 - [x] 管理后台客户列表接入动态分类和值选择，并序列化统一 POST body。
 - [x] Java 403 tests 通过，桌面 36 个 Vitest 文件/256 tests 通过，typecheck、build、renderer smoke、electron smoke 通过。
 - [x] 未新增数据库迁移；`system_tag_suggestions` PENDING 记录、LLM 开关和 Step 8 行为未修改。
+
+## Step 9B 完成记录：标签统计看板
+
+- [x] 新增 ADMIN-only `POST /admin/api/v1/analytics/tags`，请求包含统一客户条件、团队、标签事件窗口和 `DAY` 粒度。
+- [x] 服务层复用 Step 9A 的 `CustomerFilterValidator`、`CustomerAccessScopeResolver`、`CustomerFilterQueryBuilder` 和同一 `CustomerQuerySpec`。
+- [x] 当前快照只统计 active、启用、未合并、`use_for_statistics=1` 的正式标签分配，排除建议、未匹配旧值和失效记录。
+- [x] 返回分类、标签、门店、团队、员工、来源、未更新原因、连续日期趋势和权限范围内筛选选项。
+- [x] 团队与员工筛选取交集；空交集返回合法零统计，不退化为全量。
+- [x] 线索漏斗改为当前有效统一 `intentLevel` 高/中意向标签，不再读取写死旧字段语义。
+- [x] 管理看板接入独立筛选、动态标签 ANY/ALL、局部失败重试、保留上次成功数据和当前页面 CSV。
+- [x] Java 全量 414 tests：0 failures、0 errors、1 conditional skip；桌面 37 个 Vitest 文件/261 tests 全部通过。
+- [x] `npm run typecheck`、`npm run build`、`renderer_smoke=passed`、`electron_smoke=passed`。
+- [x] 未新增数据库迁移；6 条 `system_tag_suggestions.status=PENDING` 原文/状态未修改；两个 LLM 开关保持 `false`；Step 8 行为未修改。
+- [ ] Step 9C 跟进规则动态标签条件尚未开始。
+- [ ] Step 9D CSV/外部表格同步/写回统一标签校验尚未开始。
