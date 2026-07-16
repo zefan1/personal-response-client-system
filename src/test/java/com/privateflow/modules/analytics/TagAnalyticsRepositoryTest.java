@@ -186,6 +186,39 @@ class TagAnalyticsRepositoryTest {
     assertThat(response.summary().activeAssignmentCount()).isEqualTo(1);
   }
 
+  @Test
+  void groupsCurrentTagsByStoreTeamAndEmployeeAndResolvesTeamKeepers() {
+    seedAccount(9, "leader-1", "组长一", "LEADER", null, 1);
+    seedAccount(11, "keeper-1", "管家一", "KEEPER", 9L, 1);
+    seedAccount(12, "keeper-disabled", "停用管家", "KEEPER", 9L, 0);
+    seedCustomer(1, "企微", "万江店", "keeper-1", "2026-07-16 10:00:00");
+    seedCategory(10, "intent_level", "意向等级", "intentLevel", 1, null, 1);
+    seedValue(101, 10, "HIGH", "高意向", 1, null);
+    seedAssignment(1001, 1, 10, 101, 1, "SYSTEM_INFERENCE", "2026-07-12 09:00:00", null);
+
+    TagAnalyticsResponse response = repository.analyze(allSpec(), allSpec(), window());
+
+    assertThat(repository.resolveEnabledKeeperPhones(List.of(9L))).containsExactly("keeper-1");
+    assertThat(response.stores()).singleElement().satisfies(row -> {
+      assertThat(row.key()).isEqualTo("万江店");
+      assertThat(row.label()).isEqualTo("万江店");
+    });
+    assertThat(response.teams()).singleElement().satisfies(row -> {
+      assertThat(row.key()).isEqualTo("9");
+      assertThat(row.label()).isEqualTo("组长一");
+    });
+    assertThat(response.employees()).singleElement().satisfies(row -> {
+      assertThat(row.key()).isEqualTo("keeper-1");
+      assertThat(row.label()).isEqualTo("管家一");
+    });
+    assertThat(response.filterOptions().employees())
+        .extracting(TagAnalyticsResponse.EmployeeOption::account)
+        .containsExactly("keeper-1");
+    assertThat(response.filterOptions().teams())
+        .extracting(TagAnalyticsResponse.TeamOption::leaderId)
+        .containsExactly(9L);
+  }
+
   private CustomerQuerySpec allSpec() {
     return new CustomerQuerySpec(" WHERE 1=1", List.of(), "c.id ASC");
   }
@@ -204,6 +237,13 @@ class TagAnalyticsRepositoryTest {
           intended_store, intended_project, customer_stage, created_at, updated_at
         ) VALUES (?, ?, ?, ?, 'XIAN_SUO', ?, ?, '产后修复', 'PENDING', '2026-07-01 09:00:00', ?)
         """, id, "1380000" + String.format("%04d", id), "客户" + id, source, keeper, store, updatedAt);
+  }
+
+  private void seedAccount(long id, String account, String displayName, String role, Long leaderId, int enabled) {
+    jdbcTemplate.update("""
+        INSERT INTO accounts (id, phone, username, display_name, role, leader_id, is_enabled)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, id, account, account, displayName, role, leaderId, enabled);
   }
 
   private void seedCategory(long id, String key, String name, String boundField, int enabled, Long mergedIntoId, int useForStatistics) {
