@@ -12,6 +12,12 @@ import com.privateflow.modules.followup.RulePage;
 import com.privateflow.modules.followup.RuleRequest;
 import com.privateflow.modules.followup.RuleSearchCriteria;
 import com.privateflow.modules.followup.infra.FollowupRuleRepository;
+import com.privateflow.modules.tags.TagCandidatePurpose;
+import com.privateflow.modules.tags.TagSelectionContext;
+import com.privateflow.modules.tags.TagSelectionValidationResult;
+import com.privateflow.modules.tags.TagSelectionValidator;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -24,18 +30,21 @@ public class RuleAdminService {
   private final RuleLoader ruleLoader;
   private final AuditLogger auditLogger;
   private final ConditionEvaluator conditionEvaluator;
+  private final TagSelectionValidator tagSelectionValidator;
 
   public RuleAdminService(
       FollowupRuleRepository ruleRepository,
       ObjectMapper objectMapper,
       RuleLoader ruleLoader,
       AuditLogger auditLogger,
-      ConditionEvaluator conditionEvaluator) {
+      ConditionEvaluator conditionEvaluator,
+      TagSelectionValidator tagSelectionValidator) {
     this.ruleRepository = ruleRepository;
     this.objectMapper = objectMapper;
     this.ruleLoader = ruleLoader;
     this.auditLogger = auditLogger;
     this.conditionEvaluator = conditionEvaluator;
+    this.tagSelectionValidator = tagSelectionValidator;
   }
 
   public RulePage search(RuleSearchCriteria criteria) {
@@ -123,12 +132,75 @@ public class RuleAdminService {
       JsonNode condition = objectMapper.readTree(request.conditionJson());
       validateConditionComplexity(condition);
       conditionEvaluator.validateDefinition(condition);
-      objectMapper.readTree(request.actionConfig() == null || request.actionConfig().isBlank() ? "{}" : request.actionConfig());
+      validateTagConditions(request.name(), condition);
+      JsonNode action = objectMapper.readTree(
+          request.actionConfig() == null || request.actionConfig().isBlank() ? "{}" : request.actionConfig());
+      validateTagAction(request, action);
     } catch (FollowupException ex) {
       throw ex;
     } catch (Exception ex) {
       throw new FollowupException(FollowupErrorCodes.CONDITION_PARSE_FAILED, "规则条件格式不正确", ex);
     }
+  }
+
+  private void validateTagConditions(String ruleName, JsonNode node) {
+    if (node == null) {
+      return;
+    }
+    if (node.isObject()
+        && "tag".equals(node.path("field").asText())
+        && "MATCH".equals(node.path("op").asText())) {
+      validateTagSelection(ruleName, node, valueIds(node.path("valueIds")));
+      return;
+    }
+    if (node.isContainerNode()) {
+      node.elements().forEachRemaining(child -> validateTagConditions(ruleName, child));
+    }
+  }
+
+  private void validateTagAction(RuleRequest request, JsonNode action) {
+    if (request.actionType() != ActionType.TAG_CHANGE || action == null || !action.isObject()) {
+      return;
+    }
+    boolean hasCategoryId = action.hasNonNull("tagCategoryId");
+    boolean hasValueId = action.hasNonNull("tagValueId");
+    if (!hasCategoryId && !hasValueId) {
+      return;
+    }
+    if (!hasCategoryId || !hasValueId
+        || !action.path("tagCategoryId").canConvertToLong()
+        || !action.path("tagValueId").canConvertToLong()
+        || action.path("tagCategoryId").asLong() <= 0
+        || action.path("tagValueId").asLong() <= 0) {
+      throw new FollowupException(FollowupErrorCodes.BAD_REQUEST, "正式标签建议目标缺少有效的分类或标签值 ID");
+    }
+    validateTagSelection(request.name(), action, List.of(action.path("tagValueId").asLong()));
+  }
+
+  private void validateTagSelection(String ruleName, JsonNode node, List<Long> valueIds) {
+    long categoryId = node.path(node.has("tagCategoryId") ? "tagCategoryId" : "categoryId").asLong();
+    TagSelectionValidationResult result = tagSelectionValidator.validateIds(
+        TagCandidatePurpose.FOLLOWUP_RULE,
+        categoryId,
+        valueIds,
+        new TagSelectionContext(null, 0, null, businessBasis(ruleName, node)));
+    if (result == null || !result.accepted()) {
+      String message = result == null ? "标签目录校验没有返回结果" : result.message();
+      throw new FollowupException(FollowupErrorCodes.BAD_REQUEST, "标签分类/值校验失败：" + message);
+    }
+  }
+
+  private List<Long> valueIds(JsonNode values) {
+    List<Long> result = new ArrayList<>();
+    if (values != null && values.isArray()) {
+      values.forEach(value -> result.add(value.asLong()));
+    }
+    return List.copyOf(result);
+  }
+
+  private String businessBasis(String ruleName, JsonNode node) {
+    String name = ruleName == null || ruleName.isBlank() ? "未命名跟进规则" : ruleName.trim();
+    return name + " / " + node.toString();
   }
 
   private void validateConditionComplexity(JsonNode root) {
