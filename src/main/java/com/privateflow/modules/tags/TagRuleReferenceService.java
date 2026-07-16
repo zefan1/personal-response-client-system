@@ -20,7 +20,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class TagRuleReferenceService {
 
-  private static final Set<String> VALUE_ID_KEYS = Set.of("tagvalueid", "tagid", "canonicaltagvalueid");
+  private static final Set<String> VALUE_ID_KEYS = Set.of(
+      "tagvalueid", "tagid", "canonicaltagvalueid", "valueids");
   private static final Set<String> VALUE_CODE_KEYS = Set.of("tagvalue", "tagcode", "tagname");
   private static final Set<String> CATEGORY_ID_KEYS = Set.of("tagcategoryid", "categoryid");
   private static final Set<String> CATEGORY_CODE_KEYS = Set.of("tagcategorykey", "categorykey", "tagcategory");
@@ -156,9 +157,22 @@ public class TagRuleReferenceService {
       String key,
       JsonNode current,
       ValueReplacement replacement) {
-    if (VALUE_ID_KEYS.contains(key) && matchesId(current, replacement.source().id())) {
-      object.put(fieldName, replacement.target().id());
-      return true;
+    if (VALUE_ID_KEYS.contains(key)) {
+      if (current != null && current.isArray()) {
+        boolean changed = false;
+        for (int index = 0; index < current.size(); index++) {
+          JsonNode item = current.get(index);
+          if (matchesId(item, replacement.source().id())) {
+            ((ArrayNode) current).set(index, objectMapper.getNodeFactory().numberNode(replacement.target().id()));
+            changed = true;
+          }
+        }
+        return changed;
+      }
+      if (matchesId(current, replacement.source().id())) {
+        object.put(fieldName, replacement.target().id());
+        return true;
+      }
     }
     if (VALUE_CODE_KEYS.contains(key)) {
       String target = replacementText(current, replacement.source(), replacement.target());
@@ -215,8 +229,16 @@ public class TagRuleReferenceService {
         Map.Entry<String, JsonNode> field = fields.next();
         String key = normalizeKey(field.getKey());
         JsonNode current = field.getValue();
-        if (VALUE_ID_KEYS.contains(key) && matchesId(current, value.id())) {
-          return true;
+        if (VALUE_ID_KEYS.contains(key)) {
+          if (current != null && current.isArray()) {
+            for (JsonNode item : current) {
+              if (matchesId(item, value.id())) {
+                return true;
+              }
+            }
+          } else if (matchesId(current, value.id())) {
+            return true;
+          }
         }
         if (VALUE_CODE_KEYS.contains(key) && matchesValueText(current, value)) {
           return true;

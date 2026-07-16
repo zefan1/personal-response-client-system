@@ -76,6 +76,56 @@ class TagRuleReferenceServiceTest {
     assertThat(action.path("tagCategoryKey").asText()).isEqualTo("customer_stage");
   }
 
+  @Test
+  void countsValueIdsArrayAsFormalValueReference() {
+    jdbcTemplate.update("""
+        INSERT INTO followup_rules (name, condition_json, action_config)
+        VALUES (?, ?, ?)
+        """,
+        "tag array",
+        "{\"operator\":\"AND\",\"conditions\":[{\"field\":\"tag\",\"op\":\"MATCH\",\"categoryId\":1,\"valueIds\":[2,3],\"match\":\"ANY\"}]}",
+        "{}");
+    TagCategory category = category(1L, "intent_level", "intentLevel");
+    TagValue source = value(2L, 1L, "intent_level", "HIGH", "高意向");
+    category = category.withValues(List.of(source));
+
+    TagRuleReferenceService.ReferenceCounts counts = service.countReferences(List.of(category), List.of(source));
+
+    assertThat(counts.value(2L)).isEqualTo(1);
+  }
+
+  @Test
+  void rewritesValueIdsArrayAndFormalTagChangeFields() throws Exception {
+    jdbcTemplate.update("""
+        INSERT INTO followup_rules (name, condition_json, action_config)
+        VALUES (?, ?, ?)
+        """,
+        "formal tag rule",
+        "{\"operator\":\"AND\",\"conditions\":[{\"field\":\"tag\",\"op\":\"MATCH\",\"categoryId\":1,\"valueIds\":[2,3],\"match\":\"ANY\"}]}",
+        "{\"tagCategoryId\":1,\"tagCategoryKey\":\"intent_level\",\"tagValueId\":2,\"tagValue\":\"HIGH\",\"tagName\":\"高意向\"}");
+    TagCategory sourceCategory = category(1L, "intent_level", "intentLevel");
+    TagCategory targetCategory = category(4L, "customer_stage", "customerStage");
+    TagValue source = value(2L, 1L, "intent_level", "HIGH", "高意向");
+    TagValue target = value(8L, 4L, "customer_stage", "PRIORITY", "优先跟进");
+    sourceCategory = sourceCategory.withValues(List.of(source));
+
+    assertThat(service.rewriteCategory(sourceCategory, targetCategory, java.util.Map.of(2L, target))).isEqualTo(1);
+
+    JsonNode condition = objectMapper.readTree(jdbcTemplate.queryForObject(
+        "SELECT condition_json FROM followup_rules WHERE id = 1", String.class));
+    JsonNode action = objectMapper.readTree(jdbcTemplate.queryForObject(
+        "SELECT action_config FROM followup_rules WHERE id = 1", String.class));
+    JsonNode tagCondition = condition.path("conditions").path(0);
+    assertThat(tagCondition.path("categoryId").asLong()).isEqualTo(4L);
+    assertThat(tagCondition.path("valueIds").path(0).asLong()).isEqualTo(8L);
+    assertThat(tagCondition.path("valueIds").path(1).asLong()).isEqualTo(3L);
+    assertThat(action.path("tagCategoryId").asLong()).isEqualTo(4L);
+    assertThat(action.path("tagCategoryKey").asText()).isEqualTo("customer_stage");
+    assertThat(action.path("tagValueId").asLong()).isEqualTo(8L);
+    assertThat(action.path("tagValue").asText()).isEqualTo("PRIORITY");
+    assertThat(action.path("tagName").asText()).isEqualTo("优先跟进");
+  }
+
   private TagCategory category(long id, String key, String boundField) {
     LocalDateTime now = LocalDateTime.of(2026, 7, 14, 12, 0);
     return new TagCategory(id, key, key, boundField, false, true, 1, List.of(), now, now);
