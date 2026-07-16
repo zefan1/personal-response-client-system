@@ -251,7 +251,10 @@ const apiData: Record<string, unknown> = {
       sortOrder: 10,
       mergedIntoId: null,
       version: 4,
-      values: [],
+      values: [
+        { id: 51, tagValue: 'HIGH', displayName: '高意向', isEnabled: true, mergedIntoId: null },
+        { id: 52, tagValue: 'MEDIUM', displayName: '中意向', isEnabled: true, mergedIntoId: null }
+      ],
       impact: { customerCount: 12, ruleCount: 2, historyCount: 8 },
       updatedAt: '2026-07-03T09:00:00Z'
     }],
@@ -363,6 +366,33 @@ const apiData: Record<string, unknown> = {
   '/admin/api/v1/analytics/lifecycle': { list: [{ leadType: 'TUAN_GOU', allocationToFirstContact: 1.5, allocationToArrival: 4.2, estimateSource: 'customers.updated_at' }] },
   '/admin/api/v1/analytics/risks': { customers: [{ phone: '18800001111', nickname: '张三', leadType: 'TUAN_GOU', customerStage: 'PENDING', assignedKeeper: '18800000001', lastFollowupAt: '2026-07-03T09:00:00Z' }], alerts: [] },
   '/admin/api/v1/analytics/content-ranking': { list: [{ action: 'COPY_REPLY', targetType: 'template', targetId: 'hi', useCount: 9, sampleDetail: '开场话术' }], leadTypeFilterApplied: null },
+  '/admin/api/v1/analytics/tags': {
+    summary: {
+      matchedCustomerCount: 4,
+      taggedCustomerCount: 3,
+      activeAssignmentCount: 3,
+      coverageRate: 0.75,
+      systemAddedCount: 2,
+      manualAddedOrChangedCount: 1,
+      systemDecidedNoUpdateCount: 1
+    },
+    categories: [{ categoryId: 50, categoryKey: 'intent_level', categoryName: '意向等级', activeAssignmentCount: 3, taggedCustomerCount: 3 }],
+    tags: [{ categoryId: 50, categoryKey: 'intent_level', categoryName: '意向等级', valueId: 51, valueCode: 'HIGH', displayName: '高意向', activeAssignmentCount: 2, taggedCustomerCount: 2 }],
+    stores: [{ key: '万江店', label: '万江店', activeAssignmentCount: 3, taggedCustomerCount: 3 }],
+    teams: [{ key: '9', label: '一组', activeAssignmentCount: 3, taggedCustomerCount: 3 }],
+    employees: [{ key: 'keeper-1', label: '小王', activeAssignmentCount: 3, taggedCustomerCount: 3 }],
+    tagSources: [{ sourceType: 'SYSTEM_INFERENCE', sourceLabel: '系统推断', addedAssignmentCount: 2, affectedCustomerCount: 2 }],
+    unupdatedReasons: [{ reasonCode: 'NO_ANALYSIS', reasonLabel: '未进行分析', scope: 'CURRENT_GAP', customerCount: 1, decisionCount: 0, sampleReason: null }],
+    trend: [{ date: '2026-07-16', addedAssignmentCount: 2, invalidatedAssignmentCount: 1, netChange: 1, systemAddedCount: 2, manualAddedOrChangedCount: 0 }],
+    filterOptions: {
+      stores: [{ value: '万江店', label: '万江店' }],
+      teams: [{ leaderId: 9, label: '一组' }],
+      employees: [{ account: 'keeper-1', label: '小王', leaderId: 9 }],
+      customerSources: [{ value: '企微', label: '企微' }],
+      tagSources: [{ value: 'SYSTEM_INFERENCE', label: '系统推断' }]
+    },
+    appliedWindow: { tagFrom: '2026-07-10T00:00:00', tagTo: '2026-07-16T23:59:59', granularity: 'DAY' }
+  },
   '/admin/api/v1/versions': {
     items: [
       { id: 60, version: '1.0.1', platform: 'WINDOWS', updateStrategy: 'OPTIONAL', status: 'DRAFT' },
@@ -478,7 +508,7 @@ describe('AdminConsole product surface', () => {
     apiMocks.postForm.mockResolvedValue({ success: true, data: { totalRows: 1, created: 1, updated: 0, skipped: 0, errors: [] }, errorCode: null, message: null });
     apiMocks.postJson.mockImplementation(async (path: string) => ({
       success: true,
-      data: path === '/admin/api/v1/customers/search' ? apiData[path] : {},
+      data: apiData[path] ?? {},
       errorCode: null,
       message: null
     }));
@@ -1828,6 +1858,55 @@ describe('AdminConsole product surface', () => {
     const textValues = [...drawer.querySelectorAll('input[type="text"]')].map((input) => (input as HTMLInputElement).value);
     expect(textValues).toContain('/downloads/app.exe');
     expect(drawer.textContent).toContain('上传完成');
+
+    app.unmount();
+  });
+
+  it('loads, renders and filters tag analytics independently', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '运营分析看板').click();
+    await flushSave();
+    await flushSave();
+
+    expect(mainText(host)).toContain('标签统计');
+    expect(mainText(host)).toContain('正式标签 3');
+    expect(mainText(host)).toContain('高意向');
+    expect(mainText(host)).toContain('系统推断');
+
+    setInputValue(controlByLabel<HTMLSelectElement>(host, '标签统计门店'), '万江店');
+    setInputValue(controlByLabel<HTMLSelectElement>(host, '标签统计团队'), '9');
+    findButton(host, '刷新标签统计').click();
+    await flushSave();
+
+    expect(apiMocks.postJson).toHaveBeenLastCalledWith(
+      '/admin/api/v1/analytics/tags',
+      expect.objectContaining({
+        customerFilter: expect.objectContaining({ intendedStores: ['万江店'] }),
+        teamLeaderIds: [9],
+        granularity: 'DAY'
+      })
+    );
+    app.unmount();
+  });
+
+  it('keeps existing analytics visible when tag analytics fails', async () => {
+    apiMocks.postJson.mockImplementation(async (path: string) => {
+      if (path === '/admin/api/v1/analytics/tags') {
+        throw new Error('tag analytics timeout');
+      }
+      return { success: true, data: apiData[path] ?? {}, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '运营分析看板').click();
+    await flushSave();
+    await flushSave();
+
+    expect(mainText(host)).toContain('同事效能');
+    expect(mainText(host)).toContain('张三');
+    expect(mainText(host)).toContain('标签统计刷新失败');
+    expect(mainText(host)).toContain('重试标签统计');
 
     app.unmount();
   });

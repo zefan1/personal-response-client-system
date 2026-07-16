@@ -1371,6 +1371,121 @@
               <p v-if="!section.rows.length && !section.status.error" class="ops-empty compact">{{ section.status.loading ? '正在刷新' : '暂无数据' }}</p>
             </article>
           </div>
+          <section class="tag-analytics-section">
+            <div class="ops-panel-head">
+              <div>
+                <h3>标签统计</h3>
+                <p v-if="tagAnalytics">{{ formatDate(tagAnalytics.appliedWindow.tagFrom) }} 至 {{ formatDate(tagAnalytics.appliedWindow.tagTo) }}</p>
+              </div>
+              <button class="secondary small" type="button" :disabled="tagAnalyticsStatus.loading" @click="loadTagAnalytics()">
+                {{ tagAnalyticsStatus.loading ? '正在刷新' : '刷新标签统计' }}
+              </button>
+            </div>
+
+            <div class="tag-analytics-filter-grid">
+              <label>
+                <span class="ops-label-title">客户更新开始</span>
+                <input v-model="tagAnalyticsFilters.updatedFrom" type="date" />
+              </label>
+              <label>
+                <span class="ops-label-title">客户更新结束</span>
+                <input v-model="tagAnalyticsFilters.updatedTo" type="date" />
+              </label>
+              <label>
+                <span class="ops-label-title">标签事件开始</span>
+                <input v-model="tagAnalyticsFilters.tagFrom" type="date" />
+              </label>
+              <label>
+                <span class="ops-label-title">标签事件结束</span>
+                <input v-model="tagAnalyticsFilters.tagTo" type="date" />
+              </label>
+              <label>
+                <span class="ops-label-title">标签统计客户来源</span>
+                <select v-model="tagAnalyticsFilters.sourceChannel">
+                  <option value="">全部来源</option>
+                  <option v-for="option in tagAnalytics?.filterOptions.customerSources ?? []" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+              <label>
+                <span class="ops-label-title">标签统计门店</span>
+                <select v-model="tagAnalyticsFilters.intendedStore">
+                  <option value="">全部门店</option>
+                  <option v-for="option in tagAnalytics?.filterOptions.stores ?? []" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+              <label>
+                <span class="ops-label-title">标签统计团队</span>
+                <select v-model="tagAnalyticsFilters.teamLeaderId">
+                  <option value="">全部团队</option>
+                  <option v-for="option in tagAnalytics?.filterOptions.teams ?? []" :key="option.leaderId" :value="String(option.leaderId)">{{ option.label }}</option>
+                </select>
+              </label>
+              <label>
+                <span class="ops-label-title">标签统计员工</span>
+                <select v-model="tagAnalyticsFilters.assignedKeeper">
+                  <option value="">全部员工</option>
+                  <option v-for="option in tagAnalytics?.filterOptions.employees ?? []" :key="option.account" :value="option.account">{{ option.label }}</option>
+                </select>
+              </label>
+            </div>
+
+            <div v-if="customerFilterCategories.length" class="customer-tag-filters tag-analytics-tag-filters">
+              <label class="customer-tag-logic">
+                <span class="ops-label-title">标签分类组合</span>
+                <select v-model="tagAnalyticsFilters.tagGroupLogic" class="customer-tag-logic-select">
+                  <option value="AND">全部分类</option>
+                  <option value="OR">任一分类</option>
+                </select>
+              </label>
+              <div v-for="category in customerFilterCategories" :key="category.id" class="customer-tag-filter-group">
+                <label>
+                  <span>{{ category.categoryName || category.categoryKey }}</span>
+                  <select
+                    v-model="analyticsTagSelections[String(category.id)]"
+                    class="customer-tag-category-select"
+                    :multiple="String(category.selectionMode).toUpperCase() === 'MULTI'"
+                    :size="String(category.selectionMode).toUpperCase() === 'MULTI' ? Math.min(4, Math.max(2, (category.values || []).length)) : 1"
+                  >
+                    <option v-for="value in category.values || []" :key="value.id" :value="String(value.id)">{{ value.displayName || value.tagValue }}</option>
+                  </select>
+                </label>
+                <label v-if="String(category.selectionMode).toUpperCase() === 'MULTI'">
+                  <span>匹配方式</span>
+                  <select v-model="analyticsTagMatchModes[String(category.id)]" class="customer-tag-match-select">
+                    <option value="ANY">任一标签</option>
+                    <option value="ALL">全部标签</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div v-if="tagAnalyticsStatus.error" class="ops-detail-box warning">
+              <strong>标签统计刷新失败</strong>
+              <p>{{ tagAnalyticsStatus.error }}</p>
+              <button class="secondary small" type="button" @click="loadTagAnalytics()">重试标签统计</button>
+            </div>
+
+            <div class="tag-analytics-summary-grid">
+              <div v-for="card in tagAnalyticsSummaryCards" :key="card.label" class="ops-analytics-block">
+                <p><strong>{{ card.label }} {{ card.value }}</strong></p>
+              </div>
+            </div>
+
+            <div class="ops-insight-grid">
+              <article v-for="section in tagAnalyticsDetailSections" :key="section.key" class="ops-detail-box">
+                <strong>{{ section.title }}</strong>
+                <div v-if="section.rows.length" class="ops-mini-table">
+                  <div class="ops-mini-row head">
+                    <span v-for="column in section.columns" :key="column.key">{{ column.label }}</span>
+                  </div>
+                  <div v-for="(row, rowIndex) in section.rows.slice(0, 8)" :key="`${section.key}-${rowIndex}`" class="ops-mini-row">
+                    <span v-for="column in section.columns" :key="column.key">{{ analyticsCell(row, column.key) }}</span>
+                  </div>
+                </div>
+                <p v-else class="ops-empty compact">{{ tagAnalyticsStatus.loading ? '正在刷新' : '暂无数据' }}</p>
+              </article>
+            </div>
+          </section>
         </article>
 
         <article v-if="activeSection.key === 'version-management'" class="ops-panel wide">
@@ -1761,6 +1876,13 @@ import {
 import { loadDesktopConfig } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
 import { QUICK_SEARCH_TEMPLATE_VARIABLES } from '../quick-search/templateVariables';
+import {
+  buildTagAnalyticsRequest,
+  reasonScopeLabel,
+  tagAnalyticsCsvSections,
+  type TagAnalyticsRequestInput,
+  type TagAnalyticsResponse
+} from './tagAnalytics';
 
 type SectionGroupKey = 'config-center' | 'data-content' | 'org-rules-tags' | 'insight-ops';
 type SectionKey =
@@ -2132,6 +2254,21 @@ const analyticsLabels: Record<AnalyticsKey, string> = {
   risks: '风险客户',
   contentRanking: '内容排行'
 };
+const tagAnalytics = ref<TagAnalyticsResponse | null>(null);
+const tagAnalyticsStatus = reactive({ loading: false, error: '' });
+const tagAnalyticsFilters = reactive({
+  updatedFrom: '',
+  updatedTo: '',
+  tagFrom: '',
+  tagTo: '',
+  sourceChannel: '',
+  intendedStore: '',
+  teamLeaderId: '',
+  assignedKeeper: '',
+  tagGroupLogic: 'AND' as 'AND' | 'OR'
+});
+const analyticsTagSelections = reactive<Record<string, string | string[]>>({});
+const analyticsTagMatchModes = reactive<Record<string, 'ANY' | 'ALL'>>({});
 const versions = ref<AnyRecord[]>([]);
 const notices = ref<AnyRecord[]>([]);
 const auditLogs = ref<AnyRecord[]>([]);
@@ -2487,6 +2624,109 @@ const analyticsDetailSections = computed(() => [
     status: analyticsStatus.contentRanking
   }
 ]);
+const tagAnalyticsSummaryCards = computed(() => {
+  const summary = tagAnalytics.value?.summary;
+  return [
+    { label: '匹配客户', value: summary?.matchedCustomerCount ?? 0 },
+    { label: '已打标签客户', value: summary?.taggedCustomerCount ?? 0 },
+    { label: '正式标签', value: summary?.activeAssignmentCount ?? 0 },
+    { label: '覆盖率', value: `${((summary?.coverageRate ?? 0) * 100).toFixed(2)}%` },
+    { label: '系统新增', value: summary?.systemAddedCount ?? 0 },
+    { label: '人工新增或修改', value: summary?.manualAddedOrChangedCount ?? 0 },
+    { label: '系统判断未更新', value: summary?.systemDecidedNoUpdateCount ?? 0 }
+  ];
+});
+const tagAnalyticsDetailSections = computed(() => {
+  const data = tagAnalytics.value;
+  return [
+    {
+      key: 'categories',
+      title: '标签分类',
+      columns: [
+        { key: 'categoryName', label: '分类' },
+        { key: 'activeAssignmentCount', label: '有效标签' },
+        { key: 'taggedCustomerCount', label: '客户' }
+      ],
+      rows: data?.categories ?? []
+    },
+    {
+      key: 'tags',
+      title: '标签值',
+      columns: [
+        { key: 'displayName', label: '标签' },
+        { key: 'categoryName', label: '分类' },
+        { key: 'activeAssignmentCount', label: '有效标签' },
+        { key: 'taggedCustomerCount', label: '客户' }
+      ],
+      rows: data?.tags ?? []
+    },
+    {
+      key: 'stores',
+      title: '门店',
+      columns: [
+        { key: 'label', label: '门店' },
+        { key: 'activeAssignmentCount', label: '有效标签' },
+        { key: 'taggedCustomerCount', label: '客户' }
+      ],
+      rows: data?.stores ?? []
+    },
+    {
+      key: 'teams',
+      title: '团队',
+      columns: [
+        { key: 'label', label: '团队' },
+        { key: 'activeAssignmentCount', label: '有效标签' },
+        { key: 'taggedCustomerCount', label: '客户' }
+      ],
+      rows: data?.teams ?? []
+    },
+    {
+      key: 'employees',
+      title: '员工',
+      columns: [
+        { key: 'label', label: '员工' },
+        { key: 'activeAssignmentCount', label: '有效标签' },
+        { key: 'taggedCustomerCount', label: '客户' }
+      ],
+      rows: data?.employees ?? []
+    },
+    {
+      key: 'sources',
+      title: '标签来源',
+      columns: [
+        { key: 'sourceLabel', label: '来源' },
+        { key: 'addedAssignmentCount', label: '新增标签' },
+        { key: 'affectedCustomerCount', label: '客户' }
+      ],
+      rows: data?.tagSources ?? []
+    },
+    {
+      key: 'reasons',
+      title: '未更新原因',
+      columns: [
+        { key: 'reasonLabel', label: '原因' },
+        { key: 'scopeLabel', label: '范围' },
+        { key: 'customerCount', label: '客户' },
+        { key: 'decisionCount', label: '判断' }
+      ],
+      rows: (data?.unupdatedReasons ?? []).map((row) => ({
+        ...row,
+        scopeLabel: reasonScopeLabel(row.scope)
+      }))
+    },
+    {
+      key: 'trend',
+      title: '标签趋势',
+      columns: [
+        { key: 'date', label: '日期' },
+        { key: 'addedAssignmentCount', label: '新增' },
+        { key: 'invalidatedAssignmentCount', label: '失效' },
+        { key: 'netChange', label: '净变化' }
+      ],
+      rows: data?.trend ?? []
+    }
+  ];
+});
 const healthCards = computed(() => {
   const data = health.value ?? {};
   const components = (data.components ?? {}) as AnyRecord;
@@ -2720,6 +2960,64 @@ async function loadTags() {
   await refreshTagCategoryOptionsCache();
 }
 
+function localDayStart(value: string): string | undefined {
+  return value ? `${value}T00:00:00` : undefined;
+}
+
+function localDayEnd(value: string): string | undefined {
+  return value ? `${value}T23:59:59` : undefined;
+}
+
+function analyticsTagGroups(): NonNullable<TagAnalyticsRequestInput['tagGroups']> {
+  return customerFilterCategories.value.flatMap((category) => {
+    const raw = analyticsTagSelections[String(category.id)];
+    const values = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+      .map(Number)
+      .filter((value) => Number.isFinite(value));
+    return values.length === 0
+      ? []
+      : [{
+          categoryId: Number(category.id),
+          valueIds: values,
+          match: String(category.selectionMode).toUpperCase() === 'MULTI'
+            ? (analyticsTagMatchModes[String(category.id)] || 'ANY')
+            : 'ANY' as const
+        }];
+  });
+}
+
+function tagAnalyticsRequestInput(): TagAnalyticsRequestInput {
+  return {
+    leadTypes: analyticsLeadType() ? [analyticsLeadType()] : [],
+    sourceChannels: tagAnalyticsFilters.sourceChannel ? [tagAnalyticsFilters.sourceChannel] : [],
+    assignedKeepers: tagAnalyticsFilters.assignedKeeper ? [tagAnalyticsFilters.assignedKeeper] : [],
+    intendedStores: tagAnalyticsFilters.intendedStore ? [tagAnalyticsFilters.intendedStore] : [],
+    updatedFrom: localDayStart(tagAnalyticsFilters.updatedFrom),
+    updatedTo: localDayEnd(tagAnalyticsFilters.updatedTo),
+    teamLeaderIds: tagAnalyticsFilters.teamLeaderId ? [Number(tagAnalyticsFilters.teamLeaderId)] : [],
+    tagFrom: localDayStart(tagAnalyticsFilters.tagFrom),
+    tagTo: localDayEnd(tagAnalyticsFilters.tagTo),
+    tagGroups: analyticsTagGroups(),
+    tagGroupLogic: tagAnalyticsFilters.tagGroupLogic
+  };
+}
+
+async function loadTagAnalytics() {
+  tagAnalyticsStatus.loading = true;
+  tagAnalyticsStatus.error = '';
+  try {
+    const response = await postJson<unknown>(
+      '/admin/api/v1/analytics/tags',
+      buildTagAnalyticsRequest(tagAnalyticsRequestInput())
+    );
+    tagAnalytics.value = dataFromResponse(response) as TagAnalyticsResponse;
+  } catch (error) {
+    tagAnalyticsStatus.error = errorText(error);
+  } finally {
+    tagAnalyticsStatus.loading = false;
+  }
+}
+
 async function loadInsightOps() {
   await runWithNotice(async () => {
     const [accountList, versionList, noticeList, auditList, actionList, healthPayload] = await Promise.all([
@@ -2739,6 +3037,9 @@ async function loadInsightOps() {
     applyHealthMetadata();
     healthLastRefreshAt.value = formatDate((health.value as AnyRecord)?.timestamp ?? new Date().toISOString());
     healthConsecutiveFailures.value = 0;
+    if (activeSectionKey.value === 'analytics-dashboard') {
+      void refreshTagCategoryOptionsCache().catch(() => undefined);
+    }
     await loadAnalyticsDashboard({ silent: true });
   }, '分析与系统运营已刷新');
 }
@@ -2773,11 +3074,17 @@ async function loadAnalyticsDashboard(options: { silent?: boolean } = {}) {
       }
     });
   };
+  const tagAnalyticsRun = () => activeSectionKey.value === 'analytics-dashboard'
+    ? loadTagAnalytics()
+    : Promise.resolve();
   if (options.silent) {
-    await run();
+    await Promise.all([run(), tagAnalyticsRun()]);
     return;
   }
-  await runWithNotice(run, analyticsFailedSections.value.length ? '分析看板已部分刷新' : '分析看板已刷新');
+  await Promise.all([
+    runWithNotice(run, analyticsFailedSections.value.length ? '分析看板已部分刷新' : '分析看板已刷新'),
+    tagAnalyticsRun()
+  ]);
 }
 
 async function loadRuntimeModeStatus() {
@@ -4664,6 +4971,24 @@ function toggleHealthAlert(alert: AnyRecord) {
   expandedHealthAlertId.value = expandedHealthAlertId.value === id ? null : id;
 }
 
+function tagAnalyticsFilterCsvSection() {
+  const request = buildTagAnalyticsRequest(tagAnalyticsRequestInput());
+  const rows = [
+    ['线索类型', request.customerFilter.leadTypes.join('、') || '全部'],
+    ['客户来源', request.customerFilter.sourceChannels.join('、') || '全部'],
+    ['门店', request.customerFilter.intendedStores.join('、') || '全部'],
+    ['员工', request.customerFilter.assignedKeepers.join('、') || '全部'],
+    ['团队', request.teamLeaderIds.join('、') || '全部'],
+    ['客户更新开始', request.customerFilter.updatedFrom ?? ''],
+    ['客户更新结束', request.customerFilter.updatedTo ?? ''],
+    ['标签事件开始', request.tagFrom ?? ''],
+    ['标签事件结束', request.tagTo ?? ''],
+    ['标签分类组合', request.customerFilter.tagGroupLogic],
+    ['标签条件', request.customerFilter.tagGroups.map((group) => `${group.categoryId}:${group.valueIds.join('|')}:${group.match}`).join('；')]
+  ];
+  return `标签统计筛选\n筛选项,值\n${rows.map((row) => row.map(csvCell).join(',')).join('\n')}`;
+}
+
 function downloadAnalyticsCsv() {
   const sections = [
     `模块,摘要\n${analyticsBlocks.value.map((block) => `${csvCell(block.title)},${csvCell(block.summary)}`).join('\n')}`,
@@ -4671,7 +4996,10 @@ function downloadAnalyticsCsv() {
       const header = section.columns.map((column) => csvCell(column.label)).join(',');
       const rows = section.rows.map((row) => section.columns.map((column) => csvCell(analyticsCell(row, column.key))).join(',')).join('\n');
       return `${section.title}\n${header}${rows ? `\n${rows}` : ''}`;
-    })
+    }),
+    ...(tagAnalytics.value
+      ? [tagAnalyticsFilterCsvSection(), ...tagAnalyticsCsvSections(tagAnalytics.value)]
+      : [])
   ];
   downloadTextFile(`analytics-${new Date().toISOString().slice(0, 10)}.csv`, sections.join('\n\n'));
 }
@@ -4857,6 +5185,12 @@ async function refreshTagCategoryOptionsCache() {
     }
     if (customerTagMatchModes[key] === undefined) {
       customerTagMatchModes[key] = 'ANY';
+    }
+    if (analyticsTagSelections[key] === undefined) {
+      analyticsTagSelections[key] = String(category.selectionMode).toUpperCase() === 'MULTI' ? [] : '';
+    }
+    if (analyticsTagMatchModes[key] === undefined) {
+      analyticsTagMatchModes[key] = 'ANY';
     }
   });
 }
