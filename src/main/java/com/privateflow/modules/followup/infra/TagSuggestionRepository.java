@@ -30,6 +30,23 @@ public class TagSuggestionRepository {
     return count != null && count > 0;
   }
 
+  public Optional<Long> findPending(String phone, long tagValueId) {
+    return jdbcTemplate.query("""
+        SELECT id FROM system_tag_suggestions
+        WHERE phone = ? AND tag_value_id = ? AND status = 'PENDING'
+        LIMIT 1
+        """, (rs, rowNum) -> rs.getLong("id"), phone, tagValueId).stream().findFirst();
+  }
+
+  public boolean ignoredRecently(String phone, long tagValueId, int dedupDays) {
+    Integer count = jdbcTemplate.queryForObject("""
+        SELECT COUNT(*) FROM system_tag_suggestions
+        WHERE phone = ? AND tag_value_id = ? AND status = 'IGNORED'
+          AND ignored_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+        """, Integer.class, phone, tagValueId, dedupDays);
+    return count != null && count > 0;
+  }
+
   public Long upsertPending(String phone, String tagName, long ruleId, int dedupDays) {
     Optional<Long> existing = findPending(phone, tagName);
     if (existing.isPresent()) {
@@ -44,6 +61,29 @@ public class TagSuggestionRepository {
         )
         VALUES (?, (SELECT id FROM customers WHERE phone = ? LIMIT 1), ?, ?, 'PENDING', 'UNVALIDATED_RULE_TEXT')
         """, phone, phone, tagName, ruleId);
+    return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+  }
+
+  public Long upsertPending(
+      String phone,
+      long categoryId,
+      long tagValueId,
+      String tagName,
+      long ruleId,
+      int dedupDays) {
+    Optional<Long> existing = findPending(phone, tagValueId);
+    if (existing.isPresent()) {
+      return existing.get();
+    }
+    if (ignoredRecently(phone, tagValueId, dedupDays)) {
+      return null;
+    }
+    jdbcTemplate.update("""
+        INSERT INTO system_tag_suggestions (
+          phone, customer_id, tag_name, tag_value_id, rule_id, status, validation_status
+        )
+        VALUES (?, (SELECT id FROM customers WHERE phone = ? LIMIT 1), ?, ?, ?, 'PENDING', 'VALIDATED')
+        """, phone, phone, tagName, tagValueId, ruleId);
     return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
   }
 }

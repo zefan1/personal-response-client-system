@@ -13,6 +13,9 @@ import com.privateflow.modules.followup.infra.ReminderLogRepository;
 import com.privateflow.modules.followup.infra.TagSuggestionRepository;
 import com.privateflow.modules.followup.config.FollowupConfigProvider;
 import com.privateflow.modules.match.util.PhoneUtils;
+import com.privateflow.modules.tags.TagCandidatePurpose;
+import com.privateflow.modules.tags.TagSelectionContext;
+import com.privateflow.modules.tags.TagSelectionValidator;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -29,18 +32,21 @@ public class ActionExecutor {
   private final TagSuggestionRepository tagSuggestionRepository;
   private final FollowupConfigProvider configProvider;
   private final ApplicationEventPublisher eventPublisher;
+  private final TagSelectionValidator tagSelectionValidator;
 
   public ActionExecutor(
       ObjectMapper objectMapper,
       ReminderLogRepository reminderLogRepository,
       TagSuggestionRepository tagSuggestionRepository,
       FollowupConfigProvider configProvider,
-      ApplicationEventPublisher eventPublisher) {
+      ApplicationEventPublisher eventPublisher,
+      TagSelectionValidator tagSelectionValidator) {
     this.objectMapper = objectMapper;
     this.reminderLogRepository = reminderLogRepository;
     this.tagSuggestionRepository = tagSuggestionRepository;
     this.configProvider = configProvider;
     this.eventPublisher = eventPublisher;
+    this.tagSelectionValidator = tagSelectionValidator;
   }
 
   public void execute(Customer customer, List<RuleMatch> matches) {
@@ -57,11 +63,35 @@ public class ActionExecutor {
       FollowupItem.TagSuggestionPayload tagSuggestion = null;
       if (match.rule().actionType().name().equals("TAG_CHANGE")) {
         String tagName = action.path("tagName").asText("系统标签建议");
-        Long suggestionId = tagSuggestionRepository.upsertPending(
-            customer.getPhone(),
-            tagName,
-            match.rule().id(),
-            configProvider.get().tagSuggestionDedupDays());
+        Long suggestionId;
+        if (action.hasNonNull("tagCategoryId") || action.hasNonNull("tagValueId")) {
+          long categoryId = action.path("tagCategoryId").asLong(0L);
+          long tagValueId = action.path("tagValueId").asLong(0L);
+          if (categoryId <= 0 || tagValueId <= 0) {
+            continue;
+          }
+          var validation = tagSelectionValidator.validateIds(
+              TagCandidatePurpose.FOLLOWUP_RULE,
+              categoryId,
+              List.of(tagValueId),
+              new TagSelectionContext(null, 0, null, match.rule().name() + " / " + action));
+          if (validation == null || !validation.accepted()) {
+            continue;
+          }
+          suggestionId = tagSuggestionRepository.upsertPending(
+              customer.getPhone(),
+              categoryId,
+              tagValueId,
+              tagName,
+              match.rule().id(),
+              configProvider.get().tagSuggestionDedupDays());
+        } else {
+          suggestionId = tagSuggestionRepository.upsertPending(
+              customer.getPhone(),
+              tagName,
+              match.rule().id(),
+              configProvider.get().tagSuggestionDedupDays());
+        }
         if (suggestionId == null) {
           continue;
         }
