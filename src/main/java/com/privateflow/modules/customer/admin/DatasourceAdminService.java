@@ -15,11 +15,17 @@ import com.privateflow.modules.customer.sync.CustomerSyncScheduler;
 import com.privateflow.modules.customer.sync.SheetClient;
 import com.privateflow.modules.customer.sync.SheetRow;
 import com.privateflow.modules.customer.sync.SheetSource;
+import com.privateflow.modules.tags.TagExchangeResult;
+import com.privateflow.modules.tags.TagExchangeService;
+import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.beans.Introspector;
 import java.beans.PropertyDescriptor;
+import java.lang.reflect.Method;
+import java.math.BigDecimal;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -29,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -48,6 +55,29 @@ public class DatasourceAdminService {
   private final WsPushService wsPushService;
   private final ObjectMapper objectMapper;
   private final AuditLogger auditLogger;
+  private final TagExchangeService exchangeService;
+
+  @Autowired
+  public DatasourceAdminService(
+      DatasourceAdminRepository repository,
+      CustomerRepository customerRepository,
+      CustomerSyncScheduler syncScheduler,
+      SheetClient sheetClient,
+      ApplicationEventPublisher eventPublisher,
+      WsPushService wsPushService,
+      ObjectMapper objectMapper,
+      AuditLogger auditLogger,
+      TagExchangeService exchangeService) {
+    this.repository = repository;
+    this.customerRepository = customerRepository;
+    this.syncScheduler = syncScheduler;
+    this.sheetClient = sheetClient;
+    this.eventPublisher = eventPublisher;
+    this.wsPushService = wsPushService;
+    this.objectMapper = objectMapper;
+    this.auditLogger = auditLogger;
+    this.exchangeService = exchangeService;
+  }
 
   public DatasourceAdminService(
       DatasourceAdminRepository repository,
@@ -58,14 +88,16 @@ public class DatasourceAdminService {
       WsPushService wsPushService,
       ObjectMapper objectMapper,
       AuditLogger auditLogger) {
-    this.repository = repository;
-    this.customerRepository = customerRepository;
-    this.syncScheduler = syncScheduler;
-    this.sheetClient = sheetClient;
-    this.eventPublisher = eventPublisher;
-    this.wsPushService = wsPushService;
-    this.objectMapper = objectMapper;
-    this.auditLogger = auditLogger;
+    this(
+        repository,
+        customerRepository,
+        syncScheduler,
+        sheetClient,
+        eventPublisher,
+        wsPushService,
+        objectMapper,
+        auditLogger,
+        null);
   }
 
   public Map<String, Object> list() {
@@ -370,6 +402,8 @@ public class DatasourceAdminService {
     int created = 0;
     int updated = 0;
     int skipped = 0;
+    int unmatchedCount = 0;
+    List<Integer> unmatchedRows = new ArrayList<>();
     List<CsvImportResult.RowError> errors = new ArrayList<>();
     Set<String> seenPhones = new LinkedHashSet<>();
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
@@ -405,13 +439,30 @@ public class DatasourceAdminService {
         customer.setPhone(phone);
         customer.setSourceTable(customer.getSourceTable() == null ? "CSV_IMPORT" : customer.getSourceTable());
         customer.setSyncedAt(LocalDateTime.now());
-        if (headers.contains("nickname")) {
-          int index = headers.indexOf("nickname");
-          if (index < values.size() && isBlank(customer.getNickname())) {
-            customer.setNickname(values.get(index));
+        Map<String, Object> rawFields = new LinkedHashMap<>();
+        for (int index = 0; index < headers.size(); index++) {
+          String header = headers.get(index);
+          if (header.equals("phone") || index >= values.size() || values.get(index).isBlank()) {
+            continue;
           }
+          rawFields.put(header, values.get(index));
         }
-        customerRepository.upsert(customer);
+        TagExchangeResult exchange = exchangeService == null
+            ? new TagExchangeResult(rawFields, List.of(), List.of())
+            : exchangeService.prepareInbound(
+                TagExchangeSourceType.CSV_IMPORT,
+                String.valueOf(total + 1),
+                rawFields);
+        applyCsvFields(customer, exchange.acceptedFields());
+        if (!exchange.unmatched().isEmpty()) {
+          unmatchedCount += exchange.unmatched().size();
+          unmatchedRows.add(total + 1);
+        }
+        customerRepository.upsert(
+            customer,
+            exchange,
+            TagExchangeSourceType.CSV_IMPORT,
+            String.valueOf(total + 1));
         if (exists) {
           updated++;
         } else {
@@ -423,7 +474,49 @@ public class DatasourceAdminService {
     } catch (Exception ex) {
       throw new ApiException(ApiErrorCodes.INTERNAL_ERROR, "csv import failed");
     }
-    return new CsvImportResult(total, created, updated, skipped, errors);
+    return new CsvImportResult(total, created, updated, skipped, errors, unmatchedCount, unmatchedRows);
+  }
+
+  private void applyCsvFields(Customer customer, Map<String, Object> fields) {
+    for (Map.Entry<String, Object> entry : fields.entrySet()) {
+      if ("phone".equals(entry.getKey())) {
+        continue;
+      }
+      if ("nickname".equals(entry.getKey()) && !isBlank(customer.getNickname())) {
+        continue;
+      }
+      setCustomerField(customer, entry.getKey(), entry.getValue());
+    }
+  }
+
+  private void setCustomerField(Customer customer, String field, Object raw) {
+    try {
+      PropertyDescriptor descriptor = new PropertyDescriptor(field, Customer.class);
+      Method setter = descriptor.getWriteMethod();
+      if (setter == null) {
+        return;
+      }
+      setter.invoke(customer, convertCustomerField(descriptor.getPropertyType(), raw));
+    } catch (Exception ex) {
+      // Unknown CSV columns remain ignored, matching the existing import behavior.
+    }
+  }
+
+  private Object convertCustomerField(Class<?> type, Object raw) {
+    String value = String.valueOf(raw).trim();
+    if (String.class.equals(type)) {
+      return value;
+    }
+    if (BigDecimal.class.equals(type)) {
+      return new BigDecimal(value);
+    }
+    if (LocalDate.class.equals(type)) {
+      return LocalDate.parse(value);
+    }
+    if (LocalDateTime.class.equals(type)) {
+      return LocalDateTime.parse(value);
+    }
+    return value;
   }
 
   private List<String> parseLine(String line) {

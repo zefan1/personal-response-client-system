@@ -19,6 +19,10 @@ import com.privateflow.modules.customer.sync.CustomerSyncScheduler;
 import com.privateflow.modules.customer.sync.SheetClient;
 import com.privateflow.modules.customer.sync.SheetRow;
 import com.privateflow.modules.customer.sync.SheetSource;
+import com.privateflow.modules.tags.TagExchangeResult;
+import com.privateflow.modules.tags.TagExchangeService;
+import com.privateflow.modules.tags.TagExchangeSourceType;
+import com.privateflow.modules.tags.TagExchangeUnmatchedValue;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -26,28 +30,34 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.mock.web.MockMultipartFile;
 
 class DatasourceAdminServiceTest {
 
   private DatasourceAdminRepository repository;
+  private CustomerRepository customerRepository;
   private SheetClient sheetClient;
   private AuditLogger auditLogger;
+  private TagExchangeService exchangeService;
   private DatasourceAdminService service;
 
   @BeforeEach
   void setUp() {
     repository = mock(DatasourceAdminRepository.class);
+    customerRepository = mock(CustomerRepository.class);
     sheetClient = mock(SheetClient.class);
     auditLogger = mock(AuditLogger.class);
+    exchangeService = mock(TagExchangeService.class);
     service = new DatasourceAdminService(
         repository,
-        mock(CustomerRepository.class),
+        customerRepository,
         mock(CustomerSyncScheduler.class),
         sheetClient,
         mock(ApplicationEventPublisher.class),
         mock(WsPushService.class),
         new ObjectMapper(),
-        auditLogger);
+        auditLogger,
+        exchangeService);
   }
 
   @Test
@@ -141,6 +151,44 @@ class DatasourceAdminServiceTest {
     assertThat(result).containsEntry("total", 1L).containsEntry("limit", 50);
     assertThat((List<?>) result.get("logs")).hasSize(1);
     verify(repository).importLogs(50);
+  }
+
+  @Test
+  void csvImportKeepsRowAndReportsUnmatchedTagValues() {
+    when(customerRepository.findByPhone("13800000000")).thenReturn(Optional.empty());
+    TagExchangeUnmatchedValue unmatched = new TagExchangeUnmatchedValue(
+        "bodyConcerns",
+        "漏尿,未知关注",
+        List.of("未知关注"),
+        1L,
+        TagExchangeSourceType.CSV_IMPORT,
+        "2");
+    TagExchangeResult exchange = new TagExchangeResult(
+        Map.of("bodyConcerns", "URINE_LEAKAGE"),
+        List.of(),
+        List.of(unmatched));
+    when(exchangeService.prepareInbound(
+        eq(TagExchangeSourceType.CSV_IMPORT),
+        eq("2"),
+        any(Map.class))).thenReturn(exchange);
+
+    MockMultipartFile file = new MockMultipartFile(
+        "file",
+        "customers.csv",
+        "text/csv",
+        "phone,nickname,bodyConcerns\n13800000000,Alice,漏尿,未知关注\n".getBytes());
+
+    CsvImportResult result = service.importCsv(file);
+
+    assertThat(result.created()).isEqualTo(1);
+    assertThat(result.skipped()).isZero();
+    assertThat(result.unmatchedCount()).isEqualTo(1);
+    assertThat(result.unmatchedRows()).containsExactly(2);
+    verify(customerRepository).upsert(
+        any(),
+        eq(exchange),
+        eq(TagExchangeSourceType.CSV_IMPORT),
+        eq("2"));
   }
 
   @Test
