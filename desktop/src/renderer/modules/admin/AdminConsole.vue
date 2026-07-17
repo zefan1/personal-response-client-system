@@ -777,6 +777,7 @@
           <div class="ops-filter-bar customer-search-filter">
             <input v-model="customerSearchKeyword" placeholder="例如：1111、王女士、万江店" @keyup.enter="resetCustomerSearchPageAndLoad" />
             <button class="primary small" type="button" :disabled="loading" @click="resetCustomerSearchPageAndLoad">查询客户</button>
+            <button class="secondary small" type="button" :disabled="loading" @click="exportCustomerSearch">导出当前查询</button>
           </div>
           <div v-if="customerFilterCategories.length" class="customer-tag-filters">
             <label class="customer-tag-logic">
@@ -1957,6 +1958,7 @@ import {
   deleteJson as requestDeleteJson,
   getBlob as requestGetBlob,
   getJson as requestGetJson,
+  postBlob as requestPostBlob,
   postForm as requestPostForm,
   postJson as requestPostJson,
   putJson as requestPutJson,
@@ -5242,6 +5244,18 @@ function customerSearchRequest() {
     page: customerSearchPageInfo.page,
     pageSize: customerSearchPageInfo.size
   };
+}
+
+function customerSearchExportRequest() {
+  const { page: _page, pageSize: _pageSize, ...request } = customerSearchRequest();
+  return request;
+}
+
+async function exportCustomerSearch() {
+  await runWithNotice(async () => {
+    const download = await requestPostBlob('/admin/api/v1/customers/export', customerSearchExportRequest());
+    downloadBlob(download.filename || 'customers.csv', download.blob);
+  }, '客户 CSV 已开始下载');
 }
 
 function ruleListPath() {

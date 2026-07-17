@@ -4,6 +4,7 @@ import AdminConsole from './AdminConsole.vue';
 
 const apiMocks = vi.hoisted(() => ({
   getBlob: vi.fn(),
+  postBlob: vi.fn(),
   getJson: vi.fn(),
   postForm: vi.fn(),
   postJson: vi.fn(),
@@ -13,6 +14,7 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock('../../shared/apiClient', () => ({
   getBlob: apiMocks.getBlob,
+  postBlob: apiMocks.postBlob,
   getJson: apiMocks.getJson,
   postForm: apiMocks.postForm,
   postJson: apiMocks.postJson,
@@ -523,6 +525,7 @@ describe('AdminConsole product surface', () => {
     installMemoryLocalStorage();
     localStorage.clear();
     apiMocks.getBlob.mockResolvedValue({ blob: new Blob(['csv']), filename: 'tags.csv' });
+    apiMocks.postBlob.mockResolvedValue({ blob: new Blob(['csv']), filename: 'customers.csv' });
     apiMocks.getJson.mockImplementation(async (path: string) => ({ success: true, data: apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] }, errorCode: null, message: null }));
     apiMocks.postForm.mockResolvedValue({ success: true, data: { totalRows: 1, created: 1, updated: 0, skipped: 0, errors: [], unmatchedCount: 1, unmatchedRows: [2] }, errorCode: null, message: null });
     apiMocks.postJson.mockImplementation(async (path: string) => ({
@@ -540,6 +543,7 @@ describe('AdminConsole product surface', () => {
     localStorage.clear();
     apiMocks.getJson.mockReset();
     apiMocks.getBlob.mockReset();
+    apiMocks.postBlob.mockReset();
     apiMocks.postForm.mockReset();
     apiMocks.postJson.mockReset();
     apiMocks.putJson.mockReset();
@@ -1179,6 +1183,33 @@ describe('AdminConsole product surface', () => {
     await flushUi();
     expect(mainText(host)).toContain('客户阶段：待确认');
     expect(mainText(host)).toContain('数据来源：私域客资管理表');
+
+    app.unmount();
+  });
+
+  it('exports the complete customer filter without the current page limits', async () => {
+    const createObjectUrlSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:customers');
+    const revokeObjectUrlSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户数据对接').click();
+    await flushUi();
+    await flushUi();
+    findButton(host, '导出当前查询').click();
+    await flushUi();
+
+    expect(apiMocks.postBlob).toHaveBeenCalledWith('/admin/api/v1/customers/export', expect.objectContaining({
+      keyword: '',
+      tagGroups: [],
+      tagGroupLogic: 'AND'
+    }));
+    expect(apiMocks.postBlob.mock.calls[0][1]).not.toHaveProperty('page');
+    expect(apiMocks.postBlob.mock.calls[0][1]).not.toHaveProperty('pageSize');
+    expect(mainText(host)).toContain('客户 CSV 已开始下载');
+    expect(clickSpy).toHaveBeenCalled();
+    expect(createObjectUrlSpy).toHaveBeenCalled();
+    expect(revokeObjectUrlSpy).toHaveBeenCalled();
 
     app.unmount();
   });

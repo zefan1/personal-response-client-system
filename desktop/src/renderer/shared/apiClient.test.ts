@@ -93,6 +93,31 @@ describe('apiClient authentication expiry', () => {
     }));
   });
 
+  it('posts JSON and downloads an authenticated CSV blob', async () => {
+    const fetchMock = vi.fn(async () => new Response('客户ID,手机号\n1,13800000001\n', {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv;charset=utf-8',
+        'Content-Disposition': "attachment; filename*=UTF-8''customers.csv"
+      }
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { postBlob } = await import('./apiClient');
+
+    const result = await postBlob('/admin/api/v1/customers/export', { keyword: 'Alice' });
+
+    expect(result.filename).toBe('customers.csv');
+    expect(await result.blob.text()).toContain('13800000001');
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8080/admin/api/v1/customers/export', expect.objectContaining({
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer token-a'
+      },
+      body: JSON.stringify({ keyword: 'Alice' })
+    }));
+  });
+
   it('surfaces backend download protection errors instead of returning an empty file', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       success: false,

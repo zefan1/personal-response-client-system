@@ -88,6 +88,49 @@ export async function getBlob(
   }
 }
 
+export async function postBlob(
+  path: string,
+  body: unknown,
+  timeoutMs = loadDesktopConfig().requestTotalTimeoutMs,
+  signal?: AbortSignal
+): Promise<BlobDownload> {
+  const config = loadDesktopConfig();
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${config.apiBaseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : {})
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    recordApiSuccess();
+    if (!response.ok) {
+      const payload = await readErrorPayload(response);
+      emitAuthExpiredIfNeeded(path, config.accessToken, response.status, payload);
+      throw new Error(payload.message || payload.errorCode || `下载失败：${response.status}`);
+    }
+    return {
+      blob: await response.blob(),
+      filename: filenameFromDisposition(response.headers.get('Content-Disposition'))
+    };
+  } catch (error) {
+    if (error instanceof Error && !isNetworkError(error)) {
+      throw error;
+    }
+    recordApiNetworkFailure(error);
+    throw toUserFacingNetworkError(error);
+  } finally {
+    window.clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
 export async function postForm<T>(
   path: string,
   body: FormData,
