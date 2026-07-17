@@ -83,11 +83,19 @@ public class QueueRetryManager {
         }
         if (item.getActionType() == TableWriteActionType.INSERT) {
           MapPayload remote = remotePayload(payload, exchange);
+          if (remote.fields().isEmpty()) {
+            repository.markResolved(item.getId());
+            continue;
+          }
           String rowId = tableClient.createRow(remote.sourceTable(), remote.fields(), Duration.ofMillis(config.writeTimeoutMs()));
           newCustomerRowCreator.insertCustomerAfterQueuedCreate(item.getPhone(), remote.sourceTable(), rowId, exchange.acceptedFields());
         } else {
           PendingWritePayload resolved = resolveExistingRow(item.getPhone(), payload);
           MapPayload remote = remotePayload(resolved, exchange);
+          if (remote.fields().isEmpty()) {
+            repository.markResolved(item.getId());
+            continue;
+          }
           tableClient.updateRow(remote.sourceTable(), remote.sourceRowId(), remote.fields(), Duration.ofMillis(config.writeTimeoutMs()));
         }
         repository.markResolved(item.getId());

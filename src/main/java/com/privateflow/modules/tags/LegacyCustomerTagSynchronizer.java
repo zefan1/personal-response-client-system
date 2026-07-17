@@ -131,7 +131,7 @@ public class LegacyCustomerTagSynchronizer {
         numericSourceRecordId,
         item.boundField(),
         item.rawValue(),
-        item.sourceType().name() + ":" + item.rawValue(),
+        item.rawValue(),
         item.categoryId(),
         resolutionNote);
   }
