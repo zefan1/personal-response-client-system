@@ -181,7 +181,7 @@
 - [x] `AnalyticsRepository` 移除写死 `intent_level IN ('HIGH','MEDIUM')` 的标签语义依赖。
 - [x] 跟进规则创建/编辑从动态标签目录选择分类和值。
 - [x] 规则保存和执行都校验标签状态；停用暂停命中，合并更新引用。
-- [ ] 处理现有 `system_tag_suggestions` 6 条 PENDING 记录，不丢原文且不计正式统计。
+- [x] Step 9F 已通过 V70 将现有 `system_tag_suggestions` 6 条 PENDING 旧自由文本建议归档为 IGNORED；保留原文和关联审计记录，不计入正式统计。
 - [x] CSV 导入、外部表格同步和写回使用统一标签校验。
 - [x] 无法识别值写入未匹配记录；外部失败不覆盖本地有效标签。
 - [x] 标签统计导出提供中文名称和内部编码。
@@ -247,3 +247,14 @@
 - [x] 后端相关 50 个测试套件、197 tests：0 failures、0 errors、1 conditional skip；前端 37 个 Vitest 文件、264 tests 全部通过。
 - [x] `npm run typecheck`、`npm run build` 通过；真实启动后登录并调用导出接口返回 200 和 `customers.csv`。
 - [x] 未新增数据库迁移；6 条 PENDING 建议原文和状态未修改；两个 LLM 开关保持关闭；Step 8 行为未修改。
+
+## Step 9F 完成记录：旧自由文本标签建议归档
+
+- [x] 新增 Flyway `V70__archive_legacy_tag_suggestions.sql`：先归档关联 `unmatched_legacy_tag_values`，再归档 6 条 `system_tag_suggestions`，最后将内置规则 4/5 从 `TAG_CHANGE` 改为 `ALERT`/`NOTIFY_LEADER`。
+- [x] 迁移只处理 `PENDING`、`UNMATCHED_LEGACY`、`SYSTEM_TAG_SUGGESTION` 及内置规则 4/5；不猜测正式标签映射，不写入客户正式标签或旧字段。
+- [x] 两阶段 MariaDB 测试验证 V69 基线、6+6 条归档、原文/哈希/客户/规则/关联 ID 保留、`resolved_by=SYSTEM_MIGRATION_9F`、正式分配为 0（测试库）以及第二次迁移 0 次。
+- [x] fresh MariaDB 迁移测试验证空库直接升级到 V70，第二次迁移为 0 次；真实 `private_domain_assistant_smoke` 从 V69 应用 V70 后同样幂等。
+- [x] `ActionExecutorTest` 覆盖 `ALERT`/`NOTIFY_LEADER` 只发送普通提醒且不写标签建议；`TagAnalyticsRepositoryTest` 验证 `IGNORED` 未匹配值不计入当前缺口、`PENDING` 仍计入。
+- [x] 相关后端回归套件：200 tests，0 failures，0 errors，2 conditional skips；focused ActionExecutor/analytics 10 tests 全部通过。
+- [x] 真实库只读核对：schema V70；建议 1-6 为 `IGNORED`；未匹配 16-21 为 `IGNORED` 且 6 条 `resolved_by=SYSTEM_MIGRATION_9F`；规则 4=`ALERT`、5=`NOTIFY_LEADER`；两个 LLM 开关仍为 `false`。
+- [x] 真实库正式分配未由 V70 写入；核对期间运行中的服务另外产生了 `LEGACY_FIELD_SYNC`/`MANUAL` 分配，当前总数 11，需与迁移结果区分记录。
