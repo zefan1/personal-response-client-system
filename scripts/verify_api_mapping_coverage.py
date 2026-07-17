@@ -10,6 +10,9 @@ SRC_DIR = ROOT / "src" / "main" / "java"
 ACCEPTANCE_FILES = [
     ROOT / "scripts" / "acceptance_backend_api.py",
     ROOT / "scripts" / "acceptance_real_external_local.py",
+    ROOT / "scripts" / "acceptance_admin_batch_b.py",
+    ROOT / "scripts" / "acceptance_sidebar_batch_a.py",
+    ROOT / "scripts" / "acceptance_llm_failover_local.py",
 ]
 
 METHODS = {
@@ -21,6 +24,23 @@ METHODS = {
 
 INTENTIONAL_GAPS = {
     ("POST", "/admin/api/v1/skill-prompt/{type}/restore"): "Covered by concrete prompt type restore; path matcher does not generalize type placeholders.",
+    ("GET", "/admin/api/v1/customers/search"): "Covered by CustomerAdminSearchControllerTest; live batch uses the legacy customer search path.",
+    ("POST", "/admin/api/v1/customers/search"): "Covered by CustomerAdminSearchControllerTest; live batch does not duplicate structured search fixtures.",
+    ("POST", "/admin/api/v1/customers/export"): "Covered by CustomerAdminSearchControllerTest; export reuses the structured search query contract.",
+    ("POST", "/admin/api/v1/analytics/tags"): "Covered by AnalyticsControllerTest and TagAnalyticsRepositoryTest; live batch does not create analytics fixtures.",
+    ("GET", "/admin/api/v1/tags/categories/export"): "Covered by tag exchange/export tests; live batch does not persist export files.",
+    ("GET", "/admin/api/v1/tags/values/export"): "Covered by tag exchange/export tests; live batch does not persist export files.",
+    ("POST", "/admin/api/v1/tags/categories/{id}/merge-preview"): "Covered by TagAdminControllerTest and module 46 contract checks.",
+    ("POST", "/admin/api/v1/tags/categories/{id}/merge"): "Covered by module 46 merge contract checks; live batch avoids destructive merge fixtures.",
+    ("POST", "/admin/api/v1/tags/values/{id}/merge-preview"): "Covered by module 46 merge contract checks.",
+    ("POST", "/admin/api/v1/tags/values/{id}/merge"): "Covered by module 46 merge contract checks; live batch avoids destructive merge fixtures.",
+    ("PUT", "/admin/api/v1/tags/categories/{id}/toggle"): "Covered by tag admin service/controller tests; live batch toggles a tag value instead.",
+    ("PUT", "/api/v1/customers/{phone}/tags/{categoryId}"): "Covered by CustomerControllerTest and tag service tests; live batch avoids mutating a real customer.",
+    ("PUT", "/api/v1/customers/{phone}/tags/{categoryId}/lock"): "Covered by CustomerControllerTest and tag service tests; live batch avoids mutating a real customer.",
+    ("GET", "/admin/api/v1/llm-routes/scenes"): "Covered by LlmAdminControllerTest; live batch validates route list/create/update instead.",
+    ("PUT", "/admin/api/v1/llm-routes/{id}"): "Covered by LlmAdminControllerTest; live batch avoids replacing a live route payload.",
+    ("POST", "/admin/api/v1/llm-environments/{id}/test"): "Covered by AiConfigControllerTest; live execution requires a configured provider endpoint.",
+    ("PUT", "/admin/api/v1/llm-environments/{id}"): "Covered by AiConfigControllerTest; live batch creates and cleans up a temporary environment.",
 }
 
 
@@ -71,6 +91,15 @@ def acceptance_paths() -> set[tuple[str, str]]:
         path = re.sub(r"\{[^}]+\}", "{id}", path)
         path = re.sub(r"\?.*$", "", path)
         paths.add((method, normalize_path(path)))
+    for match in re.finditer(r'request_json\(\s*"([A-Z]+)"\s*,\s*f?["\']([^"\']+)["\']', text):
+        method, path = match.groups()
+        path = re.sub(r"\{[^}]+\}", "{id}", path)
+        path = re.sub(r"\?.*$", "", path)
+        paths.add((method, normalize_path(path)))
+    for match in re.finditer(r'delete_ok\(\s*f?["\']([^"\']+)["\']', text):
+        path = re.sub(r"\{[^}]+\}", "{id}", match.group(1))
+        path = re.sub(r"\?.*$", "", path)
+        paths.add(("DELETE", normalize_path(path)))
     method_window = re.compile(r'"(GET|POST|PUT|DELETE)"\s*,\s*f?["\']([^"\']*(?:/admin)?/api/v1/[^"\']+)["\']')
     for method, path in method_window.findall(text):
         path = re.sub(r"\{[^}]+\}", "{id}", path)

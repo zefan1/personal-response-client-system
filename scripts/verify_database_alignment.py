@@ -354,7 +354,7 @@ ENUM_COLUMNS = {
     ("accounts", "role"): {"ADMIN", "LEADER", "KEEPER"},
     ("customers", "lead_type"): {"TUAN_GOU", "XIAN_SUO", "PENDING"},
     ("skill_scene_bindings", "scene"): {"CHAT_RECOGNIZE", "ACTIVE_REPLY", "REGENERATE", "PROFILE_EXTRACT", "OPENING"},
-    ("skill_scene_bindings", "lead_type"): {"TUAN_GOU", "XIAN_SUO", "PENDING"},
+    ("skill_scene_bindings", "lead_type"): {"GENERAL", "TUAN_GOU", "XIAN_SUO", "PENDING"},
     ("quick_search_items", "content_type"): {"TEMPLATE", "KNOWLEDGE", "LOCATION", "IMAGE", "MINI_PROGRAM"},
     ("quick_search_items", "lead_type"): {"TUAN_GOU", "XIAN_SUO", "GENERAL"},
     ("desktop_versions", "platform"): {"WINDOWS", "MAC"},

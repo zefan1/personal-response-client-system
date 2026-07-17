@@ -13,7 +13,7 @@ EXPECTED = {
     "account.roles": {"ADMIN", "LEADER", "KEEPER"},
     "customer.leadTypes": {"TUAN_GOU", "XIAN_SUO", "PENDING"},
     "skill.scenes": {"CHAT_RECOGNIZE", "ACTIVE_REPLY", "REGENERATE", "PROFILE_EXTRACT", "OPENING"},
-    "skill.leadTypes": {"TUAN_GOU", "XIAN_SUO", "PENDING"},
+    "skill.leadTypes": {"GENERAL", "TUAN_GOU", "XIAN_SUO", "PENDING"},
     "quickSearch.contentTypes": {"TEMPLATE", "KNOWLEDGE", "LOCATION", "IMAGE", "MINI_PROGRAM"},
     "quickSearch.leadTypes": {"TUAN_GOU", "XIAN_SUO", "GENERAL"},
     "desktopVersion.platforms": {"WINDOWS", "MAC"},

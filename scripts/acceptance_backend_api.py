@@ -508,7 +508,7 @@ def customer_flow(api: ApiClient, ctx: Context):
       "action": "CONFIRM",
       "suggestionIds": [],
       "operator": "acceptance"
-  }, ctx.token)
+  }, ctx.token, expect_success=False, allow_status={400})
   api.request("customer save to table bad request", "POST", f"/api/v1/customers/{phone}/save-to-table", {
       "sourceTable": "",
       "sourceRowId": "",
@@ -971,7 +971,7 @@ def negative_matrix_flow(api: ApiClient, ctx: Context):
       "skillId": "bad-" + ctx.ts[-6:],
       "skillName": "bad lead type",
       "scene": "OPENING",
-      "leadType": "GENERAL",
+      "leadType": "UNKNOWN",
       "priority": 1
   }, ctx.token, allow_status={400}, coverage="invalid", **bad)
   api.request("negative skill env invalid url", "POST", "/admin/api/v1/skill-environments", {
