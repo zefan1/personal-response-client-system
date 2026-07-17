@@ -182,8 +182,8 @@
 - [x] 跟进规则创建/编辑从动态标签目录选择分类和值。
 - [x] 规则保存和执行都校验标签状态；停用暂停命中，合并更新引用。
 - [ ] 处理现有 `system_tag_suggestions` 6 条 PENDING 记录，不丢原文且不计正式统计。
-- [ ] CSV 导入、外部表格同步和写回使用统一标签校验。
-- [ ] 无法识别值写入未匹配记录；外部失败不覆盖本地有效标签。
+- [x] CSV 导入、外部表格同步和写回使用统一标签校验。
+- [x] 无法识别值写入未匹配记录；外部失败不覆盖本地有效标签。
 - [x] 标签统计导出提供中文名称和内部编码。
 
 ## Step 10：全量测试和真实运行验收
@@ -221,7 +221,7 @@
 - [x] `npm run typecheck`、`npm run build`、`renderer_smoke=passed`、`electron_smoke=passed`。
 - [x] 未新增数据库迁移；6 条 `system_tag_suggestions.status=PENDING` 原文/状态未修改；两个 LLM 开关保持 `false`；Step 8 行为未修改。
 - [x] Step 9C 跟进规则动态标签条件已完成。
-- [ ] Step 9D CSV/外部表格同步/写回统一标签校验尚未开始。
+- [x] Step 9D CSV/外部表格同步/写回统一标签校验已完成。
 
 ## Step 9C 完成记录：跟进规则动态标签条件
 
@@ -235,4 +235,4 @@
 - [x] 后端 followup/tags 定向 128 tests：0 failures、0 errors、1 conditional skip；AdminConsole 38 tests 通过。
 - [x] `npm run typecheck`、`npm run build` 通过。
 - [x] 未新增数据库迁移；未写入或更新现有 6 条 PENDING 建议；两个 LLM 开关保持关闭；Step 8 行为未修改。
-- [ ] Step 9D CSV/外部表格同步/写回统一标签校验尚未开始。
+- [x] Step 9D CSV/外部表格同步/写回统一标签校验已完成。
