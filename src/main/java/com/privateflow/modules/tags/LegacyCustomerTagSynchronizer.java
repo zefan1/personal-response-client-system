@@ -54,6 +54,19 @@ public class LegacyCustomerTagSynchronizer {
     if (exchangeService == null) {
       throw new IllegalStateException("source-aware tag synchronization requires exchange service");
     }
+    TagExchangeResult result = exchangeService.prepareInbound(sourceType, sourceRecordId, changedFields);
+    synchronize(phone, result, sourceType, sourceRecordId);
+  }
+
+  @Transactional
+  public void synchronize(
+      String phone,
+      TagExchangeResult result,
+      TagExchangeSourceType sourceType,
+      String sourceRecordId) {
+    if (phone == null || phone.isBlank() || result == null) {
+      return;
+    }
     CustomerRef customer = jdbcTemplate.query("""
         SELECT id, version FROM customers WHERE phone = ? LIMIT 1
         """, (rs, rowNum) -> new CustomerRef(rs.getLong("id"), rs.getInt("version")), phone)
@@ -61,7 +74,6 @@ public class LegacyCustomerTagSynchronizer {
     if (customer == null) {
       return;
     }
-    TagExchangeResult result = exchangeService.prepareInbound(sourceType, sourceRecordId, changedFields);
     for (Map.Entry<String, Object> entry : result.acceptedFields().entrySet()) {
       String column = LEGACY_COLUMNS.get(entry.getKey());
       if (column != null) {

@@ -191,7 +191,7 @@ public class CustomerRepository {
       } else {
         tagSynchronizer.synchronize(
             customer.getPhone(),
-            exchangeResult.acceptedFields(),
+            exchangeResult,
             sourceType,
             sourceRecordId);
       }

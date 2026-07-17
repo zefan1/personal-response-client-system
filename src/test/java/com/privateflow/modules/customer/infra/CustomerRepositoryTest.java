@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.tags.TagExchangeResult;
 import com.privateflow.modules.tags.TagExchangeSourceType;
+import com.privateflow.modules.tags.TagExchangeUnmatchedValue;
 import com.privateflow.modules.tags.LegacyCustomerTagSynchronizer;
 import java.util.List;
 import java.util.Map;
@@ -78,13 +79,19 @@ class CustomerRepositoryTest {
     TagExchangeResult exchange = new TagExchangeResult(
         Map.of("intentLevel", "HIGH"),
         List.of(),
-        List.of());
+        List.of(new TagExchangeUnmatchedValue(
+            "intentLevel",
+            "UNKNOWN",
+            List.of("UNKNOWN"),
+            2L,
+            TagExchangeSourceType.EXTERNAL_SYNC,
+            "22")));
 
     assertThat(repository.upsert(customer, exchange, TagExchangeSourceType.EXTERNAL_SYNC, "22"))
         .isTrue();
     verify(synchronizer).synchronize(
         "13800000000",
-        Map.of("intentLevel", "HIGH"),
+        exchange,
         TagExchangeSourceType.EXTERNAL_SYNC,
         "22");
   }
