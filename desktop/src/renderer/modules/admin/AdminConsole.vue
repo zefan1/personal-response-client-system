@@ -961,6 +961,7 @@
           <div v-if="csvImportResult" class="ops-detail-box">
             <strong>导入结果</strong>
             <p>{{ csvImportSummary }}</p>
+            <p v-if="csvUnmatchedCount">未匹配标签 {{ csvUnmatchedCount }}，涉及第 {{ csvUnmatchedRows.join('、') }} 行</p>
             <div v-if="csvImportErrors.length" class="ops-error-list">
               <span v-for="error in csvImportErrors.slice(0, 8)" :key="`${error.row}-${error.reason}`">第 {{ error.row }} 行：{{ error.reason }}</span>
               <small v-if="csvImportErrors.length > 8">还有 {{ csvImportErrors.length - 8 }} 条错误未展示</small>
@@ -2900,6 +2901,8 @@ const csvImportSummary = computed(() => {
   if (!result) return '尚未导入';
   return `总行数 ${result.totalRows ?? 0}，新增 ${result.created ?? 0}，更新 ${result.updated ?? 0}，跳过 ${result.skipped ?? 0}`;
 });
+const csvUnmatchedCount = computed(() => Number(csvImportResult.value?.unmatchedCount ?? 0));
+const csvUnmatchedRows = computed(() => listFrom(csvImportResult.value ?? {}, 'unmatchedRows'));
 
 onMounted(() => {
   disposeTagRefresh = eventBus.on<{ configKey?: string; configKeys?: string[] }>('CONFIG_REFRESH', (payload) => {

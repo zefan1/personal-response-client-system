@@ -524,7 +524,7 @@ describe('AdminConsole product surface', () => {
     localStorage.clear();
     apiMocks.getBlob.mockResolvedValue({ blob: new Blob(['csv']), filename: 'tags.csv' });
     apiMocks.getJson.mockImplementation(async (path: string) => ({ success: true, data: apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] }, errorCode: null, message: null }));
-    apiMocks.postForm.mockResolvedValue({ success: true, data: { totalRows: 1, created: 1, updated: 0, skipped: 0, errors: [] }, errorCode: null, message: null });
+    apiMocks.postForm.mockResolvedValue({ success: true, data: { totalRows: 1, created: 1, updated: 0, skipped: 0, errors: [], unmatchedCount: 1, unmatchedRows: [2] }, errorCode: null, message: null });
     apiMocks.postJson.mockImplementation(async (path: string) => ({
       success: true,
       data: apiData[path] ?? {},
@@ -1120,6 +1120,8 @@ describe('AdminConsole product surface', () => {
     expect(apiMocks.postForm).toHaveBeenCalledWith('/admin/api/v1/datasources/import', expect.any(FormData));
     expect(mainText(host)).toContain('总行数 1，新增 1');
     expect(mainText(host)).toContain('last.csv');
+    expect(mainText(host)).toContain('未匹配标签 1');
+    expect(mainText(host)).toContain('2');
     expect(mainText(host)).toContain('phone invalid');
 
     findButton(host, '保存映射').click();
