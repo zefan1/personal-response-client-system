@@ -2,9 +2,14 @@ package com.privateflow.modules.customer.infra;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.tags.TagExchangeResult;
+import com.privateflow.modules.tags.TagExchangeSourceType;
 import com.privateflow.modules.tags.LegacyCustomerTagSynchronizer;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -14,6 +19,7 @@ class CustomerRepositoryTest {
 
   private JdbcTemplate jdbcTemplate;
   private CustomerRepository repository;
+  private LegacyCustomerTagSynchronizer synchronizer;
 
   @BeforeEach
   void setUp() {
@@ -43,9 +49,8 @@ class CustomerRepositoryTest {
           UNIQUE (phone)
         )
         """);
-    repository = new CustomerRepository(
-        jdbcTemplate,
-        mock(LegacyCustomerTagSynchronizer.class));
+    synchronizer = mock(LegacyCustomerTagSynchronizer.class);
+    repository = new CustomerRepository(jdbcTemplate, synchronizer);
   }
 
   @Test
@@ -62,5 +67,25 @@ class CustomerRepositoryTest {
     assertThat(customer.getAssignedKeeper()).isEqualTo("real-keeper");
     assertThat(customer.getVersion()).isEqualTo(3);
     assertThat(repository.findById(8L)).isEmpty();
+  }
+
+  @Test
+  void sourceAwareUpsertPassesNormalizedExchangeResultToTagBridge() {
+    Customer customer = new Customer();
+    customer.setPhone("13800000000");
+    customer.setIntentLevel("HIGH");
+
+    TagExchangeResult exchange = new TagExchangeResult(
+        Map.of("intentLevel", "HIGH"),
+        List.of(),
+        List.of());
+
+    assertThat(repository.upsert(customer, exchange, TagExchangeSourceType.EXTERNAL_SYNC, "22"))
+        .isTrue();
+    verify(synchronizer).synchronize(
+        "13800000000",
+        Map.of("intentLevel", "HIGH"),
+        TagExchangeSourceType.EXTERNAL_SYNC,
+        "22");
   }
 }

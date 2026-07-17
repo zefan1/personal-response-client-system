@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,13 +22,56 @@ public class LegacyCustomerTagSynchronizer {
       "intentLevel", "intent_level");
 
   private final JdbcTemplate jdbcTemplate;
+  private final TagExchangeService exchangeService;
+
+  @Autowired
+  public LegacyCustomerTagSynchronizer(
+      JdbcTemplate jdbcTemplate,
+      TagExchangeService exchangeService) {
+    this.jdbcTemplate = jdbcTemplate;
+    this.exchangeService = exchangeService;
+  }
 
   public LegacyCustomerTagSynchronizer(JdbcTemplate jdbcTemplate) {
     this.jdbcTemplate = jdbcTemplate;
+    this.exchangeService = null;
   }
 
   @Transactional
   public void synchronize(String phone, Map<String, ?> changedFields) {
+    synchronizeLegacyCustomerField(phone, changedFields);
+  }
+
+  @Transactional
+  public void synchronize(
+      String phone,
+      Map<String, ?> changedFields,
+      TagExchangeSourceType sourceType,
+      String sourceRecordId) {
+    if (phone == null || phone.isBlank() || changedFields == null || changedFields.isEmpty()) {
+      return;
+    }
+    if (exchangeService == null) {
+      throw new IllegalStateException("source-aware tag synchronization requires exchange service");
+    }
+    CustomerRef customer = jdbcTemplate.query("""
+        SELECT id, version FROM customers WHERE phone = ? LIMIT 1
+        """, (rs, rowNum) -> new CustomerRef(rs.getLong("id"), rs.getInt("version")), phone)
+        .stream().findFirst().orElse(null);
+    if (customer == null) {
+      return;
+    }
+    TagExchangeResult result = exchangeService.prepareInbound(sourceType, sourceRecordId, changedFields);
+    for (Map.Entry<String, Object> entry : result.acceptedFields().entrySet()) {
+      String column = LEGACY_COLUMNS.get(entry.getKey());
+      if (column != null) {
+        synchronizeField(customer, entry.getKey(), column, entry.getValue());
+      }
+    }
+    result.unmatched().forEach(item -> recordExchangeUnmatched(customer.id(), item));
+  }
+
+  private void synchronizeLegacyCustomerField(String phone, Map<String, ?> changedFields) {
     if (phone == null || phone.isBlank() || changedFields == null || changedFields.isEmpty()) {
       return;
     }
@@ -44,6 +88,50 @@ public class LegacyCustomerTagSynchronizer {
         continue;
       }
       synchronizeField(customer, entry.getKey(), column, entry.getValue());
+    }
+  }
+
+  private void recordExchangeUnmatched(long customerId, TagExchangeUnmatchedValue item) {
+    jdbcTemplate.update("""
+        UPDATE unmatched_legacy_tag_values
+        SET status = 'SUPERSEDED', updated_at = NOW()
+        WHERE customer_id = ? AND source_type = ? AND legacy_field = ? AND status = 'PENDING'
+        """, customerId, item.sourceType().name(), item.boundField());
+    Long numericSourceRecordId = parseLong(item.sourceRecordId());
+    String resolutionNote = numericSourceRecordId == null && item.sourceRecordId() != null
+        ? "sourceRecordId=" + item.sourceRecordId()
+        : null;
+    jdbcTemplate.update("""
+        INSERT INTO unmatched_legacy_tag_values (
+          customer_id, source_type, source_record_id, legacy_field, raw_value,
+          raw_value_hash, category_id, status, resolution_note
+        ) VALUES (?, ?, ?, ?, ?, SHA2(?, 256), ?, 'PENDING', ?)
+        ON DUPLICATE KEY UPDATE
+          status = 'PENDING',
+          source_type = VALUES(source_type),
+          source_record_id = VALUES(source_record_id),
+          category_id = VALUES(category_id),
+          resolution_note = VALUES(resolution_note),
+          updated_at = NOW()
+        """,
+        customerId,
+        item.sourceType().name(),
+        numericSourceRecordId,
+        item.boundField(),
+        item.rawValue(),
+        item.sourceType().name() + ":" + item.rawValue(),
+        item.categoryId(),
+        resolutionNote);
+  }
+
+  private Long parseLong(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      return Long.valueOf(value);
+    } catch (NumberFormatException ex) {
+      return null;
     }
   }
 

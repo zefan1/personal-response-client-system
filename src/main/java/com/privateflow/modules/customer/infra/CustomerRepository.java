@@ -4,6 +4,8 @@ import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.LeadTypes;
 import com.privateflow.modules.customer.ScanFilter;
 import com.privateflow.modules.tags.LegacyCustomerTagSynchronizer;
+import com.privateflow.modules.tags.TagExchangeResult;
+import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -102,6 +104,15 @@ public class CustomerRepository {
 
   @Transactional
   public boolean upsert(Customer customer) {
+    return upsert(customer, null, null, null);
+  }
+
+  @Transactional
+  public boolean upsert(
+      Customer customer,
+      TagExchangeResult exchangeResult,
+      TagExchangeSourceType sourceType,
+      String sourceRecordId) {
     String leadType = LeadTypes.normalize(customer.getLeadType());
     int updated = jdbcTemplate.update("""
         INSERT INTO customers (
@@ -170,12 +181,20 @@ public class CustomerRepository {
         customer.getSourceRowId(),
         customer.getSyncedAt() == null ? null : Timestamp.valueOf(customer.getSyncedAt()));
     if (updated > 0) {
-      Map<String, Object> legacyFields = new LinkedHashMap<>();
-      legacyFields.put("personalityType", customer.getPersonalityType());
-      legacyFields.put("bodyConcerns", customer.getBodyConcerns());
-      legacyFields.put("worries", customer.getWorries());
-      legacyFields.put("intentLevel", customer.getIntentLevel());
-      tagSynchronizer.synchronize(customer.getPhone(), legacyFields);
+      if (exchangeResult == null) {
+        Map<String, Object> legacyFields = new LinkedHashMap<>();
+        legacyFields.put("personalityType", customer.getPersonalityType());
+        legacyFields.put("bodyConcerns", customer.getBodyConcerns());
+        legacyFields.put("worries", customer.getWorries());
+        legacyFields.put("intentLevel", customer.getIntentLevel());
+        tagSynchronizer.synchronize(customer.getPhone(), legacyFields);
+      } else {
+        tagSynchronizer.synchronize(
+            customer.getPhone(),
+            exchangeResult.acceptedFields(),
+            sourceType,
+            sourceRecordId);
+      }
     }
     return updated > 0;
   }
