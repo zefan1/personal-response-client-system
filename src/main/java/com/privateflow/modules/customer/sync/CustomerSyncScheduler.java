@@ -138,7 +138,8 @@ public class CustomerSyncScheduler {
 
   private void processRow(String sourceTable, SheetRow row) {
     try {
-      Customer incoming = mappingResolver.mapRow(sourceTable, row);
+      FieldMappingResult mapping = mappingResolver.mapRowResult(sourceTable, row);
+      Customer incoming = mapping.customer();
       if (incoming.getPhone() == null || incoming.getPhone().isBlank()) {
         failureRepository.record(sourceTable, row.rowId(), null, "手机号为空", row.values().toString());
         return;
@@ -146,7 +147,11 @@ public class CustomerSyncScheduler {
       Customer existing = customerRepository.findByPhone(incoming.getPhone()).orElse(null);
       boolean isNewPromoLead = existing == null && "推广组客资登记表".equals(sourceTable);
       Customer merged = mergeEngine.merge(incoming, existing);
-      customerRepository.upsert(merged);
+      customerRepository.upsert(
+          merged,
+          mapping.tagExchange(),
+          com.privateflow.modules.tags.TagExchangeSourceType.EXTERNAL_SYNC,
+          row.rowId());
       customerRepository.findByPhone(merged.getPhone()).ifPresent(cacheManager::write);
       if (isNewPromoLead) {
         eventPublisher.publishEvent(new NewLeadEvent(merged.getPhone(), merged.getLeadType(), sourceTable));

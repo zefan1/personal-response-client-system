@@ -3,6 +3,9 @@ package com.privateflow.modules.customer.sync;
 import com.privateflow.common.events.ConfigChangedEvent;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.LeadTypes;
+import com.privateflow.modules.tags.TagExchangeResult;
+import com.privateflow.modules.tags.TagExchangeService;
+import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
@@ -14,6 +17,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -22,14 +26,25 @@ public class FieldMappingResolver {
 
   private static final Logger log = LoggerFactory.getLogger(FieldMappingResolver.class);
   private final JdbcTemplate jdbcTemplate;
+  private final TagExchangeService exchangeService;
   private volatile Map<String, Map<String, String>> mappings = Map.of();
 
-  public FieldMappingResolver(JdbcTemplate jdbcTemplate) {
+  @Autowired
+  public FieldMappingResolver(JdbcTemplate jdbcTemplate, TagExchangeService exchangeService) {
     this.jdbcTemplate = jdbcTemplate;
+    this.exchangeService = exchangeService;
     reload();
   }
 
+  public FieldMappingResolver(JdbcTemplate jdbcTemplate) {
+    this(jdbcTemplate, null);
+  }
+
   public Customer mapRow(String sourceTable, SheetRow row) {
+    return mapRowResult(sourceTable, row).customer();
+  }
+
+  public FieldMappingResult mapRowResult(String sourceTable, SheetRow row) {
     Customer customer = new Customer();
     customer.setSourceTable(sourceTable);
     customer.setSourceRowId(row.rowId());
@@ -38,15 +53,25 @@ public class FieldMappingResolver {
     if (tableMappings.isEmpty()) {
       throw new IllegalStateException("no enabled field mappings configured for source table: " + sourceTable);
     }
+    Map<String, Object> mappedFields = new HashMap<>();
     for (Map.Entry<String, String> entry : tableMappings.entrySet()) {
       String raw = row.values().get(entry.getKey());
       if (raw == null || raw.isBlank()) {
         continue;
       }
-      set(customer, entry.getValue(), raw);
+      mappedFields.put(entry.getValue(), raw);
+    }
+    TagExchangeResult exchange = exchangeService == null
+        ? new TagExchangeResult(mappedFields, List.of(), List.of())
+        : exchangeService.prepareInbound(
+            TagExchangeSourceType.EXTERNAL_SYNC,
+            row.rowId(),
+            mappedFields);
+    for (Map.Entry<String, Object> entry : exchange.acceptedFields().entrySet()) {
+      set(customer, entry.getKey(), String.valueOf(entry.getValue()));
     }
     customer.setLeadType(LeadTypes.normalize(customer.getLeadType()));
-    return customer;
+    return new FieldMappingResult(customer, exchange);
   }
 
   @EventListener

@@ -4,7 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.tags.TagExchangeResult;
+import com.privateflow.modules.tags.TagExchangeService;
+import java.util.List;
 import java.util.Map;
+import org.mockito.Mockito;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -57,5 +61,32 @@ class FieldMappingResolverTest {
     assertThatThrownBy(() -> resolver.mapRow("未配置表", new SheetRow("row-1", Map.of("phone", "13800000000"))))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("no enabled field mappings");
+  }
+
+  @Test
+  void mapRowResultReturnsAcceptedTagsAndUnmatchedMetadata() {
+    jdbcTemplate.update("""
+        INSERT INTO datasource_field_mappings (source_table, source_field, target_field, is_enabled)
+        VALUES ('table_a', 'concerns', 'bodyConcerns', 1),
+               ('table_a', 'phone', 'phone', 1)
+        """);
+    TagExchangeService exchangeService = Mockito.mock(TagExchangeService.class);
+    TagExchangeResult exchange = new TagExchangeResult(
+        Map.of("bodyConcerns", "URINE_LEAKAGE", "phone", "13800000000"),
+        List.of(),
+        List.of());
+    Mockito.when(exchangeService.prepareInbound(
+        Mockito.eq(com.privateflow.modules.tags.TagExchangeSourceType.EXTERNAL_SYNC),
+        Mockito.eq("row-1"),
+        Mockito.any(Map.class))).thenReturn(exchange);
+    FieldMappingResolver resolver = new FieldMappingResolver(jdbcTemplate, exchangeService);
+
+    FieldMappingResult result = resolver.mapRowResult("table_a", new SheetRow("row-1", Map.of(
+        "concerns", "漏尿",
+        "phone", "13800000000")));
+
+    assertThat(result.customer().getPhone()).isEqualTo("13800000000");
+    assertThat(result.customer().getBodyConcerns()).isEqualTo("URINE_LEAKAGE");
+    assertThat(result.tagExchange()).isEqualTo(exchange);
   }
 }
