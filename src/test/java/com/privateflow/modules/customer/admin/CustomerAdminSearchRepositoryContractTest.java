@@ -12,4 +12,14 @@ class CustomerAdminSearchRepositoryContractTest {
         "search", CustomerFilter.class, CustomerAccessScope.class))
         .doesNotThrowAnyException();
   }
+
+  @Test
+  void exposesCountAndExportEntryPoints() {
+    assertThatCode(() -> CustomerAdminSearchRepository.class.getMethod(
+        "count", CustomerFilter.class, CustomerAccessScope.class))
+        .doesNotThrowAnyException();
+    assertThatCode(() -> CustomerAdminSearchRepository.class.getMethod(
+        "exportRows", CustomerFilter.class, CustomerAccessScope.class, int.class))
+        .doesNotThrowAnyException();
+  }
 }

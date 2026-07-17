@@ -106,8 +106,9 @@ class CustomerAdminSearchRepositoryTest {
         INSERT INTO customers (
           id, phone, nickname, assigned_keeper, source_table, source_row_id, created_at, updated_at
         ) VALUES
-          (1, '13800000001', 'Alice', 'keeper-1', 'customers', 'row-1', '2026-07-16 10:00:00', '2026-07-16 10:00:00'),
-          (2, '13800000002', 'Bob', 'keeper-1', 'customers', 'row-2', '2026-07-16 11:00:00', '2026-07-16 11:00:00')
+        (1, '13800000001', 'Alice', 'keeper-1', 'customers', 'row-1', '2026-07-16 10:00:00', '2026-07-16 10:00:00'),
+          (2, '13800000002', 'Bob', 'keeper-1', 'customers', 'row-2', '2026-07-16 11:00:00', '2026-07-16 11:00:00'),
+          (3, '13800000003', 'Carol', 'keeper-2', 'customers', 'row-3', '2026-07-16 12:00:00', '2026-07-16 12:00:00')
         """);
     jdbcTemplate.update("""
         INSERT INTO tag_categories (
@@ -128,7 +129,9 @@ class CustomerAdminSearchRepositoryTest {
           (1001, 1, 7, 101, 1),
           (1002, 1, 7, 102, 1),
           (1003, 2, 7, 101, 1),
-          (1004, 2, 7, 102, 0)
+          (1004, 2, 7, 102, 0),
+          (1005, 3, 7, 101, 1),
+          (1006, 3, 7, 102, 1)
         """);
   }
 
@@ -142,11 +145,29 @@ class CustomerAdminSearchRepositoryTest {
 
     CustomerAdminSearchPage page = repository.search(filter, CustomerAccessScope.all());
 
-    assertThat(page.total()).isEqualTo(1);
-    assertThat(page.items()).singleElement().satisfies(item -> {
-      assertThat(item.id()).isEqualTo(1L);
+    assertThat(page.total()).isEqualTo(2);
+    assertThat(page.items()).extracting(CustomerAdminListItem::id).containsExactly(3L, 1L);
+    assertThat(page.items()).allSatisfy(item -> {
       assertThat(item.tags()).extracting(CustomerTagSummary::valueId)
           .containsExactly(101L, 102L);
     });
+  }
+
+  @Test
+  void exportRowsUsesTheSameTagFilterAndAccessScopeAsSearch() {
+    CustomerFilter filter = new CustomerFilter(
+        "", List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+        null, null,
+        List.of(new TagFilterGroup(7L, List.of(101L, 102L), TagMatchMode.ALL)),
+        TagGroupLogic.AND, CustomerSortField.UPDATED_AT, SortDirection.DESC, 1, 20);
+    CustomerAccessScope scope = new CustomerAccessScope(false, List.of("keeper-1"), true);
+
+    CustomerAdminSearchPage page = repository.search(filter, scope);
+    List<CustomerAdminListItem> exported = repository.exportRows(filter, scope, 100);
+
+    assertThat(repository.count(filter, scope)).isEqualTo(page.total());
+    assertThat(exported).extracting(CustomerAdminListItem::id).containsExactly(1L);
+    assertThat(exported.get(0).tags()).extracting(CustomerTagSummary::valueId)
+        .containsExactly(101L, 102L);
   }
 }

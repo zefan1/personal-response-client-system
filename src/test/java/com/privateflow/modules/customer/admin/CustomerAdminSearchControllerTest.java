@@ -7,15 +7,19 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.privateflow.modules.api.ApiException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.springframework.http.MediaType;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.hamcrest.Matchers;
 
 class CustomerAdminSearchControllerTest {
 
@@ -46,7 +50,9 @@ class CustomerAdminSearchControllerTest {
   @Test
   void serviceValidatesBoundsWithChineseMessages() {
     CustomerAdminSearchRepository repository = mock(CustomerAdminSearchRepository.class);
-    CustomerAdminSearchService service = new CustomerAdminSearchService(repository);
+    CustomerAdminSearchService service = new CustomerAdminSearchService(
+        repository, mock(CustomerFilterValidator.class), mock(CustomerAccessScopeResolver.class),
+        mock(CustomerCsvWriter.class));
 
     assertThatThrownBy(() -> service.search("", 0, 20))
         .isInstanceOf(ApiException.class)
@@ -88,5 +94,23 @@ class CustomerAdminSearchControllerTest {
       assertThat(group.match()).isEqualTo(TagMatchMode.ANY);
     });
     assertThat(captor.getValue().page()).isEqualTo(2);
+  }
+
+  @Test
+  void returnsCustomerCsvAttachment() throws Exception {
+    CustomerAdminSearchService service = mock(CustomerAdminSearchService.class);
+    byte[] csv = "\uFEFF客户ID,手机号\r\n".getBytes(StandardCharsets.UTF_8);
+    when(service.export(org.mockito.ArgumentMatchers.any(CustomerSearchRequest.class))).thenReturn(csv);
+    MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new CustomerAdminSearchController(service)).build();
+
+    mockMvc.perform(post("/admin/api/v1/customers/export")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"keyword\":\"Alice\"}"))
+        .andExpect(status().isOk())
+        .andExpect(header().string("Content-Type", Matchers.containsString("text/csv")))
+        .andExpect(header().string("Content-Disposition", Matchers.containsString("customers.csv")))
+        .andExpect(content().bytes(csv));
+
+    verify(service).export(org.mockito.ArgumentMatchers.any(CustomerSearchRequest.class));
   }
 }

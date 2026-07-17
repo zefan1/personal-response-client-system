@@ -31,29 +31,28 @@ public class CustomerAdminSearchRepository {
   public CustomerAdminSearchPage search(CustomerFilter filter, CustomerAccessScope accessScope) {
     CustomerFilter safeFilter = filter == null ? CustomerFilter.empty() : filter;
     CustomerQuerySpec query = queryBuilder.build(safeFilter, accessScope);
-    Long totalValue = jdbcTemplate.queryForObject(
-        "SELECT COUNT(*) FROM customers c" + query.whereClause(),
-        Long.class,
-        query.args().toArray());
-    long total = totalValue == null ? 0L : totalValue;
+    long total = count(query);
     int totalPages = Math.max(1, (int) Math.ceil(total / (double) safeFilter.pageSize()));
     int offset = (safeFilter.page() - 1) * safeFilter.pageSize();
-
-    List<Object> pageArgs = new ArrayList<>(query.args());
-    pageArgs.add(safeFilter.pageSize());
-    pageArgs.add(offset);
-    List<CustomerAdminListItem> items = jdbcTemplate.query(
-        "SELECT c.* FROM customers c" + query.whereClause()
-            + " ORDER BY " + query.orderClause() + " LIMIT ? OFFSET ?",
-        ROW_MAPPER,
-        pageArgs.toArray()).stream().map(this::toListItem).toList();
-    Map<Long, List<CustomerTagSummary>> tagsByCustomer = loadCurrentTagSummaries(
-        items.stream().map(CustomerAdminListItem::id).toList());
-    List<CustomerAdminListItem> enrichedItems = items.stream()
-        .map(item -> item.withTags(tagsByCustomer.getOrDefault(item.id(), List.of())))
-        .toList();
+    List<CustomerAdminListItem> enrichedItems = loadRows(query, safeFilter.pageSize(), offset);
     return new CustomerAdminSearchPage(
         enrichedItems, total, safeFilter.page(), safeFilter.pageSize(), totalPages);
+  }
+
+  public long count(CustomerFilter filter, CustomerAccessScope accessScope) {
+    CustomerFilter safeFilter = filter == null ? CustomerFilter.empty() : filter;
+    return count(queryBuilder.build(safeFilter, accessScope));
+  }
+
+  public List<CustomerAdminListItem> exportRows(
+      CustomerFilter filter,
+      CustomerAccessScope accessScope,
+      int limit) {
+    if (limit <= 0) {
+      return List.of();
+    }
+    CustomerFilter safeFilter = filter == null ? CustomerFilter.empty() : filter;
+    return loadRows(queryBuilder.build(safeFilter, accessScope), limit, 0);
   }
 
   public CustomerAdminSearchPage search(String keyword, int page, int size) {
@@ -61,6 +60,30 @@ public class CustomerAdminSearchRepository {
         keyword, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
         null, null, List.of(), TagGroupLogic.AND, CustomerSortField.UPDATED_AT,
         SortDirection.DESC, page, size), CustomerAccessScope.all());
+  }
+
+  private long count(CustomerQuerySpec query) {
+    Long totalValue = jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM customers c" + query.whereClause(),
+        Long.class,
+        query.args().toArray());
+    return totalValue == null ? 0L : totalValue;
+  }
+
+  private List<CustomerAdminListItem> loadRows(CustomerQuerySpec query, int limit, int offset) {
+    List<Object> pageArgs = new ArrayList<>(query.args());
+    pageArgs.add(limit);
+    pageArgs.add(Math.max(0, offset));
+    List<CustomerAdminListItem> items = jdbcTemplate.query(
+        "SELECT c.* FROM customers c" + query.whereClause()
+            + " ORDER BY " + query.orderClause() + " LIMIT ? OFFSET ?",
+        ROW_MAPPER,
+        pageArgs.toArray()).stream().map(this::toListItem).toList();
+    Map<Long, List<CustomerTagSummary>> tagsByCustomer = loadCurrentTagSummaries(
+        items.stream().map(CustomerAdminListItem::id).toList());
+    return items.stream()
+        .map(item -> item.withTags(tagsByCustomer.getOrDefault(item.id(), List.of())))
+        .toList();
   }
 
   private CustomerAdminListItem toListItem(Customer customer) {
