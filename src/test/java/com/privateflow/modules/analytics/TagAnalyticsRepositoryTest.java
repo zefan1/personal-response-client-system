@@ -261,6 +261,7 @@ class TagAnalyticsRepositoryTest {
     seedValue(101, 10, "HIGH", "高意向", 1, null);
     seedAssignment(1004, 4, 10, 101, 1, "SYSTEM_INFERENCE", "2026-07-11 09:00:00", null);
     seedCustomer(5, "企微", "万江店", "keeper-1", "2026-07-16 10:00:00");
+    jdbcTemplate.update("INSERT INTO unmatched_legacy_tag_values (customer_id, status, raw_value) VALUES (5, 'IGNORED', 'archived legacy tag')");
 
     TagAnalyticsResponse response = repository.analyze(allSpec(), allSpec(), window());
 
@@ -268,6 +269,10 @@ class TagAnalyticsRepositoryTest {
     assertThat(response.unupdatedReasons()).extracting(TagAnalyticsResponse.ReasonRow::reasonCode)
         .contains("NO_ANALYSIS", "LATEST_RUN_REJECTED", "LATEST_RUN_NO_CHANGE",
             "UNMATCHED_LEGACY_VALUE", "CUSTOMER_UPDATED_AFTER_TAG_CHANGE");
+    assertThat(response.unupdatedReasons().stream()
+        .filter(row -> row.reasonCode().equals("UNMATCHED_LEGACY_VALUE"))
+        .findFirst()).get().extracting(TagAnalyticsResponse.ReasonRow::customerCount)
+        .isEqualTo(1L);
     assertThat(response.unupdatedReasons().stream()
         .filter(row -> row.reasonCode().equals("LATEST_RUN_REJECTED"))
         .findFirst()).get().satisfies(row -> {

@@ -103,6 +103,47 @@ class ActionExecutorTest {
     verify(reminderLogs, never()).markSent(any(), anyLong(), any());
   }
 
+  @Test
+  void alertActionCreatesOrdinaryReminderWithoutTagSuggestion() {
+    ReminderLogRepository reminderLogs = Mockito.mock(ReminderLogRepository.class);
+    TagSuggestionRepository suggestions = Mockito.mock(TagSuggestionRepository.class);
+    FollowupConfigProvider config = Mockito.mock(FollowupConfigProvider.class);
+    ApplicationEventPublisher events = Mockito.mock(ApplicationEventPublisher.class);
+    TagSelectionValidator validator = Mockito.mock(TagSelectionValidator.class);
+    ActionExecutor executor = new ActionExecutor(
+        new ObjectMapper(), reminderLogs, suggestions, config, events, validator);
+
+    executor.execute(customer(), List.of(new RuleMatch(new FollowupRule(
+        4L, "沉睡风险", "{}", ActionType.ALERT,
+        "{\"alertLevel\":\"HIGH\",\"reminderType\":\"OVERDUE\"}",
+        7, true, true, null, null))));
+
+    verify(suggestions, never()).upsertPending(any(), anyLong(), anyLong(), any(), anyLong(), anyInt());
+    verify(suggestions, never()).upsertPending(any(), any(), anyLong(), anyInt());
+    verify(reminderLogs).markSent("13800000000", 4L, ReminderType.OVERDUE);
+    verify(events).publishEvent(Mockito.any(Object.class));
+  }
+
+  @Test
+  void notifyLeaderActionCreatesOrdinaryReminderWithoutTagSuggestion() {
+    ReminderLogRepository reminderLogs = Mockito.mock(ReminderLogRepository.class);
+    TagSuggestionRepository suggestions = Mockito.mock(TagSuggestionRepository.class);
+    FollowupConfigProvider config = Mockito.mock(FollowupConfigProvider.class);
+    ApplicationEventPublisher events = Mockito.mock(ApplicationEventPublisher.class);
+    TagSelectionValidator validator = Mockito.mock(TagSelectionValidator.class);
+    ActionExecutor executor = new ActionExecutor(
+        new ObjectMapper(), reminderLogs, suggestions, config, events, validator);
+
+    executor.execute(customer(), List.of(new RuleMatch(new FollowupRule(
+        5L, "可能流失", "{}", ActionType.NOTIFY_LEADER,
+        "{\"notifyLeader\":true}", 6, true, true, null, null))));
+
+    verify(suggestions, never()).upsertPending(any(), anyLong(), anyLong(), any(), anyLong(), anyInt());
+    verify(suggestions, never()).upsertPending(any(), any(), anyLong(), anyInt());
+    verify(reminderLogs).markSent("13800000000", 5L, ReminderType.OVERDUE);
+    verify(events).publishEvent(Mockito.any(Object.class));
+  }
+
   private Customer customer() {
     Customer customer = new Customer();
     customer.setId(7L);
