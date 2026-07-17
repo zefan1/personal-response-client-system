@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -21,6 +22,7 @@ public class CustomerAdminSearchRepository {
     this(jdbcTemplate, new CustomerFilterQueryBuilder());
   }
 
+  @Autowired
   public CustomerAdminSearchRepository(
       JdbcTemplate jdbcTemplate,
       CustomerFilterQueryBuilder queryBuilder) {

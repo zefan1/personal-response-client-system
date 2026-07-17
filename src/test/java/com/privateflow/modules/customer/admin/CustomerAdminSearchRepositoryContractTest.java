@@ -1,8 +1,11 @@
 package com.privateflow.modules.customer.admin;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 class CustomerAdminSearchRepositoryContractTest {
 
@@ -21,5 +24,12 @@ class CustomerAdminSearchRepositoryContractTest {
     assertThatCode(() -> CustomerAdminSearchRepository.class.getMethod(
         "exportRows", CustomerFilter.class, CustomerAccessScope.class, int.class))
         .doesNotThrowAnyException();
+  }
+
+  @Test
+  void marksTheProductionConstructorForSpringInjection() throws Exception {
+    assertThat(CustomerAdminSearchRepository.class.getConstructor(
+        JdbcTemplate.class, CustomerFilterQueryBuilder.class).isAnnotationPresent(Autowired.class))
+        .isTrue();
   }
 }
