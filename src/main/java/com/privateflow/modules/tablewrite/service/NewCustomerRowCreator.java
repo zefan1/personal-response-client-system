@@ -11,12 +11,16 @@ import com.privateflow.modules.tablewrite.TableWriteException;
 import com.privateflow.modules.tablewrite.client.WecomTableClient;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import com.privateflow.modules.tablewrite.infra.TableFieldMappingResolver;
+import com.privateflow.modules.tags.TagExchangeResult;
+import com.privateflow.modules.tags.TagExchangeService;
+import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -28,6 +32,25 @@ public class NewCustomerRowCreator {
   private final CustomerRepository customerRepository;
   private final DatasourceAdminRepository datasourceRepository;
   private final ApplicationEventPublisher eventPublisher;
+  private final TagExchangeService exchangeService;
+
+  @Autowired
+  public NewCustomerRowCreator(
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      TableFieldMappingResolver mappingResolver,
+      CustomerRepository customerRepository,
+      DatasourceAdminRepository datasourceRepository,
+      ApplicationEventPublisher eventPublisher,
+      TagExchangeService exchangeService) {
+    this.tableClient = tableClient;
+    this.configProvider = configProvider;
+    this.mappingResolver = mappingResolver;
+    this.customerRepository = customerRepository;
+    this.datasourceRepository = datasourceRepository;
+    this.eventPublisher = eventPublisher;
+    this.exchangeService = exchangeService;
+  }
 
   public NewCustomerRowCreator(
       WecomTableClient tableClient,
@@ -36,18 +59,19 @@ public class NewCustomerRowCreator {
       CustomerRepository customerRepository,
       DatasourceAdminRepository datasourceRepository,
       ApplicationEventPublisher eventPublisher) {
-    this.tableClient = tableClient;
-    this.configProvider = configProvider;
-    this.mappingResolver = mappingResolver;
-    this.customerRepository = customerRepository;
-    this.datasourceRepository = datasourceRepository;
-    this.eventPublisher = eventPublisher;
+    this(tableClient, configProvider, mappingResolver, customerRepository, datasourceRepository, eventPublisher, null);
   }
 
   public void create(CustomerMessageSentEvent event) {
     Map<String, Object> internal = newCustomerFields(event);
     String sourceTable = resolveSourceTable(event.sourceTable());
-    Map<String, Object> sourceFields = mappingResolver.toSourceFields(sourceTable, internal);
+    TagExchangeResult exchange = exchangeService == null
+        ? new TagExchangeResult(internal, java.util.List.of(), java.util.List.of())
+        : exchangeService.prepareOutbound(TagExchangeSourceType.TABLE_WRITE, null, internal);
+    Map<String, Object> sourceFields = mappingResolver.toSourceFields(sourceTable, exchange.acceptedFields());
+    if (sourceFields.isEmpty()) {
+      throw new TableWriteException(TableWriteErrorCodes.TABLE_WRITE_FAILED, "no fields remain after tag validation");
+    }
     String rowId = tableClient.createRow(
         sourceTable,
         sourceFields,
@@ -66,7 +90,11 @@ public class NewCustomerRowCreator {
     customer.setSourceTable(sourceTable);
     customer.setSourceRowId(rowId);
     customer.setSyncedAt(LocalDateTime.now());
-    customerRepository.upsert(customer);
+    if (exchangeService == null) {
+      customerRepository.upsert(customer);
+    } else {
+      customerRepository.upsert(customer, exchange, TagExchangeSourceType.TABLE_WRITE, rowId);
+    }
     eventPublisher.publishEvent(new ProfileUpdatedEvent(event.phone(), List.copyOf(internal.keySet())));
   }
 

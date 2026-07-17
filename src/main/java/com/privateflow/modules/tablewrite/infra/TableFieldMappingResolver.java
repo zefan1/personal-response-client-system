@@ -4,6 +4,8 @@ import com.privateflow.common.events.ConfigChangedEvent;
 import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
 import com.privateflow.modules.tablewrite.TableWriteException;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,6 +44,61 @@ public class TableFieldMappingResolver {
       }
     });
     return mapped;
+  }
+
+  public Map<String, Object> toInternalFields(String sourceTable, Map<String, Object> sourceFields) {
+    Map<String, String> reverse = mappings.getOrDefault(sourceTable, Map.of());
+    if (reverse.isEmpty()) {
+      throw new TableWriteException(
+          TableWriteErrorCodes.CONFIG_MISSING,
+          "no enabled field mappings configured for source table: " + sourceTable);
+    }
+    Map<String, Object> mapped = new LinkedHashMap<>();
+    sourceFields.forEach((sourceField, value) -> {
+      String targetField = reverse.entrySet().stream()
+          .filter(entry -> entry.getValue().equals(sourceField))
+          .map(Map.Entry::getKey)
+          .findFirst()
+          .orElse(null);
+      if (targetField != null && value != null) {
+        mapped.put(targetField, value);
+      }
+    });
+    return mapped;
+  }
+
+  public Map<String, Object> mergeSourceFields(
+      String sourceTable,
+      Map<String, Object> originalSourceFields,
+      Map<String, Object> acceptedInternalFields) {
+    return mergeSourceFields(sourceTable, originalSourceFields, acceptedInternalFields, List.of());
+  }
+
+  public Map<String, Object> mergeSourceFields(
+      String sourceTable,
+      Map<String, Object> originalSourceFields,
+      Map<String, Object> acceptedInternalFields,
+      List<String> filteredInternalFields) {
+    Map<String, String> reverse = mappings.getOrDefault(sourceTable, Map.of());
+    if (reverse.isEmpty()) {
+      throw new TableWriteException(
+          TableWriteErrorCodes.CONFIG_MISSING,
+          "no enabled field mappings configured for source table: " + sourceTable);
+    }
+    Map<String, Object> merged = new LinkedHashMap<>(originalSourceFields);
+    for (String filteredField : filteredInternalFields) {
+      String sourceField = reverse.get(filteredField);
+      if (sourceField != null) {
+        merged.remove(sourceField);
+      }
+    }
+    acceptedInternalFields.forEach((targetField, value) -> {
+      String sourceField = reverse.get(targetField);
+      if (sourceField != null && value != null) {
+        merged.put(sourceField, value);
+      }
+    });
+    return merged;
   }
 
   @EventListener

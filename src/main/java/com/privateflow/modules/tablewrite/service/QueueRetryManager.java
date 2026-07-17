@@ -10,11 +10,16 @@ import com.privateflow.modules.tablewrite.client.WecomTableClient;
 import com.privateflow.modules.tablewrite.config.TableConfig;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import com.privateflow.modules.tablewrite.infra.PendingTableWriteRepository;
+import com.privateflow.modules.tablewrite.infra.TableFieldMappingResolver;
+import com.privateflow.modules.tags.TagExchangeResult;
+import com.privateflow.modules.tags.TagExchangeService;
+import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -27,6 +32,28 @@ public class QueueRetryManager {
   private final ObjectMapper objectMapper;
   private final CustomerQueryService customerQueryService;
   private final NewCustomerRowCreator newCustomerRowCreator;
+  private final TableFieldMappingResolver mappingResolver;
+  private final TagExchangeService exchangeService;
+
+  @Autowired
+  public QueueRetryManager(
+      PendingTableWriteRepository repository,
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      ObjectMapper objectMapper,
+      CustomerQueryService customerQueryService,
+      NewCustomerRowCreator newCustomerRowCreator,
+      TableFieldMappingResolver mappingResolver,
+      TagExchangeService exchangeService) {
+    this.repository = repository;
+    this.tableClient = tableClient;
+    this.configProvider = configProvider;
+    this.objectMapper = objectMapper;
+    this.customerQueryService = customerQueryService;
+    this.newCustomerRowCreator = newCustomerRowCreator;
+    this.mappingResolver = mappingResolver;
+    this.exchangeService = exchangeService;
+  }
 
   public QueueRetryManager(
       PendingTableWriteRepository repository,
@@ -35,12 +62,7 @@ public class QueueRetryManager {
       ObjectMapper objectMapper,
       CustomerQueryService customerQueryService,
       NewCustomerRowCreator newCustomerRowCreator) {
-    this.repository = repository;
-    this.tableClient = tableClient;
-    this.configProvider = configProvider;
-    this.objectMapper = objectMapper;
-    this.customerQueryService = customerQueryService;
-    this.newCustomerRowCreator = newCustomerRowCreator;
+    this(repository, tableClient, configProvider, objectMapper, customerQueryService, newCustomerRowCreator, null, null);
   }
 
   @Scheduled(fixedDelayString = "#{@tableConfigProvider.get().retryIntervalS() * 1000L}")
@@ -49,12 +71,24 @@ public class QueueRetryManager {
     for (PendingTableWrite item : repository.due(100)) {
       try {
         PendingWritePayload payload = objectMapper.readValue(item.getPayload(), PendingWritePayload.class);
+        TagExchangeResult exchange = exchangeService == null
+            ? new TagExchangeResult(payload.fields(), java.util.List.of(), java.util.List.of())
+            : exchangeService.prepareOutbound(
+                TagExchangeSourceType.TABLE_WRITE,
+                String.valueOf(item.getId()),
+                payload.fields());
+        if (exchange.acceptedFields().isEmpty()) {
+          repository.markResolved(item.getId());
+          continue;
+        }
         if (item.getActionType() == TableWriteActionType.INSERT) {
-          String rowId = tableClient.createRow(payload.sourceTable(), payload.fields(), Duration.ofMillis(config.writeTimeoutMs()));
-          newCustomerRowCreator.insertCustomerAfterQueuedCreate(item.getPhone(), payload.sourceTable(), rowId, payload.fields());
+          MapPayload remote = remotePayload(payload, exchange);
+          String rowId = tableClient.createRow(remote.sourceTable(), remote.fields(), Duration.ofMillis(config.writeTimeoutMs()));
+          newCustomerRowCreator.insertCustomerAfterQueuedCreate(item.getPhone(), remote.sourceTable(), rowId, exchange.acceptedFields());
         } else {
           PendingWritePayload resolved = resolveExistingRow(item.getPhone(), payload);
-          tableClient.updateRow(resolved.sourceTable(), resolved.sourceRowId(), resolved.fields(), Duration.ofMillis(config.writeTimeoutMs()));
+          MapPayload remote = remotePayload(resolved, exchange);
+          tableClient.updateRow(remote.sourceTable(), remote.sourceRowId(), remote.fields(), Duration.ofMillis(config.writeTimeoutMs()));
         }
         repository.markResolved(item.getId());
       } catch (Exception ex) {
@@ -81,6 +115,19 @@ public class QueueRetryManager {
       throw new IllegalStateException("customer source table or row id is still missing");
     }
     return new PendingWritePayload(customer.getSourceTable(), customer.getSourceRowId(), payload.fields());
+  }
+
+  private MapPayload remotePayload(PendingWritePayload payload, TagExchangeResult exchange) {
+    if (mappingResolver == null) {
+      return new MapPayload(payload.sourceTable(), payload.sourceRowId(), exchange.acceptedFields());
+    }
+    return new MapPayload(
+        payload.sourceTable(),
+        payload.sourceRowId(),
+        mappingResolver.toSourceFields(payload.sourceTable(), exchange.acceptedFields()));
+  }
+
+  private record MapPayload(String sourceTable, String sourceRowId, java.util.Map<String, Object> fields) {
   }
 
   private boolean blank(String value) {

@@ -57,4 +57,27 @@ class TableFieldMappingResolverTest {
         .isInstanceOf(TableWriteException.class)
         .hasMessageContaining("no enabled field mappings");
   }
+
+  @Test
+  void resolvesSourceFieldsBackToInternalTargetsAndMergesAcceptedValues() {
+    jdbcTemplate.update("""
+        INSERT INTO datasource_field_mappings (source_table, source_field, target_field, is_enabled)
+        VALUES ('table_a', 'tag_column', 'bodyConcerns', 1),
+               ('table_a', 'name_column', 'nickname', 1)
+        """);
+    TableFieldMappingResolver resolver = new TableFieldMappingResolver(jdbcTemplate);
+
+    Map<String, Object> internal = resolver.toInternalFields("table_a", Map.of(
+        "tag_column", "漏尿",
+        "name_column", "Alice"));
+    Map<String, Object> merged = resolver.mergeSourceFields(
+        "table_a",
+        Map.of("tag_column", "漏尿", "name_column", "Alice", "ordinary", "keep"),
+        Map.of("bodyConcerns", "URINE_LEAKAGE", "nickname", "Alice"));
+
+    assertThat(internal).containsEntry("bodyConcerns", "漏尿").containsEntry("nickname", "Alice");
+    assertThat(merged).containsEntry("tag_column", "URINE_LEAKAGE")
+        .containsEntry("name_column", "Alice")
+        .containsEntry("ordinary", "keep");
+  }
 }

@@ -7,9 +7,13 @@ import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
 import com.privateflow.modules.tablewrite.client.WecomTableClient;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import com.privateflow.modules.tablewrite.infra.TableFieldMappingResolver;
+import com.privateflow.modules.tags.TagExchangeResult;
+import com.privateflow.modules.tags.TagExchangeService;
+import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -18,14 +22,25 @@ public class ExistingCustomerUpdater {
   private final WecomTableClient tableClient;
   private final TableConfigProvider configProvider;
   private final TableFieldMappingResolver mappingResolver;
+  private final TagExchangeService exchangeService;
+
+  @Autowired
+  public ExistingCustomerUpdater(
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      TableFieldMappingResolver mappingResolver,
+      TagExchangeService exchangeService) {
+    this.tableClient = tableClient;
+    this.configProvider = configProvider;
+    this.mappingResolver = mappingResolver;
+    this.exchangeService = exchangeService;
+  }
 
   public ExistingCustomerUpdater(
       WecomTableClient tableClient,
       TableConfigProvider configProvider,
       TableFieldMappingResolver mappingResolver) {
-    this.tableClient = tableClient;
-    this.configProvider = configProvider;
-    this.mappingResolver = mappingResolver;
+    this(tableClient, configProvider, mappingResolver, null);
   }
 
   public void update(Customer customer, CustomerMessageSentEvent event) {
@@ -33,10 +48,20 @@ public class ExistingCustomerUpdater {
       throw new TableWriteException(TableWriteErrorCodes.TABLE_WRITE_FAILED, "customer source table or row id is missing");
     }
     Map<String, Object> fields = followupFields(event);
+    TagExchangeResult exchange = exchangeService == null
+        ? new TagExchangeResult(fields, java.util.List.of(), java.util.List.of())
+        : exchangeService.prepareOutbound(
+            TagExchangeSourceType.TABLE_WRITE,
+            customer.getSourceRowId(),
+            fields);
+    Map<String, Object> sourceFields = mappingResolver.toSourceFields(customer.getSourceTable(), exchange.acceptedFields());
+    if (sourceFields.isEmpty()) {
+      return;
+    }
     tableClient.updateRow(
         customer.getSourceTable(),
         customer.getSourceRowId(),
-        mappingResolver.toSourceFields(customer.getSourceTable(), fields),
+        sourceFields,
         Duration.ofMillis(configProvider.get().writeTimeoutMs()));
   }
 

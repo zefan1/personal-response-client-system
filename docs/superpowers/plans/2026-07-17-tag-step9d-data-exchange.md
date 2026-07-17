@@ -48,6 +48,8 @@ Tests to modify:
 - `src/test/java/com/privateflow/modules/tablewrite/infra/TableFieldMappingResolverTest.java`
 - `src/test/java/com/privateflow/modules/tablewrite/service/NewCustomerRowCreatorTest.java`
 - Add `src/test/java/com/privateflow/modules/tablewrite/service/ManualSaveHandlerTest.java`.
+- Add `src/test/java/com/privateflow/modules/tablewrite/service/ExistingCustomerUpdaterTest.java`.
+- Add `src/test/java/com/privateflow/modules/tablewrite/service/QueueRetryManagerTest.java`.
 
 ---
 

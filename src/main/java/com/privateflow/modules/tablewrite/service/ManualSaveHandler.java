@@ -9,9 +9,14 @@ import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
 import com.privateflow.modules.tablewrite.TableWriteException;
 import com.privateflow.modules.tablewrite.client.WecomTableClient;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
+import com.privateflow.modules.tablewrite.infra.TableFieldMappingResolver;
+import com.privateflow.modules.tags.TagExchangeResult;
+import com.privateflow.modules.tags.TagExchangeService;
+import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -21,16 +26,31 @@ public class ManualSaveHandler {
   private final TableConfigProvider configProvider;
   private final CustomerQueryService customerQueryService;
   private final CustomerAccessService customerAccessService;
+  private final TableFieldMappingResolver mappingResolver;
+  private final TagExchangeService exchangeService;
+
+  @Autowired
+  public ManualSaveHandler(
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      CustomerQueryService customerQueryService,
+      CustomerAccessService customerAccessService,
+      TableFieldMappingResolver mappingResolver,
+      TagExchangeService exchangeService) {
+    this.tableClient = tableClient;
+    this.configProvider = configProvider;
+    this.customerQueryService = customerQueryService;
+    this.customerAccessService = customerAccessService;
+    this.mappingResolver = mappingResolver;
+    this.exchangeService = exchangeService;
+  }
 
   public ManualSaveHandler(
       WecomTableClient tableClient,
       TableConfigProvider configProvider,
       CustomerQueryService customerQueryService,
       CustomerAccessService customerAccessService) {
-    this.tableClient = tableClient;
-    this.configProvider = configProvider;
-    this.customerQueryService = customerQueryService;
-    this.customerAccessService = customerAccessService;
+    this(tableClient, configProvider, customerQueryService, customerAccessService, null, null);
   }
 
   public ManualSaveResult save(String phone, ManualSaveRequest request) {
@@ -50,12 +70,35 @@ public class ManualSaveHandler {
       throw new TableWriteException(TableWriteErrorCodes.BAD_REQUEST, "该客户不在你的负责范围内");
     }
     try {
+      Map<String, Object> internalFields = mappingResolver == null
+          ? Map.of()
+          : mappingResolver.toInternalFields(request.sourceTable(), request.fields());
+      TagExchangeResult exchange = exchangeService == null
+          ? new TagExchangeResult(internalFields, java.util.List.of(), java.util.List.of())
+          : exchangeService.prepareOutbound(
+              TagExchangeSourceType.TABLE_WRITE,
+              request.sourceRowId(),
+              internalFields);
+      Map<String, Object> fields = mappingResolver == null
+          ? request.fields()
+          : mappingResolver.mergeSourceFields(
+              request.sourceTable(),
+              request.fields(),
+              exchange.acceptedFields(),
+              exchange.filteredFields());
+      if (fields.isEmpty()) {
+        return new ManualSaveResult(false, java.util.List.of(), exchange.filteredFields(), exchange.unmatched().size());
+      }
       tableClient.updateRow(
           request.sourceTable(),
           request.sourceRowId(),
-          request.fields(),
+          fields,
           Duration.ofMillis(configProvider.get().writeTimeoutMs()));
-      return new ManualSaveResult(true, new ArrayList<>(request.fields().keySet()));
+      return new ManualSaveResult(
+          true,
+          new ArrayList<>(fields.keySet()),
+          exchange.filteredFields(),
+          exchange.unmatched().size());
     } catch (RuntimeException ex) {
       throw new TableWriteException(TableWriteErrorCodes.TABLE_WRITE_FAILED, "table write failed: " + ex.getMessage());
     }
