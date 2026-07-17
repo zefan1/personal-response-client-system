@@ -176,7 +176,7 @@
 ## Step 9：搜索、统计、规则和数据交换
 
 - [x] 客户搜索支持动态分类、单/多标签、任一/全部组合及现有条件组合。
-- [ ] 分页、导出和数据权限与列表查询使用同一查询条件。
+- [x] 分页、导出和数据权限与列表查询使用同一查询条件。
 - [x] 统计当前有效标签数量、门店/团队/员工/时间范围、来源、未更新原因和趋势。
 - [x] `AnalyticsRepository` 移除写死 `intent_level IN ('HIGH','MEDIUM')` 的标签语义依赖。
 - [x] 跟进规则创建/编辑从动态标签目录选择分类和值。
@@ -236,3 +236,14 @@
 - [x] `npm run typecheck`、`npm run build` 通过。
 - [x] 未新增数据库迁移；未写入或更新现有 6 条 PENDING 建议；两个 LLM 开关保持关闭；Step 8 行为未修改。
 - [x] Step 9D CSV/外部表格同步/写回统一标签校验已完成。
+
+## Step 9E 完成记录：客户分页、导出和权限查询统一
+
+- [x] 结构化 POST、旧 GET 兼容查询和客户 CSV 导出统一经过 `CustomerFilterValidator` 与 `CustomerAccessScopeResolver`。
+- [x] COUNT、分页行、导出行、标签筛选、排序和当前标签摘要统一复用 `CustomerFilterQueryBuilder` 生成的 `CustomerQuerySpec`。
+- [x] 新增 `POST /admin/api/v1/customers/export`，导出当前完整筛选结果并限制最多 10,000 行；超限不生成部分文件。
+- [x] CSV 使用 UTF-8 BOM，包含当前标签中文名称和内部编码，并防护公式注入。
+- [x] 管理后台新增“导出当前查询”，请求复用当前筛选但不携带页码和每页数量。
+- [x] 后端相关 50 个测试套件、197 tests：0 failures、0 errors、1 conditional skip；前端 37 个 Vitest 文件、264 tests 全部通过。
+- [x] `npm run typecheck`、`npm run build` 通过；真实启动后登录并调用导出接口返回 200 和 `customers.csv`。
+- [x] 未新增数据库迁移；6 条 PENDING 建议原文和状态未修改；两个 LLM 开关保持关闭；Step 8 行为未修改。
