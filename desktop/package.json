@@ -21,6 +21,7 @@
     "extends": null
   },
   "dependencies": {
+    "get-windows": "9.3.0",
     "vue": "^3.5.17"
   },
   "devDependencies": {

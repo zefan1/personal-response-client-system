@@ -1,8 +1,10 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net, shell } from 'electron';
+import { activeWindow } from 'get-windows';
 import crypto from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { captureForegroundWindow } from './foregroundWindowCapture.js';
 
 type ClipboardHistoryItem = {
   md5: string;
@@ -975,31 +977,30 @@ function stopOnlineStatusPolling() {
 
 function registerScreenshotCapture() {
   ipcMain.handle('screenshot:capture', async () => {
-    try {
-      const sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: { width: 1920, height: 1080 },
-        fetchWindowIcons: false
-      });
-      const selected = sources.find((source) => source.id.startsWith('screen:0:')) ?? sources[0];
-      if (!selected) {
-        return { success: false, error: 'CAPTURE_FAILED', message: 'No screen source detected' };
-      }
-      const png = selected.thumbnail.toPNG();
-      const size = selected.thumbnail.getSize();
-      if (!png.length || size.width < DESKTOP_DEFAULTS.clipboardMinImageDimension || size.height < DESKTOP_DEFAULTS.clipboardMinImageDimension) {
-        return { success: false, error: 'CAPTURE_FAILED', message: 'Captured window image is empty' };
-      }
-      return {
-        success: true,
-        imageBase64: png.toString('base64'),
-        width: size.width,
-        height: size.height,
-        screenTitle: selected.name
-      };
-    } catch (error) {
-      return { success: false, error: 'CAPTURE_FAILED', message: 'Screenshot capture failed' };
+    const assistantWindow = mainWindow;
+    if (!assistantWindow) {
+      return { success: false, error: 'CAPTURE_FAILED', message: 'Assistant window is unavailable' };
     }
+    return captureForegroundWindow({
+      assistantWindow,
+      getActiveWindow: async () => {
+        const current = await activeWindow();
+        if (!current) return undefined;
+        return {
+          id: current.id,
+          title: current.title,
+          ownerName: current.owner?.name ?? '',
+          bounds: { width: current.bounds.width, height: current.bounds.height }
+        };
+      },
+      getSources: async (types, thumbnailSize) => desktopCapturer.getSources({
+        types,
+        thumbnailSize,
+        fetchWindowIcons: false
+      }),
+      delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      minImageDimension: DESKTOP_DEFAULTS.clipboardMinImageDimension
+    });
   });
 }
 
