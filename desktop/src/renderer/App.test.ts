@@ -289,7 +289,11 @@ describe('App route shell', () => {
       import('./modules/chat-recognition/recognitionStore')
     ]);
     installDesktopBridge();
-    vi.mocked(captureScreenshot).mockResolvedValueOnce({ success: false, error: 'CAPTURE_FAILED' });
+    vi.mocked(captureScreenshot).mockResolvedValueOnce({
+      success: false,
+      error: 'CAPTURE_FAILED',
+      message: '当前窗口未显示可识别的主聊天会话'
+    });
     const { app, host } = await mountAppWithToken('#/desktop');
 
     (host.querySelector('.sidebar-quick-actions button') as HTMLButtonElement).click();
@@ -297,6 +301,7 @@ describe('App route shell', () => {
 
     expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent)
       .toBe('回复助手');
+    expect(host.textContent).toContain('当前窗口未显示可识别的主聊天会话');
     expect(triggerRecognize).not.toHaveBeenCalled();
     app.unmount();
   });

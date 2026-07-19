@@ -150,6 +150,36 @@ function macCodeSignStatus(path) {
   };
 }
 
+function targetGetWindowsBinding() {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') {
+    return null;
+  }
+  return `node_modules/get-windows/lib/binding/napi-9-${process.platform}-unknown-${process.arch}/node-get-windows.node`;
+}
+
+function runPackagedSmoke() {
+  if (!existsSync(executablePath)) return { attempted: false, passed: false, output: '' };
+  const userDataDir = join(reportDir, 'package-smoke-user-data');
+  const result = spawnSync(executablePath, [], {
+    cwd: platformDir,
+    env: {
+      ...process.env,
+      PDA_ELECTRON_SMOKE: '1',
+      PDA_ELECTRON_SMOKE_AUTO_QUIT: '1',
+      PDA_ELECTRON_SMOKE_USER_DATA_DIR: userDataDir,
+      ELECTRON_ENABLE_LOGGING: '1'
+    },
+    encoding: 'utf8',
+    timeout: 20000,
+    windowsHide: true
+  });
+  return {
+    attempted: true,
+    passed: result.status === 0,
+    output: `${result.stdout || ''}${result.stderr || ''}`.trim()
+  };
+}
+
 const failures = [];
 for (const [label, path] of [['release directory', platformDir], ['application executable', executablePath], ['application asar', asarPath]]) {
   if (!existsSync(path)) {
@@ -178,6 +208,7 @@ if (process.platform === 'darwin' && requireNotarized && !signConfig.notarizatio
 let asarEntries = [];
 let getWindowsEntries = [];
 let getWindowsNativeEntries = [];
+const targetNativeEntry = targetGetWindowsBinding();
 if (existsSync(asarPath)) {
   try {
     asarEntries = listPackage(asarPath).map((entry) => entry.replaceAll('\\', '/').replace(/^\/+/, ''));
@@ -186,15 +217,26 @@ if (existsSync(asarPath)) {
     if (getWindowsEntries.length === 0) {
       failures.push('app.asar does not contain node_modules/get-windows');
     }
+    if (targetNativeEntry && !getWindowsNativeEntries.includes(targetNativeEntry)) {
+      failures.push(`app.asar does not contain the target get-windows binding: ${targetNativeEntry}`);
+    }
     if (getWindowsNativeEntries.length > 0) {
       const missingUnpackedNativeEntries = getWindowsNativeEntries.filter((entry) => !existsSync(join(asarUnpackedPath, entry)));
       if (missingUnpackedNativeEntries.length > 0) {
         failures.push(`get-windows native files missing from app.asar.unpacked: ${missingUnpackedNativeEntries.join(', ')}`);
       }
+      if (targetNativeEntry && !existsSync(join(asarUnpackedPath, targetNativeEntry))) {
+        failures.push(`app.asar.unpacked does not contain the target get-windows binding: ${targetNativeEntry}`);
+      }
     }
   } catch (error) {
     failures.push(`unable to inspect app.asar: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+const packagedSmoke = runPackagedSmoke();
+if (packagedSmoke.attempted && !packagedSmoke.passed) {
+  failures.push(`packaged Electron smoke failed: ${packagedSmoke.output || 'no output'}`);
 }
 
 const report = {
@@ -208,8 +250,10 @@ const report = {
   asarEntryCount: asarEntries.length,
   getWindowsEntries: getWindowsEntries.length,
   getWindowsNativeEntries,
+  targetNativeEntry,
   getWindowsUnpackedPath: join(asarUnpackedPath, 'node_modules', 'get-windows'),
   getWindowsUnpackedPresent: existsSync(join(asarUnpackedPath, 'node_modules', 'get-windows')),
+  packagedSmoke,
   signed,
   signature,
   macSignature,

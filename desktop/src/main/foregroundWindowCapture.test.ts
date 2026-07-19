@@ -14,8 +14,18 @@ function image(bytes: string, width = 900, height = 700) {
   };
 }
 
-function source(id: string, name: string, bytes: string): CaptureSource {
-  return { id, name, thumbnail: image(bytes) };
+function source(
+  id: string,
+  name: string,
+  bytes: string,
+  options: { width?: number; height?: number; displayId?: string } = {}
+): CaptureSource {
+  return {
+    id,
+    name,
+    displayId: options.displayId,
+    thumbnail: image(bytes, options.width ?? 900, options.height ?? 700)
+  };
 }
 
 function dependencies(overrides: Partial<CaptureDependencies> = {}): CaptureDependencies {
@@ -38,6 +48,7 @@ function dependencies(overrides: Partial<CaptureDependencies> = {}): CaptureDepe
     getSources: vi.fn(async (types) => types[0] === 'window'
       ? [source('window:77:0', '抖音企业号', 'window-image')]
       : [source('screen:0:0', 'Screen 1', 'screen-image')]),
+    getDisplayId: vi.fn(() => '0'),
     delay: vi.fn(async () => undefined),
     minImageDimension: 200,
     ...overrides
@@ -78,6 +89,70 @@ describe('foregroundWindowCapture', () => {
       success: true,
       captureMode: 'SCREEN_FALLBACK',
       imageBase64: Buffer.from('screen-image').toString('base64')
+    });
+  });
+
+  it('selects the screen containing the active window for fallback capture', async () => {
+    const deps = dependencies({
+      getActiveWindow: vi.fn().mockResolvedValue({
+        id: 77,
+        title: '抖音企业号',
+        ownerName: 'msedge.exe',
+        bounds: { x: 2200, y: 120, width: 1400, height: 900 }
+      }),
+      getSources: vi.fn(async (types) => types[0] === 'window'
+        ? []
+        : [
+            source('screen:0:0', 'Screen 1', 'primary-screen', { displayId: '0' }),
+            source('screen:1:0', 'Screen 2', 'active-screen', { displayId: '1' })
+          ]),
+      getDisplayId: vi.fn(() => '1')
+    });
+
+    await expect(captureForegroundWindow(deps)).resolves.toMatchObject({
+      success: true,
+      captureMode: 'SCREEN_FALLBACK',
+      imageBase64: Buffer.from('active-screen').toString('base64')
+    });
+  });
+
+  it('does not select an ambiguous duplicate title when source ids do not match', async () => {
+    const deps = dependencies({
+      getSources: vi.fn(async (types) => types[0] === 'window'
+        ? [
+            source('window:90:0', '抖音企业号', 'wrong-a'),
+            source('window:91:0', '抖音企业号', 'wrong-b')
+          ]
+        : [source('screen:0:0', 'Screen 1', 'screen-image')])
+    });
+
+    await expect(captureForegroundWindow(deps)).resolves.toMatchObject({
+      success: true,
+      captureMode: 'SCREEN_FALLBACK',
+      imageBase64: Buffer.from('screen-image').toString('base64')
+    });
+  });
+
+  it('uses aspect ratio to disambiguate a unique title match', async () => {
+    const deps = dependencies({
+      getActiveWindow: vi.fn().mockResolvedValue({
+        id: 77,
+        title: '抖音企业号',
+        ownerName: 'msedge.exe',
+        bounds: { x: 0, y: 0, width: 1400, height: 900 }
+      }),
+      getSources: vi.fn(async (types) => types[0] === 'window'
+        ? [
+            source('window:90:0', '抖音企业号', 'wrong-aspect', { width: 900, height: 900 }),
+            source('window:91:0', '抖音企业号', 'matching-aspect', { width: 1400, height: 900 })
+          ]
+        : [source('screen:0:0', 'Screen 1', 'screen-image')])
+    });
+
+    await expect(captureForegroundWindow(deps)).resolves.toMatchObject({
+      success: true,
+      captureMode: 'FOREGROUND_WINDOW',
+      imageBase64: Buffer.from('matching-aspect').toString('base64')
     });
   });
 

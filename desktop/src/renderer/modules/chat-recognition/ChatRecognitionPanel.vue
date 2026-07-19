@@ -62,7 +62,7 @@ onBeforeUnmount(() => {
 async function captureFromWindow() {
   const result = await captureScreenshot();
   if (!result.success || !result.imageBase64) {
-    state.toast = '屏幕截图失败，请确认系统允许桌面端录屏后重试';
+    state.toast = result.message ?? '屏幕截图失败，请确认系统允许桌面端录屏后重试';
     return;
   }
   await triggerRecognize('BUTTON_CLICK', { imageBase64: result.imageBase64 });

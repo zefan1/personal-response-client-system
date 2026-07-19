@@ -438,7 +438,7 @@ async function recognizeFromAnywhere() {
   selectDesktopPanel('reply');
   const result = await captureScreenshot();
   if (!result.success || !result.imageBase64) {
-    setDesktopNotice('屏幕截图失败，请确认系统允许桌面端录屏后重试', 'error');
+    setDesktopNotice(result.message ?? '屏幕截图失败，请确认系统允许桌面端录屏后重试', 'error');
     return;
   }
   await triggerRecognize('BUTTON_CLICK', { imageBase64: result.imageBase64 });

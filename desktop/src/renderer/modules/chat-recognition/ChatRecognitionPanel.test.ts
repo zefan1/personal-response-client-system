@@ -103,6 +103,22 @@ describe('ChatRecognitionPanel', () => {
     app.unmount();
   });
 
+  it('shows the capture coordinator failure reason instead of replacing it with a generic error', async () => {
+    mocks.captureScreenshot.mockResolvedValueOnce({
+      success: false,
+      error: 'CAPTURE_FAILED',
+      message: '当前窗口未显示可识别的主聊天会话'
+    });
+    const { app, host } = await mountPanel();
+
+    (host.querySelector('.toolbar .primary') as HTMLButtonElement | null)?.click();
+    await flushUi();
+
+    expect(host.textContent).toContain('当前窗口未显示可识别的主聊天会话');
+    expect(mocks.postJson).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
   it('opens text mode from the secondary button and submits customer identity plus chat text', async () => {
     const { app, host } = await mountPanel();
 

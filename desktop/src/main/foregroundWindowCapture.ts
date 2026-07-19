@@ -14,12 +14,13 @@ export type ActiveWindowInfo = {
   id: number;
   title: string;
   ownerName: string;
-  bounds: { width: number; height: number };
+  bounds: { x?: number; y?: number; width: number; height: number };
 };
 
 export type CaptureSource = {
   id: string;
   name: string;
+  displayId?: string;
   thumbnail: {
     toPNG(): Buffer;
     getSize(): { width: number; height: number };
@@ -40,6 +41,7 @@ export type CaptureDependencies = {
   };
   getActiveWindow(): Promise<ActiveWindowInfo | undefined>;
   getSources(types: Array<'window' | 'screen'>, size: { width: number; height: number }): Promise<CaptureSource[]>;
+  getDisplayId?: (point: { x: number; y: number }) => string | undefined;
   delay(ms: number): Promise<void>;
   minImageDimension: number;
 };
@@ -76,7 +78,7 @@ export async function captureForegroundWindow(deps: CaptureDependencies): Promis
     }
 
     const screenSources = await deps.getSources(['screen'], SCREEN_THUMBNAIL_SIZE);
-    const screen = screenSources.find((item) => item.id.startsWith('screen:0:')) ?? screenSources[0];
+    const screen = selectScreenSource(screenSources, active, deps.getDisplayId);
     return screen && imageResult(screen, 'SCREEN_FALLBACK', deps.minImageDimension)
       || { success: false, error: 'CAPTURE_FAILED', message: 'No usable foreground window or screen source detected' };
   } catch {
@@ -108,7 +110,41 @@ function matchWindowSource(sources: CaptureSource[], active: ActiveWindowInfo): 
 
   const title = normalizeTitle(active.title);
   if (!title) return undefined;
-  return sources.find((source) => normalizeTitle(source.name) === title);
+  const titleMatches = sources.filter((source) => normalizeTitle(source.name) === title);
+  if (titleMatches.length === 0) return undefined;
+  const targetAspect = aspectRatio(active.bounds.width, active.bounds.height);
+  if (targetAspect === undefined) {
+    return titleMatches.length === 1 ? titleMatches[0] : undefined;
+  }
+  const aspectMatches = titleMatches.filter((source) => {
+    const size = source.thumbnail.getSize();
+    const sourceAspect = aspectRatio(size.width, size.height);
+    return sourceAspect !== undefined && Math.abs(sourceAspect - targetAspect) / targetAspect <= 0.08;
+  });
+  return aspectMatches.length === 1 ? aspectMatches[0] : undefined;
+}
+
+function selectScreenSource(
+  sources: CaptureSource[],
+  active: ActiveWindowInfo | undefined,
+  getDisplayId: CaptureDependencies['getDisplayId']
+): CaptureSource | undefined {
+  if (!sources.length) return undefined;
+  const point = active && {
+    x: (active.bounds.x ?? 0) + active.bounds.width / 2,
+    y: (active.bounds.y ?? 0) + active.bounds.height / 2
+  };
+  const displayId = point && getDisplayId?.(point);
+  if (displayId) {
+    const matching = sources.find((source) => sourceDisplayId(source) === displayId);
+    if (matching) return matching;
+  }
+  return sources.find((item) => sourceDisplayId(item) === '0') ?? sources[0];
+}
+
+function sourceDisplayId(source: CaptureSource): string | undefined {
+  if (source.displayId) return source.displayId;
+  return /^screen:([^:]+):/.exec(source.id)?.[1];
 }
 
 function imageResult(
@@ -162,6 +198,11 @@ function boundedSize(bounds: { width: number; height: number }): { width: number
     width: Math.max(1, Math.round(bounds.width * scale)),
     height: Math.max(1, Math.round(bounds.height * scale))
   };
+}
+
+function aspectRatio(width: number, height: number): number | undefined {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return undefined;
+  return width / height;
 }
 
 function normalizeTitle(value: string): string {

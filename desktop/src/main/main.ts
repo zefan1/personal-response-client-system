@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net, shell } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net, screen, shell } from 'electron';
 import { activeWindow } from 'get-windows';
 import crypto from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -990,14 +990,25 @@ function registerScreenshotCapture() {
           id: current.id,
           title: current.title,
           ownerName: current.owner?.name ?? '',
-          bounds: { width: current.bounds.width, height: current.bounds.height }
+          bounds: {
+            x: current.bounds.x,
+            y: current.bounds.y,
+            width: current.bounds.width,
+            height: current.bounds.height
+          }
         };
       },
       getSources: async (types, thumbnailSize) => desktopCapturer.getSources({
         types,
         thumbnailSize,
         fetchWindowIcons: false
-      }),
+      }).then((sources) => sources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        displayId: source.display_id,
+        thumbnail: source.thumbnail
+      }))),
+      getDisplayId: (point) => String(screen.getDisplayNearestPoint(point).id),
       delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       minImageDimension: DESKTOP_DEFAULTS.clipboardMinImageDimension
     });

@@ -93,6 +93,13 @@ public class ChatOrchestrationService {
     String nickname = firstNonBlank(request.customerIdentifier(), recognized == null ? null : recognized.nickname());
     String phone = recognized == null ? null : recognized.phone();
     MatchResult match = match(nickname, phone, request.leadType(), request.sourceTable());
+    String platformIdentifier = recognized == null ? null : recognized.customerIdentifier();
+    if (isNoMatch(match)
+        && blank(request.customerIdentifier())
+        && !blank(platformIdentifier)
+        && !platformIdentifier.equals(nickname)) {
+      match = match(platformIdentifier, phone, request.leadType(), request.sourceTable());
+    }
     Customer customer = firstCustomer(match);
     String clientMessage = buildClientMessage(request, recognized);
     List<Map<String, String>> chatContext = messages(request, recognized);
@@ -251,6 +258,10 @@ public class ChatOrchestrationService {
     } catch (RuntimeException ex) {
       return MatchResult.none();
     }
+  }
+
+  private boolean isNoMatch(MatchResult result) {
+    return result == null || result.matchType() == MatchType.NONE;
   }
 
   private GeneratedReplies generateSkill(Scene scene, String leadType, Customer customer, String phone, String clientMessage, List<String> previousSuggestions, List<Map<String, String>> chatContext) {
