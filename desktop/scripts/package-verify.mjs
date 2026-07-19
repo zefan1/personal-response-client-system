@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { listPackage } from '@electron/asar';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -22,6 +23,9 @@ const executablePath = join(platformDir, executableName);
 const asarPath = process.platform === 'darwin'
   ? join(executablePath, 'Contents', 'Resources', 'app.asar')
   : join(platformDir, 'resources', 'app.asar');
+const asarUnpackedPath = process.platform === 'darwin'
+  ? join(executablePath, 'Contents', 'Resources', 'app.asar.unpacked')
+  : join(platformDir, 'resources', 'app.asar.unpacked');
 
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -171,6 +175,28 @@ if (process.platform === 'darwin' && requireNotarized && !signConfig.notarizatio
   failures.push('notarized package required but Apple notarization credentials are not configured');
 }
 
+let asarEntries = [];
+let getWindowsEntries = [];
+let getWindowsNativeEntries = [];
+if (existsSync(asarPath)) {
+  try {
+    asarEntries = listPackage(asarPath).map((entry) => entry.replaceAll('\\', '/').replace(/^\/+/, ''));
+    getWindowsEntries = asarEntries.filter((entry) => entry.startsWith('node_modules/get-windows/'));
+    getWindowsNativeEntries = getWindowsEntries.filter((entry) => entry.endsWith('.node'));
+    if (getWindowsEntries.length === 0) {
+      failures.push('app.asar does not contain node_modules/get-windows');
+    }
+    if (getWindowsNativeEntries.length > 0) {
+      const missingUnpackedNativeEntries = getWindowsNativeEntries.filter((entry) => !existsSync(join(asarUnpackedPath, entry)));
+      if (missingUnpackedNativeEntries.length > 0) {
+        failures.push(`get-windows native files missing from app.asar.unpacked: ${missingUnpackedNativeEntries.join(', ')}`);
+      }
+    }
+  } catch (error) {
+    failures.push(`unable to inspect app.asar: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 const report = {
   platform: process.platform,
   releaseDir: platformDir,
@@ -179,6 +205,11 @@ const report = {
   topLevelFiles: files,
   asarSha256: existsSync(asarPath) ? sha256(asarPath) : null,
   asarBytes: existsSync(asarPath) ? statSync(asarPath).size : 0,
+  asarEntryCount: asarEntries.length,
+  getWindowsEntries: getWindowsEntries.length,
+  getWindowsNativeEntries,
+  getWindowsUnpackedPath: join(asarUnpackedPath, 'node_modules', 'get-windows'),
+  getWindowsUnpackedPresent: existsSync(join(asarUnpackedPath, 'node_modules', 'get-windows')),
   signed,
   signature,
   macSignature,
