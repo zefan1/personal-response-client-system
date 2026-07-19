@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   captureForegroundWindow,
   parseElectronWindowId,
+  resolveDisplayIdFromPhysicalPoint,
   type CaptureDependencies,
   type CaptureSource
 } from './foregroundWindowCapture.js';
@@ -56,6 +57,18 @@ function dependencies(overrides: Partial<CaptureDependencies> = {}): CaptureDepe
 }
 
 describe('foregroundWindowCapture', () => {
+  it('converts physical window coordinates to DIP before resolving the display', () => {
+    const screenToDipPoint = vi.fn(() => ({ x: 1600, y: 240 }));
+    const getDisplayNearestPoint = vi.fn(() => ({ id: 2 }));
+
+    expect(resolveDisplayIdFromPhysicalPoint(
+      { x: 2400, y: 360 },
+      { screenToDipPoint, getDisplayNearestPoint }
+    )).toBe('2');
+    expect(screenToDipPoint).toHaveBeenCalledWith({ x: 2400, y: 360 });
+    expect(getDisplayNearestPoint).toHaveBeenCalledWith({ x: 1600, y: 240 });
+  });
+
   it('parses Electron native window source ids', () => {
     expect(parseElectronWindowId('window:77:0')).toBe(77);
     expect(parseElectronWindowId('screen:0:0')).toBeNull();

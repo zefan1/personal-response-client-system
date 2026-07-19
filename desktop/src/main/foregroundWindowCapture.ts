@@ -46,6 +46,11 @@ export type CaptureDependencies = {
   minImageDimension: number;
 };
 
+type ScreenCoordinateApi = {
+  screenToDipPoint(point: { x: number; y: number }): { x: number; y: number };
+  getDisplayNearestPoint(point: { x: number; y: number }): { id: number | string };
+};
+
 const FOREGROUND_WAIT_ATTEMPTS = 10;
 const FOREGROUND_WAIT_INTERVAL_MS = 50;
 const SCREEN_THUMBNAIL_SIZE = { width: 1920, height: 1080 };
@@ -53,6 +58,13 @@ const SCREEN_THUMBNAIL_SIZE = { width: 1920, height: 1080 };
 export function parseElectronWindowId(sourceId: string): number | null {
   const match = /^window:(\d+):/.exec(sourceId);
   return match ? Number(match[1]) : null;
+}
+
+export function resolveDisplayIdFromPhysicalPoint(
+  point: { x: number; y: number },
+  screenApi: ScreenCoordinateApi
+): string {
+  return String(screenApi.getDisplayNearestPoint(screenApi.screenToDipPoint(point)).id);
 }
 
 export async function captureForegroundWindow(deps: CaptureDependencies): Promise<ScreenshotCaptureResult> {

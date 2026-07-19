@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captureForegroundWindow } from './foregroundWindowCapture.js';
+import { captureForegroundWindow, resolveDisplayIdFromPhysicalPoint } from './foregroundWindowCapture.js';
 
 type ClipboardHistoryItem = {
   md5: string;
@@ -1008,7 +1008,7 @@ function registerScreenshotCapture() {
         displayId: source.display_id,
         thumbnail: source.thumbnail
       }))),
-      getDisplayId: (point) => String(screen.getDisplayNearestPoint(point).id),
+      getDisplayId: (point) => resolveDisplayIdFromPhysicalPoint(point, screen),
       delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       minImageDimension: DESKTOP_DEFAULTS.clipboardMinImageDimension
     });
