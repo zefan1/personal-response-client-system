@@ -18,6 +18,9 @@ import org.springframework.stereotype.Component;
 public class RecognitionResultParser {
 
   private static final Logger log = LoggerFactory.getLogger(RecognitionResultParser.class);
+  private static final String UNABLE_TO_DETERMINE = "UNABLE_TO_DETERMINE";
+  private static final String DEFAULT_FAILURE_REASON = "当前窗口未显示可识别的主聊天会话";
+  private static final String GENERIC_CHAT_FAILURE_REASON = "未能从图片中识别到聊天内容，请确认截图中包含聊天窗口";
   private static final Pattern JSON_BLOCK = Pattern.compile("\\{[\\s\\S]*\\}");
   private final ObjectMapper objectMapper;
 
@@ -35,12 +38,20 @@ public class RecognitionResultParser {
         throw failed("图片识别结果异常，建议重新截图或手动复制文字");
       }
       JsonNode root = objectMapper.readTree(matcher.group());
+      String status = normalizeStatus(textOrNull(root.path("status")));
+      String failureReason = textOrNull(root.path("failureReason"));
+      if (UNABLE_TO_DETERMINE.equals(status)) {
+        throw failed(firstNonBlank(failureReason, DEFAULT_FAILURE_REASON));
+      }
+      String platform = normalizePlatform(textOrNull(root.path("platform")));
+      String customerIdentifier = normalizeIdentifier(textOrNull(root.path("customerIdentifier")));
       String nickname = normalizeNickname(textOrNull(root.path("nickname")));
+      nickname = firstNonBlank(nickname, customerIdentifier);
       String phone = normalizePhone(textOrNull(root.path("phone")));
       String timestamp = textOrNull(root.path("timestamp"));
       JsonNode messagesNode = root.path("messages");
       if (!messagesNode.isArray()) {
-        throw failed("未能从图片中识别到聊天内容，请确认截图中包含聊天窗口");
+        throw failed(firstNonBlank(failureReason, GENERIC_CHAT_FAILURE_REASON));
       }
       List<Message> messages = new ArrayList<>();
       for (JsonNode node : messagesNode) {
@@ -51,9 +62,16 @@ public class RecognitionResultParser {
         messages.add(new Message(normalizeRole(providerRole(node)), text.trim()));
       }
       if (messages.isEmpty()) {
-        throw failed("未能从图片中识别到聊天内容，请确认截图中包含聊天窗口");
+        throw failed(firstNonBlank(failureReason, GENERIC_CHAT_FAILURE_REASON));
       }
-      return new RecognitionResult(nickname, phone, List.copyOf(messages), timestamp);
+      return new RecognitionResult(
+          nickname,
+          phone,
+          List.copyOf(messages),
+          timestamp,
+          customerIdentifier,
+          platform,
+          confidence(root.path("confidence")));
     } catch (ImageRecognitionException ex) {
       throw ex;
     } catch (Exception ex) {
@@ -102,6 +120,41 @@ public class RecognitionResultParser {
     return cleaned.matches("\\d{11}") ? cleaned : null;
   }
 
+  private String normalizeIdentifier(String identifier) {
+    return identifier == null || identifier.isBlank() ? null : identifier.trim();
+  }
+
+  private String normalizePlatform(String platform) {
+    if (platform == null || platform.isBlank()) {
+      return "UNKNOWN";
+    }
+    return platform.trim().toUpperCase().replace('-', '_').replace(' ', '_');
+  }
+
+  private String normalizeStatus(String status) {
+    return status == null ? "" : status.trim().toUpperCase();
+  }
+
+  private double confidence(JsonNode node) {
+    if (node == null || node.isMissingNode() || node.isNull()) {
+      return 0.0;
+    }
+    double value;
+    if (node.isNumber()) {
+      value = node.asDouble();
+    } else {
+      try {
+        value = Double.parseDouble(node.asText());
+      } catch (NumberFormatException ex) {
+        return 0.0;
+      }
+    }
+    if (Double.isNaN(value) || Double.isInfinite(value)) {
+      return 0.0;
+    }
+    return Math.max(0.0, Math.min(1.0, value));
+  }
+
   private String normalizeNickname(String nickname) {
     if (nickname == null || nickname.isBlank()) {
       return null;
@@ -115,6 +168,10 @@ public class RecognitionResultParser {
     }
     String text = node.asText();
     return text == null || text.isBlank() || "null".equalsIgnoreCase(text.trim()) ? null : text;
+  }
+
+  private String firstNonBlank(String first, String second) {
+    return first == null || first.isBlank() ? second : first.trim();
   }
 
   private ImageRecognitionException failed(String message) {
