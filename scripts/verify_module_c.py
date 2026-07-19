@@ -22,6 +22,7 @@ required_files = [
     "src/main/java/com/privateflow/modules/image/service/ImageRecognitionServiceImpl.java",
     "src/main/java/com/privateflow/common/events/ImageServiceStatusEvent.java",
     "src/main/resources/db/migration/V2__module_c_image_configs.sql",
+    "src/main/resources/db/migration/V72__cross_platform_image_recognition_prompt.sql",
     "dev-progress/01C_progress.md",
 ]
 
@@ -47,7 +48,7 @@ for value in ["BUTTON_CLICK", "CLIPBOARD_SCREENSHOT"]:
         errors.append(f"Source enum missing {value}")
 
 result = (ROOT / "src/main/java/com/privateflow/modules/image/RecognitionResult.java").read_text(encoding="utf-8")
-for field in ["nickname", "phone", "messages", "timestamp"]:
+for field in ["nickname", "phone", "messages", "timestamp", "customerIdentifier", "platform", "confidence"]:
     if field not in result:
         errors.append(f"RecognitionResult missing {field}")
 
@@ -57,7 +58,7 @@ for token in ["isPng", "isJpeg", "isWebp", "maxSizeBytes", "ImageFormatException
         errors.append(f"ImageValidator missing {token}")
 
 parser = (ROOT / "src/main/java/com/privateflow/modules/image/parser/RecognitionResultParser.java").read_text(encoding="utf-8")
-for token in ["client", "keeper", "replaceAll(\"[-\\\\s]\", \"\")", "\\\\d{11}", "messages.isEmpty"]:
+for token in ["client", "keeper", "replaceAll(\"[-\\\\s]\", \"\")", "\\\\d{11}", "messages.isEmpty", "UNABLE_TO_DETERMINE", "failureReason"]:
     if token not in parser:
         errors.append(f"RecognitionResultParser missing {token}")
 
@@ -82,6 +83,20 @@ sql = (ROOT / "src/main/resources/db/migration/V2__module_c_image_configs.sql").
 for key in image_keys:
     if key not in sql:
         errors.append(f"V2 migration missing config key {key}")
+
+cross_platform_prompt_sql = (ROOT / "src/main/resources/db/migration/V72__cross_platform_image_recognition_prompt.sql").read_text(encoding="utf-8") if (ROOT / "src/main/resources/db/migration/V72__cross_platform_image_recognition_prompt.sql").exists() else ""
+for token in [
+    "微信",
+    "企业微信",
+    "抖音网页后台",
+    "UNKNOWN",
+    "UNABLE_TO_DETERMINE",
+    "customerIdentifier",
+    "failureReason",
+    "ON DUPLICATE KEY UPDATE",
+]:
+    if token not in cross_platform_prompt_sql:
+        errors.append(f"V72 migration missing {token}")
 
 progress = (ROOT / "dev-progress/01C_progress.md").read_text(encoding="utf-8")
 for label in ["SF-C01", "SF-C02", "SF-C03", "SF-C04", "SF-C05", "SF-C06", "SF-C07", "SF-C08"]:
