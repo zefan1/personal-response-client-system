@@ -6,7 +6,7 @@
 
 **Architecture:** Extract foreground capture into a dependency-injected Electron main-process coordinator so hiding, active-window discovery, source matching, fallback capture, and window restoration are unit-testable. Keep the renderer API stable except for non-sensitive capture metadata. Extend the backend parser compatibly and migrate the recognition prompt with Flyway V72 without overwriting customized prompts.
 
-**Tech Stack:** Electron 40, `active-win` 9, TypeScript, Vitest, Vue 3, Java 17, Spring Boot, Jackson, Flyway, Maven.
+**Tech Stack:** Electron 40, `get-windows` 9.3, TypeScript, Vitest, Vue 3, Java 17, Spring Boot, Jackson, Flyway, Maven.
 
 ---
 
@@ -14,9 +14,9 @@
 
 - Create `desktop/src/main/foregroundWindowCapture.ts`: platform-independent capture coordinator and source matching helpers.
 - Create `desktop/src/main/foregroundWindowCapture.test.ts`: Node-environment unit tests for capture sequencing and restoration.
-- Modify `desktop/src/main/main.ts`: adapt Electron and `active-win` to the coordinator.
-- Modify `desktop/package.json` and `desktop/package-lock.json`: add exact `active-win` runtime dependency.
-- Modify `desktop/scripts/package-verify.mjs`: assert native `active-win` files are present in the packaged archive and unpacked directory.
+- Modify `desktop/src/main/main.ts`: adapt Electron and `get-windows` to the coordinator.
+- Modify `desktop/package.json` and `desktop/package-lock.json`: add exact `get-windows` runtime dependency.
+- Modify `desktop/scripts/package-verify.mjs`: assert native `get-windows` files are present in the packaged archive and unpacked directory.
 - Modify `desktop/src/preload/preload.cts`: expose `captureMode`, width, and height without window identity.
 - Modify `desktop/src/renderer/types/desktop.ts`: align renderer bridge result type.
 - Modify `desktop/src/renderer/shared/desktopBridge.test.ts`: verify capture metadata stays intact.
@@ -256,7 +256,7 @@ git add desktop/src/main/foregroundWindowCapture.ts desktop/src/main/foregroundW
 git commit -m "feat: add foreground window capture coordinator"
 ```
 
-### Task 2: Integrate `active-win` and Electron IPC
+### Task 2: Integrate `get-windows` and Electron IPC
 
 **Files:**
 - Modify: `desktop/package.json`
@@ -268,17 +268,18 @@ git commit -m "feat: add foreground window capture coordinator"
 Run from `desktop`:
 
 ```powershell
-npm install active-win@9.0.0 --save-exact
+npm uninstall active-win
+npm install get-windows@9.3.0 --save-exact
 ```
 
-Expected: `active-win` appears under `dependencies`, and the lockfile records version `9.0.0`.
+Expected: `get-windows` appears under `dependencies`, the deprecated `active-win` entry is gone, and the lockfile records version `9.3.0`.
 
 - [ ] **Step 2: Replace the screen-only IPC implementation**
 
 Import the dependency and coordinator:
 
 ```ts
-import activeWindow from 'active-win';
+import { activeWindow } from 'get-windows';
 import { captureForegroundWindow } from './foregroundWindowCapture.js';
 ```
 
@@ -623,7 +624,7 @@ git commit -m "feat: add cross-platform recognition prompt"
 
 - [ ] **Step 1: Extend package verification for the native dependency**
 
-Import `listPackage` from `@electron/asar` in `desktop/scripts/package-verify.mjs`. After validating `asarPath`, inspect the archive and require at least one path under `node_modules/active-win/`. Also require the corresponding `app.asar.unpacked/node_modules/active-win` directory when the archive contains a `.node` file. Add these facts to the JSON report so a packaged build cannot silently omit the foreground-window native module.
+Import `listPackage` from `@electron/asar` in `desktop/scripts/package-verify.mjs`. After validating `asarPath`, inspect the archive and require at least one path under `node_modules/get-windows/`. Also require the corresponding `app.asar.unpacked/node_modules/get-windows` directory when the archive contains a `.node` file. Add these facts to the JSON report so a packaged build cannot silently omit the foreground-window native module.
 
 - [ ] **Step 2: Run the desktop checks separately**
 
@@ -638,7 +639,7 @@ npm run renderer:smoke
 npm run package:verify
 ```
 
-Expected: all commands exit 0; both smoke commands report `passed`; package verification confirms the packaged app contains and loads the native `active-win` dependency.
+Expected: all commands exit 0; both smoke commands report `passed`; package verification confirms the packaged app contains and loads the native `get-windows` dependency.
 
 - [ ] **Step 3: Run backend checks separately**
 
