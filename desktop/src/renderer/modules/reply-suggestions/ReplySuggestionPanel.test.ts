@@ -289,6 +289,22 @@ describe('ReplySuggestionPanel', () => {
     app.unmount();
   });
 
+  it('shows the backend detail for image recognition failures', async () => {
+    const { app, host, eventBus } = await mountPanel();
+
+    eventBus.emit('recognize:start', { sessionId: 'session-image-failed', source: 'BUTTON_CLICK' });
+    eventBus.emit('recognize:image-failed', {
+      sessionId: 'session-image-failed',
+      errorCode: '30-10001',
+      message: '未能从图片中识别到聊天内容，请确认截图中包含聊天窗口'
+    });
+    await flushUi();
+
+    expect(host.querySelector('.reply-failure-state')?.textContent ?? '')
+      .toContain('未能从图片中识别到聊天内容，请确认截图中包含聊天窗口');
+    app.unmount();
+  });
+
   it('shows a close icon for a single task, confirms removal, and ignores late results', async () => {
     const { app, host, eventBus } = await mountPanel();
 
