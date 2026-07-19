@@ -283,6 +283,41 @@ describe('App route shell', () => {
     app.unmount();
   });
 
+  it('focuses the reply assistant when the global screenshot capture fails', async () => {
+    const [{ captureScreenshot }, { triggerRecognize }] = await Promise.all([
+      import('./shared/desktopBridge'),
+      import('./modules/chat-recognition/recognitionStore')
+    ]);
+    installDesktopBridge();
+    vi.mocked(captureScreenshot).mockResolvedValueOnce({ success: false, error: 'CAPTURE_FAILED' });
+    const { app, host } = await mountAppWithToken('#/desktop');
+
+    (host.querySelector('.sidebar-quick-actions button') as HTMLButtonElement).click();
+    await flushUi();
+
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent)
+      .toBe('回复助手');
+    expect(triggerRecognize).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it('focuses the reply assistant for recognition failure events', async () => {
+    const { eventBus } = await import('./shared/eventBus');
+    installDesktopBridge();
+    const { app, host } = await mountAppWithToken('#/desktop');
+
+    eventBus.emit('recognize:image-failed', {
+      sessionId: 'failure-session',
+      errorCode: '30-10001',
+      message: '未能从图片中识别到聊天内容，请确认截图中包含聊天窗口'
+    });
+    await flushUi();
+
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent)
+      .toBe('回复助手');
+    app.unmount();
+  });
+
   it('toggles the pinned window button through the desktop bridge', async () => {
     const { toggleAlwaysOnTop } = await import('./shared/desktopBridge');
     installDesktopBridge();

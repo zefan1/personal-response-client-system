@@ -58,7 +58,7 @@ export async function triggerRecognize(source: RecognizeSource, content: Recogni
       source
     });
     if (!response.success) {
-      handleError(response.errorCode, sessionId);
+      handleError(response.errorCode, sessionId, response.message);
       return;
     }
     eventBus.emit('recognize:progress', { sessionId, source, stage: 'GENERATING', message: '正在生成回复' });
@@ -140,21 +140,22 @@ export function handleImageServiceStatus(payload: { status?: string; message?: s
   }
 }
 
-function handleError(errorCode: string | null, sessionId: string): void {
+function handleError(errorCode: string | null, sessionId: string, message?: string | null): void {
   if (errorCode === '30-10001') {
-    recognitionState.toast = '图片识别失败，请粘贴客户标识和聊天内容';
+    const detail = message?.trim() || '图片识别失败，请粘贴客户标识和聊天内容';
+    recognitionState.toast = detail;
     recognitionState.isTwoBoxMode = true;
-    eventBus.emit('recognize:image-failed', { sessionId, errorCode, message: recognitionState.toast });
-  } else if (errorCode === '30-10002') {
-    recognitionState.toast = '图片格式不支持，请使用 PNG/JPG 截图';
-    eventBus.emit('recognize:failed', { sessionId, errorCode, message: recognitionState.toast });
-  } else if (errorCode === '80-10002') {
-    recognitionState.toast = '登录已失效，请重新登录';
-    eventBus.emit('recognize:failed', { sessionId, errorCode, message: recognitionState.toast });
-  } else {
-    recognitionState.toast = '识别失败，请稍后重试';
-    eventBus.emit('recognize:failed', { sessionId, errorCode, message: recognitionState.toast });
+    eventBus.emit('recognize:image-failed', { sessionId, errorCode, message: detail });
+    return;
   }
+  const fallback = errorCode === '30-10002'
+    ? '图片格式不支持，请使用 PNG/JPG 截图'
+    : errorCode === '80-10002'
+      ? '登录已失效，请重新登录'
+      : '识别失败，请稍后重试';
+  const detail = message?.trim() || fallback;
+  recognitionState.toast = detail;
+  eventBus.emit('recognize:failed', { sessionId, errorCode, message: detail });
 }
 
 async function digest(value: string): Promise<string> {

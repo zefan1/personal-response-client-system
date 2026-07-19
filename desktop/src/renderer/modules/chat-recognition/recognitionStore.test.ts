@@ -202,6 +202,38 @@ describe('recognitionStore', () => {
     expect(recognition.recognitionState.isRecognizePending).toBe(false);
   });
 
+  it('preserves the backend message on image recognition failure events', async () => {
+    const { recognition, eventBus } = await freshStore();
+    const events: unknown[] = [];
+    eventBus.on('recognize:image-failed', (payload) => events.push(payload));
+    postJsonMock.mockResolvedValueOnce({
+      success: false,
+      errorCode: '30-10001',
+      message: '未能从图片中识别到聊天内容，请确认截图中包含聊天窗口'
+    });
+
+    await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'bad-image' });
+
+    expect(events[0]).toMatchObject({
+      errorCode: '30-10001',
+      message: '未能从图片中识别到聊天内容，请确认截图中包含聊天窗口'
+    });
+  });
+
+  it('uses the generic image failure message when the API omits a message', async () => {
+    const { recognition, eventBus } = await freshStore();
+    const events: unknown[] = [];
+    eventBus.on('recognize:image-failed', (payload) => events.push(payload));
+    postJsonMock.mockResolvedValueOnce({ success: false, errorCode: '30-10001', message: null });
+
+    await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'bad-image' });
+
+    expect(events[0]).toMatchObject({
+      errorCode: '30-10001',
+      message: '图片识别失败，请粘贴客户标识和聊天内容'
+    });
+  });
+
   it('emits a failed event with the matching session id for non-image business errors', async () => {
     const { recognition, eventBus } = await freshStore();
     const events: unknown[] = [];

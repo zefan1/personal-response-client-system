@@ -293,7 +293,12 @@ onMounted(() => {
     taskQueueOpen.value = true;
   }));
   eventDisposers.push(eventBus.on('customer:selected', () => selectDesktopPanel('customer')));
-  eventDisposers.push(eventBus.on('recognize:result', () => selectDesktopPanel('reply')));
+  const focusReplyAssistant = () => selectDesktopPanel('reply');
+  eventDisposers.push(eventBus.on('recognize:result', focusReplyAssistant));
+  eventDisposers.push(eventBus.on('recognize:image-failed', focusReplyAssistant));
+  eventDisposers.push(eventBus.on('recognize:failed', focusReplyAssistant));
+  eventDisposers.push(eventBus.on('recognize:timeout', focusReplyAssistant));
+  eventDisposers.push(eventBus.on('recognize:multiple', focusReplyAssistant));
   eventDisposers.push(eventBus.on('suggestion:show', () => selectDesktopPanel('reply')));
   eventDisposers.push(eventBus.on('desktop:recognize-request', () => {
     void recognizeFromAnywhere();
@@ -430,6 +435,7 @@ function selectDesktopPanel(panel: DesktopPanelKey) {
 
 async function recognizeFromAnywhere() {
   clearDesktopNotice();
+  selectDesktopPanel('reply');
   const result = await captureScreenshot();
   if (!result.success || !result.imageBase64) {
     setDesktopNotice('屏幕截图失败，请确认系统允许桌面端录屏后重试', 'error');
