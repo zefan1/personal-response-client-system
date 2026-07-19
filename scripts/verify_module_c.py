@@ -23,6 +23,7 @@ required_files = [
     "src/main/java/com/privateflow/common/events/ImageServiceStatusEvent.java",
     "src/main/resources/db/migration/V2__module_c_image_configs.sql",
     "src/main/resources/db/migration/V72__cross_platform_image_recognition_prompt.sql",
+    "src/main/resources/db/migration/V73__allow_nickname_only_image_recognition.sql",
     "dev-progress/01C_progress.md",
 ]
 
@@ -97,6 +98,11 @@ for token in [
 ]:
     if token not in cross_platform_prompt_sql:
         errors.append(f"V72 migration missing {token}")
+
+nickname_only_prompt_sql = (ROOT / "src/main/resources/db/migration/V73__allow_nickname_only_image_recognition.sql").read_text(encoding="utf-8")
+for token in ["Nickname-only success rule", "status=OK", "customerIdentifier", "NOT LIKE"]:
+    if token not in nickname_only_prompt_sql:
+        errors.append(f"V73 migration missing {token}")
 
 progress = (ROOT / "dev-progress/01C_progress.md").read_text(encoding="utf-8")
 for label in ["SF-C01", "SF-C02", "SF-C03", "SF-C04", "SF-C05", "SF-C06", "SF-C07", "SF-C08"]:
