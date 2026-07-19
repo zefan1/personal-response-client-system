@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { listPackage } from '@electron/asar';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = process.cwd();
@@ -160,6 +160,9 @@ function targetGetWindowsBinding() {
 function runPackagedSmoke() {
   if (!existsSync(executablePath)) return { attempted: false, passed: false, output: '' };
   const userDataDir = join(reportDir, 'package-smoke-user-data');
+  const nativeBindingMarkerPath = join(reportDir, 'package-smoke-native-binding.ok');
+  mkdirSync(reportDir, { recursive: true });
+  rmSync(nativeBindingMarkerPath, { force: true });
   const result = spawnSync(executablePath, [], {
     cwd: platformDir,
     env: {
@@ -167,15 +170,26 @@ function runPackagedSmoke() {
       PDA_ELECTRON_SMOKE: '1',
       PDA_ELECTRON_SMOKE_AUTO_QUIT: '1',
       PDA_ELECTRON_SMOKE_USER_DATA_DIR: userDataDir,
+      PDA_FOREGROUND_CAPTURE_NATIVE_SMOKE: '1',
+      PDA_FOREGROUND_CAPTURE_NATIVE_SMOKE_MARKER: nativeBindingMarkerPath,
       ELECTRON_ENABLE_LOGGING: '1'
     },
     encoding: 'utf8',
     timeout: 20000,
     windowsHide: true
   });
+  const nativeBindingLoaded = existsSync(nativeBindingMarkerPath);
+  const failure = result.status !== 0
+    ? `application exited with status ${result.status ?? 'unknown'}`
+    : nativeBindingLoaded
+      ? null
+      : 'foreground capture native binding smoke marker missing';
   return {
     attempted: true,
-    passed: result.status === 0,
+    passed: failure === null,
+    nativeBindingLoaded,
+    nativeBindingMarkerPath,
+    failure,
     output: `${result.stdout || ''}${result.stderr || ''}`.trim()
   };
 }
@@ -236,7 +250,7 @@ if (existsSync(asarPath)) {
 
 const packagedSmoke = runPackagedSmoke();
 if (packagedSmoke.attempted && !packagedSmoke.passed) {
-  failures.push(`packaged Electron smoke failed: ${packagedSmoke.output || 'no output'}`);
+  failures.push(`packaged Electron smoke failed: ${packagedSmoke.failure || packagedSmoke.output || 'no output'}`);
 }
 
 const report = {

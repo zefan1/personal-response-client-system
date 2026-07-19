@@ -4,6 +4,7 @@ import {
   captureForegroundWindow,
   parseElectronWindowId,
   resolveDisplayIdFromPhysicalPoint,
+  verifyForegroundCaptureNativeBinding,
   type CaptureDependencies,
   type CaptureSource
 } from './foregroundWindowCapture.js';
@@ -57,6 +58,16 @@ function dependencies(overrides: Partial<CaptureDependencies> = {}): CaptureDepe
 }
 
 describe('foregroundWindowCapture', () => {
+  it('loads the foreground capture native binding and propagates load failures', async () => {
+    const loader = vi.fn().mockResolvedValue(undefined);
+    await expect(verifyForegroundCaptureNativeBinding(loader)).resolves.toBeUndefined();
+    expect(loader).toHaveBeenCalledOnce();
+
+    await expect(verifyForegroundCaptureNativeBinding(async () => {
+      throw new Error('native binding ABI mismatch');
+    })).rejects.toThrow('native binding ABI mismatch');
+  });
+
   it('converts physical window coordinates to DIP before resolving the display', () => {
     const screenToDipPoint = vi.fn(() => ({ x: 1600, y: 240 }));
     const getDisplayNearestPoint = vi.fn(() => ({ id: 2 }));

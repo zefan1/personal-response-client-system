@@ -4,7 +4,11 @@ import crypto from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captureForegroundWindow, resolveDisplayIdFromPhysicalPoint } from './foregroundWindowCapture.js';
+import {
+  captureForegroundWindow,
+  resolveDisplayIdFromPhysicalPoint,
+  verifyForegroundCaptureNativeBinding
+} from './foregroundWindowCapture.js';
 
 type ClipboardHistoryItem = {
   md5: string;
@@ -22,6 +26,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
 const isSmoke = process.env.PDA_ELECTRON_SMOKE === '1';
 const smokeAutoQuit = process.env.PDA_ELECTRON_SMOKE_AUTO_QUIT !== '0';
+const foregroundCaptureNativeSmoke = process.env.PDA_FOREGROUND_CAPTURE_NATIVE_SMOKE === '1';
+const foregroundCaptureNativeSmokeMarker = process.env.PDA_FOREGROUND_CAPTURE_NATIVE_SMOKE_MARKER ?? '';
 const rendererSmoke = process.env.PDA_RENDERER_SMOKE === '1';
 const rendererSmokeTarget = process.env.PDA_RENDERER_SMOKE_TARGET ?? 'desktop';
 const rendererSmokeApiBaseUrl = process.env.PDA_SMOKE_API_BASE_URL ?? 'http://localhost:8080';
@@ -837,7 +843,10 @@ async function captureRendererSmokeScreenshot(window: BrowserWindow, fileName: s
   writeFileSync(path.join(rendererSmokeScreenshotDir, fileName), image.toPNG());
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  if (foregroundCaptureNativeSmoke && !(await runForegroundCaptureNativeSmoke())) {
+    return;
+  }
   registerOnlineStatusIpc();
   registerWindowControlIpc();
   registerAdminOpenExternal();
@@ -870,6 +879,21 @@ function getOnlineStatus(): OnlineStatusPayload {
     online: net.isOnline(),
     type: 'unknown'
   };
+}
+
+async function runForegroundCaptureNativeSmoke(): Promise<boolean> {
+  try {
+    await verifyForegroundCaptureNativeBinding(activeWindow);
+    if (foregroundCaptureNativeSmokeMarker) {
+      writeFileSync(foregroundCaptureNativeSmokeMarker, 'passed\n', 'utf8');
+    }
+    console.log('foreground_capture_native_smoke=passed');
+    return true;
+  } catch (error) {
+    console.error('foreground_capture_native_smoke=failed', error);
+    app.exit(1);
+    return false;
+  }
 }
 
 function registerOnlineStatusIpc() {

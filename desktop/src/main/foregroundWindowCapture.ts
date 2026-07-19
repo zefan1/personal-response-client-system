@@ -67,6 +67,12 @@ export function resolveDisplayIdFromPhysicalPoint(
   return String(screenApi.getDisplayNearestPoint(screenApi.screenToDipPoint(point)).id);
 }
 
+export async function verifyForegroundCaptureNativeBinding(
+  loader: () => Promise<unknown>
+): Promise<void> {
+  await loader();
+}
+
 export async function captureForegroundWindow(deps: CaptureDependencies): Promise<ScreenshotCaptureResult> {
   const previous = {
     visible: deps.assistantWindow.isVisible(),
