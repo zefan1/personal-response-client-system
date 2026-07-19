@@ -2,6 +2,9 @@ type BridgeResult = {
   success: boolean;
   error?: string;
   imageBase64?: string;
+  width?: number;
+  height?: number;
+  captureMode?: 'FOREGROUND_WINDOW' | 'SCREEN_FALLBACK';
   message?: string;
   url?: string;
 };

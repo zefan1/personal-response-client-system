@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getAlwaysOnTop, openAdminConsole, toggleAlwaysOnTop } from './desktopBridge';
+import { captureScreenshot, getAlwaysOnTop, openAdminConsole, toggleAlwaysOnTop } from './desktopBridge';
 
 describe('desktopBridge admin console launcher', () => {
   const originalUserAgent = navigator.userAgent;
@@ -86,5 +86,29 @@ describe('desktopBridge admin console launcher', () => {
       alwaysOnTop: false,
       error: 'DESKTOP_BRIDGE_UNAVAILABLE'
     });
+  });
+
+  it('preserves non-sensitive capture metadata from the Electron bridge', async () => {
+    const captureScreenshotMock = vi.fn(async () => ({
+      success: true,
+      imageBase64: 'window-image',
+      width: 1280,
+      height: 720,
+      captureMode: 'FOREGROUND_WINDOW' as const
+    }));
+    (window as unknown as {
+      desktopBridge: { captureScreenshot: typeof captureScreenshotMock };
+    }).desktopBridge = { captureScreenshot: captureScreenshotMock };
+
+    const result = await captureScreenshot();
+
+    expect(result).toMatchObject({
+      success: true,
+      width: 1280,
+      height: 720,
+      captureMode: 'FOREGROUND_WINDOW'
+    });
+    const captureMode: 'FOREGROUND_WINDOW' | 'SCREEN_FALLBACK' | undefined = result.captureMode;
+    expect(captureMode).toBe('FOREGROUND_WINDOW');
   });
 });

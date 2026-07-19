@@ -5,7 +5,7 @@ type ScreenshotResult = {
   imageBase64?: string;
   width?: number;
   height?: number;
-  screenTitle?: string;
+  captureMode?: 'FOREGROUND_WINDOW' | 'SCREEN_FALLBACK';
   error?: 'CAPTURE_FAILED' | 'DESKTOP_BRIDGE_UNAVAILABLE';
   message?: string;
 };
