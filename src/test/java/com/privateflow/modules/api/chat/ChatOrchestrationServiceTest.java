@@ -157,6 +157,37 @@ class ChatOrchestrationServiceTest {
   }
 
   @Test
+  void recognizeUsesPlatformIdentifierToDisambiguateMultipleNicknameMatches() {
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Displayed name",
+        null,
+        List.of(new com.privateflow.modules.image.Message("client", "hello")),
+        null,
+        "douyin_user_88",
+        "DOUYIN_WEB",
+        0.92));
+    when(customerMatchService.match(any()))
+        .thenReturn(new com.privateflow.modules.match.MatchResult(
+            com.privateflow.modules.match.MatchType.MULTIPLE,
+            List.of(),
+            2))
+        .thenReturn(com.privateflow.modules.match.MatchResult.none());
+
+    service.recognize(new ChatRecognizeRequest(
+        Base64.getEncoder().encodeToString("image".getBytes()),
+        null,
+        null,
+        "TUAN_GOU",
+        "source-table",
+        List.of()));
+
+    org.mockito.ArgumentCaptor<MatchRequest> captor = org.mockito.ArgumentCaptor.forClass(MatchRequest.class);
+    verify(customerMatchService, org.mockito.Mockito.times(2)).match(captor.capture());
+    assertEquals("Displayed name", captor.getAllValues().get(0).nickname());
+    assertEquals("douyin_user_88", captor.getAllValues().get(1).nickname());
+  }
+
+  @Test
   void recognizePersistsRawMessagesForLaterSendConfirmation() {
     when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
         "Alice",

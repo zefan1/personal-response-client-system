@@ -94,7 +94,7 @@ public class ChatOrchestrationService {
     String phone = recognized == null ? null : recognized.phone();
     MatchResult match = match(nickname, phone, request.leadType(), request.sourceTable());
     String platformIdentifier = recognized == null ? null : recognized.customerIdentifier();
-    if (isNoMatch(match)
+    if ((isNoMatch(match) || match.matchType() == MatchType.MULTIPLE)
         && blank(request.customerIdentifier())
         && !blank(platformIdentifier)
         && !platformIdentifier.equals(nickname)) {
