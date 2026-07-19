@@ -23,4 +23,12 @@ class ImageConfigProviderTest {
 
     assertThat(provider.get().apiKey()).isEqualTo("image-secret");
   }
+
+  @Test
+  void doesNotChooseAProviderSpecificDefaultModel() {
+    provider.refresh();
+
+    assertThat(provider.get().model()).isBlank();
+  }
+
 }

@@ -35,6 +35,20 @@ class JwtAuthenticationFilterTest {
   }
 
   @Test
+  void refreshEndpointBypassesExpiredAccessTokenAuthentication() throws Exception {
+    JwtService jwtService = mock(JwtService.class);
+    JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtService, mock(AccountRepository.class), new ObjectMapper());
+    MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/refresh");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    FilterChain chain = mock(FilterChain.class);
+
+    filter.doFilter(request, response, chain);
+
+    verify(chain).doFilter(request, response);
+    verify(jwtService, never()).verify(any());
+  }
+
+  @Test
   void authFailureIncludesCorsHeadersForLocalFrontend() throws Exception {
     JwtService jwtService = mock(JwtService.class);
     JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtService, mock(AccountRepository.class), new ObjectMapper());

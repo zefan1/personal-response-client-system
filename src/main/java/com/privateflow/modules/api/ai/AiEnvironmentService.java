@@ -42,6 +42,7 @@ public class AiEnvironmentService {
 
   private static final byte[] TEST_IMAGE = createTestImage();
   private static final String DEFAULT_LLM_PROTOCOL = "OPENAI_COMPATIBLE";
+  private static final String DEFAULT_SKILL_PROTOCOL = "OPENAI_COMPATIBLE";
   private final AiEnvironmentRepository repository;
   private final ApplicationEventPublisher eventPublisher;
   private final WsPushService wsPushService;
@@ -293,6 +294,16 @@ public class AiEnvironmentService {
     if (type == AiEnvironmentType.LLM) {
       validateLlm(request);
     }
+    if (type == AiEnvironmentType.SKILL) {
+      validateSkill(request);
+    }
+  }
+
+  private void validateSkill(AiEnvironmentRequest request) {
+    String protocol = skillProtocol(request.protocol(), request.baseUrl());
+    if (!DEFAULT_SKILL_PROTOCOL.equals(protocol) && !"MCP_STREAMABLE_HTTP".equals(protocol)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "protocol must be OPENAI_COMPATIBLE or MCP_STREAMABLE_HTTP");
+    }
   }
 
   private void validateLlm(AiEnvironmentRequest request) {
@@ -331,6 +342,9 @@ public class AiEnvironmentService {
       updateLlmConfig("llm.temperature", String.valueOf(environment.temperature()));
       updateLlmConfig("llm.max_tokens", String.valueOf(environment.maxTokens()));
     }
+    if (type == AiEnvironmentType.SKILL && environment.protocol() != null && !environment.protocol().isBlank()) {
+      updateRuntimeConfig("skill.protocol", skillProtocol(environment.protocol(), environment.baseUrl()));
+    }
   }
 
   private void updateLlmConfig(String key, String value) {
@@ -338,8 +352,22 @@ public class AiEnvironmentService {
     publishConfig(key);
   }
 
+  private void updateRuntimeConfig(String key, String value) {
+    repository.updateConfig(key, value == null ? "" : value);
+    publishConfig(key);
+  }
+
   private String protocol(String value) {
     return value == null || value.isBlank() ? DEFAULT_LLM_PROTOCOL : value.trim().toUpperCase();
+  }
+
+  private String skillProtocol(String value, String baseUrl) {
+    if (value != null && !value.isBlank()) {
+      return value.trim().toUpperCase();
+    }
+    return baseUrl != null && baseUrl.toLowerCase().matches(".*\\/mcp\\/?$")
+        ? "MCP_STREAMABLE_HTTP"
+        : DEFAULT_SKILL_PROTOCOL;
   }
 
   private static byte[] createTestImage() {

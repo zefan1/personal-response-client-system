@@ -32,6 +32,7 @@ class AiEnvironmentRepositoryTest {
           base_url VARCHAR(500) NOT NULL,
           api_key VARCHAR(500) NOT NULL,
           api_key_last4 VARCHAR(4) NOT NULL,
+          protocol VARCHAR(50) NOT NULL DEFAULT 'OPENAI_COMPATIBLE',
           is_active TINYINT NOT NULL DEFAULT 0,
           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -91,6 +92,7 @@ class AiEnvironmentRepositoryTest {
     assertThat(updated.envName()).isEqualTo("生产二");
     assertThat(updated.baseUrl()).isEqualTo("https://skill2.example.com");
     assertThat(updated.apiKeyLast4()).isEqualTo("1234");
+    assertThat(updated.protocol()).isEqualTo("OPENAI_COMPATIBLE");
     assertThat(secretCipher.decrypt(repository.encryptedApiKey(AiEnvironmentType.SKILL, id))).isEqualTo("secret-1234");
     assertThat(repository.decryptApiKey(AiEnvironmentType.SKILL, id)).isEqualTo("secret-1234");
   }

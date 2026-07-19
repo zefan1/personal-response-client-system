@@ -3644,7 +3644,9 @@ async function submitEnvironment(kind: 'skill' | 'image' | 'llm') {
   const prefix = environmentPrefix(kind);
   const payload = kind === 'llm'
     ? pickDraft(['envName', 'baseUrl', 'apiKey', 'model', 'protocol', 'timeoutMs', 'temperature', 'maxTokens'])
-    : pickDraft(['envName', 'baseUrl', 'apiKey']);
+    : kind === 'skill'
+      ? pickDraft(['envName', 'baseUrl', 'apiKey', 'protocol'])
+      : pickDraft(['envName', 'baseUrl', 'apiKey']);
   if (editingItem.value?.id) await putJson(`/admin/api/v1/${prefix}/${editingItem.value.id}`, payload);
   else await postJson(`/admin/api/v1/${prefix}`, payload);
 }
@@ -3757,7 +3759,8 @@ function noticeUpdatePayload() {
 function initialDraft(kind: FormKind, item?: AnyRecord): AnyRecord {
   const suffix = Date.now().toString().slice(-6);
   if (kind === 'skill') return { skillId: item?.skillId ?? '', skillName: item?.skillName ?? '', scene: item?.scene ?? 'OPENING', leadType: item?.leadType ?? 'GENERAL', priority: item?.priority ?? 90 };
-  if (kind === 'skillEnv' || kind === 'imageEnv') return { envName: item?.envName ?? '', baseUrl: item?.baseUrl ?? '', apiKey: '' };
+  if (kind === 'skillEnv') return { envName: item?.envName ?? '', baseUrl: item?.baseUrl ?? '', apiKey: '', protocol: item?.protocol ?? 'OPENAI_COMPATIBLE' };
+  if (kind === 'imageEnv') return { envName: item?.envName ?? '', baseUrl: item?.baseUrl ?? '', apiKey: '' };
   if (kind === 'llmEnv') return {
     envName: item?.envName ?? '',
     baseUrl: item?.baseUrl ?? '',
@@ -3858,7 +3861,8 @@ function formMeta(kind: FormKind | null): { title: string; description: string; 
   if (kind === 'skillEnv' || kind === 'imageEnv') return { title: kind === 'skillEnv' ? 'Skill 环境' : '识图环境', description: 'API Key 保存后只展示脱敏信息。', fields: [
     { key: 'envName', label: '环境名称', type: 'text', placeholder: '生产环境 / 备份环境' },
     { key: 'baseUrl', label: '服务地址', type: 'text', placeholder: 'https://api.example.com' },
-    { key: 'apiKey', label: 'API Key', type: 'password' }
+    { key: 'apiKey', label: 'API Key', type: 'password' },
+    ...(kind === 'skillEnv' ? [{ key: 'protocol', label: '接口协议', type: 'select', options: [{ label: 'OpenAI Compatible', value: 'OPENAI_COMPATIBLE' }, { label: 'MCP Streamable HTTP', value: 'MCP_STREAMABLE_HTTP' }] }] as FormField[] : [])
   ] };
   if (kind === 'llmEnv') return { title: 'LLM 思考环境', description: '每个环境可绑定一个模型和一组推理参数，API Key 保存后只展示脱敏信息。', fields: [
     { key: 'envName', label: '环境名称', type: 'text', placeholder: 'OpenAI 主模型 / 本地模型网关' },

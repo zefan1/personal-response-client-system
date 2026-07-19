@@ -27,6 +27,7 @@ import com.privateflow.modules.skill.SkillGatewayService;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.ReplyTagSnapshot;
+import com.privateflow.modules.skill.Suggestion;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
 import java.util.Base64;
 import java.util.List;
@@ -260,10 +261,6 @@ public class ChatOrchestrationService {
     }
   }
 
-  private boolean isNoMatch(MatchResult result) {
-    return result == null || result.matchType() == MatchType.NONE;
-  }
-
   private GeneratedReplies generateSkill(Scene scene, String leadType, Customer customer, String phone, String clientMessage, List<String> previousSuggestions, List<Map<String, String>> chatContext) {
     SkillRequest skillRequest = new SkillRequest(
         scene,
@@ -280,21 +277,29 @@ public class ChatOrchestrationService {
   }
 
   private GeneratedReplies generateReplies(SkillRequest skillRequest) {
-    return llmReplyGenerationService.tryGenerate(skillRequest)
-        .map(skill -> new GeneratedReplies(skillRequest, skill, ChatReplySource.llm()))
-        .orElseGet(() -> {
-          if (!llmReplyGenerationService.fallbackToSkill()) {
-            return new GeneratedReplies(
-                skillRequest,
-                new SkillResponse(List.of(), null, null, null),
-                ChatReplySource.fallback("LLM 回复生成失败，且未启用 Skill 回落"));
-          }
-          SkillResponse skill = skillGatewayService.generateReplies(skillRequest);
-          return new GeneratedReplies(skillRequest, skill, replySourceForSkill(skill));
-        });
+    SkillResponse skillGuidance = skillGatewayService.generateReplies(skillRequest);
+    ChatReplySource skillSource = replySourceForSkill(skillGuidance);
+    if ("FALLBACK".equals(skillSource.source())) {
+      return new GeneratedReplies(skillRequest, skillGuidance, skillSource);
+    }
+    return llmReplyGenerationService.tryGenerate(skillRequest, skillGuidance)
+        .map(reply -> new GeneratedReplies(skillRequest, reply, ChatReplySource.llmWithSkill()))
+        .orElseGet(() -> guidanceOnly(skillGuidance)
+            ? new GeneratedReplies(skillRequest, configuredFallback(), ChatReplySource.fallback("LLM generation failed; using configured fallback"))
+            : new GeneratedReplies(skillRequest, skillGuidance, ChatReplySource.skill()));
+  }
+
+  private boolean isNoMatch(MatchResult result) {
+    return result == null || result.matchType() == MatchType.NONE;
   }
 
   private ChatReplySource replySourceForSkill(SkillResponse skill) {
+    if (skill != null
+        && (skill.suggestions() == null || skill.suggestions().isEmpty())
+        && skill.guidance() != null
+        && !skill.guidance().isBlank()) {
+      return ChatReplySource.skill();
+    }
     if (skill == null || skill.suggestions() == null || skill.suggestions().isEmpty()) {
       return ChatReplySource.fallback("Skill 未返回可用回复");
     }
@@ -303,6 +308,21 @@ public class ChatOrchestrationService {
       return ChatReplySource.fallback("Skill 不可用，已使用系统降级回复");
     }
     return ChatReplySource.skill();
+  }
+
+  private boolean guidanceOnly(SkillResponse skill) {
+    return skill != null
+        && skill.guidance() != null
+        && !skill.guidance().isBlank()
+        && (skill.suggestions() == null || skill.suggestions().isEmpty());
+  }
+
+  private SkillResponse configuredFallback() {
+    return new SkillResponse(
+        List.of(new Suggestion(skillConfigProvider.get().fallbackReply(), "SYSTEM_FALLBACK", "")),
+        null,
+        null,
+        null);
   }
 
   private List<ReplyTagSnapshot> loadReplyTags(Customer customer) {

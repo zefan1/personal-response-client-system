@@ -102,7 +102,7 @@ describe('ClipboardCaptureConfirmAgent', () => {
       textMessage: undefined,
       customerIdentifier: undefined,
       source: 'CLIPBOARD_SCREENSHOT'
-    });
+    }, 0);
     expect(recognition.recognitionState.pendingClipboardImage).toBeNull();
     app.unmount();
   });

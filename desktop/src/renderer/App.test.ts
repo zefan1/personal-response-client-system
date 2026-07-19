@@ -104,9 +104,14 @@ async function flushAsyncComponent() {
   await nextTick();
 }
 
-async function mountAppWithToken(hash = '#/desktop'): Promise<MountedApp> {
+async function mountAppWithToken(hash = '#/desktop', configPatch: Record<string, unknown> = {}): Promise<MountedApp> {
   window.history.replaceState(null, '', hash);
-  localStorage.setItem('desktop_config', JSON.stringify({ apiBaseUrl: 'http://localhost:8080', accessToken: 'token-a', accountRole: 'ADMIN' }));
+  localStorage.setItem('desktop_config', JSON.stringify({
+    apiBaseUrl: 'http://localhost:8080',
+    accessToken: 'token-a',
+    accountRole: 'ADMIN',
+    ...configPatch
+  }));
   const host = document.createElement('div');
   document.body.appendChild(host);
   const app = createApp(App);
@@ -223,6 +228,44 @@ describe('App route shell', () => {
     const saved = JSON.parse(localStorage.getItem('desktop_config') ?? '{}');
     expect(saved.accessToken).toBe('');
     expect(saved.accountRole).toBe('');
+
+    app.unmount();
+  });
+
+  it('refreshes an expired session before showing the login page', async () => {
+    installDesktopBridge();
+    const { eventBus } = await import('./shared/eventBus');
+    const { app, host } = await mountAppWithToken('#/desktop', {
+      refreshToken: 'refresh-a',
+      accountUsername: 'admin'
+    });
+    apiMocks.postJson.mockImplementation(async (path: string) => path === '/api/v1/auth/refresh'
+      ? {
+          success: true,
+          data: {
+            accessToken: 'token-b',
+            refreshToken: 'refresh-a',
+            account: { username: 'admin', displayName: 'Admin', role: 'ADMIN', permissions: [] }
+          },
+          errorCode: null,
+          message: null
+        }
+      : { success: true, data: null, errorCode: null, message: null });
+
+    eventBus.emit('auth:expired', { message: '登录已过期，请重新登录' });
+    await flushUi();
+    await flushUi();
+
+    expect(host.querySelector('.login-shell')).toBeFalsy();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/api/v1/auth/refresh', {
+      refreshToken: 'refresh-a',
+      username: 'admin'
+    });
+    expect(JSON.parse(localStorage.getItem('desktop_config') ?? '{}')).toMatchObject({
+      accessToken: 'token-b',
+      refreshToken: 'refresh-a',
+      accountUsername: 'admin'
+    });
 
     app.unmount();
   });

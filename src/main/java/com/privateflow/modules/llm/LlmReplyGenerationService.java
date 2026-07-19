@@ -27,6 +27,9 @@ public class LlmReplyGenerationService {
       "【当前客户标签使用规则】标签只用于调整回复方向、优先级和语气。"
           + "不得向客户描述内部标签、系统判断、把握度、证据、来源或锁定状态。"
           + "标签与客户当前消息或真实业务事实冲突时，以当前消息和真实业务事实为准。";
+  private static final String SKILL_GUIDANCE_RULE =
+      "【Skill 固定流程】必须遵守 Skill 给出的固定思考流程、回复方向、客户分析和业务红线。"
+          + "你只能在不改变 Skill 结论的前提下优化措辞，并生成最终可发送的 3 条回复。";
   private static final String DEFAULT_SYSTEM_PROMPT = """
       You generate reply suggestions for a private-domain postpartum recovery sales assistant.
       Return JSON only. Schema:
@@ -59,8 +62,8 @@ public class LlmReplyGenerationService {
     return booleanConfig(FALLBACK_KEY, true);
   }
 
-  public Optional<SkillResponse> tryGenerate(SkillRequest request) {
-    if (!enabled()) {
+  public Optional<SkillResponse> tryGenerate(SkillRequest request, SkillResponse skillGuidance) {
+    if (!enabled() || !hasUsableGuidance(skillGuidance)) {
       return Optional.empty();
     }
     LlmResponse response = llmService.generate(
@@ -68,7 +71,7 @@ public class LlmReplyGenerationService {
         request.leadType(),
         request.caller(),
         requestSummary(request.clientMessage(), request.phone()),
-        buildRequest(request));
+        buildRequest(request, skillGuidance));
     if (!response.success()) {
       return Optional.empty();
     }
@@ -80,16 +83,16 @@ public class LlmReplyGenerationService {
     }
   }
 
-  private LlmRequest buildRequest(SkillRequest request) {
+  private LlmRequest buildRequest(SkillRequest request, SkillResponse skillGuidance) {
     return new LlmRequest(
         systemPrompt(),
-        userPrompt(request),
+        userPrompt(request, skillGuidance),
         List.of(),
         decimalConfig(TEMPERATURE_KEY),
         integerConfig(MAX_TOKENS_KEY));
   }
 
-  private String userPrompt(SkillRequest request) {
+  private String userPrompt(SkillRequest request, SkillResponse skillGuidance) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("scene", request.scene() == null ? "" : request.scene().name());
     payload.put("leadType", nvl(request.leadType()));
@@ -98,11 +101,28 @@ public class LlmReplyGenerationService {
     payload.put("chatContext", sanitizeChatContext(request.chatContext()));
     payload.put("previousSuggestions", request.previousSuggestions() == null ? List.of() : request.previousSuggestions());
     payload.put("currentTags", request.currentTags() == null ? List.of() : request.currentTags());
+    payload.put("skillGuidance", skillGuidance);
     return ("""
-        Generate reply suggestions for this customer conversation.
+        Generate final reply suggestions for this customer conversation.
+        必须遵守 Skill 给出的固定思考流程；Skill 已完成业务判断，你只负责在不改变结论的前提下生成自然、可发送的回复。
         Input JSON:
         %s
-        """.formatted(toJson(payload))) + "\n" + REPLY_TAG_GUIDANCE;
+        """.formatted(toJson(payload))) + "\n" + SKILL_GUIDANCE_RULE + "\n" + REPLY_TAG_GUIDANCE;
+  }
+
+  private boolean hasUsableGuidance(SkillResponse guidance) {
+    if (guidance == null) {
+      return false;
+    }
+    if (guidance.guidance() != null && !guidance.guidance().isBlank()) {
+      return true;
+    }
+    if (guidance.suggestions() == null || guidance.suggestions().isEmpty()) {
+      return false;
+    }
+    return guidance.suggestions().stream()
+        .filter(java.util.Objects::nonNull)
+        .noneMatch(suggestion -> "SYSTEM_FALLBACK".equalsIgnoreCase(suggestion.direction()));
   }
 
   private Map<String, Object> sanitizedCustomer(Map<String, Object> raw, String phone) {
@@ -150,7 +170,7 @@ public class LlmReplyGenerationService {
     String configured = configRepository.findValue(SYSTEM_PROMPT_KEY)
         .filter(value -> !value.isBlank())
         .orElse(DEFAULT_SYSTEM_PROMPT);
-    return configured + "\n" + REPLY_TAG_GUIDANCE;
+    return configured + "\n" + SKILL_GUIDANCE_RULE + "\n" + REPLY_TAG_GUIDANCE;
   }
 
   private String toJson(Object value) {

@@ -95,7 +95,7 @@ describe('ChatRecognitionPanel', () => {
       textMessage: undefined,
       customerIdentifier: undefined,
       source: 'BUTTON_CLICK'
-    });
+    }, 0);
     expect(events[0]).toMatchObject({ event: 'recognize:start', payload: { source: 'BUTTON_CLICK' } });
     expect(events[1]).toMatchObject({ event: 'recognize:result', payload: { source: 'BUTTON_CLICK', response: response('EXACT') } });
     expect((events[0].payload as { sessionId?: string }).sessionId).toBeTruthy();
@@ -143,7 +143,7 @@ describe('ChatRecognitionPanel', () => {
       textMessage: 'customer wants appointment',
       customerIdentifier: 'Alice',
       source: 'CLIPBOARD_TEXT'
-    });
+    }, 0);
     expect(host.querySelector('.two-box')).toBeFalsy();
     app.unmount();
   });
@@ -171,7 +171,7 @@ describe('ChatRecognitionPanel', () => {
       textMessage: 'fallback text',
       customerIdentifier: '',
       source: 'CLIPBOARD_TEXT'
-    });
+    }, 0);
     app.unmount();
   });
 

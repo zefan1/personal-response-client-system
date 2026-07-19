@@ -1,6 +1,8 @@
 export type DesktopConfig = {
   apiBaseUrl: string;
   accessToken: string;
+  refreshToken: string;
+  accountUsername: string;
   accountRole: string;
   accountPermissions: string[];
   wsUrl: string;
@@ -54,6 +56,8 @@ const WS_PATH = '/ws/v1/desktop';
 const defaults: DesktopConfig = {
   apiBaseUrl: 'http://localhost:8080',
   accessToken: '',
+  refreshToken: '',
+  accountUsername: '',
   accountRole: '',
   accountPermissions: [],
   wsUrl: '',

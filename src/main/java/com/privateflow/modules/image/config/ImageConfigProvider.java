@@ -80,6 +80,6 @@ public class ImageConfigProvider {
   }
 
   private static ImageConfig defaults() {
-    return new ImageConfig("", "", 5000, 5242880, 1920, 85, DEFAULT_PROMPT, "qwen3-vl-plus", 3);
+    return new ImageConfig("", "", 5000, 5242880, 1920, 85, DEFAULT_PROMPT, "", 3);
   }
 }

@@ -74,7 +74,8 @@ public class SkillConfigProvider {
               "skill.regenerate_max_count",
               previous.regenerateMaxCount(),
               MIN_REGENERATE_MAX_COUNT,
-              MAX_REGENERATE_MAX_COUNT)));
+              MAX_REGENERATE_MAX_COUNT),
+          protocol(string("skill.protocol", previous.protocol()))));
     } catch (RuntimeException ex) {
       log.warn("skill config refresh failed, keeping previous snapshot: {}", ex.getMessage());
     }
@@ -132,6 +133,13 @@ public class SkillConfigProvider {
     }).orElse(fallback);
   }
 
+  private String protocol(String value) {
+    if (value == null || value.isBlank()) {
+      return "OPENAI_COMPATIBLE";
+    }
+    return value.trim().toUpperCase();
+  }
+
   private double decimal(String key, double fallback) {
     return repository.findValue(key).map(value -> {
       try {
@@ -145,6 +153,6 @@ public class SkillConfigProvider {
   private static SkillConfig defaults() {
     return new SkillConfig("", "", "LAST_FOUR", "", 10000, 30, 0.5, 5, 30,
         "抱歉，AI 助手暂不可用，请手动回复或稍后再试。", "", "", "", DEFAULT_PROMPT,
-        "", 0.3, 15, 8000, DEFAULT_REGENERATE_MAX_COUNT);
+        "", 0.3, 15, 8000, DEFAULT_REGENERATE_MAX_COUNT, "OPENAI_COMPATIBLE");
   }
 }

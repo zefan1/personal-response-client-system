@@ -244,13 +244,14 @@ const loginLoading = ref(false);
 const loginError = ref('');
 const loginForm = reactive({
   apiBaseUrl: config.apiBaseUrl,
-  username: '',
+  username: config.accountUsername,
   password: '',
   mode: (currentMode.value === 'desktop' ? 'desktop' : 'admin') as 'admin' | 'desktop'
 });
 const session = reactive({
   accessToken: config.accessToken,
-  refreshToken: '',
+  refreshToken: config.refreshToken,
+  accountUsername: config.accountUsername || readJwtUsername(config.accessToken),
   accountName: config.accessToken ? '当前账号' : '',
   role: resolveInitialRole(config),
   permissions: normalizePermissions(config.accountPermissions)
@@ -277,6 +278,7 @@ const skillStatusCompactLabel = computed(() => {
   return '未配置';
 });
 const eventDisposers: Array<() => void> = [];
+let refreshPromise: Promise<void> | null = null;
 
 onMounted(() => {
   normalizeInitialHash();
@@ -304,7 +306,7 @@ onMounted(() => {
     void recognizeFromAnywhere();
   }));
   eventDisposers.push(eventBus.on<{ message?: string }>('auth:expired', (payload) => {
-    expireSession(payload?.message);
+    void handleAuthExpired(payload?.message);
   }));
   eventDisposers.push(eventBus.on<{ configKey?: string; configKeys?: string[] }>('CONFIG_REFRESH', (payload) => {
     const keys = [payload?.configKey, ...(payload?.configKeys ?? [])].filter(Boolean) as string[];
@@ -336,11 +338,14 @@ async function login() {
     const account = response.data.account ?? response.data.userInfo;
     session.accessToken = response.data.accessToken;
     session.refreshToken = response.data.refreshToken ?? '';
+    session.accountUsername = account?.username || loginForm.username.trim();
     session.accountName = account?.displayName || account?.username || loginForm.username.trim();
     session.role = normalizeRole(account?.role);
     session.permissions = normalizePermissions(account?.permissions);
     saveDesktopConfig({
       accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      accountUsername: session.accountUsername,
       accountRole: session.role,
       accountPermissions: session.permissions
     });
@@ -358,20 +363,72 @@ function logout() {
   loginError.value = '';
 }
 
+async function handleAuthExpired(message?: string): Promise<void> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+  const saved = loadDesktopConfig();
+  const refreshToken = session.refreshToken || saved.refreshToken;
+  const username = session.accountUsername || saved.accountUsername || readJwtUsername(saved.accessToken);
+  if (!refreshToken || !username) {
+    expireSession(message);
+    return;
+  }
+  refreshPromise = (async () => {
+    const response = await postJson<LoginPayload>('/api/v1/auth/refresh', { refreshToken, username });
+    if (!response.success || !response.data?.accessToken) {
+      throw new Error(response.message ?? response.errorCode ?? 'login refresh failed');
+    }
+    const account = response.data.account ?? response.data.userInfo;
+    session.accessToken = response.data.accessToken;
+    session.refreshToken = response.data.refreshToken ?? refreshToken;
+    session.accountUsername = account?.username || username;
+    session.accountName = account?.displayName || account?.username || username;
+    session.role = normalizeRole(account?.role) || session.role;
+    session.permissions = normalizePermissions(account?.permissions);
+    saveDesktopConfig({
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      accountUsername: session.accountUsername,
+      accountRole: session.role,
+      accountPermissions: session.permissions
+    });
+    loginError.value = '';
+    await refreshDesktopStatus();
+  })()
+    .catch(() => {
+      expireSession(message);
+    })
+    .finally(() => {
+      refreshPromise = null;
+    });
+  return refreshPromise;
+}
+
 function expireSession(message?: string) {
-  clearSession();
+  const username = session.accountUsername || loadDesktopConfig().accountUsername || readJwtUsername(session.accessToken);
+  clearSession(true);
+  loginForm.username = username;
   loginError.value = message?.trim() || '登录已过期，请重新登录';
 }
 
-function clearSession() {
+function clearSession(preserveIdentity = false) {
+  const username = session.accountUsername;
   session.accessToken = '';
   session.refreshToken = '';
+  session.accountUsername = preserveIdentity ? username : '';
   session.accountName = '';
   session.role = '';
   session.permissions = [];
   clearDesktopNotice();
   resetDesktopStatus();
-  saveDesktopConfig({ accessToken: '', accountRole: '', accountPermissions: [] });
+  saveDesktopConfig({
+    accessToken: '',
+    refreshToken: '',
+    accountUsername: preserveIdentity ? username : '',
+    accountRole: '',
+    accountPermissions: []
+  });
 }
 
 function setMode(mode: RouteMode) {
@@ -535,6 +592,21 @@ function readJwtRole(token?: string): string {
     const json = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='));
     const data = JSON.parse(json) as { role?: string };
     return data.role ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function readJwtUsername(token?: string): string {
+  const payload = token?.split('.')[1];
+  if (!payload) {
+    return '';
+  }
+  try {
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='));
+    const data = JSON.parse(json) as { username?: string; phone?: string };
+    return data.username ?? data.phone ?? '';
   } catch {
     return '';
   }

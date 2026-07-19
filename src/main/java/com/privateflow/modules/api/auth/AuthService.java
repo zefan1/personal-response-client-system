@@ -69,15 +69,19 @@ public class AuthService {
   }
 
   public LoginResponse refresh(RefreshRequest request, AuthUser user) {
-    if (request == null || blank(request.refreshToken()) || user == null) {
+    if (request == null || blank(request.refreshToken())) {
       throw new ApiException(ApiErrorCodes.AUTH_FAILED, "登录状态无效，请重新登录");
     }
-    String stored = refreshTokenStore.read(user.username())
+    String username = user == null ? request.username() : user.username();
+    if (blank(username)) {
+      throw new ApiException(ApiErrorCodes.AUTH_FAILED, "refresh username is required");
+    }
+    String stored = refreshTokenStore.read(username)
         .orElseThrow(() -> new ApiException(ApiErrorCodes.AUTH_FAILED, "登录已过期，请重新登录"));
     if (!stored.equals(request.refreshToken())) {
       throw new ApiException(ApiErrorCodes.AUTH_FAILED, "登录状态无效，请重新登录");
     }
-    Account account = accountRepository.findByPhone(user.username())
+    Account account = accountRepository.findByPhone(username)
         .orElseThrow(() -> new ApiException(ApiErrorCodes.AUTH_FAILED, "登录状态无效，请重新登录"));
     if (!account.enabled()) {
       throw new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "账号已停用，请联系管理员");

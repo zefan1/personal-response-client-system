@@ -45,7 +45,7 @@ describe('recognitionStore', () => {
       textMessage: 'hello',
       customerIdentifier: 'Alice',
       source: 'CLIPBOARD_TEXT'
-    });
+    }, 0);
     expect(seen[0]).toMatchObject({ event: 'recognize:start', payload: { source: 'CLIPBOARD_TEXT' } });
     expect(seen[1]).toMatchObject({ event: 'recognize:result', payload: { source: 'CLIPBOARD_TEXT', response: response('EXACT') } });
     expect((seen[0].payload as { sessionId?: string }).sessionId).toBeTruthy();
@@ -67,7 +67,7 @@ describe('recognitionStore', () => {
       textMessage: 'customer asks for appointment',
       customerIdentifier: 'Alice',
       source: 'CLIPBOARD_TEXT'
-    });
+    }, 0);
   });
 
   it('emits multiple-match candidates instead of a direct result', async () => {
@@ -156,7 +156,7 @@ describe('recognitionStore', () => {
       textMessage: undefined,
       customerIdentifier: undefined,
       source: 'CLIPBOARD_SCREENSHOT'
-    });
+    }, 0);
     expect(recognition.recognitionState.pendingClipboardImage).toBeNull();
   });
 

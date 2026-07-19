@@ -330,6 +330,7 @@ import {
   handleHelpResolved,
   handleHelpTimeout,
   handleProfileSuggestions,
+  hydrateReplySuggestionStore,
   pauseForMultipleMatch,
   regenerateReplies,
   replySuggestionState as state,
@@ -391,6 +392,7 @@ const copySuggestionSummary = computed(() => {
 const disposers: Array<() => void> = [];
 
 onMounted(() => {
+  hydrateReplySuggestionStore();
   disposers.push(eventBus.on('recognize:start', startRecognizeLoading));
   disposers.push(eventBus.on<RecognizeProgressPayload>('recognize:progress', updateRecognizeProgress));
   disposers.push(eventBus.on<RecognizeResultPayload>('recognize:result', showRecognizeResult));

@@ -26,7 +26,6 @@ import org.springframework.stereotype.Component;
 public class HttpImageRecognitionClient implements ImageRecognitionClient, ConfigurableImageRecognitionClient {
 
   private static final Logger log = LoggerFactory.getLogger(HttpImageRecognitionClient.class);
-  private static final String DEFAULT_MODEL = "qwen3-vl-plus";
   private final HttpClient httpClient;
   private final ImageConfigProvider configProvider;
   private final ObjectMapper objectMapper;
@@ -53,9 +52,11 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient, Confi
     byte[] body = requestBody(config, jpegImage);
     HttpRequest.Builder builder = HttpRequest.newBuilder()
         .uri(URI.create(chatCompletionsUrl(config.apiBaseUrl())))
-        .timeout(Duration.ofMillis(config.timeoutMs()))
         .header("Content-Type", "application/json")
         .POST(HttpRequest.BodyPublishers.ofByteArray(body));
+    if (config.timeoutMs() > 0) {
+      builder.timeout(Duration.ofMillis(config.timeoutMs()));
+    }
     if (config.apiKey() != null && !config.apiKey().isBlank()) {
       builder.header("Authorization", "Bearer " + config.apiKey());
     }
@@ -120,7 +121,10 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient, Confi
   }
 
   private String model(ImageConfig config) {
-    return config.model() == null || config.model().isBlank() ? DEFAULT_MODEL : config.model().trim();
+    if (config.model() == null || config.model().isBlank()) {
+      throw failed("Image recognition model is not configured");
+    }
+    return config.model().trim();
   }
 
   private String unwrapProviderResponse(String raw) {

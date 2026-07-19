@@ -19,6 +19,7 @@ import com.privateflow.modules.skill.ProfileAnalysisResult;
 import com.privateflow.modules.skill.ProfileUpdates;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillResponse;
+import com.privateflow.modules.skill.SkillGatewayException;
 import com.privateflow.modules.skill.Suggestion;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -180,6 +181,20 @@ class SkillAdminControllerTest {
         .andExpect(jsonPath("$.data.suggestions").isEmpty())
         .andExpect(jsonPath("$.data.profileAnalysis.profileUpdates.fields").isMap())
         .andExpect(jsonPath("$.data.profileAnalysis.tagDecisions").isArray());
+  }
+
+  @Test
+  void skillProviderFailureReturnsActionableGatewayError() throws Exception {
+    when(service.test(eq(4L), any())).thenThrow(new SkillGatewayException(
+        "20-10004", "Quota exhausted: 0/0", false));
+
+    mockMvc.perform(post("/admin/api/v1/skills/4/test")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"testMessage\":\"hello\"}"))
+        .andExpect(status().isBadGateway())
+        .andExpect(jsonPath("$.success").value(false))
+        .andExpect(jsonPath("$.errorCode").value("20-10004"))
+        .andExpect(jsonPath("$.message").value("Quota exhausted: 0/0"));
   }
 
   @Test

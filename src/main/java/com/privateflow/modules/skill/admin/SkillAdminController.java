@@ -2,6 +2,7 @@ package com.privateflow.modules.skill.admin;
 
 import com.privateflow.modules.match.ApiResponse;
 import com.privateflow.modules.skill.Scene;
+import com.privateflow.modules.skill.SkillGatewayException;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -75,5 +76,10 @@ public class SkillAdminController {
   @ExceptionHandler(SkillAdminException.class)
   public ResponseEntity<ApiResponse<Void>> handleSkillAdmin(SkillAdminException ex) {
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(ex.getErrorCode(), ex.getMessage()));
+  }
+
+  @ExceptionHandler(SkillGatewayException.class)
+  public ResponseEntity<ApiResponse<Void>> handleSkillGateway(SkillGatewayException ex) {
+    return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ApiResponse.error(ex.getErrorCode(), ex.getMessage()));
   }
 }

@@ -56,7 +56,7 @@ export async function triggerRecognize(source: RecognizeSource, content: Recogni
       textMessage: content.textMessage,
       customerIdentifier: content.customerIdentifier,
       source
-    });
+    }, 0);
     if (!response.success) {
       handleError(response.errorCode, sessionId, response.message);
       return;

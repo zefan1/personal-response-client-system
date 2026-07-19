@@ -175,7 +175,9 @@ async function requestJson<T>(
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const timer = timeoutMs > 0
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : undefined;
   try {
     const response = await fetch(`${config.apiBaseUrl}${path}`, {
       method,
@@ -194,13 +196,15 @@ async function requestJson<T>(
     recordApiNetworkFailure(error);
     throw toUserFacingNetworkError(error);
   } finally {
-    window.clearTimeout(timer);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+    }
     signal?.removeEventListener('abort', abort);
   }
 }
 
 function emitAuthExpiredIfNeeded<T>(path: string, accessToken: string, status: number, payload: ApiResponse<T>): void {
-  if (!accessToken || path.endsWith('/auth/login')) {
+  if (!accessToken || path.endsWith('/auth/login') || path.endsWith('/auth/refresh')) {
     return;
   }
   const authExpired = status === 401 || payload.errorCode === '80-10002' || payload.errorCode === '80-10008';

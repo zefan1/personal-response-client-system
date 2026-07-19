@@ -81,8 +81,12 @@ class ChatOrchestrationServiceTest {
     customerAccessService = org.mockito.Mockito.mock(CustomerAccessService.class);
     replyTagSnapshotBuilder = org.mockito.Mockito.mock(ReplyTagSnapshotBuilder.class);
     when(skillConfigProvider.get()).thenReturn(skillConfig(3));
-    when(llmReplyGenerationService.tryGenerate(any())).thenReturn(Optional.empty());
-    when(llmReplyGenerationService.fallbackToSkill()).thenReturn(true);
+    when(skillGatewayService.generateReplies(any())).thenReturn(new SkillResponse(
+        List.of(new Suggestion("skill guidance", "NEXT_STEP", "fixed workflow")),
+        null,
+        null,
+        null));
+    when(llmReplyGenerationService.tryGenerate(any(), any())).thenReturn(Optional.empty());
     when(llmFollowupSuggestionService.trySuggest(any())).thenReturn(Optional.empty());
     when(llmSummaryService.trySummarize(any())).thenReturn(Optional.empty());
     Customer accessibleCustomer = customer("18800001111");
@@ -376,12 +380,12 @@ class ChatOrchestrationServiceTest {
 
     assertEquals("skill reply", response.skill().suggestions().get(0).text());
     assertEquals("SKILL", response.replySource().source());
-    verify(llmReplyGenerationService).tryGenerate(any());
+    verify(llmReplyGenerationService).tryGenerate(any(), any());
     verify(skillGatewayService).generateReplies(any());
   }
 
   @Test
-  void regenerateUsesLlmReplyWhenAvailableAndSkipsSkill() {
+  void regenerateUsesSkillGuidanceBeforeLlmReplyGeneration() {
     SkillRequest previousRequest = new SkillRequest(
         Scene.ACTIVE_REPLY,
         "TUAN_GOU",
@@ -393,15 +397,73 @@ class ChatOrchestrationServiceTest {
         List.of(),
         "keeper");
     SkillResponse previousResponse = new SkillResponse(List.of(new Suggestion("old", "NEXT_STEP", "reason")), null, null, null);
+    SkillResponse skillGuidance = new SkillResponse(
+        List.of(new Suggestion("先确认恢复阶段", "NEXT_STEP", "固定流程")),
+        null,
+        null,
+        null);
     SkillResponse llmResponse = new SkillResponse(List.of(new Suggestion("llm reply", "NEXT_STEP", "reason")), null, null, null);
     when(contextStore.read(eq("keeper-1"), eq("18800001111"))).thenReturn(Optional.of(new RequestContext(previousRequest, previousResponse, 0)));
-    when(llmReplyGenerationService.tryGenerate(any())).thenReturn(Optional.of(llmResponse));
+    when(skillGatewayService.generateReplies(any())).thenReturn(skillGuidance);
+    when(llmReplyGenerationService.tryGenerate(any(), eq(skillGuidance))).thenReturn(Optional.of(llmResponse));
 
     ChatResponse response = service.regenerate(new RegenerateRequest("18800001111"));
 
     assertEquals("llm reply", response.skill().suggestions().get(0).text());
     assertEquals("LLM", response.replySource().source());
-    verify(skillGatewayService, never()).generateReplies(any());
+    org.mockito.InOrder order = org.mockito.Mockito.inOrder(skillGatewayService, llmReplyGenerationService);
+    order.verify(skillGatewayService).generateReplies(any());
+    order.verify(llmReplyGenerationService).tryGenerate(any(), eq(skillGuidance));
+  }
+
+  @Test
+  void regenerateUsesMcpExecutionGuidanceBeforeLlmReplyGeneration() {
+    SkillRequest previousRequest = new SkillRequest(
+        Scene.ACTIVE_REPLY,
+        "TUAN_GOU",
+        "18800001111",
+        "hello",
+        Map.of("nickname", "Alice"),
+        Map.of(),
+        List.of(),
+        List.of(),
+        "keeper");
+    SkillResponse previousResponse = new SkillResponse(List.of(new Suggestion("old", "NEXT_STEP", "reason")), null, null, null);
+    SkillResponse skillGuidance = SkillResponse.guidanceOnly("先确认客户预算顾虑，再追问真实预算和优先目标。");
+    SkillResponse llmResponse = new SkillResponse(List.of(new Suggestion("llm reply", "NEXT_STEP", "reason")), null, null, null);
+    when(contextStore.read(eq("keeper-1"), eq("18800001111"))).thenReturn(Optional.of(new RequestContext(previousRequest, previousResponse, 0)));
+    when(skillGatewayService.generateReplies(any())).thenReturn(skillGuidance);
+    when(llmReplyGenerationService.tryGenerate(any(), eq(skillGuidance))).thenReturn(Optional.of(llmResponse));
+
+    ChatResponse response = service.regenerate(new RegenerateRequest("18800001111"));
+
+    assertEquals("llm reply", response.skill().suggestions().get(0).text());
+    assertEquals("LLM", response.replySource().source());
+    verify(llmReplyGenerationService).tryGenerate(any(), eq(skillGuidance));
+  }
+
+  @Test
+  void usesConfiguredFallbackWhenMcpGuidanceHasNoLlmReply() {
+    SkillRequest previousRequest = new SkillRequest(
+        Scene.ACTIVE_REPLY,
+        "TUAN_GOU",
+        "18800001111",
+        "hello",
+        Map.of("nickname", "Alice"),
+        Map.of(),
+        List.of(),
+        List.of(),
+        "keeper");
+    SkillResponse previousResponse = new SkillResponse(List.of(new Suggestion("old", "NEXT_STEP", "reason")), null, null, null);
+    SkillResponse skillGuidance = SkillResponse.guidanceOnly("内部固定流程内容");
+    when(contextStore.read(eq("keeper-1"), eq("18800001111"))).thenReturn(Optional.of(new RequestContext(previousRequest, previousResponse, 0)));
+    when(skillGatewayService.generateReplies(any())).thenReturn(skillGuidance);
+    when(llmReplyGenerationService.tryGenerate(any(), eq(skillGuidance))).thenReturn(Optional.empty());
+
+    ChatResponse response = service.regenerate(new RegenerateRequest("18800001111"));
+
+    assertEquals("fallback", response.skill().suggestions().get(0).text());
+    assertEquals("FALLBACK", response.replySource().source());
   }
 
   @Test
@@ -427,6 +489,7 @@ class ChatOrchestrationServiceTest {
     ChatResponse response = service.regenerate(new RegenerateRequest("18800001111"));
 
     assertEquals("FALLBACK", response.replySource().source());
+    verify(llmReplyGenerationService, never()).tryGenerate(any(), any());
   }
 
   @Test

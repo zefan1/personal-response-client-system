@@ -56,15 +56,28 @@ public class AiEnvironmentRepository {
       Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
       return id == null ? 0 : id;
     }
-    jdbcTemplate.update("""
-        INSERT INTO %s (env_name, provider, base_url, api_key, api_key_last4, is_active)
-        VALUES (?, ?, ?, ?, ?, 0)
-        """.formatted(table(type)),
-        request.envName().trim(),
-        type.provider(),
-        request.baseUrl().trim(),
-        secretCipher.encrypt(request.apiKey().trim()),
-        last4(request.apiKey().trim()));
+    if (type == AiEnvironmentType.SKILL) {
+      jdbcTemplate.update("""
+          INSERT INTO skill_environments (env_name, provider, base_url, api_key, api_key_last4, protocol, is_active)
+          VALUES (?, ?, ?, ?, ?, ?, 0)
+          """,
+          request.envName().trim(),
+          type.provider(),
+          request.baseUrl().trim(),
+          secretCipher.encrypt(request.apiKey().trim()),
+          last4(request.apiKey().trim()),
+          normalizeSkillProtocol(request.protocol(), request.baseUrl()));
+    } else {
+      jdbcTemplate.update("""
+          INSERT INTO image_environments (env_name, provider, base_url, api_key, api_key_last4, is_active)
+          VALUES (?, ?, ?, ?, ?, 0)
+          """,
+          request.envName().trim(),
+          type.provider(),
+          request.baseUrl().trim(),
+          secretCipher.encrypt(request.apiKey().trim()),
+          last4(request.apiKey().trim()));
+    }
     Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     return id == null ? 0 : id;
   }
@@ -101,6 +114,32 @@ public class AiEnvironmentRepository {
           request.timeoutMs(),
           request.temperature(),
           request.maxTokens(),
+          id);
+      return;
+    }
+    if (type == AiEnvironmentType.SKILL) {
+      if (request.apiKey() == null || request.apiKey().isBlank()) {
+        jdbcTemplate.update("""
+            UPDATE skill_environments
+            SET env_name = ?, base_url = ?, protocol = ?, updated_at = NOW()
+            WHERE id = ?
+            """,
+            request.envName().trim(),
+            request.baseUrl().trim(),
+            normalizeSkillProtocol(request.protocol(), request.baseUrl()),
+            id);
+        return;
+      }
+      jdbcTemplate.update("""
+          UPDATE skill_environments
+          SET env_name = ?, base_url = ?, api_key = ?, api_key_last4 = ?, protocol = ?, updated_at = NOW()
+          WHERE id = ?
+          """,
+          request.envName().trim(),
+          request.baseUrl().trim(),
+          secretCipher.encrypt(request.apiKey().trim()),
+          last4(request.apiKey().trim()),
+          normalizeSkillProtocol(request.protocol(), request.baseUrl()),
           id);
       return;
     }
@@ -225,5 +264,14 @@ public class AiEnvironmentRepository {
 
   private static String normalizeProtocol(String value) {
     return value == null || value.isBlank() ? "OPENAI_COMPATIBLE" : value.trim().toUpperCase();
+  }
+
+  private static String normalizeSkillProtocol(String value, String baseUrl) {
+    if (value != null && !value.isBlank()) {
+      return value.trim().toUpperCase();
+    }
+    return baseUrl != null && baseUrl.toLowerCase().matches(".*\\/mcp\\/?$")
+        ? "MCP_STREAMABLE_HTTP"
+        : "OPENAI_COMPATIBLE";
   }
 }

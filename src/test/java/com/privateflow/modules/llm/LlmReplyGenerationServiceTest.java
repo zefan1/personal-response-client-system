@@ -9,9 +9,12 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import com.privateflow.modules.skill.Scene;
+import com.privateflow.modules.skill.CustomerAnalysis;
+import com.privateflow.modules.skill.FollowupSuggest;
 import com.privateflow.modules.skill.ReplyTagSnapshot;
 import com.privateflow.modules.skill.SkillRequest;
 import com.privateflow.modules.skill.SkillResponse;
+import com.privateflow.modules.skill.Suggestion;
 import com.privateflow.modules.skill.parser.SkillResponseParser;
 import java.util.List;
 import java.util.Map;
@@ -47,7 +50,7 @@ class LlmReplyGenerationServiceTest {
   void returnsEmptyWhenDisabled() {
     when(configRepository.findValue("llm.reply_generation.enabled")).thenReturn(Optional.of("false"));
 
-    assertThat(service.tryGenerate(request())).isEmpty();
+    assertThat(service.tryGenerate(request(), guidance())).isEmpty();
   }
 
   @Test
@@ -63,7 +66,7 @@ class LlmReplyGenerationServiceTest {
             ```
             """, "gpt-4.1-mini", "OPENAI_COMPATIBLE", 120));
 
-    Optional<SkillResponse> response = service.tryGenerate(request());
+    Optional<SkillResponse> response = service.tryGenerate(request(), guidance());
 
     assertThat(response).isPresent();
     assertThat(response.orElseThrow().suggestions()).hasSize(3);
@@ -101,7 +104,7 @@ class LlmReplyGenerationServiceTest {
         "keeper",
         List.of(tag));
 
-    assertThat(service.tryGenerate(request)).isEmpty();
+    assertThat(service.tryGenerate(request, guidance())).isEmpty();
 
     ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
     verify(llmService).generate(eq(LlmScene.REPLY_GENERATION), eq("TUAN_GOU"), eq("keeper"), any(), captor.capture());
@@ -117,16 +120,50 @@ class LlmReplyGenerationServiceTest {
   }
 
   @Test
+  void includesMandatorySkillGuidanceBeforeGeneratingTheFinalReply() {
+    when(llmService.generate(eq(LlmScene.REPLY_GENERATION), eq("TUAN_GOU"), eq("keeper"), any(), any()))
+        .thenReturn(LlmResponse.failed(LlmErrorCodes.CONFIG_MISSING, "missing", "", "OPENAI_COMPATIBLE", 1));
+    SkillResponse guidance = guidance();
+
+    assertThat(service.tryGenerate(request(), guidance)).isEmpty();
+
+    ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(llmService).generate(eq(LlmScene.REPLY_GENERATION), eq("TUAN_GOU"), eq("keeper"), any(), captor.capture());
+    assertThat(captor.getValue().userPrompt())
+        .contains("skillGuidance")
+        .contains("固定流程：先确认客户恢复阶段")
+        .contains("了解恢复项目")
+        .contains("必须遵守 Skill 给出的固定思考流程")
+        .doesNotContain("18800001111");
+  }
+
+  @Test
+  void acceptsMcpExecutionGuidanceWithoutSuggestions() {
+    when(llmService.generate(eq(LlmScene.REPLY_GENERATION), eq("TUAN_GOU"), eq("keeper"), any(), any()))
+        .thenReturn(LlmResponse.failed(LlmErrorCodes.CONFIG_MISSING, "missing", "", "OPENAI_COMPATIBLE", 1));
+
+    SkillResponse guidance = SkillResponse.guidanceOnly("先确认客户预算顾虑，再追问真实预算和优先目标。");
+
+    assertThat(service.tryGenerate(request(), guidance)).isEmpty();
+
+    ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(llmService).generate(eq(LlmScene.REPLY_GENERATION), eq("TUAN_GOU"), eq("keeper"), any(), captor.capture());
+    assertThat(captor.getValue().userPrompt())
+        .contains("先确认客户预算顾虑，再追问真实预算和优先目标")
+        .contains("skillGuidance");
+  }
+
+  @Test
   void returnsEmptyWhenLlmFailsOrResponseCannotParse() {
     when(llmService.generate(eq(LlmScene.REPLY_GENERATION), eq("TUAN_GOU"), eq("keeper"), any(), any()))
         .thenReturn(LlmResponse.failed(LlmErrorCodes.CONFIG_MISSING, "missing", "", "OPENAI_COMPATIBLE", 1));
 
-    assertThat(service.tryGenerate(request())).isEmpty();
+    assertThat(service.tryGenerate(request(), guidance())).isEmpty();
 
     when(llmService.generate(eq(LlmScene.REPLY_GENERATION), eq("TUAN_GOU"), eq("keeper"), any(), any()))
         .thenReturn(LlmResponse.ok("not json", "gpt", "OPENAI_COMPATIBLE", 1));
 
-    assertThat(service.tryGenerate(request())).isEmpty();
+    assertThat(service.tryGenerate(request(), guidance())).isEmpty();
   }
 
   private SkillRequest request() {
@@ -140,5 +177,13 @@ class LlmReplyGenerationServiceTest {
         List.of("旧建议"),
         List.of(Map.of("role", "client", "text", "我想了解腹直肌修复")),
         "keeper");
+  }
+
+  private SkillResponse guidance() {
+    return new SkillResponse(
+        List.of(new Suggestion("固定流程：先确认客户恢复阶段", "NEXT_STEP", "避免直接承诺")),
+        new CustomerAnalysis("了解恢复项目", "谨慎", "LOYALIST", "HIGH"),
+        new FollowupSuggest("", "邀请客户补充恢复月份"),
+        null);
   }
 }

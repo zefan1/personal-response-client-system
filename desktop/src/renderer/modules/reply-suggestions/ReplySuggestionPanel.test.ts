@@ -40,14 +40,17 @@ async function flushUi(): Promise<void> {
   await nextTick();
 }
 
-async function mountPanel(): Promise<MountedPanel> {
+async function mountPanel(resetStorage = true): Promise<MountedPanel> {
   vi.resetModules();
-  localStorage.clear();
-  localStorage.setItem('desktop_config', JSON.stringify({
-    requestTotalTimeoutMs: 1000,
-    fallbackRetryIntervalMs: 100,
-    fallbackMaxRetries: 2
-  }));
+  if (resetStorage) {
+    localStorage.clear();
+    localStorage.setItem('desktop_config', JSON.stringify({
+      requestTotalTimeoutMs: 1000,
+      fallbackRetryIntervalMs: 100,
+      fallbackMaxRetries: 2,
+      accountUsername: 'admin'
+    }));
+  }
   const [{ default: ReplySuggestionPanel }, { eventBus }] = await Promise.all([
     import('./ReplySuggestionPanel.vue'),
     import('../../shared/eventBus')
@@ -122,6 +125,62 @@ describe('ReplySuggestionPanel', () => {
     }]);
     expect(host.textContent).toContain('Ask for budget');
     app.unmount();
+  });
+
+  it('restores recognized reply sessions after the panel is remounted', async () => {
+    const first = await mountPanel();
+
+    first.eventBus.emit('recognize:result', {
+      sessionId: 'persisted-session',
+      response: response('18800001111', [suggestion('Persisted reply')])
+    });
+    await flushUi();
+    first.app.unmount();
+
+    const second = await mountPanel(false);
+    expect(second.host.textContent).toContain('Persisted reply');
+    expect(second.host.textContent).toContain('Alice');
+
+    second.app.unmount();
+  });
+
+  it('restores recognized reply sessions when the same running app returns from login', async () => {
+    vi.resetModules();
+    localStorage.clear();
+    localStorage.setItem('desktop_config', JSON.stringify({
+      requestTotalTimeoutMs: 1000,
+      fallbackRetryIntervalMs: 100,
+      fallbackMaxRetries: 2,
+      accountUsername: 'admin'
+    }));
+    const [{ default: ReplySuggestionPanel }, { eventBus }] = await Promise.all([
+      import('./ReplySuggestionPanel.vue'),
+      import('../../shared/eventBus')
+    ]);
+
+    const firstHost = document.createElement('div');
+    document.body.appendChild(firstHost);
+    const firstApp = createApp(ReplySuggestionPanel);
+    firstApp.mount(firstHost);
+    await flushUi();
+
+    eventBus.emit('recognize:result', {
+      sessionId: 'same-app-session',
+      response: response('18800001111', [suggestion('Same app persisted reply')])
+    });
+    await flushUi();
+    firstApp.unmount();
+
+    const secondHost = document.createElement('div');
+    document.body.appendChild(secondHost);
+    const secondApp = createApp(ReplySuggestionPanel);
+    secondApp.mount(secondHost);
+    await flushUi();
+
+    expect(secondHost.textContent).toContain('Same app persisted reply');
+    expect(secondHost.textContent).toContain('Alice');
+
+    secondApp.unmount();
   });
 
   it('shows reply source labels for LLM and fallback responses', async () => {

@@ -57,7 +57,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       return true;
     }
     return !path.startsWith("/api/v1/") && !path.startsWith("/admin/api/v1/")
-        || ("POST".equalsIgnoreCase(request.getMethod()) && PUBLIC_POSTS.contains(path));
+        || ("POST".equalsIgnoreCase(request.getMethod())
+            && (PUBLIC_POSTS.contains(path) || "/api/v1/auth/refresh".equals(path)));
   }
 
   @Override

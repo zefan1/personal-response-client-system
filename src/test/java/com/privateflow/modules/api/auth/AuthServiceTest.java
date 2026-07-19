@@ -138,6 +138,22 @@ class AuthServiceTest {
   }
 
   @Test
+  void refreshCanUseStoredUsernameWhenAccessTokenHasExpired() {
+    Account account = new Account(7L, "leader", "{plain}leader123", "Leader", Role.LEADER, null, true, 3L);
+    AuthUser expectedUser = new AuthUser(
+        "leader", "Leader", Role.LEADER, null, 3L, Set.of(PermissionCodes.TAG_MANAGEMENT));
+    when(refreshTokenStore.read("leader")).thenReturn(Optional.of("refresh-token"));
+    when(accountRepository.findByPhone("leader")).thenReturn(Optional.of(account));
+    when(permissionRepository.findEnabledByAccountId(7L)).thenReturn(Set.of(PermissionCodes.TAG_MANAGEMENT));
+    when(jwtService.issue(expectedUser)).thenReturn("new-access-token");
+
+    LoginResponse response = authService.refresh(new RefreshRequest("refresh-token", "leader"), null);
+
+    assertThat(response.accessToken()).isEqualTo("new-access-token");
+    assertThat(response.account()).isEqualTo(expectedUser);
+  }
+
+  @Test
   void loginRejectsDisabledAccount() {
     Account account = new Account(3L, "disabled", "{plain}pass123", "Disabled", Role.ADMIN, null, false);
     when(accountRepository.findByPhone("disabled")).thenReturn(Optional.of(account));

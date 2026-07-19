@@ -132,4 +132,20 @@ describe('apiClient authentication expiry', () => {
 
     await expect(getBlob('/admin/api/v1/tags/values/export')).rejects.toThrow('当前筛选条件无权导出');
   });
+  it('does not start an abort timer when a long-running request uses timeout zero', async () => {
+    const timerSpy = vi.spyOn(window, 'setTimeout');
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      status: 200,
+      json: async () => ({ success: true, data: { accepted: true }, errorCode: null, message: null })
+    })));
+    const { postJson } = await import('./apiClient');
+
+    await expect(postJson('/api/v1/chat/recognize', { textMessage: 'long-running' }, 0)).resolves.toMatchObject({
+      success: true,
+      data: { accepted: true }
+    });
+
+    expect(timerSpy).not.toHaveBeenCalled();
+    timerSpy.mockRestore();
+  });
 });

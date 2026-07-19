@@ -31,17 +31,56 @@ public class SkillResponseParser {
   public SkillResponse parseReplies(String raw) {
     try {
       JsonNode root = objectMapper.readTree(raw);
-      List<Suggestion> suggestions = normalizeSuggestions(root.path("suggestions"));
-      return new SkillResponse(
-          suggestions,
-          parseCustomerAnalysis(root.path("customer_analysis")),
-          parseFollowupSuggest(root.path("followup_suggest")),
-          parseProfileUpdates(root.path("profile_updates")));
+      SkillResponse structured = parseStructured(root);
+      if (structured != null) {
+        return structured;
+      }
+      String result = text(root.path("result"));
+      if (result != null) {
+        SkillResponse embedded = parseEmbeddedStructured(result);
+        return embedded == null ? SkillResponse.guidanceOnly(result) : embedded;
+      }
+      String guidance = text(root.path("guidance"));
+      if (guidance != null) {
+        return SkillResponse.guidanceOnly(guidance);
+      }
+      throw invalid("Skill response contains no suggestions or guidance", null);
     } catch (SkillGatewayException ex) {
       throw ex;
     } catch (Exception ex) {
       throw invalid("Skill 返回格式异常", ex);
     }
+  }
+
+  private SkillResponse parseStructured(JsonNode root) {
+    JsonNode suggestions = root.path("suggestions");
+    if (!suggestions.isArray() || suggestions.isEmpty()) {
+      return null;
+    }
+    return new SkillResponse(
+        normalizeSuggestions(suggestions),
+        parseCustomerAnalysis(root.path("customer_analysis")),
+        parseFollowupSuggest(root.path("followup_suggest")),
+        parseProfileUpdates(root.path("profile_updates")),
+        text(root.path("guidance")));
+  }
+
+  private SkillResponse parseEmbeddedStructured(String result) {
+    try {
+      JsonNode embedded = objectMapper.readTree(cleanJson(result));
+      return parseStructured(embedded);
+    } catch (Exception ignored) {
+      return null;
+    }
+  }
+
+  private String cleanJson(String content) {
+    String trimmed = content == null ? "" : content.trim();
+    if (!trimmed.startsWith("```")) {
+      return trimmed;
+    }
+    String withoutOpening = trimmed.replaceFirst("^```[A-Za-z0-9_-]*\\s*", "");
+    return withoutOpening.replaceFirst("\\s*```$", "").trim();
   }
 
   public ProfileUpdates parseProfileUpdatesOnly(String raw) {

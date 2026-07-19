@@ -146,6 +146,44 @@ class AiEnvironmentServiceTest {
   }
 
   @Test
+  void activateSkillEnvironmentSynchronizesProtocolRuntimeConfig() {
+    AiEnvironmentRepository repository = mock(AiEnvironmentRepository.class);
+    ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+    WsPushService wsPushService = mock(WsPushService.class);
+    AiEnvironmentService service = new AiEnvironmentService(
+        repository,
+        eventPublisher,
+        wsPushService,
+        mock(ImageConfigProvider.class),
+        imageClientProvider(null),
+        new RecognitionResultParser(new ObjectMapper()),
+        mock(LlmService.class));
+    AiEnvironment environment = new AiEnvironment(
+        21L,
+        "skill-mcp",
+        "skill",
+        "https://mcp.example.com/mcp",
+        "last",
+        null,
+        "MCP_STREAMABLE_HTTP",
+        null,
+        null,
+        null,
+        true,
+        null,
+        null,
+        null,
+        null);
+    when(repository.find(AiEnvironmentType.SKILL, 21L)).thenReturn(Optional.of(environment));
+    when(repository.encryptedApiKey(AiEnvironmentType.SKILL, 21L)).thenReturn("{aes-gcm}skill-secret");
+
+    service.activate(AiEnvironmentType.SKILL, 21L);
+
+    verify(repository).updateConfig("skill.protocol", "MCP_STREAMABLE_HTTP");
+    verify(eventPublisher).publishEvent(new ConfigChangedEvent("skill.protocol"));
+  }
+
+  @Test
   void testLlmUsesUnifiedRuntimeServiceAndMarksResult() {
     AiEnvironmentRepository repository = mock(AiEnvironmentRepository.class);
     LlmService llmService = mock(LlmService.class);

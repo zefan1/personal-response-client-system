@@ -9,6 +9,10 @@ public record ChatReplySource(
     return new ChatReplySource("LLM", "LLM 生成", "回复建议来自 LLM 场景路由");
   }
 
+  public static ChatReplySource llmWithSkill() {
+    return new ChatReplySource("LLM", "LLM 生成", "已先执行 Skill 固定流程，再由当前 LLM 生成最终回复");
+  }
+
   public static ChatReplySource skill() {
     return new ChatReplySource("SKILL", "Skill 生成", "回复建议来自 Skill 场景接口");
   }

@@ -1,4 +1,4 @@
-import { computed, reactive } from 'vue';
+import { computed, reactive, watch } from 'vue';
 import { postJson } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
@@ -27,6 +27,7 @@ const STAGE_DURATIONS = [1200, 1800, 5000, 7500];
 const FALLBACK_DIRECTION = 'SYSTEM_FALLBACK';
 const DISMISSED_SESSION_TTL_MS = 30 * 60 * 1000;
 const DISMISSED_SESSION_MAX = 200;
+const PERSISTED_SESSIONS_PREFIX = 'reply-suggestion-sessions-v1:';
 
 type LoadingMode = 'NONE' | 'FULL' | 'SIMPLE';
 
@@ -75,6 +76,40 @@ let fallbackRetryTimer: number | null = null;
 let fallbackRetrySessionId = '';
 let generatedSessionSequence = 0;
 const dismissedSessionIds = new Map<string, number>();
+let hydrated = false;
+let persistedStorageKey = '';
+let skipNextPersistence = false;
+
+watch(
+  () => ({ sessions: replySuggestionState.sessions, activeSessionId: replySuggestionState.activeSessionId }),
+  () => {
+    if (skipNextPersistence) {
+      skipNextPersistence = false;
+      return;
+    }
+    persistReplySessions();
+  },
+  { deep: true }
+);
+
+export function hydrateReplySuggestionStore(): void {
+  if (hydrated) return;
+  hydrated = true;
+  persistedStorageKey = storageKey();
+  try {
+    const raw = localStorage.getItem(persistedStorageKey);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as { sessions?: ReplySession[]; activeSessionId?: string };
+    const sessions = Array.isArray(parsed.sessions) ? parsed.sessions.map(recoverSession) : [];
+    replySuggestionState.sessions = sessions;
+    replySuggestionState.activeSessionId = sessions.some((item) => item.sessionId === parsed.activeSessionId)
+      ? parsed.activeSessionId ?? ''
+      : sessions[0]?.sessionId ?? '';
+    syncActiveSessionToState();
+  } catch {
+    // Ignore malformed local session data and start with an empty queue.
+  }
+}
 
 export function startRecognizeLoading(payload: RecognizeStartPayload = {}): void {
   if (isDismissedSession(payload.sessionId)) return;
@@ -394,12 +429,54 @@ export function selectCandidateForSession(sessionId: string, candidate: ReplyCan
 }
 
 export function cleanupReplySuggestionStore(): void {
+  const snapshot = serializeSessions();
   clearSkeletonTimer();
   stopFallbackRetry();
   dismissedSessionIds.clear();
+  skipNextPersistence = true;
   replySuggestionState.sessions = [];
   replySuggestionState.activeSessionId = '';
   syncActiveSessionToState();
+  persistSnapshot(snapshot);
+  hydrated = false;
+  persistedStorageKey = '';
+}
+
+function storageKey(): string {
+  const username = loadDesktopConfig().accountUsername || 'anonymous';
+  return `${PERSISTED_SESSIONS_PREFIX}${username}`;
+}
+
+function persistReplySessions(): void {
+  if (!hydrated && replySuggestionState.sessions.length === 0) return;
+  if (!persistedStorageKey) persistedStorageKey = storageKey();
+  persistSnapshot(serializeSessions());
+}
+
+function serializeSessions(): { sessions: ReplySession[]; activeSessionId: string } {
+  return {
+    sessions: replySuggestionState.sessions,
+    activeSessionId: replySuggestionState.activeSessionId
+  };
+}
+
+function persistSnapshot(snapshot: { sessions: ReplySession[]; activeSessionId: string }): void {
+  try {
+    localStorage.setItem(persistedStorageKey || storageKey(), JSON.stringify(snapshot));
+  } catch {
+    // Local persistence is best effort; the live queue remains usable.
+  }
+}
+
+function recoverSession(session: ReplySession): ReplySession {
+  if (session.status !== 'LOADING') return session;
+  return {
+    ...session,
+    status: 'FAILED',
+    loadingMode: 'NONE',
+    progressStage: 'FAILED',
+    failureReason: '上次识别被中断，请重新识别'
+  };
 }
 
 function showChatResponse(session: ReplySession, response: ChatResponse, scene: ReplyScene): void {
