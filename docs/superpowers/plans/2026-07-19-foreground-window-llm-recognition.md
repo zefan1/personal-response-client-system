@@ -16,6 +16,7 @@
 - Create `desktop/src/main/foregroundWindowCapture.test.ts`: Node-environment unit tests for capture sequencing and restoration.
 - Modify `desktop/src/main/main.ts`: adapt Electron and `active-win` to the coordinator.
 - Modify `desktop/package.json` and `desktop/package-lock.json`: add exact `active-win` runtime dependency.
+- Modify `desktop/scripts/package-verify.mjs`: assert native `active-win` files are present in the packaged archive and unpacked directory.
 - Modify `desktop/src/preload/preload.cts`: expose `captureMode`, width, and height without window identity.
 - Modify `desktop/src/renderer/types/desktop.ts`: align renderer bridge result type.
 - Modify `desktop/src/renderer/shared/desktopBridge.test.ts`: verify capture metadata stays intact.
@@ -298,7 +299,7 @@ function registerScreenshotCapture() {
         return {
           id: current.id,
           title: current.title,
-          ownerName: current.owner.name,
+          ownerName: current.owner?.name ?? '',
           bounds: { width: current.bounds.width, height: current.bounds.height }
         };
       },
