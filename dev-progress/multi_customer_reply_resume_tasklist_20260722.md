@@ -4,7 +4,7 @@
 
 - 基线提交：`7fb9c7f7fe8aa411a4fd390b91ecf1f87122280f`
 - 当前任务：`Task 5 - 真实桌面截图与 Windows 通知点击验收。`
-- 最近验证：`2026-07-22：后端全量 548 项，失败 0、错误 0、跳过 2；前端全量 39 个文件 359/359 通过；npm run typecheck 通过。`
+- 最近验证：`2026-07-22：修复候选完整手机号持久化后，后端全量 549 项，失败 0、错误 0、跳过 2；前端最近一次全量 39 个文件 359/359 通过；npm run typecheck 通过。`
 - 未解决阻塞：`自动化代码门禁已通过。真实微信、企业微信、抖音网页截图，以及 Windows 通知点击恢复尚未验收；在这些项目完成前，整个功能不能标记完成。`
 - 用户授权：`用户明确要求不新开 worktree，在当前工作区开发。必须保留并兼容已有未提交改动。`
 
@@ -15,11 +15,12 @@
 - [x] Task 2 编排与 API：多客户识别仅创建 `WAITING_CUSTOMER`；列表、单任务、确认、重试、取消 5 个 REST 路由已接通。确认/重试共用原聊天与 `CHAT_RECOGNIZE` 生成；活跃生成不会被同进程轮询误恢复，READY 查询不重复调用 Skill/LLM。
 - [x] Task 3 桌面候选预览与确认：DTO/恢复 Store 提交 `8848648`；候选回复会话路由提交 `0367fcb`；完整档案预览、严格手机号确认、取消清理、并发任务隔离和自动切到档案页提交 `6dbd854`。
 - [x] Task 4 恢复与桌面提醒：登录、有效会话启动、令牌刷新均恢复服务端任务；账号切换清理、旧 refresh/login 竞态隔离、前后台提醒和通知点击恢复已提交（`2ccf950`）。
+- [x] Task 4.1 真实运行时恢复修复：8081 闭环发现候选表保存了脱敏手机号，刷新后无法重新匹配候选；已按 RED/GREEN 改为持久化 `phoneFull`，刷新后仍能读取 4 个候选并确认第二位，READY 回到原 `replySessionId`，连续查询未重复调用 Skill/LLM。
 - [ ] Task 5 全量验证与人工验收
 
 ## 本次验证证据
 
-- `PendingReplyTaskRepositoryTest`：24 项通过。覆盖原子候选领取、首次确认/失败重试分离、事务创建回滚、READY 会话/手机号/可展示回复校验、活跃生成排除、超时和过期恢复。
+- `PendingReplyTaskRepositoryTest`：25 项通过。新增验证创建任务时保存候选完整手机号而非脱敏展示手机号；其余覆盖原子候选领取、首次确认/失败重试分离、事务创建回滚、READY 会话/手机号/可展示回复校验、活跃生成排除、超时和过期恢复。
 - `PendingReplyTaskRepositoryTransactionTest`：2 项通过。覆盖两个 `create` 入口在 Spring 事务代理下回滚候选写入失败。
 - `PendingReplyTaskServiceTest`：8 项通过。覆盖恢复列表、候选档案权限过滤、失败重试、取消和本 JVM 活跃生成登记。
 - `ChatOrchestrationServiceTest`：39 项通过。覆盖多客户不提前调用 Skill/LLM、确认第二候选、REST 委托、重试原聊天、失败回退、活跃生成保护和 READY 写入。
@@ -28,7 +29,8 @@
 - 桌面任务 DTO 与恢复 Store：指定 3 个 Vitest 文件 43 项通过，`npm run typecheck` 通过。覆盖多客户不提前显示生成、服务端任务恢复、READY 只展示持久化结果、并发刷新防旧结果覆盖、服务端快照清理和显式打开已关闭任务；提交为 `8848648`。
 - 候选预览/确认：指定 6 个 Vitest 文件 106 项通过，`npm run typecheck` 通过。覆盖查看档案不触发确认/生成、完整手机号严格相等、预览失败不授权确认、纯查看不恢复待保存编辑、取消即时清理任务与原会话、A/B 并发确认隔离，以及从回复队列自动切到客户档案页；提交为 `0367fcb`、`6dbd854`。
 - 恢复与桌面提醒：从 Git 索引导出的精确提交快照运行 `App.test.ts`、`customerProfileStore.test.ts`、`CustomerProfilePanel.test.ts`、`ReplySuggestionPanel.test.ts`、`replySuggestionStore.test.ts`、`pendingReplyTaskStore.test.ts`，6 个文件 119/119 通过；`npm run typecheck` 通过；`git diff --cached --check` 通过；提交为 `2ccf950`。
-- 全量后端：`C:\Users\85314\AppData\Local\Temp\codex-maven-20260722\apache-maven-3.9.11\bin\mvn.cmd -q test` 退出码 0；127 份 Surefire 报告合计 548 项，失败 0、错误 0、跳过 2。
+- 候选手机号修复定向验证：`C:\Users\85314\AppData\Local\Temp\codex-maven-20260722\apache-maven-3.9.11\bin\mvn.cmd -q -Dtest=PendingReplyTaskRepositoryTest,PendingReplyTaskRepositoryTransactionTest,PendingReplyTaskServiceTest,ChatOrchestrationServiceTest,ChatControllerTest test` 退出码 0；5 个测试类合计 85 项，失败 0、错误 0、跳过 0。
+- 全量后端：`C:\Users\85314\AppData\Local\Temp\codex-maven-20260722\apache-maven-3.9.11\bin\mvn.cmd -q test` 退出码 0；127 份 Surefire 报告合计 549 项，失败 0、错误 0、跳过 2。
 - 全量前端：`npm test` 最终 39 个文件、359/359 通过；`npm run typecheck` 通过。第一次全量发现 4 个旧测试未包含新增 `replySessionId`，已按失败输出最小修正；并行 Maven 时出现一次无关 `AlertBell.test.ts` 超时，单文件 6/6 及无并行的后续全量均通过。
 - 公共契约、模块依赖、业务决策和桌面 A/B/D 开发手册已在父目录 `C:\Users\85314\Desktop\私域工具` 增量回填；这些共享文档不属于嵌套 Git 仓库，不能随本仓库提交。
 - 真实人工验收清单：`dev-progress/manual-tests/multi_customer_reply_resume_20260722.md` 已创建，当前全部未执行。

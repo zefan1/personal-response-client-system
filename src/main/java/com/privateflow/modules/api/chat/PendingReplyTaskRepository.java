@@ -72,11 +72,12 @@ public class PendingReplyTaskRepository {
     List<CustomerSummary> candidates = draft.candidates() == null ? List.of() : draft.candidates();
     for (int index = 0; index < candidates.size(); index++) {
       CustomerSummary candidate = candidates.get(index);
-      if (candidate != null && candidate.phone() != null && !candidate.phone().isBlank()) {
+      String candidatePhone = candidate == null ? null : candidate.phoneFull();
+      if (candidatePhone != null && !candidatePhone.isBlank()) {
         jdbcTemplate.update(
             "INSERT INTO pending_reply_task_candidates (task_id, phone, rank_no) VALUES (?, ?, ?)",
             id,
-            candidate.phone(),
+            candidatePhone,
             index + 1);
       }
     }

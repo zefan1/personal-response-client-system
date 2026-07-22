@@ -93,6 +93,36 @@ class PendingReplyTaskRepositoryTest {
   }
 
   @Test
+  void createPersistsFullCandidatePhoneInsteadOfMaskedDisplayPhone() {
+    CustomerSummary candidate = new CustomerSummary(
+        "188****1111",
+        "18800001111",
+        "same-name customer",
+        "WECHAT",
+        "TUAN_GOU",
+        "keeper-1",
+        null,
+        "Store A",
+        Confidence.HIGH);
+
+    PendingReplyTask task = repository.create(new PendingReplyTaskDraft(
+        "reply-full-candidate-phone",
+        "keeper-1",
+        "same-name customer",
+        null,
+        null,
+        "TUAN_GOU",
+        null,
+        "I want to know more",
+        List.of(Map.of("role", "client", "text", "I want to know more")),
+        List.of(candidate)));
+
+    assertThat(task.candidatePhones()).containsExactly("18800001111");
+    assertThat(repository.claim(task.taskId(), "keeper-1", "188****1111")).isFalse();
+    assertThat(repository.claim(task.taskId(), "keeper-1", "18800001111")).isTrue();
+  }
+
+  @Test
   void failedTaskCannotBeReclaimedWithAnotherCandidatePhone() {
     PendingReplyTask task = repository.create(new PendingReplyTaskDraft(
         "reply-retry-same-customer",
