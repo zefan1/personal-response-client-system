@@ -40,6 +40,38 @@ git worktree add ..\private-domain-assistant-reply-task -b feat/pending-reply-ta
 
 预期：新 worktree 初始状态干净；原工作区的工作台改动仍原样保留。
 
+### 两个会话并行开发规则
+
+两个会话可以同步开发，但不能在同一个 worktree 中修改，也不能同时认领同一份共享文件。业务上“工作台/管理后台”和“回复主线”是不同功能；代码上它们仍共享应用外壳、客户档案、全局事件、数据库迁移和配置，所以需要按下面的所有权边界执行。
+
+| 区域 | 并行修改风险 | 当前工作台/管理后台会话 | 多客户回复主线会话 |
+|---|---|---|---|
+| `desktop/src/renderer/modules/workbench/**`、`desktop/src/renderer/modules/admin/**` | 低 | 独占修改和人工测试。 | 不修改。 |
+| 新建的 `PendingReplyTask*` 后端类型和服务文件 | 低 | 不修改。 | 可在独立 worktree 中创建和编写单元测试。 |
+| `ChatOrchestrationService.java`、`ChatController.java`、`ChatResponse.java`、`ChatRecognizeRequest.java` | 高 | 若人工测试发现问题可修改，但必须在任务清单记录。 | 先不改；等工作台/管理后台会话提交后，rebase 到最新基线再统一改。 |
+| `V75__pending_reply_tasks.sql` 和任何 Flyway 迁移 | 高 | 若需要迁移，先使用下一个可用版本号并提交。 | 在共享合并关口再创建迁移；创建前重新检查最大版本，不能假设 `V75` 仍可用。 |
+| `ConfigAdminService.java`、`AdminConsole.vue`、管理后台配置测试 | 高 | 管理后台会话独占。 | 本计划第一阶段只使用已确认的默认值和 `ChatTaskConfig` 自身的边界限制；后台可编辑校验放到共享合并关口。 |
+| `App.vue`、`App.test.ts`、`styles.css`、`CustomerProfilePanel.vue`、`customerProfileStore.ts`、`main.ts`、preload/bridge | 高 | 工作台会话可继续按人工测试修改。 | 不修改，直到工作台会话提交；之后只在独立 worktree 处理候选预览、恢复和通知。 |
+| `SHARED_CONTRACTS.md`、`DEPENDENCIES.md`、`decisions.md`、`questions.md` | 高 | 只记录已完成工作台/管理后台的契约。 | 在最终合并关口一次性回填本计划的契约，先拉取对方最新提交。 |
+
+并行阶段的实际顺序：
+
+```text
+工作台/管理后台会话：继续人工测试 -> 修改 -> 提交
+多客户主线会话：独立 worktree 中编写仅新增的任务模型/服务/测试
+共享合并关口：rebase 到工作台最新提交 -> 处理 Chat API、迁移、档案预览、App、样式和契约
+全量测试：只在共享合并关口之后运行
+```
+
+禁止的并行操作：
+
+1. 两个会话同时编辑 `App.vue`、`styles.css`、客户档案模块、`ChatOrchestrationService.java` 或 `ConfigAdminService.java`。
+2. 两个会话同时创建相同版本号的 Flyway 迁移。
+3. 多客户主线会话为了“先跑通”而改变工作台使用的 `customer:selected` 事件。
+4. 任一会话用覆盖、重置或检出操作清理另一会话的未提交改动。
+
+发生合并冲突时，以工作台/管理后台已通过人工测试的行为为基线；多客户主线只新增独立的 `reply-task:*` 事件和待选任务状态，不删除或改写既有工作台事件。
+
 ## 文件清单
 
 | 文件 | 变更职责 |
