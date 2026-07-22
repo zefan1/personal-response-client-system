@@ -222,11 +222,21 @@ describe('CustomerProfilePanel', () => {
     app.unmount();
   });
 
-  it('shows candidate modal from recognition events and opens the chosen candidate', async () => {
+  it('previews the chosen candidate in the full profile before explicit confirmation', async () => {
     const { app, host, eventBus } = await mountPanel();
-    mocks.getJson.mockResolvedValue({ success: true, data: view('18800000003', 'Candidate C') });
+    const selected: unknown[] = [];
+    const recognized: unknown[] = [];
+    eventBus.on('customer:selected', (payload) => selected.push(payload));
+    eventBus.on('recognize:result', (payload) => recognized.push(payload));
+    mocks.getJson.mockResolvedValue({ success: true, data: view('18800000004', 'Candidate D') });
+    mocks.postJson.mockResolvedValue({
+      success: true,
+      data: { phone: '18800000004', skill: { suggestions: [] } }
+    });
 
     eventBus.emit('recognize:multiple', {
+      sessionId: 'session-candidate',
+      taskId: 'task-1',
       matchInfo: {
         customers: [summary('18800000003', 'Candidate C'), summary('18800000004', 'Candidate D')]
       }
@@ -235,13 +245,110 @@ describe('CustomerProfilePanel', () => {
 
     expect(host.querySelector('.candidate-modal')).toBeTruthy();
     expect(host.querySelectorAll('.candidate-modal .result-row')).toHaveLength(2);
+    expect(host.querySelectorAll('.candidate-modal .result-row')[1]?.textContent).toContain('查看档案');
 
-    const candidate = host.querySelector('.candidate-modal .result-row') as HTMLButtonElement | null;
+    const candidate = host.querySelectorAll('.candidate-modal .result-row')[1] as HTMLButtonElement | null;
     candidate?.click();
+    await flushUi();
     await flushUi();
 
     expect(host.querySelector('.candidate-modal')).toBeFalsy();
-    expect(host.querySelector('.profile-card')?.textContent ?? '').toContain('Candidate C');
+    expect(mocks.getJson).toHaveBeenCalledWith('/api/v1/customers/18800000004', 5000, expect.any(AbortSignal));
+    expect(host.querySelector('.profile-card')?.textContent ?? '').toContain('Candidate D');
+    expect(host.querySelector('.candidate-preview-actions')?.textContent).toContain('返回候选客户');
+    expect(host.querySelector('.candidate-preview-actions')?.textContent).toContain('确认是此客户');
+    expect(mocks.postJson).not.toHaveBeenCalled();
+    expect(selected).toEqual([]);
+
+    const returnButton = [...host.querySelectorAll('.candidate-preview-actions button')]
+      .find((button) => button.textContent?.includes('返回候选客户')) as HTMLButtonElement;
+    returnButton.click();
+    await flushUi();
+    expect(host.querySelector('.candidate-modal')).toBeTruthy();
+
+    (host.querySelectorAll('.candidate-modal .result-row')[1] as HTMLButtonElement).click();
+    await flushUi();
+    await flushUi();
+    const confirmButton = [...host.querySelectorAll('.candidate-preview-actions button')]
+      .find((button) => button.textContent?.includes('确认是此客户')) as HTMLButtonElement;
+    confirmButton.click();
+    await flushUi();
+
+    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/reply-tasks/task-1/confirm', { phone: '18800000004' });
+    expect(selected).toEqual([]);
+    expect(recognized).toEqual([{
+      sessionId: 'session-candidate',
+      source: 'PENDING_REPLY_TASK',
+      response: { phone: '18800000004', skill: { suggestions: [] } }
+    }]);
+    app.unmount();
+  });
+
+  it('cancels the persisted candidate task from the candidate list close action', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    const pending = await import('../reply-suggestions/pendingReplyTaskStore');
+    const replies = await import('../reply-suggestions/replySuggestionStore');
+    pending.syncPendingReplyTask({
+      taskId: 'task-1',
+      replySessionId: 'session-candidate',
+      status: 'WAITING_CUSTOMER',
+      candidates: [{ phone: '18800000003', nickname: 'Candidate C' }],
+      expiresAt: '2026-07-04T12:00:00'
+    });
+    mocks.postJson.mockResolvedValue({ success: true, data: {} });
+    eventBus.emit('recognize:multiple', {
+      sessionId: 'session-candidate',
+      taskId: 'task-1',
+      candidates: [summary('18800000003', 'Candidate C')]
+    });
+    await flushUi();
+
+    (host.querySelector('.candidate-modal .icon-close-button') as HTMLButtonElement).click();
+    await flushUi();
+
+    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/reply-tasks/task-1/cancel', {});
+    expect(host.querySelector('.candidate-modal')).toBeFalsy();
+    expect(pending.pendingReplyTaskState.tasks).toEqual([]);
+    expect(replies.replySuggestionState.sessions).toEqual([]);
+    expect(pending.openPendingReplyTask('task-1')).toBe(false);
+    app.unmount();
+  });
+
+  it('does not show candidate confirmation when the fresh profile request fails', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    mocks.getJson.mockRejectedValueOnce(new Error('timeout'));
+    eventBus.emit('recognize:multiple', {
+      sessionId: 'session-candidate',
+      taskId: 'task-1',
+      candidates: [summary('18800000003', 'Candidate C')]
+    });
+    await flushUi();
+
+    (host.querySelector('.candidate-modal .result-row') as HTMLButtonElement).click();
+    await flushUi();
+    await flushUi();
+
+    expect(host.querySelector('.candidate-modal')).toBeTruthy();
+    expect(host.querySelector('.candidate-preview-actions .primary')).toBeFalsy();
+    expect(mocks.postJson).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it('opens a full candidate profile when requested from the reply task queue', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    mocks.getJson.mockResolvedValue({ success: true, data: view('18800000004', 'Candidate D') });
+
+    eventBus.emit('candidate:preview', {
+      sessionId: 'session-candidate',
+      taskId: 'task-1',
+      candidate: summary('18800000004', 'Candidate D'),
+      candidates: [summary('18800000003', 'Candidate C'), summary('18800000004', 'Candidate D')]
+    });
+    await flushUi();
+    await flushUi();
+
+    expect(host.querySelector('.profile-card')?.textContent).toContain('Candidate D');
+    expect(host.querySelector('.candidate-preview-actions')?.textContent).toContain('确认是此客户');
     app.unmount();
   });
 
@@ -254,9 +361,12 @@ describe('CustomerProfilePanel', () => {
     mocks.getJson.mockResolvedValue({ success: true, data: view('18800000005', 'Profile E') });
     mocks.postJson.mockResolvedValue({ success: true, data: { phone: '18800000005', skill: { suggestions: [] } } });
 
-    eventBus.emit('recognize:multiple', { candidates: [summary('18800000005', 'Profile E')] });
-    await flushUi();
-    (host.querySelector('.candidate-modal .result-row') as HTMLButtonElement | null)?.click();
+    eventBus.emit('customer:selected', {
+      phone: '18800000005',
+      scene: 'ACTIVE_REPLY',
+      leadType: 'TUAN_GOU',
+      sourceFrom: 'DASHBOARD'
+    });
     await flushUi();
 
     const actionButtons = [...host.querySelectorAll('.profile-actions button')] as HTMLButtonElement[];

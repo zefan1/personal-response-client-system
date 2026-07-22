@@ -204,26 +204,212 @@ describe('customerProfileStore', () => {
     expect(profile.customerProfileState.offline).toBe(true);
   });
 
-  it('handles candidate selection and candidate dismissal events', async () => {
+  it('previews a candidate without confirming and confirms through the pending reply task', async () => {
     const { profile, eventBus } = await freshStore();
     const selected: unknown[] = [];
+    const generating: unknown[] = [];
+    const recognized: unknown[] = [];
     eventBus.on('customer:selected', (payload) => selected.push(payload));
+    eventBus.on('reply-task:generating', (payload) => generating.push(payload));
+    eventBus.on('recognize:result', (payload) => recognized.push(payload));
     getJsonMock.mockResolvedValue({ success: true, data: view('18800002222') });
     loadAlertsByPhoneMock.mockResolvedValue([]);
+    postJsonMock.mockResolvedValue({ success: true, data: { phone: '18800002222', skill: { suggestions: [] } } });
 
-    profile.showCandidates({ sessionId: 'session-a', matchInfo: { customers: [summary('18800002222'), summary('18800003333')] } });
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-1',
+      matchInfo: { customers: [summary('18800001111'), summary('18800002222')] }
+    });
     expect(profile.customerProfileState.candidateVisible).toBe(true);
 
-    profile.chooseCandidate(summary('18800002222'));
-    await vi.runAllTimersAsync();
+    await profile.previewCandidate(summary('18800002222'));
+
+    expect(getJsonMock).toHaveBeenCalledWith('/api/v1/customers/18800002222', 5000, expect.any(AbortSignal));
     expect(profile.customerProfileState.candidateVisible).toBe(false);
+    expect(profile.customerProfileState.candidateTaskId).toBe('task-1');
+    expect(profile.customerProfileState.candidateReplySessionId).toBe('session-a');
+    expect(profile.customerProfileState.candidatePreviewPhone).toBe('18800002222');
     expect(profile.customerProfileState.profile?.customer.phone).toBe('18800002222');
+    expect(postJsonMock).not.toHaveBeenCalled();
+    expect(selected).toEqual([]);
+    expect(generating).toEqual([]);
+    expect(recognized).toEqual([]);
 
-    expect(selected.at(-1)).toMatchObject({ sessionId: 'session-a', phone: '18800002222' });
+    await profile.confirmPreviewedCandidate();
 
-    profile.showCandidates({ sessionId: 'session-b', candidates: [summary('18800004444')] });
-    profile.dismissCandidates();
-    expect(selected.at(-1)).toEqual({ sessionId: 'session-b', phone: '', scene: 'CHAT_RECOGNIZE', sourceFrom: 'CANDIDATE_DISMISSED' });
+    expect(generating).toEqual([{ sessionId: 'session-a', taskId: 'task-1', phone: '18800002222' }]);
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/reply-tasks/task-1/confirm', { phone: '18800002222' });
+    expect(recognized).toEqual([{
+      sessionId: 'session-a',
+      source: 'PENDING_REPLY_TASK',
+      response: { phone: '18800002222', skill: { suggestions: [] } }
+    }]);
+    expect(selected).toEqual([]);
+    expect(postJsonMock).not.toHaveBeenCalledWith('/api/v1/chat/generate', expect.anything());
+    expect(profile.customerProfileState.candidateTaskId).toBe('');
+  });
+
+  it('returns to the waiting candidate list and cancels the persisted task explicitly', async () => {
+    const { profile } = await freshStore();
+    getJsonMock.mockResolvedValue({ success: true, data: view('18800002222') });
+    postJsonMock.mockResolvedValue({ success: true, data: {} });
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-1',
+      candidates: [summary('18800001111'), summary('18800002222')]
+    });
+
+    await profile.previewCandidate(summary('18800002222'));
+    profile.returnToCandidates();
+
+    expect(profile.customerProfileState.candidateVisible).toBe(true);
+    expect(profile.customerProfileState.candidateTaskId).toBe('task-1');
+    expect(profile.customerProfileState.candidateReplySessionId).toBe('session-a');
+    expect(profile.customerProfileState.candidatePreviewPhone).toBe('');
+
+    await profile.cancelCandidateTask();
+
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/reply-tasks/task-1/cancel', {});
+    expect(profile.customerProfileState.candidateVisible).toBe(false);
+    expect(profile.customerProfileState.candidates).toEqual([]);
+    expect(profile.customerProfileState.candidateTaskId).toBe('');
+  });
+
+  it('keeps the candidate task retryable when confirmation fails', async () => {
+    const { profile } = await freshStore();
+    getJsonMock.mockResolvedValue({ success: true, data: view('18800002222') });
+    postJsonMock.mockResolvedValue({ success: false, message: 'confirm failed' });
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-1',
+      candidates: [summary('18800002222')]
+    });
+    await profile.previewCandidate(summary('18800002222'));
+
+    await profile.confirmPreviewedCandidate();
+
+    expect(profile.customerProfileState.candidateTaskId).toBe('task-1');
+    expect(profile.customerProfileState.candidates).toHaveLength(1);
+    expect(profile.customerProfileState.candidateError).toContain('confirm failed');
+    expect(profile.customerProfileState.candidateConfirming).toBe(false);
+  });
+
+  it('does not grant confirmation when candidate loading fails or returns another customer', async () => {
+    const { profile } = await freshStore();
+    postJsonMock.mockResolvedValue({ success: true, data: { phone: '18800002222' } });
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-1',
+      candidates: [summary('18800002222')]
+    });
+    getJsonMock.mockRejectedValueOnce(new Error('timeout'));
+
+    await profile.previewCandidate(summary('18800002222'));
+    await profile.confirmPreviewedCandidate();
+
+    expect(profile.customerProfileState.candidatePreviewReady).toBe(false);
+    expect(profile.customerProfileState.candidateVisible).toBe(true);
+    expect(postJsonMock).not.toHaveBeenCalled();
+
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-1',
+      candidates: [summary('18800002222')]
+    });
+    getJsonMock.mockResolvedValueOnce({ success: true, data: view('18800009999') });
+
+    await profile.previewCandidate(summary('18800002222'));
+    await profile.confirmPreviewedCandidate();
+
+    expect(profile.customerProfileState.candidatePreviewReady).toBe(false);
+    expect(profile.customerProfileState.candidateVisible).toBe(true);
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a fresh profile whose full phone only shares the candidate last four digits', async () => {
+    const { profile } = await freshStore();
+    getJsonMock.mockResolvedValueOnce({ success: true, data: view('19999992222') });
+    postJsonMock.mockResolvedValue({ success: true, data: { phone: '18800002222' } });
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-1',
+      candidates: [summary('18800002222')]
+    });
+
+    await profile.previewCandidate(summary('18800002222'));
+    await profile.confirmPreviewedCandidate();
+
+    expect(profile.customerProfileState.candidatePreviewReady).toBe(false);
+    expect(profile.customerProfileState.candidateVisible).toBe(true);
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it('does not authorize a masked candidate without a full phone number', async () => {
+    const { profile } = await freshStore();
+    getJsonMock.mockResolvedValueOnce({ success: true, data: view('18800002222') });
+    postJsonMock.mockResolvedValue({ success: true, data: { phone: '18800002222' } });
+    const masked = summary('188****2222');
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-1',
+      candidates: [masked]
+    });
+
+    await profile.previewCandidate(masked);
+    await profile.confirmPreviewedCandidate();
+
+    expect(profile.customerProfileState.candidatePreviewReady).toBe(false);
+    expect(profile.customerProfileState.candidateVisible).toBe(true);
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it('revokes candidate confirmation when another profile is opened later', async () => {
+    const { profile } = await freshStore();
+    getJsonMock
+      .mockResolvedValueOnce({ success: true, data: view('18800002222') })
+      .mockResolvedValueOnce({ success: true, data: view('18800003333') });
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-1',
+      candidates: [summary('18800002222')]
+    });
+
+    await profile.previewCandidate(summary('18800002222'));
+    expect(profile.customerProfileState.candidatePreviewReady).toBe(true);
+
+    await profile.openProfile('18800003333', 'FOLLOWUP_LIST');
+    await profile.confirmPreviewedCandidate();
+
+    expect(profile.customerProfileState.profile?.customer.phone).toBe('18800003333');
+    expect(profile.customerProfileState.candidatePreviewReady).toBe(false);
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps candidate previews read-only by skipping pending save recovery', async () => {
+    const { profile } = await freshStore();
+    getPendingSaveMock.mockReturnValue({
+      phone: '18800002222',
+      editedFields: { nickname: 'Pending' },
+      version: 7,
+      createdAt: Date.now(),
+      retryCount: 0
+    });
+    recoverPendingSaveMock.mockResolvedValue(null);
+    getJsonMock.mockResolvedValue({ success: true, data: view('18800002222') });
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-1',
+      candidates: [summary('18800002222')]
+    });
+
+    await profile.previewCandidate(summary('18800002222'));
+
+    expect(profile.customerProfileState.candidatePreviewReady).toBe(true);
+    expect(recoverPendingSaveMock).not.toHaveBeenCalled();
+
+    await profile.openProfile('18800002222', 'PROFILE_CARD');
+    expect(recoverPendingSaveMock).toHaveBeenCalledWith('18800002222', 7);
   });
 
   it('generates replies from the profile and emits recognize results on success', async () => {
@@ -247,7 +433,7 @@ describe('customerProfileStore', () => {
     expect(profile.customerProfileState.generating).toBe(false);
   });
 
-  it('keeps multiple-match reply generation on the original session', async () => {
+  it('keeps pending-task confirmation on the original session', async () => {
     const { profile, eventBus } = await freshStore();
     const selected: unknown[] = [];
     const recognized: unknown[] = [];
@@ -256,20 +442,132 @@ describe('customerProfileStore', () => {
     getJsonMock.mockResolvedValue({ success: true, data: view('18800002222') });
     postJsonMock.mockResolvedValue({ success: true, data: { phone: '18800002222', skill: { suggestions: [] } } });
 
-    profile.showCandidates({ sessionId: 'session-candidate', candidates: [summary('18800002222')] });
-    profile.chooseCandidate(summary('18800002222'));
-    await vi.runAllTimersAsync();
-    await profile.generateReplyFromProfile();
+    profile.showCandidates({ sessionId: 'session-candidate', taskId: 'task-1', candidates: [summary('18800002222')] });
+    await profile.previewCandidate(summary('18800002222'));
+    await profile.confirmPreviewedCandidate();
 
-    expect(selected).toContainEqual(expect.objectContaining({
-      sessionId: 'session-candidate',
-      phone: '18800002222',
-      sourceFrom: 'CANDIDATE_LIST'
-    }));
+    expect(selected).toEqual([]);
     expect(recognized[0]).toMatchObject({
       sessionId: 'session-candidate',
+      source: 'PENDING_REPLY_TASK',
       response: { phone: '18800002222' }
     });
+  });
+
+  it('keeps task B intact when delayed task A confirmation succeeds', async () => {
+    const { profile, eventBus } = await freshStore();
+    const replies = await import('../reply-suggestions/replySuggestionStore');
+    eventBus.on('reply-task:generating', replies.startPendingTaskGeneration);
+    eventBus.on('recognize:result', replies.showRecognizeResult);
+    replies.startRecognizeLoading({ sessionId: 'session-a', source: 'BUTTON_CLICK' });
+    replies.pauseForMultipleMatch({
+      sessionId: 'session-a',
+      taskId: 'task-a',
+      candidates: [{ phone: '18800001111', nickname: 'Alice' }]
+    });
+    getJsonMock
+      .mockResolvedValueOnce({ success: true, data: view('18800001111') })
+      .mockResolvedValueOnce({ success: true, data: view('18800002222') });
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-a',
+      candidates: [summary('18800001111')]
+    });
+    await profile.previewCandidate(summary('18800001111'));
+    const pending = deferred<unknown>();
+    postJsonMock.mockReturnValueOnce(pending.promise);
+
+    const confirmingA = profile.confirmPreviewedCandidate();
+    expect(replies.replySuggestionState.sessions.find((item) => item.sessionId === 'session-a'))
+      .toMatchObject({ status: 'LOADING', pendingTaskStatus: 'GENERATING' });
+
+    replies.startRecognizeLoading({ sessionId: 'session-b', source: 'BUTTON_CLICK' });
+    replies.pauseForMultipleMatch({
+      sessionId: 'session-b',
+      taskId: 'task-b',
+      candidates: [{ phone: '18800002222', nickname: 'Betty' }]
+    });
+    profile.showCandidates({
+      sessionId: 'session-b',
+      taskId: 'task-b',
+      candidates: [summary('18800002222')]
+    });
+    await profile.previewCandidate(summary('18800002222'));
+    expect(profile.customerProfileState.candidatePreviewReady).toBe(true);
+
+    pending.resolve({
+      success: true,
+      data: {
+        phone: '18800001111',
+        skill: { suggestions: [{ text: 'A reply', direction: 'NEXT_STEP', reason: 'confirmed' }] }
+      }
+    });
+    await confirmingA;
+
+    expect(profile.customerProfileState).toMatchObject({
+      candidateTaskId: 'task-b',
+      candidateReplySessionId: 'session-b',
+      candidatePreviewPhone: '18800002222',
+      candidatePreviewReady: true,
+      candidateError: ''
+    });
+    expect(replies.replySuggestionState.sessions.find((item) => item.sessionId === 'session-a'))
+      .toMatchObject({ status: 'READY', pendingTaskStatus: 'READY', suggestions: [{ text: 'A reply' }] });
+    expect(replies.replySuggestionState.sessions.find((item) => item.sessionId === 'session-b'))
+      .toMatchObject({ status: 'MULTIPLE', pendingTaskStatus: 'WAITING_CUSTOMER' });
+  });
+
+  it('restores only task A when delayed task A confirmation fails after task B arrives', async () => {
+    const { profile, eventBus } = await freshStore();
+    const replies = await import('../reply-suggestions/replySuggestionStore');
+    eventBus.on('reply-task:generating', replies.startPendingTaskGeneration);
+    replies.startRecognizeLoading({ sessionId: 'session-a', source: 'BUTTON_CLICK' });
+    replies.pauseForMultipleMatch({
+      sessionId: 'session-a',
+      taskId: 'task-a',
+      candidates: [{ phone: '18800001111', nickname: 'Alice' }]
+    });
+    getJsonMock
+      .mockResolvedValueOnce({ success: true, data: view('18800001111') })
+      .mockResolvedValueOnce({ success: true, data: view('18800002222') });
+    profile.showCandidates({
+      sessionId: 'session-a',
+      taskId: 'task-a',
+      candidates: [summary('18800001111')]
+    });
+    await profile.previewCandidate(summary('18800001111'));
+    const pending = deferred<unknown>();
+    postJsonMock.mockReturnValueOnce(pending.promise);
+
+    const confirmingA = profile.confirmPreviewedCandidate();
+    replies.startRecognizeLoading({ sessionId: 'session-b', source: 'BUTTON_CLICK' });
+    replies.pauseForMultipleMatch({
+      sessionId: 'session-b',
+      taskId: 'task-b',
+      candidates: [{ phone: '18800002222', nickname: 'Betty' }]
+    });
+    profile.showCandidates({
+      sessionId: 'session-b',
+      taskId: 'task-b',
+      candidates: [summary('18800002222')]
+    });
+    await profile.previewCandidate(summary('18800002222'));
+    expect(profile.customerProfileState.candidatePreviewReady).toBe(true);
+
+    pending.resolve({ success: false, message: 'A failed' });
+    await confirmingA;
+
+    expect(profile.customerProfileState).toMatchObject({
+      candidateTaskId: 'task-b',
+      candidateReplySessionId: 'session-b',
+      candidatePreviewPhone: '18800002222',
+      candidatePreviewReady: true,
+      candidateError: ''
+    });
+    expect(replies.replySuggestionState.sessions.find((item) => item.sessionId === 'session-a'))
+      .toMatchObject({ status: 'MULTIPLE', pendingTaskStatus: 'WAITING_CUSTOMER' });
+    expect(replies.replySuggestionState.sessions.find((item) => item.sessionId === 'session-b'))
+      .toMatchObject({ status: 'MULTIPLE', pendingTaskStatus: 'WAITING_CUSTOMER' });
   });
 
   it('saves changed profile fields, handles table sync prompts, and refreshes after confirm or skip', async () => {
@@ -552,6 +850,14 @@ function suggestion(patch: Partial<ProfileSuggestion>): ProfileSuggestion {
     reason: 'AI suggestion',
     ...patch
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
 }
 
 function alert(alertId: string) {

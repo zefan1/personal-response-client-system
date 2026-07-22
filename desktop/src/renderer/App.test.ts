@@ -326,6 +326,30 @@ describe('App route shell', () => {
     app.unmount();
   });
 
+  it('opens the customer panel when a reply candidate requests a full profile preview', async () => {
+    const { eventBus } = await import('./shared/eventBus');
+    installDesktopBridge();
+    const { app, host } = await mountAppWithToken('#/desktop');
+
+    const replyNav = [...host.querySelectorAll('.desktop-nav-button')]
+      .find((button) => button.textContent?.includes('回复助手')) as HTMLButtonElement;
+    replyNav.click();
+    await flushUi();
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('回复助手');
+
+    eventBus.emit('candidate:preview', {
+      sessionId: 'session-a',
+      taskId: 'task-a',
+      candidate: { phone: '18800001111', nickname: 'Alice' }
+    });
+    await flushUi();
+
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('客户档案');
+    expect((host.querySelector('.customer-panel') as HTMLElement | null)?.style.display).not.toBe('none');
+    expect((host.querySelector('.reply-panel') as HTMLElement | null)?.style.display).toBe('none');
+    app.unmount();
+  });
+
   it('focuses the reply assistant when the global screenshot capture fails', async () => {
     const [{ captureScreenshot }, { triggerRecognize }] = await Promise.all([
       import('./shared/desktopBridge'),

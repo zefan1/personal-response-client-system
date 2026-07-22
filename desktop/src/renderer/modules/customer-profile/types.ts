@@ -6,6 +6,7 @@ export type CustomerSummary = {
   phone: string;
   phoneFull?: string | null;
   nickname?: string | null;
+  sourceChannel?: string | null;
   leadType?: LeadType | null;
   assignedKeeper?: string | null;
   lastFollowupAt?: string | null;
@@ -162,6 +163,7 @@ export type CustomerSearchResult = {
 
 export type RecognizeMultiplePayload = {
   sessionId?: string;
+  taskId?: string;
   candidates?: CustomerSummary[];
   matchInfo?: {
     customers?: CustomerSummary[];

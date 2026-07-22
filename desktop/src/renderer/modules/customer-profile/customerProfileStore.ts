@@ -16,7 +16,10 @@ import {
   handleCustomerProfileLoaded,
   ignoreStageSuggestion
 } from '../stage-suggestion/stageSuggestionHandler';
+import { removePendingReplyTask } from '../reply-suggestions/pendingReplyTaskStore';
+import { restorePendingTaskWaiting } from '../reply-suggestions/replySuggestionStore';
 import type { SaveProfileInput } from '../save-to-table/types';
+import type { ChatResponse } from '../reply-suggestions/types';
 import type {
   AbnormalAlertPayload,
   Customer,
@@ -55,6 +58,13 @@ export const customerProfileState = reactive({
   candidateVisible: false,
   candidates: [] as CustomerSummary[],
   candidateSessionId: '',
+  candidateTaskId: '',
+  candidateReplySessionId: '',
+  candidatePreviewPhone: '',
+  candidatePreviewReady: false,
+  candidatePreviewing: false,
+  candidateConfirming: false,
+  candidateError: '',
   profileLoading: false,
   profile: null as CustomerProfileView | null,
   fromCache: false,
@@ -88,6 +98,7 @@ let searchTimer: number | null = null;
 let searchAbort: AbortController | null = null;
 let profileAbort: AbortController | null = null;
 let tableSyncTimer: number | null = null;
+const confirmingCandidateTaskIds = new Set<string>();
 
 cleanupExpiredPendingSaves();
 
@@ -151,10 +162,16 @@ export async function searchCustomers(keyword: string): Promise<void> {
   }
 }
 
-export async function openProfile(phone: string, sourceFrom: SourceFrom, sessionId = ''): Promise<void> {
+export async function openProfile(
+  phone: string,
+  sourceFrom: SourceFrom,
+  sessionId = '',
+  options: { emitCustomerSelected?: boolean; recoverPendingSave?: boolean } = {}
+): Promise<boolean> {
   if (!phone) {
-    return;
+    return false;
   }
+  customerProfileState.candidatePreviewReady = false;
   if (!isSamePhone(phone, currentProfilePhone())) {
     clearTableSyncStatus();
   }
@@ -181,14 +198,19 @@ export async function openProfile(phone: string, sourceFrom: SourceFrom, session
       } else {
         customerProfileState.toast = '加载超时，请重试';
       }
-      return;
+      return false;
     }
     renderProfile(response.data, false, false, '');
     await refreshProfileAlert(profilePhone(response.data));
     cacheCustomer(response.data);
     handleCustomerProfileLoaded(response.data);
-    await recoverPendingForProfile(response.data);
-    emitCustomerSelected(response.data.customer, sourceFrom, sessionId);
+    if (options.recoverPendingSave !== false) {
+      await recoverPendingForProfile(response.data);
+    }
+    if (options.emitCustomerSelected !== false) {
+      emitCustomerSelected(response.data.customer, sourceFrom, sessionId);
+    }
+    return true;
   } catch {
     const cached = loadCachedCustomer(phone);
     if (cached) {
@@ -196,6 +218,7 @@ export async function openProfile(phone: string, sourceFrom: SourceFrom, session
     } else {
       customerProfileState.toast = navigator.onLine ? '加载超时，请重试' : '当前离线，该客户档案未缓存';
     }
+    return false;
   } finally {
     customerProfileState.profileLoading = false;
   }
@@ -206,22 +229,134 @@ export function showCandidates(payload: RecognizeMultiplePayload): void {
   customerProfileState.candidateVisible = true;
   customerProfileState.candidates = candidates.slice(0, 5);
   customerProfileState.candidateSessionId = payload.sessionId ?? '';
+  customerProfileState.candidateTaskId = payload.taskId ?? '';
+  customerProfileState.candidateReplySessionId = payload.sessionId ?? '';
+  customerProfileState.candidatePreviewPhone = '';
+  customerProfileState.candidatePreviewReady = false;
+  customerProfileState.candidateConfirming = confirmingCandidateTaskIds.has(customerProfileState.candidateTaskId);
+  customerProfileState.candidateError = '';
+}
+
+export async function previewCandidate(candidate: CustomerSummary): Promise<void> {
+  const phone = candidateFullPhone(candidate);
+  if (!phone) {
+    customerProfileState.candidatePreviewReady = false;
+    customerProfileState.candidatePreviewPhone = '';
+    customerProfileState.candidateVisible = true;
+    customerProfileState.candidateError = '候选客户缺少完整手机号，无法确认';
+    return;
+  }
+  if (customerProfileState.candidatePreviewing || customerProfileState.candidateConfirming) return;
+  customerProfileState.candidatePreviewing = true;
+  customerProfileState.candidateVisible = false;
+  customerProfileState.candidatePreviewPhone = phone;
+  customerProfileState.candidatePreviewReady = false;
+  customerProfileState.candidateError = '';
+  try {
+    const loaded = await openProfile(phone, 'CANDIDATE_LIST', customerProfileState.candidateReplySessionId, {
+      emitCustomerSelected: false,
+      recoverPendingSave: false
+    });
+    if (loaded && isSameFullPhone(currentProfilePhone(), phone)) {
+      customerProfileState.candidatePreviewReady = true;
+    } else {
+      customerProfileState.candidatePreviewPhone = '';
+      customerProfileState.candidateVisible = true;
+      customerProfileState.candidateError = loaded ? '返回的客户档案不匹配，请重新选择' : '客户档案加载失败，请重试';
+    }
+  } finally {
+    customerProfileState.candidatePreviewing = false;
+  }
+}
+
+export function returnToCandidates(): void {
+  if (!customerProfileState.candidates.length || customerProfileState.candidateConfirming) return;
+  customerProfileState.candidateVisible = true;
+  customerProfileState.candidatePreviewPhone = '';
+  customerProfileState.candidatePreviewReady = false;
+  customerProfileState.candidateError = '';
+}
+
+export async function confirmPreviewedCandidate(): Promise<void> {
+  const taskId = customerProfileState.candidateTaskId;
+  const sessionId = customerProfileState.candidateReplySessionId;
+  const phone = customerProfileState.candidatePreviewPhone;
+  if (
+    !taskId
+    || !sessionId
+    || !phone
+    || !customerProfileState.candidatePreviewReady
+    || !isSameFullPhone(currentProfilePhone(), phone)
+    || customerProfileState.candidateConfirming
+  ) {
+    customerProfileState.candidatePreviewReady = false;
+    return;
+  }
+
+  const task = {
+    taskId,
+    sessionId,
+    phone,
+    candidates: customerProfileState.candidates.map((candidate) => ({ ...candidate }))
+  };
+  confirmingCandidateTaskIds.add(taskId);
+  customerProfileState.candidateConfirming = true;
+  customerProfileState.candidateError = '';
+  eventBus.emit('reply-task:generating', { sessionId, taskId, phone });
+  try {
+    const response = await postJson<ChatResponse>(
+      `/api/v1/chat/reply-tasks/${encodeURIComponent(taskId)}/confirm`,
+      { phone }
+    );
+    if (!response.success || !response.data) {
+      restoreCandidateTaskAfterFailure(task, response.message ?? '确认失败，请重试');
+      return;
+    }
+    eventBus.emit('recognize:result', {
+      sessionId,
+      source: 'PENDING_REPLY_TASK',
+      response: response.data
+    });
+    clearCandidateTask(taskId);
+  } catch (error) {
+    restoreCandidateTaskAfterFailure(task, error instanceof Error ? error.message : '确认失败，请重试');
+  } finally {
+    confirmingCandidateTaskIds.delete(taskId);
+    customerProfileState.candidateConfirming = confirmingCandidateTaskIds.has(customerProfileState.candidateTaskId);
+  }
+}
+
+export async function cancelCandidateTask(): Promise<void> {
+  const taskId = customerProfileState.candidateTaskId;
+  const sessionId = customerProfileState.candidateReplySessionId;
+  if (!taskId) {
+    clearCandidateTask();
+    return;
+  }
+  if (customerProfileState.candidateConfirming) return;
+  customerProfileState.candidateConfirming = true;
+  customerProfileState.candidateError = '';
+  try {
+    const response = await postJson(`/api/v1/chat/reply-tasks/${encodeURIComponent(taskId)}/cancel`, {});
+    if (!response.success) {
+      customerProfileState.candidateError = response.message ?? '取消失败，请重试';
+      return;
+    }
+    removePendingReplyTask(taskId, sessionId);
+    clearCandidateTask();
+  } catch (error) {
+    customerProfileState.candidateError = error instanceof Error ? error.message : '取消失败，请重试';
+  } finally {
+    customerProfileState.candidateConfirming = false;
+  }
 }
 
 export function chooseCandidate(candidate: CustomerSummary): void {
-  const sessionId = customerProfileState.candidateSessionId;
-  customerProfileState.candidateVisible = false;
-  customerProfileState.candidates = [];
-  customerProfileState.candidateSessionId = '';
-  void openProfile(summaryPhone(candidate), 'CANDIDATE_LIST', sessionId);
+  void previewCandidate(candidate);
 }
 
 export function dismissCandidates(): void {
-  const sessionId = customerProfileState.candidateSessionId;
-  customerProfileState.candidateVisible = false;
-  customerProfileState.candidates = [];
-  customerProfileState.candidateSessionId = '';
-  eventBus.emit('customer:selected', { ...(sessionId ? { sessionId } : {}), phone: '', scene: 'CHAT_RECOGNIZE', sourceFrom: 'CANDIDATE_DISMISSED' });
+  void cancelCandidateTask();
 }
 
 export async function generateReplyFromProfile(): Promise<void> {
@@ -525,6 +660,8 @@ export function cleanupCustomerProfileStore(): void {
     window.clearTimeout(tableSyncTimer);
     tableSyncTimer = null;
   }
+  confirmingCandidateTaskIds.clear();
+  customerProfileState.candidateConfirming = false;
   cleanupSaveToTableService();
 }
 
@@ -556,6 +693,31 @@ export async function skipTableSync(): Promise<void> {
     setTableSyncStatus(input.phone, 'skipped', '已暂不同步企微表格', '本地档案已保存，表格保留原值');
     await openProfile(input.phone, 'PROFILE_CARD');
   }
+}
+
+function clearCandidateTask(expectedTaskId = ''): void {
+  if (expectedTaskId && customerProfileState.candidateTaskId !== expectedTaskId) return;
+  customerProfileState.candidateVisible = false;
+  customerProfileState.candidates = [];
+  customerProfileState.candidateSessionId = '';
+  customerProfileState.candidateTaskId = '';
+  customerProfileState.candidateReplySessionId = '';
+  customerProfileState.candidatePreviewPhone = '';
+  customerProfileState.candidatePreviewReady = false;
+  customerProfileState.candidatePreviewing = false;
+  customerProfileState.candidateError = '';
+}
+
+function restoreCandidateTaskAfterFailure(
+  task: { taskId: string; sessionId: string; phone: string; candidates: CustomerSummary[] },
+  message: string
+): void {
+  restorePendingTaskWaiting(task);
+  if (customerProfileState.candidateTaskId !== task.taskId) return;
+  customerProfileState.candidateVisible = true;
+  customerProfileState.candidatePreviewPhone = '';
+  customerProfileState.candidatePreviewReady = false;
+  customerProfileState.candidateError = message;
 }
 
 function renderProfile(profile: CustomerProfileView, fromCache: boolean, offline: boolean, cachedAt: string): void {
@@ -722,6 +884,23 @@ function clearTableSyncStatus(): void {
 
 function summaryPhone(customer: CustomerSummary): string {
   return customer.phoneFull || customer.phone;
+}
+
+function candidateFullPhone(customer: CustomerSummary): string {
+  return normalizeFullPhone(customer.phoneFull) || normalizeFullPhone(customer.phone);
+}
+
+function normalizeFullPhone(value?: string | null): string {
+  if (!value || /[*xX]/.test(value)) return '';
+  const digits = value.replace(/\D/g, '');
+  const normalized = digits.length === 13 && digits.startsWith('86') ? digits.slice(2) : digits;
+  return /^\d{11}$/.test(normalized) ? normalized : '';
+}
+
+function isSameFullPhone(left: string, right: string): boolean {
+  const normalizedLeft = normalizeFullPhone(left);
+  const normalizedRight = normalizeFullPhone(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
 }
 
 function customerPhone(customer: Customer): string {

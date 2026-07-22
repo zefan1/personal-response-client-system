@@ -295,6 +295,7 @@ onMounted(() => {
     taskQueueOpen.value = true;
   }));
   eventDisposers.push(eventBus.on('customer:selected', () => selectDesktopPanel('customer')));
+  eventDisposers.push(eventBus.on('candidate:preview', () => selectDesktopPanel('customer')));
   const focusReplyAssistant = () => selectDesktopPanel('reply');
   eventDisposers.push(eventBus.on('recognize:result', focusReplyAssistant));
   eventDisposers.push(eventBus.on('recognize:image-failed', focusReplyAssistant));
