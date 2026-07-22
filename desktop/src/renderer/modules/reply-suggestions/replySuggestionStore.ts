@@ -7,6 +7,7 @@ import type {
   AbnormalAlertPayload,
   ChatResponse,
   CustomerSelectedPayload,
+  PendingReplyTask,
   ProfileSuggestion,
   ProfileSuggestionsPayload,
   RecognizeFailurePayload,
@@ -169,20 +170,96 @@ export function startGenerateLoading(payload: CustomerSelectedPayload): void {
   activateSession(session.sessionId);
 }
 
-export function pauseForMultipleMatch(payload: RecognizeStartPayload & { candidates?: ReplyCandidate[]; matchInfo?: { customers?: ReplyCandidate[] } } = {}): void {
+export function pauseForMultipleMatch(payload: RecognizeStartPayload & {
+  taskId?: string;
+  candidates?: ReplyCandidate[];
+  matchInfo?: { customers?: ReplyCandidate[] };
+} = {}): void {
   if (isDismissedSession(payload.sessionId)) return;
   const session = sessionForPayload(payload);
   if (!session) return;
   session.status = 'MULTIPLE';
+  session.pendingTaskId = payload.taskId ?? session.pendingTaskId;
+  session.pendingTaskStatus = payload.taskId ? 'WAITING_CUSTOMER' : session.pendingTaskStatus;
   session.candidates = (payload.candidates ?? payload.matchInfo?.customers ?? []).slice(0, 5);
+  session.suggestions = [];
   session.loadingMode = 'NONE';
   session.progressStage = 'DONE';
-  session.currentStageText = session.currentStageText || '等待选择客户...';
+  session.currentStageText = '等待选择客户';
   session.updatedAt = Date.now();
   if (session.sessionId === replySuggestionState.activeSessionId) {
     clearSkeletonTimer();
   }
   syncActiveSessionToState();
+}
+
+export function syncPendingReplyTaskIntoSession(task: PendingReplyTask): void {
+  if (!task?.taskId || !task.replySessionId) return;
+  const existing = replySuggestionState.sessions.find((item) => item.sessionId === task.replySessionId);
+
+  if (task.status === 'CANCELLED') {
+    if (existing) closeReplySession(existing.sessionId);
+    return;
+  }
+
+  const session = existing ?? createSession(task.replySessionId, 'NONE', 'PENDING_REPLY_TASK');
+  if (!session) return;
+  stopFallbackRetry(session.sessionId);
+  session.pendingTaskId = task.taskId;
+  session.pendingTaskStatus = task.status;
+  session.currentScene = 'CHAT_RECOGNIZE';
+  session.currentPhone = task.selectedPhone ?? session.currentPhone;
+  if (task.candidates?.length) {
+    session.candidates = task.candidates.slice(0, 5);
+  }
+  session.updatedAt = Date.now();
+
+  if (task.status === 'WAITING_CUSTOMER') {
+    session.status = 'MULTIPLE';
+    session.loadingMode = 'NONE';
+    session.progressStage = 'DONE';
+    session.currentStageText = '等待选择客户';
+    session.failureReason = '';
+    session.suggestions = [];
+  } else if (task.status === 'GENERATING') {
+    session.status = 'LOADING';
+    session.loadingMode = 'SIMPLE';
+    session.progressStage = 'GENERATING';
+    session.currentStageText = '正在生成回复';
+    session.failureReason = '';
+    session.suggestions = [];
+  } else if (task.status === 'READY') {
+    if (task.response) {
+      showChatResponse(session, task.response, 'CHAT_RECOGNIZE', { allowAutomaticFallbackRetry: false });
+    } else {
+      markSavedReplyProtocolFailure(session);
+    }
+    session.pendingTaskId = task.taskId;
+    session.pendingTaskStatus = 'READY';
+  } else if (task.status === 'FAILED') {
+    session.status = 'FAILED';
+    session.loadingMode = 'NONE';
+    session.progressStage = 'FAILED';
+    session.currentStageText = '回复生成失败，可重新生成或取消任务';
+    session.failureReason = session.currentStageText;
+    session.suggestions = [];
+    session.showRegenerateButton = true;
+  } else if (task.status === 'EXPIRED') {
+    session.status = 'FAILED';
+    session.loadingMode = 'NONE';
+    session.progressStage = 'FAILED';
+    session.currentStageText = '任务已过期，请重新识别聊天';
+    session.failureReason = session.currentStageText;
+    session.candidates = [];
+    session.suggestions = [];
+    session.showRegenerateButton = false;
+  }
+
+  if (!replySuggestionState.activeSessionId || replySuggestionState.activeSessionId === session.sessionId) {
+    activateSession(session.sessionId);
+  } else {
+    syncActiveSessionToState();
+  }
 }
 
 export function stopForImageFailure(payload: RecognizeFailurePayload = {}): void {
@@ -414,6 +491,29 @@ export function closeReplySession(sessionId: string): void {
   }
 }
 
+export function removeMissingPendingReplySessions(currentTaskIds: ReadonlySet<string>): void {
+  const removableStatuses = new Set(['WAITING_CUSTOMER', 'GENERATING', 'FAILED']);
+  const missingSessionIds = replySuggestionState.sessions
+    .filter((session) => session.pendingTaskId
+      && !currentTaskIds.has(session.pendingTaskId)
+      && session.pendingTaskStatus !== null
+      && removableStatuses.has(session.pendingTaskStatus))
+    .map((session) => session.sessionId);
+  missingSessionIds.forEach(closeReplySession);
+}
+
+export function restoreAndActivatePendingReplyTask(task: PendingReplyTask): boolean {
+  if (!task?.taskId || !task.replySessionId) return false;
+  dismissedSessionIds.delete(task.replySessionId);
+  syncPendingReplyTaskIntoSession(task);
+  const restored = replySuggestionState.sessions.find((session) =>
+    session.sessionId === task.replySessionId && session.pendingTaskId === task.taskId
+  );
+  if (!restored) return false;
+  activateSession(restored.sessionId);
+  return replySuggestionState.activeSessionId === restored.sessionId;
+}
+
 export function selectCandidateForSession(sessionId: string, candidate: ReplyCandidate): void {
   if (isDismissedSession(sessionId)) return;
   const session = replySuggestionState.sessions.find((item) => item.sessionId === sessionId);
@@ -469,9 +569,14 @@ function persistSnapshot(snapshot: { sessions: ReplySession[]; activeSessionId: 
 }
 
 function recoverSession(session: ReplySession): ReplySession {
-  if (session.status !== 'LOADING') return session;
-  return {
+  const recovered = {
     ...session,
+    pendingTaskId: session.pendingTaskId ?? '',
+    pendingTaskStatus: session.pendingTaskStatus ?? null
+  };
+  if (session.status !== 'LOADING') return recovered;
+  return {
+    ...recovered,
     status: 'FAILED',
     loadingMode: 'NONE',
     progressStage: 'FAILED',
@@ -479,7 +584,12 @@ function recoverSession(session: ReplySession): ReplySession {
   };
 }
 
-function showChatResponse(session: ReplySession, response: ChatResponse, scene: ReplyScene): void {
+function showChatResponse(
+  session: ReplySession,
+  response: ChatResponse,
+  scene: ReplyScene,
+  options: { allowAutomaticFallbackRetry?: boolean } = {}
+): void {
   stopFallbackRetry(session.sessionId);
   session.loadingMode = 'NONE';
   session.progressStage = 'DONE';
@@ -493,11 +603,15 @@ function showChatResponse(session: ReplySession, response: ChatResponse, scene: 
   const suggestions = response.skill?.suggestions ?? [];
   session.replySource = response.replySource ?? null;
   if (suggestions.length === 0) {
+    if (options.allowAutomaticFallbackRetry === false) {
+      markSavedReplyProtocolFailure(session);
+      return;
+    }
     enterFallbackMode(session, '系统返回异常，请重试');
     return;
   }
   if (suggestions[0]?.direction === FALLBACK_DIRECTION) {
-    enterFallbackMode(session, suggestions[0].text);
+    enterFallbackMode(session, suggestions[0].text, options.allowAutomaticFallbackRetry !== false);
     return;
   }
   session.status = 'READY';
@@ -511,7 +625,23 @@ function showChatResponse(session: ReplySession, response: ChatResponse, scene: 
   session.updatedAt = Date.now();
 }
 
-function enterFallbackMode(session: ReplySession, text: string): void {
+function markSavedReplyProtocolFailure(session: ReplySession): void {
+  stopFallbackRetry(session.sessionId);
+  session.status = 'FAILED';
+  session.loadingMode = 'NONE';
+  session.progressStage = 'FAILED';
+  session.currentStageText = '保存的回复内容异常，请重新识别聊天';
+  session.failureReason = session.currentStageText;
+  session.suggestions = [];
+  session.replySource = null;
+  session.isFallbackMode = false;
+  session.fallbackText = '';
+  session.fallbackBannerText = '';
+  session.showRegenerateButton = false;
+  session.updatedAt = Date.now();
+}
+
+function enterFallbackMode(session: ReplySession, text: string, allowAutomaticRetry = true): void {
   session.status = 'FALLBACK';
   session.loadingMode = 'NONE';
   session.progressStage = 'DONE';
@@ -521,11 +651,15 @@ function enterFallbackMode(session: ReplySession, text: string): void {
     session.replySource = { source: 'FALLBACK', label: '系统兜底', detail: 'AI 服务不可用，已使用降级回复' };
   }
   session.fallbackText = text;
-  session.fallbackBannerText = 'AI 助手暂时不可用，正在自动重试恢复...';
+  session.fallbackBannerText = allowAutomaticRetry
+    ? 'AI 助手暂时不可用，正在自动重试恢复...'
+    : 'AI 助手暂时不可用，已展示保存的降级回复';
   session.suggestions = [{ text, direction: FALLBACK_DIRECTION, reason: '系统降级回复' }];
   session.showRegenerateButton = false;
   session.updatedAt = Date.now();
-  startFallbackRetry(session);
+  if (allowAutomaticRetry) {
+    startFallbackRetry(session);
+  }
 }
 
 function startFallbackRetry(session: ReplySession): void {
@@ -641,6 +775,8 @@ function createSession(sessionId: string, loadingMode: LoadingMode, source?: str
   const session: ReplySession = {
     sessionId,
     status: loadingMode === 'NONE' ? 'READY' : 'LOADING',
+    pendingTaskId: '',
+    pendingTaskStatus: null,
     source,
     createdAt: now,
     updatedAt: now,

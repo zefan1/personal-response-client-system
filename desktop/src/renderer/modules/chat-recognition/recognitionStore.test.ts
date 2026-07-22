@@ -44,7 +44,8 @@ describe('recognitionStore', () => {
       imageBase64: undefined,
       textMessage: 'hello',
       customerIdentifier: 'Alice',
-      source: 'CLIPBOARD_TEXT'
+      source: 'CLIPBOARD_TEXT',
+      replySessionId: expect.any(String)
     }, 0);
     expect(seen[0]).toMatchObject({ event: 'recognize:start', payload: { source: 'CLIPBOARD_TEXT' } });
     expect(seen[1]).toMatchObject({ event: 'recognize:result', payload: { source: 'CLIPBOARD_TEXT', response: response('EXACT') } });
@@ -66,24 +67,63 @@ describe('recognitionStore', () => {
       imageBase64: undefined,
       textMessage: 'customer asks for appointment',
       customerIdentifier: 'Alice',
-      source: 'CLIPBOARD_TEXT'
+      source: 'CLIPBOARD_TEXT',
+      replySessionId: expect.any(String)
     }, 0);
   });
 
   it('emits multiple-match candidates instead of a direct result', async () => {
     const { recognition, eventBus } = await freshStore();
-    const multiple: unknown[] = [];
-    eventBus.on('recognize:multiple', (payload) => multiple.push(payload));
+    const events: Array<{ type: string; payload: unknown }> = [];
+    eventBus.on('recognize:progress', (payload) => events.push({ type: 'recognize:progress', payload }));
+    eventBus.on('recognize:multiple', (payload) => events.push({ type: 'recognize:multiple', payload }));
+    postJsonMock.mockResolvedValue({
+      success: true,
+      data: {
+        ...response('MULTIPLE'),
+        pendingTask: {
+          taskId: 'task-1',
+          replySessionId: 'server-session-1',
+          status: 'WAITING_CUSTOMER',
+          candidates: [{ phone: '18800001111', nickname: 'Alice' }],
+          selectedPhone: null,
+          response: null,
+          errorCode: null,
+          expiresAt: '2026-07-04T12:00:00'
+        }
+      }
+    });
+
+    await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'base64' });
+
+    expect(events.filter((event) => event.type === 'recognize:progress')).toEqual([
+      expect.objectContaining({ payload: expect.objectContaining({ stage: 'UPLOADING' }) })
+    ]);
+    expect(events.find((event) => event.type === 'recognize:multiple')?.payload).toMatchObject({
+      sessionId: 'server-session-1',
+      taskId: 'task-1',
+      candidates: [{ phone: '18800001111', nickname: 'Alice' }],
+      matchInfo: { matchType: 'MULTIPLE', customers: [{ phone: '18800001111' }], matchCount: 1 }
+    });
+    expect(recognition.recognitionState.lastRequestSource).toBeNull();
+  });
+
+  it('fails a multiple-match response without a persisted task id', async () => {
+    const { recognition, eventBus } = await freshStore();
+    const events: Array<{ type: string; payload: unknown }> = [];
+    eventBus.on('recognize:progress', (payload) => events.push({ type: 'recognize:progress', payload }));
+    eventBus.on('recognize:multiple', (payload) => events.push({ type: 'recognize:multiple', payload }));
+    eventBus.on('recognize:failed', (payload) => events.push({ type: 'recognize:failed', payload }));
     postJsonMock.mockResolvedValue({ success: true, data: response('MULTIPLE') });
 
     await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'base64' });
 
-    expect(multiple[0]).toMatchObject({
-      candidates: [{ phone: '18800001111' }],
-      matchInfo: { matchType: 'MULTIPLE', customers: [{ phone: '18800001111' }], matchCount: 1 }
+    expect(events.some((event) => event.type === 'recognize:multiple')).toBe(false);
+    expect(events.some((event) => event.type === 'recognize:progress'
+      && (event.payload as { stage?: string }).stage === 'GENERATING')).toBe(false);
+    expect(events.find((event) => event.type === 'recognize:failed')?.payload).toMatchObject({
+      errorCode: 'CLIENT_PROTOCOL_ERROR'
     });
-    expect((multiple[0] as { sessionId?: string }).sessionId).toBeTruthy();
-    expect(recognition.recognitionState.lastRequestSource).toBeNull();
   });
 
   it('deduplicates identical recognition content inside one second', async () => {
@@ -155,7 +195,8 @@ describe('recognitionStore', () => {
       imageBase64: 'busy',
       textMessage: undefined,
       customerIdentifier: undefined,
-      source: 'CLIPBOARD_SCREENSHOT'
+      source: 'CLIPBOARD_SCREENSHOT',
+      replySessionId: expect.any(String)
     }, 0);
     expect(recognition.recognitionState.pendingClipboardImage).toBeNull();
   });

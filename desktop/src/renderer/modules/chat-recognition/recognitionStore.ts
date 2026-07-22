@@ -55,18 +55,33 @@ export async function triggerRecognize(source: RecognizeSource, content: Recogni
       imageBase64: content.imageBase64,
       textMessage: content.textMessage,
       customerIdentifier: content.customerIdentifier,
-      source
+      source,
+      replySessionId: sessionId
     }, 0);
     if (!response.success) {
       handleError(response.errorCode, sessionId, response.message);
       return;
     }
-    eventBus.emit('recognize:progress', { sessionId, source, stage: 'GENERATING', message: '正在生成回复' });
     const data = response.data as ChatRecognizeResponse;
+    if (!data) {
+      handleError('CLIENT_PROTOCOL_ERROR', sessionId, '识别服务返回的数据不完整，请重新识别聊天');
+      return;
+    }
     const matchType = data.match?.matchType ?? 'NONE';
     if (matchType === 'MULTIPLE') {
-      eventBus.emit('recognize:multiple', { sessionId, candidates: data.match?.customers ?? [], matchInfo: data.match });
+      const pendingTask = data.pendingTask;
+      if (!pendingTask?.taskId) {
+        handleError('CLIENT_PROTOCOL_ERROR', sessionId, '多客户任务保存失败，请重新识别聊天');
+        return;
+      }
+      eventBus.emit('recognize:multiple', {
+        sessionId: pendingTask.replySessionId || sessionId,
+        taskId: pendingTask.taskId,
+        candidates: pendingTask.candidates ?? [],
+        matchInfo: data.match
+      });
     } else {
+      eventBus.emit('recognize:progress', { sessionId, source, stage: 'GENERATING', message: '正在生成回复' });
       eventBus.emit('recognize:result', { sessionId, source, response: data });
     }
     recognitionState.isTwoBoxMode = false;

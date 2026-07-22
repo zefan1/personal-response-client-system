@@ -1,3 +1,5 @@
+import type { PendingReplyTask } from '../reply-suggestions/types';
+
 export type RecognizeSource = 'BUTTON_CLICK' | 'CLIPBOARD_SCREENSHOT' | 'CLIPBOARD_TEXT';
 export type ImageServiceStatus = 'UP' | 'DOWN' | 'UNKNOWN';
 
@@ -23,6 +25,7 @@ export type ChatRecognizeResponse = {
     followupSuggest?: unknown;
   } | null;
   warning?: string | null;
+  pendingTask?: PendingReplyTask | null;
 };
 
 export type RecognizeEventPayload = {

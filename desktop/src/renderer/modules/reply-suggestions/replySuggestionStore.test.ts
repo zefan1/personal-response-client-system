@@ -233,6 +233,187 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.progressStage).toBe('GENERATING');
   });
 
+  it('maps a waiting server task into the original multiple-match session without generating', async () => {
+    const { replies } = await freshStore();
+    replies.startRecognizeLoading({ sessionId: 'reply-session-1', source: 'BUTTON_CLICK' });
+
+    replies.syncPendingReplyTaskIntoSession(pendingTask('WAITING_CUSTOMER'));
+
+    expect(replies.replySuggestionState.sessions).toHaveLength(1);
+    expect(replies.activeReplySession.value).toMatchObject({
+      sessionId: 'reply-session-1',
+      status: 'MULTIPLE',
+      pendingTaskId: 'task-1',
+      pendingTaskStatus: 'WAITING_CUSTOMER',
+      candidates: [{ phone: '18800001111', nickname: 'Alice' }],
+      suggestions: []
+    });
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it('stores the persisted task when a live multiple-match event pauses recognition', async () => {
+    const { replies } = await freshStore();
+    replies.startRecognizeLoading({ sessionId: 'reply-session-1', source: 'BUTTON_CLICK' });
+
+    replies.pauseForMultipleMatch({
+      sessionId: 'reply-session-1',
+      taskId: 'task-1',
+      candidates: [{ phone: '18800001111', nickname: 'Alice' }]
+    });
+
+    expect(replies.activeReplySession.value).toMatchObject({
+      status: 'MULTIPLE',
+      pendingTaskId: 'task-1',
+      pendingTaskStatus: 'WAITING_CUSTOMER',
+      currentStageText: '等待选择客户',
+      suggestions: []
+    });
+  });
+
+  it('restores a ready server task into the same session without posting generation', async () => {
+    const { replies } = await freshStore();
+    replies.syncPendingReplyTaskIntoSession(pendingTask('WAITING_CUSTOMER'));
+
+    replies.syncPendingReplyTaskIntoSession(pendingTask('READY', {
+      response: response('18800001111', [suggestion('Saved server reply')]),
+      selectedPhone: '18800001111'
+    }));
+
+    expect(replies.replySuggestionState.sessions).toHaveLength(1);
+    expect(replies.activeReplySession.value).toMatchObject({
+      sessionId: 'reply-session-1',
+      status: 'READY',
+      pendingTaskId: 'task-1',
+      pendingTaskStatus: 'READY',
+      currentPhone: '18800001111'
+    });
+    expect(replies.replySuggestionState.suggestions.map((item) => item.text)).toEqual(['Saved server reply']);
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it('shows a saved fallback reply without automatically regenerating it', async () => {
+    const { replies } = await freshStore();
+
+    replies.syncPendingReplyTaskIntoSession(pendingTask('READY', {
+      response: response('18800001111', [{
+        text: 'Saved fallback reply',
+        direction: 'SYSTEM_FALLBACK',
+        reason: 'saved provider fallback'
+      }]),
+      selectedPhone: '18800001111'
+    }));
+
+    expect(replies.activeReplySession.value).toMatchObject({
+      status: 'FALLBACK',
+      pendingTaskStatus: 'READY',
+      suggestions: [{ text: 'Saved fallback reply', direction: 'SYSTEM_FALLBACK' }]
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it('marks an empty saved ready response as failed without regenerating it', async () => {
+    const { replies } = await freshStore();
+
+    replies.syncPendingReplyTaskIntoSession(pendingTask('READY', {
+      response: response('18800001111', []),
+      selectedPhone: '18800001111'
+    }));
+
+    expect(replies.activeReplySession.value).toMatchObject({
+      status: 'FAILED',
+      pendingTaskStatus: 'READY',
+      suggestions: []
+    });
+    expect(replies.replySuggestionState.failureReason).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['new', 'existing'] as const)(
+    'marks a READY task with a null response as failed for a %s session',
+    async (sessionKind) => {
+      const { replies } = await freshStore();
+      if (sessionKind === 'existing') {
+        replies.startRecognizeLoading({ sessionId: 'reply-session-1', source: 'BUTTON_CLICK' });
+        replies.showRecognizeResult({
+          sessionId: 'reply-session-1',
+          response: response('18800001111', [suggestion('Old reply')])
+        });
+      }
+
+      replies.syncPendingReplyTaskIntoSession(pendingTask('READY', {
+        response: null,
+        selectedPhone: '18800001111'
+      }));
+
+      expect(replies.activeReplySession.value).toMatchObject({
+        status: 'FAILED',
+        pendingTaskStatus: 'READY',
+        suggestions: []
+      });
+      expect(replies.replySuggestionState.failureReason).toContain('回复内容异常');
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(postJsonMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('removes missing unfinished pending sessions while preserving normal and ready replies', async () => {
+    const { replies } = await freshStore();
+    replies.startRecognizeLoading({ sessionId: 'normal-session', source: 'BUTTON_CLICK' });
+    replies.showRecognizeResult({
+      sessionId: 'normal-session',
+      response: response('18800009999', [suggestion('Normal reply')])
+    });
+    replies.syncPendingReplyTaskIntoSession(pendingTask('WAITING_CUSTOMER'));
+    replies.syncPendingReplyTaskIntoSession(pendingTask('GENERATING', {
+      taskId: 'task-2',
+      replySessionId: 'reply-session-2',
+      selectedPhone: '18800002222'
+    }));
+    replies.syncPendingReplyTaskIntoSession(pendingTask('FAILED', {
+      taskId: 'task-3',
+      replySessionId: 'reply-session-3',
+      selectedPhone: '18800003333'
+    }));
+    replies.syncPendingReplyTaskIntoSession(pendingTask('READY', {
+      taskId: 'task-4',
+      replySessionId: 'reply-session-4',
+      selectedPhone: '18800004444',
+      response: response('18800004444', [suggestion('Saved ready reply')])
+    }));
+
+    replies.removeMissingPendingReplySessions(new Set(['task-4']));
+
+    expect(replies.replySuggestionState.sessions.map((session) => session.sessionId).sort()).toEqual([
+      'normal-session',
+      'reply-session-4'
+    ]);
+    expect(replies.replySuggestionState.sessions.find((session) => session.sessionId === 'normal-session')?.suggestions)
+      .toEqual([suggestion('Normal reply')]);
+    expect(replies.replySuggestionState.sessions.find((session) => session.sessionId === 'reply-session-4'))
+      .toMatchObject({ status: 'READY', pendingTaskStatus: 'READY' });
+  });
+
+  it('keeps the selected customer when a server task fails', async () => {
+    const { replies } = await freshStore();
+
+    replies.syncPendingReplyTaskIntoSession(pendingTask('FAILED', {
+      selectedPhone: '18800001111',
+      errorCode: '50-10001'
+    }));
+
+    expect(replies.activeReplySession.value).toMatchObject({
+      status: 'FAILED',
+      pendingTaskId: 'task-1',
+      pendingTaskStatus: 'FAILED',
+      currentPhone: '18800001111',
+      suggestions: []
+    });
+    expect(replies.replySuggestionState.failureReason).toBeTruthy();
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
   it('enters fallback mode on empty Skill output and automatically recovers with retry', async () => {
     const { replies } = await freshStore();
     replies.showRecognizeResult(response('18800001111', []));
@@ -430,5 +611,22 @@ function alert(alertId: string, phone = '18800001111'): AbnormalAlertPayload {
     level: 'WARN',
     occurredAt: '2026-07-03T12:00:00Z',
     acknowledged: false
+  };
+}
+
+function pendingTask(
+  status: import('./types').PendingReplyTaskStatus,
+  overrides: Partial<import('./types').PendingReplyTask> = {}
+): import('./types').PendingReplyTask {
+  return {
+    taskId: 'task-1',
+    replySessionId: 'reply-session-1',
+    status,
+    candidates: [{ phone: '18800001111', nickname: 'Alice' }],
+    selectedPhone: null,
+    response: null,
+    errorCode: null,
+    expiresAt: '2026-07-04T12:00:00',
+    ...overrides
   };
 }

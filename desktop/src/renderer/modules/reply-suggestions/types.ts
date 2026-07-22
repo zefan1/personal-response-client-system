@@ -24,6 +24,7 @@ export type ChatResponse = {
   } | null;
   warning?: string | null;
   replySource?: ReplySourceInfo | null;
+  pendingTask?: PendingReplyTask | null;
 };
 
 export type ReplySourceInfo = {
@@ -70,6 +71,25 @@ export type ReplyCandidate = {
   intendedStore?: string | null;
 };
 
+export type PendingReplyTaskStatus =
+  | 'WAITING_CUSTOMER'
+  | 'GENERATING'
+  | 'READY'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'EXPIRED';
+
+export type PendingReplyTask = {
+  taskId: string;
+  replySessionId: string;
+  status: PendingReplyTaskStatus;
+  candidates: ReplyCandidate[];
+  selectedPhone?: string | null;
+  response?: ChatResponse | null;
+  errorCode?: string | null;
+  expiresAt: string;
+};
+
 export type ProfileSuggestion = {
   suggestionId?: number;
   fieldName: string;
@@ -113,6 +133,8 @@ export type RecognizeProgressStage = 'CAPTURED' | 'UPLOADING' | 'WAITING_MODEL' 
 export type ReplySession = {
   sessionId: string;
   status: ReplySessionStatus;
+  pendingTaskId: string;
+  pendingTaskStatus: PendingReplyTaskStatus | null;
   source?: string;
   createdAt: number;
   updatedAt: number;
