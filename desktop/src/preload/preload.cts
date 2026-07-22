@@ -17,6 +17,16 @@ type ClipboardImagePayload = {
   height: number;
 };
 
+type ReplyTaskNotificationPayload = {
+  taskId: string;
+  title?: string;
+  body?: string;
+};
+
+type ReplyTaskOpenPayload = {
+  taskId: string;
+};
+
 type OnlineStatusPayload = {
   online: boolean;
   type?: string;
@@ -36,6 +46,13 @@ const api = {
   toggleAlwaysOnTop: (): Promise<AlwaysOnTopResult> => ipcRenderer.invoke('window:toggle-always-on-top'),
   getAlwaysOnTop: (): Promise<AlwaysOnTopResult> => ipcRenderer.invoke('window:get-always-on-top'),
   getOnlineStatus: (): Promise<OnlineStatusPayload> => ipcRenderer.invoke('app:get-online-status'),
+  notifyReplyTask: (payload: ReplyTaskNotificationPayload): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('reply-task:notify', payload),
+  onReplyTaskOpen: (callback: (payload: ReplyTaskOpenPayload) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, payload: ReplyTaskOpenPayload) => callback(payload);
+    ipcRenderer.on('reply-task:open', listener);
+    return () => ipcRenderer.removeListener('reply-task:open', listener);
+  },
   onOnlineStatusChange: (callback: (payload: OnlineStatusPayload) => void) => {
     const listener = (_: Electron.IpcRendererEvent, payload: OnlineStatusPayload) => callback(payload);
     ipcRenderer.on('app:online-status', listener);

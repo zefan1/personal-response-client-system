@@ -214,6 +214,24 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.activeSessionId).toBe('session-reusable');
   });
 
+  it('persists account A before clearing memory and never writes the cleanup snapshot under account B', async () => {
+    const { replies } = await freshStore();
+    localStorage.setItem('desktop_config', JSON.stringify({ accountUsername: 'account-a' }));
+    replies.hydrateReplySuggestionStore();
+    replies.startRecognizeLoading({ sessionId: 'session-a', source: 'BUTTON_CLICK' });
+
+    replies.resetReplySuggestionStoreForSessionChange();
+    localStorage.setItem('desktop_config', JSON.stringify({ accountUsername: 'account-b' }));
+    replies.cleanupReplySuggestionStore();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const accountA = JSON.parse(localStorage.getItem('reply-suggestion-sessions-v1:account-a') ?? '{}');
+    expect(accountA.sessions).toEqual([expect.objectContaining({ sessionId: 'session-a' })]);
+    expect(localStorage.getItem('reply-suggestion-sessions-v1:account-b')).toBeNull();
+    expect(replies.replySuggestionState.sessions).toEqual([]);
+  });
+
   it('reuses the original multiple-match session when a candidate is selected', async () => {
     const { replies } = await freshStore();
 

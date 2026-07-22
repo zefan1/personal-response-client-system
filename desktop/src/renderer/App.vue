@@ -86,6 +86,11 @@
             <span class="nav-label">{{ item.title }}</span>
             <small>{{ item.description }}</small>
           </span>
+          <span
+            v-if="item.key === 'reply' && pendingReplyTaskCount"
+            class="pending-reply-task-count"
+            aria-label="待恢复回复任务数"
+          >{{ pendingReplyTaskCount }}</span>
         </button>
       </nav>
       <nav class="sidebar-quick-actions" aria-label="全局快捷操作">
@@ -186,6 +191,12 @@ import NewLeadToastAgent from './modules/new-lead-toast/NewLeadToastAgent.vue';
 import OfflineStatusBar from './modules/offline/OfflineStatusBar.vue';
 import QuickSearchOverlay from './modules/quick-search/QuickSearchOverlay.vue';
 import ReplySuggestionPanel from './modules/reply-suggestions/ReplySuggestionPanel.vue';
+import {
+  initializePendingReplyTaskOpenListener,
+  pendingReplyTaskCount,
+  refreshPendingReplyTasks,
+  resetPendingReplyTasksForSessionChange
+} from './modules/reply-suggestions/pendingReplyTaskStore';
 import { postJson } from './shared/apiClient';
 import { captureScreenshot, getAlwaysOnTop, openAdminConsole, toggleAlwaysOnTop } from './shared/desktopBridge';
 import { clearDesktopNotice, desktopNoticeState, setDesktopNotice } from './shared/desktopNoticeStore';
@@ -279,14 +290,18 @@ const skillStatusCompactLabel = computed(() => {
 });
 const eventDisposers: Array<() => void> = [];
 let refreshPromise: Promise<void> | null = null;
+let sessionEpoch = 0;
+const SESSION_REFRESH_LEAD_MS = 60_000;
+let sessionRefreshTimer: number | null = null;
 
 onMounted(() => {
   normalizeInitialHash();
   window.addEventListener('hashchange', syncModeFromHash);
   initializeAbnormalAlertRouter();
   initializeStageSuggestionHandler();
+  eventDisposers.push(initializePendingReplyTaskOpenListener());
   if (session.accessToken) {
-    void refreshDesktopStatus();
+    void initializeAuthenticatedSession();
   }
   if (hasDesktopBridge()) {
     void refreshAlwaysOnTopState();
@@ -321,9 +336,11 @@ onBeforeUnmount(() => {
   cleanupAbnormalAlertRouter();
   cleanupStageSuggestionHandler();
   eventDisposers.splice(0).forEach((dispose) => dispose());
+  clearSessionRefreshTimer();
 });
 
 async function login() {
+  const loginRequestEpoch = sessionEpoch;
   loginLoading.value = true;
   loginError.value = '';
   try {
@@ -336,6 +353,11 @@ async function login() {
     if (!response.success || !response.data?.accessToken) {
       throw new Error(response.message ?? response.errorCode ?? '登录失败');
     }
+    if (loginRequestEpoch !== sessionEpoch) return;
+    sessionEpoch += 1;
+    refreshPromise = null;
+    resetPendingReplyTasksForSessionChange();
+    const authenticatedEpoch = sessionEpoch;
     const account = response.data.account ?? response.data.userInfo;
     session.accessToken = response.data.accessToken;
     session.refreshToken = response.data.refreshToken ?? '';
@@ -350,7 +372,10 @@ async function login() {
       accountRole: session.role,
       accountPermissions: session.permissions
     });
-    await refreshDesktopStatus();
+    if (!await refreshDesktopStatus(authenticatedEpoch)) return;
+    await refreshPendingReplyTasks();
+    if (authenticatedEpoch !== sessionEpoch) return;
+    scheduleSessionRefresh();
     setMode(loginForm.mode === 'admin' && !hasDesktopBridge() ? currentMode.value === 'admin-dev' && devConsoleEnabled ? 'admin-dev' : 'admin' : 'desktop');
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : String(error);
@@ -359,9 +384,20 @@ async function login() {
   }
 }
 
-function logout() {
+async function logout() {
+  const saved = loadDesktopConfig();
+  const refreshToken = session.refreshToken || saved.refreshToken;
+  const username = session.accountUsername || saved.accountUsername || readJwtUsername(session.accessToken);
+  const logoutRequest = refreshToken && username
+    ? postJson('/api/v1/auth/logout', { refreshToken, username })
+    : null;
   clearSession();
   loginError.value = '';
+  try {
+    await logoutRequest;
+  } catch {
+    // Local logout must remain available when the backend is offline.
+  }
 }
 
 async function handleAuthExpired(message?: string): Promise<void> {
@@ -375,8 +411,11 @@ async function handleAuthExpired(message?: string): Promise<void> {
     expireSession(message);
     return;
   }
-  refreshPromise = (async () => {
+  const refreshEpoch = sessionEpoch;
+  let currentRefresh!: Promise<void>;
+  currentRefresh = (async () => {
     const response = await postJson<LoginPayload>('/api/v1/auth/refresh', { refreshToken, username });
+    if (refreshEpoch !== sessionEpoch) return;
     if (!response.success || !response.data?.accessToken) {
       throw new Error(response.message ?? response.errorCode ?? 'login refresh failed');
     }
@@ -395,15 +434,23 @@ async function handleAuthExpired(message?: string): Promise<void> {
       accountPermissions: session.permissions
     });
     loginError.value = '';
-    await refreshDesktopStatus();
+    if (!await refreshDesktopStatus(refreshEpoch)) return;
+    await refreshPendingReplyTasks();
+    if (refreshEpoch !== sessionEpoch) return;
+    scheduleSessionRefresh();
   })()
     .catch(() => {
-      expireSession(message);
+      if (refreshEpoch === sessionEpoch) {
+        expireSession(message);
+      }
     })
     .finally(() => {
-      refreshPromise = null;
+      if (refreshPromise === currentRefresh) {
+        refreshPromise = null;
+      }
     });
-  return refreshPromise;
+  refreshPromise = currentRefresh;
+  return currentRefresh;
 }
 
 function expireSession(message?: string) {
@@ -414,7 +461,11 @@ function expireSession(message?: string) {
 }
 
 function clearSession(preserveIdentity = false) {
+  sessionEpoch += 1;
+  refreshPromise = null;
+  clearSessionRefreshTimer();
   const username = session.accountUsername;
+  resetPendingReplyTasksForSessionChange();
   session.accessToken = '';
   session.refreshToken = '';
   session.accountUsername = preserveIdentity ? username : '';
@@ -430,6 +481,42 @@ function clearSession(preserveIdentity = false) {
     accountRole: '',
     accountPermissions: []
   });
+}
+
+async function initializeAuthenticatedSession(): Promise<void> {
+  const authenticatedEpoch = sessionEpoch;
+  const expiresAt = readJwtExpiryMs(session.accessToken);
+  if (expiresAt !== null && expiresAt - Date.now() <= SESSION_REFRESH_LEAD_MS) {
+    await handleAuthExpired();
+    return;
+  }
+  if (!await refreshDesktopStatus(authenticatedEpoch)) return;
+  await refreshPendingReplyTasks();
+  if (authenticatedEpoch !== sessionEpoch) return;
+  scheduleSessionRefresh();
+}
+
+function scheduleSessionRefresh(): void {
+  clearSessionRefreshTimer();
+  if (!session.refreshToken) {
+    return;
+  }
+  const expiresAt = readJwtExpiryMs(session.accessToken);
+  if (expiresAt === null) {
+    return;
+  }
+  const delay = Math.max(0, expiresAt - Date.now() - SESSION_REFRESH_LEAD_MS);
+  sessionRefreshTimer = window.setTimeout(() => {
+    sessionRefreshTimer = null;
+    void handleAuthExpired();
+  }, delay);
+}
+
+function clearSessionRefreshTimer(): void {
+  if (sessionRefreshTimer !== null) {
+    window.clearTimeout(sessionRefreshTimer);
+    sessionRefreshTimer = null;
+  }
 }
 
 function setMode(mode: RouteMode) {
@@ -547,8 +634,9 @@ async function openAdmin() {
   }
 }
 
-async function refreshDesktopStatus() {
+async function refreshDesktopStatus(expectedEpoch = sessionEpoch): Promise<boolean> {
   await loadDesktopStatus();
+  if (expectedEpoch !== sessionEpoch) return false;
   if (desktopStatusState.accountName) {
     session.accountName = desktopStatusState.accountName;
   }
@@ -557,6 +645,7 @@ async function refreshDesktopStatus() {
   }
   session.permissions = [...desktopStatusState.permissions];
   saveDesktopConfig({ accountRole: session.role, accountPermissions: session.permissions });
+  return true;
 }
 
 function normalizeRole(value?: string): AccountRole {
@@ -595,6 +684,22 @@ function readJwtRole(token?: string): string {
     return data.role ?? '';
   } catch {
     return '';
+  }
+}
+
+function readJwtExpiryMs(token?: string): number | null {
+  const payload = token?.split('.')[1];
+  if (!payload) {
+    return null;
+  }
+  try {
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='));
+    const data = JSON.parse(json) as { exp?: number };
+    const expiresAtSeconds = Number(data.exp);
+    return Number.isFinite(expiresAtSeconds) ? expiresAtSeconds * 1000 : null;
+  } catch {
+    return null;
   }
 }
 

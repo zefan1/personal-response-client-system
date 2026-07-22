@@ -1,31 +1,64 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const postJsonMock = vi.fn();
+const notifyReplyTaskMock = vi.fn();
 
 vi.mock('../../shared/apiClient', () => ({
   postJson: postJsonMock
 }));
 
+vi.mock('../../shared/desktopBridge', () => ({
+  notifyReplyTask: notifyReplyTaskMock,
+  onReplyTaskOpen: vi.fn(() => () => undefined)
+}));
+
 type RecognitionModule = typeof import('./recognitionStore');
 type EventBusModule = typeof import('../../shared/eventBus');
+type PendingModule = typeof import('../reply-suggestions/pendingReplyTaskStore');
 
-async function freshStore(): Promise<{ recognition: RecognitionModule; eventBus: EventBusModule['eventBus'] }> {
+function installMemoryLocalStorage(): void {
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: vi.fn((key: string) => values.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => values.set(key, String(value))),
+      removeItem: vi.fn((key: string) => values.delete(key)),
+      clear: vi.fn(() => values.clear())
+    }
+  });
+}
+
+async function freshStore(): Promise<{
+  recognition: RecognitionModule;
+  eventBus: EventBusModule['eventBus'];
+  pending: PendingModule;
+}> {
   vi.resetModules();
   postJsonMock.mockReset();
+  notifyReplyTaskMock.mockReset();
+  notifyReplyTaskMock.mockResolvedValue({ success: true });
   const recognition = await import('./recognitionStore');
   const { eventBus } = await import('../../shared/eventBus');
-  return { recognition, eventBus };
+  const pending = await import('../reply-suggestions/pendingReplyTaskStore');
+  return { recognition, eventBus, pending };
 }
 
 describe('recognitionStore', () => {
   beforeEach(() => {
+    installMemoryLocalStorage();
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-03T12:00:00Z'));
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    localStorage.clear();
   });
 
   afterEach(() => {
     vi.useRealTimers();
     postJsonMock.mockReset();
+    notifyReplyTaskMock.mockReset();
+    vi.restoreAllMocks();
+    localStorage.clear();
   });
 
   it('emits recognize start and result for exact text recognition', async () => {
@@ -73,7 +106,8 @@ describe('recognitionStore', () => {
   });
 
   it('emits multiple-match candidates instead of a direct result', async () => {
-    const { recognition, eventBus } = await freshStore();
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    const { recognition, eventBus, pending } = await freshStore();
     const events: Array<{ type: string; payload: unknown }> = [];
     eventBus.on('recognize:progress', (payload) => events.push({ type: 'recognize:progress', payload }));
     eventBus.on('recognize:multiple', (payload) => events.push({ type: 'recognize:multiple', payload }));
@@ -105,7 +139,14 @@ describe('recognitionStore', () => {
       candidates: [{ phone: '18800001111', nickname: 'Alice' }],
       matchInfo: { matchType: 'MULTIPLE', customers: [{ phone: '18800001111' }], matchCount: 1 }
     });
+    expect(events.filter((event) => event.type === 'recognize:multiple')).toHaveLength(1);
     expect(recognition.recognitionState.lastRequestSource).toBeNull();
+    expect(pending.pendingReplyTaskState.tasks).toEqual([
+      expect.objectContaining({ taskId: 'task-1', status: 'WAITING_CUSTOMER' })
+    ]);
+    expect(pending.pendingReplyTaskCount.value).toBe(1);
+    expect(notifyReplyTaskMock).toHaveBeenCalledTimes(1);
+    expect(postJsonMock).toHaveBeenCalledTimes(1);
   });
 
   it('fails a multiple-match response without a persisted task id', async () => {

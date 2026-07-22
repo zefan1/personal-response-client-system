@@ -580,6 +580,7 @@ export function selectCandidateForSession(sessionId: string, candidate: ReplyCan
 
 export function cleanupReplySuggestionStore(): void {
   const snapshot = serializeSessions();
+  const shouldPersistSnapshot = hydrated || Boolean(persistedStorageKey) || snapshot.sessions.length > 0;
   clearSkeletonTimer();
   stopFallbackRetry();
   dismissedSessionIds.clear();
@@ -587,9 +588,15 @@ export function cleanupReplySuggestionStore(): void {
   replySuggestionState.sessions = [];
   replySuggestionState.activeSessionId = '';
   syncActiveSessionToState();
-  persistSnapshot(snapshot);
+  if (shouldPersistSnapshot) {
+    persistSnapshot(snapshot);
+  }
   hydrated = false;
   persistedStorageKey = '';
+}
+
+export function resetReplySuggestionStoreForSessionChange(): void {
+  cleanupReplySuggestionStore();
 }
 
 function storageKey(): string {

@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { captureScreenshot, getAlwaysOnTop, openAdminConsole, toggleAlwaysOnTop } from './desktopBridge';
+import {
+  captureScreenshot,
+  getAlwaysOnTop,
+  notifyReplyTask,
+  onReplyTaskOpen,
+  openAdminConsole,
+  toggleAlwaysOnTop
+} from './desktopBridge';
 
 describe('desktopBridge admin console launcher', () => {
   const originalUserAgent = navigator.userAgent;
@@ -110,5 +117,44 @@ describe('desktopBridge admin console launcher', () => {
     });
     const captureMode: 'FOREGROUND_WINDOW' | 'SCREEN_FALLBACK' | undefined = result.captureMode;
     expect(captureMode).toBe('FOREGROUND_WINDOW');
+  });
+
+  it('delegates pending reply notifications and disposes the open listener', async () => {
+    const notifyReplyTaskMock = vi.fn(async () => ({ success: true }));
+    const dispose = vi.fn();
+    let openListener: ((payload: { taskId: string }) => void) | undefined;
+    const onReplyTaskOpenMock = vi.fn((listener: (payload: { taskId: string }) => void) => {
+      openListener = listener;
+      return dispose;
+    });
+    (window as unknown as {
+      desktopBridge: {
+        notifyReplyTask: typeof notifyReplyTaskMock;
+        onReplyTaskOpen: typeof onReplyTaskOpenMock;
+      };
+    }).desktopBridge = { notifyReplyTask: notifyReplyTaskMock, onReplyTaskOpen: onReplyTaskOpenMock };
+    const opened: string[] = [];
+
+    await expect(notifyReplyTask({ taskId: 'task-1' })).resolves.toEqual({ success: true });
+    const removeListener = onReplyTaskOpen((payload) => opened.push(payload.taskId));
+    openListener?.({ taskId: 'task-1' });
+    removeListener();
+
+    expect(notifyReplyTaskMock).toHaveBeenCalledWith({ taskId: 'task-1' });
+    expect(opened).toEqual(['task-1']);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('safely disables pending reply notifications in the browser preview', async () => {
+    const opened: string[] = [];
+
+    await expect(notifyReplyTask({ taskId: 'task-1' })).resolves.toMatchObject({
+      success: false,
+      error: 'DESKTOP_BRIDGE_UNAVAILABLE'
+    });
+    const removeListener = onReplyTaskOpen((payload) => opened.push(payload.taskId));
+    removeListener();
+
+    expect(opened).toEqual([]);
   });
 });

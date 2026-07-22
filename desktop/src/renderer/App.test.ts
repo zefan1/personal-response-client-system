@@ -8,9 +8,23 @@ const apiMocks = vi.hoisted(() => ({
   postJson: vi.fn()
 }));
 
+const pendingReplyTaskMocks = vi.hoisted(() => ({
+  refresh: vi.fn(async () => undefined),
+  resetForSessionChange: vi.fn(),
+  initializeOpenListener: vi.fn(() => () => undefined),
+  count: { __v_isRef: true, value: 0 }
+}));
+
 vi.mock('./shared/apiClient', () => ({
   getJson: apiMocks.getJson,
   postJson: apiMocks.postJson
+}));
+
+vi.mock('./modules/reply-suggestions/pendingReplyTaskStore', () => ({
+  refreshPendingReplyTasks: pendingReplyTaskMocks.refresh,
+  resetPendingReplyTasksForSessionChange: pendingReplyTaskMocks.resetForSessionChange,
+  initializePendingReplyTaskOpenListener: pendingReplyTaskMocks.initializeOpenListener,
+  pendingReplyTaskCount: pendingReplyTaskMocks.count
 }));
 
 vi.mock('./modules/abnormal-alert/alertStore', () => ({
@@ -239,6 +253,7 @@ describe('App route shell', () => {
       refreshToken: 'refresh-a',
       accountUsername: 'admin'
     });
+    pendingReplyTaskMocks.refresh.mockClear();
     apiMocks.postJson.mockImplementation(async (path: string) => path === '/api/v1/auth/refresh'
       ? {
           success: true,
@@ -266,7 +281,213 @@ describe('App route shell', () => {
       refreshToken: 'refresh-a',
       accountUsername: 'admin'
     });
+    expect(pendingReplyTaskMocks.refresh).toHaveBeenCalledTimes(1);
 
+    app.unmount();
+  });
+
+  it('silently refreshes an already expired saved access token during startup', async () => {
+    installDesktopBridge();
+    apiMocks.postJson.mockImplementation(async (path: string) => path === '/api/v1/auth/refresh'
+      ? {
+          success: true,
+          data: {
+            accessToken: unsignedJwt({ exp: Math.floor(Date.now() / 1000) + 7200, role: 'ADMIN' }),
+            refreshToken: 'refresh-b',
+            account: { username: 'admin', displayName: 'Admin', role: 'ADMIN', permissions: [] }
+          },
+          errorCode: null,
+          message: null
+        }
+      : { success: true, data: null, errorCode: null, message: null });
+
+    const { app, host } = await mountAppWithToken('#/desktop', {
+      accessToken: unsignedJwt({ exp: Math.floor(Date.now() / 1000) - 60, role: 'ADMIN' }),
+      refreshToken: 'refresh-a',
+      accountUsername: 'admin'
+    });
+    await flushUi();
+    await flushUi();
+
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/api/v1/auth/refresh', {
+      refreshToken: 'refresh-a',
+      username: 'admin'
+    });
+    expect(host.querySelector('.login-shell')).toBeFalsy();
+    expect(JSON.parse(localStorage.getItem('desktop_config') ?? '{}')).toMatchObject({
+      refreshToken: 'refresh-b',
+      accountUsername: 'admin'
+    });
+    expect(pendingReplyTaskMocks.refresh).toHaveBeenCalledTimes(1);
+
+    app.unmount();
+  });
+
+  it('restores pending reply tasks once after a successful login', async () => {
+    installDesktopBridge();
+    apiMocks.postJson.mockResolvedValueOnce({
+      success: true,
+      data: {
+        accessToken: 'token-b',
+        refreshToken: 'refresh-b',
+        account: { username: 'admin', displayName: 'Admin', role: 'ADMIN', permissions: [] }
+      },
+      errorCode: null,
+      message: null
+    });
+    const { app, host } = await mountAppWithToken('#/desktop', { accessToken: '' });
+    const username = host.querySelector('input[autocomplete="username"]') as HTMLInputElement;
+    const password = host.querySelector('input[autocomplete="current-password"]') as HTMLInputElement;
+    username.value = 'admin';
+    username.dispatchEvent(new Event('input'));
+    password.value = 'secret';
+    password.dispatchEvent(new Event('input'));
+
+    (host.querySelector('.login-panel button[type="submit"]') as HTMLButtonElement).click();
+    await flushUi();
+    await flushUi();
+
+    expect(pendingReplyTaskMocks.refresh).toHaveBeenCalledTimes(1);
+    app.unmount();
+  });
+
+  it('restores pending reply tasks once for an existing valid session', async () => {
+    installDesktopBridge();
+
+    const { app } = await mountAppWithToken('#/desktop', {
+      accessToken: unsignedJwt({ exp: Math.floor(Date.now() / 1000) + 7200, role: 'ADMIN' })
+    });
+    await flushUi();
+
+    expect(pendingReplyTaskMocks.refresh).toHaveBeenCalledTimes(1);
+    app.unmount();
+  });
+
+  it('does not restore pending reply tasks while logged out', async () => {
+    installDesktopBridge();
+
+    const { app, host } = await mountAppWithToken('#/desktop', { accessToken: '' });
+
+    expect(host.querySelector('.login-shell')).toBeTruthy();
+    expect(pendingReplyTaskMocks.refresh).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it('revokes the current refresh session on logout and clears local state even when logout fails', async () => {
+    installDesktopBridge();
+    apiMocks.postJson.mockRejectedValueOnce(new Error('backend unavailable'));
+    const { app, host } = await mountAppWithToken('#/desktop', {
+      refreshToken: 'desktop-refresh',
+      accountUsername: 'admin'
+    });
+
+    const logoutButton = [...host.querySelectorAll('.desktop-sidebar-actions button')]
+      .find((button) => button.textContent?.trim() === '退出') as HTMLButtonElement;
+    pendingReplyTaskMocks.resetForSessionChange.mockClear();
+    logoutButton.click();
+    const immediateResetCalls = pendingReplyTaskMocks.resetForSessionChange.mock.calls.length;
+    await flushUi();
+    await flushUi();
+
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/api/v1/auth/logout', {
+      refreshToken: 'desktop-refresh',
+      username: 'admin'
+    });
+    expect(host.querySelector('.login-shell')).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem('desktop_config') ?? '{}')).toMatchObject({
+      accessToken: '',
+      refreshToken: ''
+    });
+
+    app.unmount();
+    expect(immediateResetCalls).toBe(1);
+  });
+
+  it('does not let an old account refresh overwrite a logged-out or newly logged-in account', async () => {
+    installDesktopBridge();
+    const refreshA = deferred<unknown>();
+    const refreshB = deferred<unknown>();
+    let refreshCalls = 0;
+    apiMocks.postJson.mockImplementation((path: string) => {
+      if (path === '/api/v1/auth/refresh') {
+        refreshCalls += 1;
+        return refreshCalls === 1 ? refreshA.promise : refreshB.promise;
+      }
+      if (path === '/api/v1/auth/login') {
+        return Promise.resolve({
+          success: true,
+          data: {
+            accessToken: 'token-b',
+            refreshToken: 'refresh-b',
+            account: { username: 'account-b', displayName: 'Account B', role: 'ADMIN', permissions: [] }
+          },
+          errorCode: null,
+          message: null
+        });
+      }
+      return Promise.resolve({ success: true, data: null, errorCode: null, message: null });
+    });
+    const { eventBus } = await import('./shared/eventBus');
+    const { app, host } = await mountAppWithToken('#/desktop', {
+      refreshToken: 'refresh-a',
+      accountUsername: 'account-a'
+    });
+    pendingReplyTaskMocks.refresh.mockClear();
+
+    eventBus.emit('auth:expired', { message: 'expired A' });
+    await flushUi();
+    expect(refreshCalls).toBe(1);
+
+    const logoutButton = [...host.querySelectorAll('.desktop-sidebar-actions button')]
+      .find((button) => button.textContent?.trim() === '退出') as HTMLButtonElement;
+    logoutButton.click();
+    await flushUi();
+
+    const username = host.querySelector('input[autocomplete="username"]') as HTMLInputElement;
+    const password = host.querySelector('input[autocomplete="current-password"]') as HTMLInputElement;
+    username.value = 'account-b';
+    username.dispatchEvent(new Event('input'));
+    password.value = 'secret';
+    password.dispatchEvent(new Event('input'));
+    (host.querySelector('.login-panel button[type="submit"]') as HTMLButtonElement).click();
+    await flushUi();
+    await flushUi();
+
+    eventBus.emit('auth:expired', { message: 'expired B' });
+    await flushUi();
+    expect(refreshCalls).toBe(2);
+
+    refreshA.resolve({
+      success: true,
+      data: {
+        accessToken: 'stale-token-a',
+        refreshToken: 'stale-refresh-a',
+        account: { username: 'account-a', displayName: 'Account A', role: 'ADMIN', permissions: [] }
+      }
+    });
+    await flushUi();
+    eventBus.emit('auth:expired', { message: 'duplicate B expiry' });
+    await flushUi();
+    expect(refreshCalls).toBe(2);
+
+    refreshB.resolve({
+      success: true,
+      data: {
+        accessToken: 'refreshed-token-b',
+        refreshToken: 'refreshed-refresh-b',
+        account: { username: 'account-b', displayName: 'Account B', role: 'ADMIN', permissions: [] }
+      }
+    });
+    await flushUi();
+    await flushUi();
+
+    expect(JSON.parse(localStorage.getItem('desktop_config') ?? '{}')).toMatchObject({
+      accessToken: 'refreshed-token-b',
+      refreshToken: 'refreshed-refresh-b',
+      accountUsername: 'account-b'
+    });
+    expect(pendingReplyTaskMocks.refresh).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('.login-shell')).toBeFalsy();
     app.unmount();
   });
 
@@ -528,3 +749,13 @@ describe('App route shell', () => {
     app.unmount();
   });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}

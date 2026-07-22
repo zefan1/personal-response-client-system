@@ -4,6 +4,8 @@ import type { PendingReplyTask, PendingReplyTaskStatus } from './types';
 const getJsonMock = vi.fn();
 const postJsonMock = vi.fn();
 const getAlertsByPhoneMock = vi.fn();
+const notifyReplyTaskMock = vi.fn();
+const onReplyTaskOpenMock = vi.fn();
 
 vi.mock('../../shared/apiClient', () => ({
   getJson: getJsonMock,
@@ -12,6 +14,11 @@ vi.mock('../../shared/apiClient', () => ({
 
 vi.mock('../abnormal-alert/alertStore', () => ({
   getAlertsByPhone: getAlertsByPhoneMock
+}));
+
+vi.mock('../../shared/desktopBridge', () => ({
+  notifyReplyTask: notifyReplyTaskMock,
+  onReplyTaskOpen: onReplyTaskOpenMock
 }));
 
 function installMemoryLocalStorage(): void {
@@ -33,6 +40,9 @@ async function freshStores() {
   postJsonMock.mockReset();
   getAlertsByPhoneMock.mockReset();
   getAlertsByPhoneMock.mockReturnValue([]);
+  notifyReplyTaskMock.mockReset();
+  notifyReplyTaskMock.mockResolvedValue({ success: true });
+  onReplyTaskOpenMock.mockReset();
   const pending = await import('./pendingReplyTaskStore');
   const replies = await import('./replySuggestionStore');
   return { pending, replies };
@@ -41,12 +51,14 @@ async function freshStores() {
 describe('pendingReplyTaskStore', () => {
   beforeEach(() => {
     installMemoryLocalStorage();
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
   });
 
   afterEach(async () => {
     const replies = await import('./replySuggestionStore');
     replies.cleanupReplySuggestionStore();
     localStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it('replaces server state and synchronizes waiting tasks into reply sessions', async () => {
@@ -96,6 +108,131 @@ describe('pendingReplyTaskStore', () => {
     expect(replies.replySuggestionState.activeSessionId).toBe('reply-session-1');
   });
 
+  it('opens a waiting task immediately in the foreground without a system notification', async () => {
+    const { pending, replies } = await freshStores();
+    const multipleEvents: unknown[] = [];
+    const { eventBus } = await import('../../shared/eventBus');
+    const dispose = eventBus.on('recognize:multiple', (payload) => multipleEvents.push(payload));
+    getJsonMock.mockResolvedValue({ success: true, data: [task('WAITING_CUSTOMER')] });
+
+    await pending.refreshPendingReplyTasks();
+    await pending.refreshPendingReplyTasks();
+
+    expect(notifyReplyTaskMock).not.toHaveBeenCalled();
+    expect(replies.replySuggestionState.activeSessionId).toBe('reply-session-1');
+    expect(multipleEvents).toEqual([{
+      sessionId: 'reply-session-1',
+      taskId: 'task-1',
+      candidates: [{ phone: '18800001111', nickname: 'Alice' }]
+    }]);
+    dispose();
+  });
+
+  it('opens only one new waiting task from a foreground snapshot', async () => {
+    const { pending, replies } = await freshStores();
+    const multipleEvents: unknown[] = [];
+    const { eventBus } = await import('../../shared/eventBus');
+    const dispose = eventBus.on('recognize:multiple', (payload) => multipleEvents.push(payload));
+    getJsonMock.mockResolvedValue({
+      success: true,
+      data: [
+        task('WAITING_CUSTOMER'),
+        task('WAITING_CUSTOMER', { taskId: 'task-2', replySessionId: 'reply-session-2' })
+      ]
+    });
+
+    await pending.refreshPendingReplyTasks();
+    await pending.refreshPendingReplyTasks();
+
+    expect(replies.replySuggestionState.sessions).toHaveLength(2);
+    expect(multipleEvents).toEqual([expect.objectContaining({ taskId: 'task-1' })]);
+    dispose();
+  });
+
+  it('records a foreground live task without replaying the existing UI event on refresh', async () => {
+    const { pending } = await freshStores();
+    const multipleEvents: unknown[] = [];
+    const { eventBus } = await import('../../shared/eventBus');
+    const dispose = eventBus.on('recognize:multiple', (payload) => multipleEvents.push(payload));
+    pending.receivePendingReplyTask(task('WAITING_CUSTOMER'));
+    getJsonMock.mockResolvedValue({ success: true, data: [task('WAITING_CUSTOMER')] });
+
+    await pending.refreshPendingReplyTasks();
+
+    expect(pending.pendingReplyTaskCount.value).toBe(1);
+    expect(multipleEvents).toEqual([]);
+    expect(notifyReplyTaskMock).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it('allows a foreground task to open automatically after it disappears and returns', async () => {
+    const { pending } = await freshStores();
+    const multipleEvents: unknown[] = [];
+    const { eventBus } = await import('../../shared/eventBus');
+    const dispose = eventBus.on('recognize:multiple', (payload) => multipleEvents.push(payload));
+    getJsonMock
+      .mockResolvedValueOnce({ success: true, data: [task('WAITING_CUSTOMER')] })
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({ success: true, data: [task('WAITING_CUSTOMER')] });
+
+    await pending.refreshPendingReplyTasks();
+    await pending.refreshPendingReplyTasks();
+    await pending.refreshPendingReplyTasks();
+
+    expect(multipleEvents).toHaveLength(2);
+    dispose();
+  });
+
+  it('notifies a background waiting task once and allows a future reminder after it disappears', async () => {
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    const { pending } = await freshStores();
+    getJsonMock
+      .mockResolvedValueOnce({ success: true, data: [task('WAITING_CUSTOMER')] })
+      .mockResolvedValueOnce({ success: true, data: [task('WAITING_CUSTOMER')] })
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({ success: true, data: [task('WAITING_CUSTOMER')] });
+
+    await pending.refreshPendingReplyTasks();
+    await pending.refreshPendingReplyTasks();
+    await pending.refreshPendingReplyTasks();
+    await pending.refreshPendingReplyTasks();
+
+    expect(notifyReplyTaskMock).toHaveBeenCalledTimes(2);
+    expect(notifyReplyTaskMock).toHaveBeenNthCalledWith(1, { taskId: 'task-1' });
+    expect(notifyReplyTaskMock).toHaveBeenNthCalledWith(2, { taskId: 'task-1' });
+  });
+
+  it.each([
+    ['returns success false', () => Promise.resolve({ success: false })],
+    ['rejects', () => Promise.reject(new Error('notification unavailable'))]
+  ])('retries a background notification after the first attempt %s', async (_label, notifyResult) => {
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    const { pending } = await freshStores();
+    notifyReplyTaskMock.mockImplementation(notifyResult);
+    getJsonMock.mockResolvedValue({ success: true, data: [task('WAITING_CUSTOMER')] });
+
+    await pending.refreshPendingReplyTasks();
+    await Promise.resolve();
+    await pending.refreshPendingReplyTasks();
+
+    expect(notifyReplyTaskMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not duplicate a background notification while the first attempt is in flight', async () => {
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    const { pending } = await freshStores();
+    const notification = deferred<{ success: boolean }>();
+    notifyReplyTaskMock.mockReturnValue(notification.promise);
+    getJsonMock.mockResolvedValue({ success: true, data: [task('WAITING_CUSTOMER')] });
+
+    await pending.refreshPendingReplyTasks();
+    await pending.refreshPendingReplyTasks();
+
+    expect(notifyReplyTaskMock).toHaveBeenCalledTimes(1);
+    notification.resolve({ success: true });
+    await Promise.resolve();
+  });
+
   it('ignores an older refresh that completes after a newer READY snapshot', async () => {
     const { pending, replies } = await freshStores();
     const older = deferred<unknown>();
@@ -123,6 +260,36 @@ describe('pendingReplyTaskStore', () => {
     });
   });
 
+  it('clears account tasks and reply sessions and invalidates an in-flight account refresh', async () => {
+    const { pending, replies } = await freshStores();
+    pending.syncPendingReplyTask(task('WAITING_CUSTOMER'));
+    const oldAccountResponse = deferred<unknown>();
+    getJsonMock.mockReturnValueOnce(oldAccountResponse.promise);
+    const oldRefresh = pending.refreshPendingReplyTasks();
+
+    pending.resetPendingReplyTasksForSessionChange();
+    oldAccountResponse.resolve({ success: true, data: [task('READY', {
+      response: savedResponse('Stale account reply')
+    })] });
+    await oldRefresh;
+
+    expect(pending.pendingReplyTaskState.tasks).toEqual([]);
+    expect(pending.pendingReplyTaskState.activeTaskId).toBe('');
+    expect(replies.replySuggestionState.sessions).toEqual([]);
+  });
+
+  it('keeps a new account empty when its first task recovery fails after reset', async () => {
+    const { pending, replies } = await freshStores();
+    pending.syncPendingReplyTask(task('WAITING_CUSTOMER'));
+    pending.resetPendingReplyTasksForSessionChange();
+    getJsonMock.mockRejectedValueOnce(new Error('account B recovery failed'));
+
+    await pending.refreshPendingReplyTasks();
+
+    expect(pending.pendingReplyTaskState.tasks).toEqual([]);
+    expect(replies.replySuggestionState.sessions).toEqual([]);
+  });
+
   it('removes unfinished sessions missing from a successful server snapshot', async () => {
     const { pending, replies } = await freshStores();
     getJsonMock
@@ -140,6 +307,9 @@ describe('pendingReplyTaskStore', () => {
 
   it('explicitly opens a server task after its reply session was dismissed', async () => {
     const { pending, replies } = await freshStores();
+    const multipleEvents: unknown[] = [];
+    const { eventBus } = await import('../../shared/eventBus');
+    const dispose = eventBus.on('recognize:multiple', (payload) => multipleEvents.push(payload));
     getJsonMock.mockResolvedValue({ success: true, data: [task('WAITING_CUSTOMER')] });
     await pending.refreshPendingReplyTasks();
     replies.closeReplySession('reply-session-1');
@@ -147,14 +317,87 @@ describe('pendingReplyTaskStore', () => {
     replies.startRecognizeLoading({ sessionId: 'reply-session-1', source: 'BUTTON_CLICK' });
     expect(replies.replySuggestionState.sessions).toHaveLength(0);
 
-    expect(pending.openPendingReplyTask('task-1')).toBe(true);
+    expect(pending.openRecoveredReplyTask('task-1')).toBe(true);
     expect(replies.replySuggestionState.sessions).toHaveLength(1);
     expect(replies.activeReplySession.value).toMatchObject({
       sessionId: 'reply-session-1',
       pendingTaskId: 'task-1',
       status: 'MULTIPLE'
     });
+    expect(multipleEvents.at(-1)).toEqual({
+      sessionId: 'reply-session-1',
+      taskId: 'task-1',
+      candidates: [{ phone: '18800001111', nickname: 'Alice' }]
+    });
     expect(pending.openPendingReplyTask('missing-task')).toBe(false);
+    dispose();
+  });
+
+  it('opens a saved READY task without repeating Skill or LLM generation', async () => {
+    const { pending, replies } = await freshStores();
+    pending.syncPendingReplyTask(task('READY', {
+      selectedPhone: '18800001111',
+      response: savedResponse('Saved reply')
+    }));
+
+    expect(pending.openRecoveredReplyTask('task-1')).toBe(true);
+
+    expect(replies.activeReplySession.value).toMatchObject({
+      sessionId: 'reply-session-1',
+      status: 'READY',
+      suggestions: [{ text: 'Saved reply' }]
+    });
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it('opens a notification task through an initialized disposable listener', async () => {
+    const dispose = vi.fn();
+    let listener: ((payload: { taskId: string }) => void) | undefined;
+    const { pending, replies } = await freshStores();
+    onReplyTaskOpenMock.mockImplementation((callback: (payload: { taskId: string }) => void) => {
+      listener = callback;
+      return dispose;
+    });
+    pending.syncPendingReplyTask(task('WAITING_CUSTOMER'));
+    replies.closeReplySession('reply-session-1');
+
+    const cleanup = pending.initializePendingReplyTaskOpenListener();
+    listener?.({ taskId: 'task-1' });
+
+    expect(replies.replySuggestionState.activeSessionId).toBe('reply-session-1');
+    cleanup();
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores waiting, generating, ready, and failed server tasks without overwriting sessions', async () => {
+    const { pending, replies } = await freshStores();
+    getJsonMock.mockResolvedValue({
+      success: true,
+      data: [
+        task('WAITING_CUSTOMER'),
+        task('GENERATING', { taskId: 'task-2', replySessionId: 'reply-session-2', selectedPhone: '18800002222' }),
+        task('READY', {
+          taskId: 'task-3',
+          replySessionId: 'reply-session-3',
+          selectedPhone: '18800003333',
+          response: savedResponse('Saved third reply')
+        }),
+        task('FAILED', { taskId: 'task-4', replySessionId: 'reply-session-4', selectedPhone: '18800004444' })
+      ]
+    });
+
+    await pending.refreshPendingReplyTasks();
+
+    expect(replies.replySuggestionState.sessions).toHaveLength(4);
+    expect(replies.replySuggestionState.sessions
+      .map((session) => [session.sessionId, session.status])
+      .sort(([left], [right]) => String(left).localeCompare(String(right)))).toEqual([
+      ['reply-session-1', 'MULTIPLE'],
+      ['reply-session-2', 'LOADING'],
+      ['reply-session-3', 'READY'],
+      ['reply-session-4', 'FAILED']
+    ]);
+    expect(postJsonMock).not.toHaveBeenCalled();
   });
 
   it('removes a cancelled task and its original multiple-match session immediately', async () => {

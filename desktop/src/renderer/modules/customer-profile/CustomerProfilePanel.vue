@@ -89,7 +89,7 @@
         <button class="secondary small" type="button" :disabled="state.candidatePreviewing || state.candidateConfirming" @click="returnToCandidates">
           返回候选客户
         </button>
-        <button v-if="state.candidatePreviewReady" class="primary small" type="button" :disabled="state.candidatePreviewing || state.candidateConfirming || state.profileLoading" @click="confirmPreviewedCandidate">
+        <button v-if="state.candidatePreviewReady" class="primary small candidate-confirm-action" type="button" :disabled="state.candidatePreviewing || state.candidateConfirming || state.profileLoading" @click="confirmPreviewedCandidate">
           {{ state.candidateConfirming ? '确认中...' : '确认是此客户' }}
         </button>
       </div>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net, Notification, screen, shell } from 'electron';
 import { activeWindow } from 'get-windows';
 import crypto from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -850,6 +850,7 @@ app.whenReady().then(async () => {
   registerOnlineStatusIpc();
   registerWindowControlIpc();
   registerAdminOpenExternal();
+  registerReplyTaskNotificationIpc();
   registerScreenshotCapture();
   registerClipboardWriteText();
   registerClipboardWriteImage();
@@ -1036,6 +1037,29 @@ function registerScreenshotCapture() {
       delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       minImageDimension: DESKTOP_DEFAULTS.clipboardMinImageDimension
     });
+  });
+}
+
+function registerReplyTaskNotificationIpc() {
+  ipcMain.handle('reply-task:notify', (_event, payload?: { taskId?: string; title?: string; body?: string }) => {
+    const taskId = payload?.taskId?.trim();
+    if (!taskId || !Notification.isSupported()) {
+      return { success: false };
+    }
+    const notification = new Notification({
+      title: payload?.title?.trim() || '请选择对应客户',
+      body: payload?.body?.trim() || '识别到多个客户，请查看档案后确认。'
+    });
+    notification.on('click', () => {
+      if (mainWindow?.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow?.show();
+      mainWindow?.focus();
+      mainWindow?.webContents.send('reply-task:open', { taskId });
+    });
+    notification.show();
+    return { success: true };
   });
 }
 

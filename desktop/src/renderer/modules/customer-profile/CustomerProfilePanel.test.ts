@@ -271,6 +271,7 @@ describe('CustomerProfilePanel', () => {
     await flushUi();
     const confirmButton = [...host.querySelectorAll('.candidate-preview-actions button')]
       .find((button) => button.textContent?.includes('确认是此客户')) as HTMLButtonElement;
+    expect(confirmButton.classList.contains('candidate-confirm-action')).toBe(true);
     confirmButton.click();
     await flushUi();
 

@@ -23,6 +23,16 @@ type ClipboardImagePayload = {
   height: number;
 };
 
+export type ReplyTaskNotificationPayload = {
+  taskId: string;
+  title?: string;
+  body?: string;
+};
+
+export type ReplyTaskOpenPayload = {
+  taskId: string;
+};
+
 export async function writeClipboardText(text: string): Promise<BridgeResult> {
   if (window.desktopBridge) {
     return window.desktopBridge.writeClipboardText(text);
@@ -48,6 +58,13 @@ export async function writeClipboardImage(imageUrl: string): Promise<BridgeResul
 export async function captureScreenshot(): Promise<BridgeResult> {
   if (window.desktopBridge) {
     return window.desktopBridge.captureScreenshot();
+  }
+  return { success: false, error: 'DESKTOP_BRIDGE_UNAVAILABLE' };
+}
+
+export async function notifyReplyTask(payload: ReplyTaskNotificationPayload): Promise<BridgeResult> {
+  if (window.desktopBridge?.notifyReplyTask) {
+    return window.desktopBridge.notifyReplyTask(payload);
   }
   return { success: false, error: 'DESKTOP_BRIDGE_UNAVAILABLE' };
 }
@@ -102,6 +119,13 @@ export function onQuickSearchShow(listener: () => void): () => void {
 export function onQuickSearchHide(listener: () => void): () => void {
   if (window.desktopBridge) {
     return window.desktopBridge.onQuickSearchHide(listener);
+  }
+  return () => undefined;
+}
+
+export function onReplyTaskOpen(listener: (payload: ReplyTaskOpenPayload) => void): () => void {
+  if (window.desktopBridge?.onReplyTaskOpen) {
+    return window.desktopBridge.onReplyTaskOpen(listener);
   }
   return () => undefined;
 }

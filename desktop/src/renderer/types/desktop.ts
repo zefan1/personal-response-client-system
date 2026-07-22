@@ -27,6 +27,16 @@ type ClipboardImagePayload = {
   height: number;
 };
 
+type ReplyTaskNotificationPayload = {
+  taskId: string;
+  title?: string;
+  body?: string;
+};
+
+type ReplyTaskOpenPayload = {
+  taskId: string;
+};
+
 type DesktopBridge = {
   captureScreenshot: () => Promise<BridgeResult>;
   writeClipboardText: (text: string) => Promise<BridgeResult>;
@@ -40,6 +50,8 @@ type DesktopBridge = {
   onQuickSearchShow: (callback: () => void) => () => void;
   onQuickSearchHide: (callback: () => void) => () => void;
   onClipboardImage: (callback: (payload: ClipboardImagePayload) => void) => () => void;
+  notifyReplyTask: (payload: ReplyTaskNotificationPayload) => Promise<BridgeResult>;
+  onReplyTaskOpen: (callback: (payload: ReplyTaskOpenPayload) => void) => () => void;
 };
 
 declare global {

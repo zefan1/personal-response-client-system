@@ -1,6 +1,7 @@
 import { reactive } from 'vue';
 import { postJson } from '../../shared/apiClient';
 import { eventBus } from '../../shared/eventBus';
+import { receivePendingReplyTask } from '../reply-suggestions/pendingReplyTaskStore';
 import type { ChatRecognizeResponse, ClipboardImagePayload, ImageServiceStatus, RecognizeSource } from './types';
 
 type RecognizeContent = {
@@ -74,8 +75,13 @@ export async function triggerRecognize(source: RecognizeSource, content: Recogni
         handleError('CLIENT_PROTOCOL_ERROR', sessionId, '多客户任务保存失败，请重新识别聊天');
         return;
       }
+      const receivedTask = {
+        ...pendingTask,
+        replySessionId: pendingTask.replySessionId || sessionId
+      };
+      receivePendingReplyTask(receivedTask);
       eventBus.emit('recognize:multiple', {
-        sessionId: pendingTask.replySessionId || sessionId,
+        sessionId: receivedTask.replySessionId,
         taskId: pendingTask.taskId,
         candidates: pendingTask.candidates ?? [],
         matchInfo: data.match
