@@ -631,6 +631,16 @@ function recoverSession(session: ReplySession): ReplySession {
     pendingTaskId: session.pendingTaskId ?? '',
     pendingTaskStatus: session.pendingTaskStatus ?? null
   };
+  if (session.status === 'FALLBACK'
+    && session.currentScene === 'CHAT_RECOGNIZE'
+    && session.currentMatchType === 'NONE') {
+    return {
+      ...recovered,
+      fallbackBannerText: 'AI 助手暂时不可用，请重新识别当前聊天',
+      fallbackRetryCount: 0,
+      showRegenerateButton: true
+    };
+  }
   if (session.status !== 'LOADING') return recovered;
   return {
     ...recovered,

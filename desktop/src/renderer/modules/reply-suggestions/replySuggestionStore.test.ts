@@ -358,6 +358,35 @@ describe('replySuggestionStore', () => {
     expect(postJsonMock).not.toHaveBeenCalled();
   });
 
+  it('repairs a restored unmatched fallback session that still claims automatic retry', async () => {
+    const { replies } = await freshStore();
+    replies.showRecognizeResult({
+      ...response('19900001111', [{ text: 'fallback', direction: 'SYSTEM_FALLBACK', reason: 'down' }]),
+      needsCustomerIdentifier: true,
+      match: { matchType: 'NONE' }
+    });
+    const savedSession = {
+      ...replies.activeReplySession.value!,
+      fallbackBannerText: 'AI 助手暂时不可用，正在自动重试恢复...',
+      fallbackRetryCount: 1,
+      showRegenerateButton: false
+    };
+    replies.cleanupReplySuggestionStore();
+    localStorage.setItem('reply-suggestion-sessions-v1:anonymous', JSON.stringify({
+      sessions: [savedSession],
+      activeSessionId: savedSession.sessionId
+    }));
+
+    vi.resetModules();
+    const restored = await import('./replySuggestionStore');
+    restored.hydrateReplySuggestionStore();
+
+    expect(restored.replySuggestionState.fallbackBannerText).toContain('重新识别');
+    expect(restored.replySuggestionState.fallbackRetryCount).toBe(0);
+    expect(restored.replySuggestionState.showRegenerateButton).toBe(true);
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
   it('marks an empty saved ready response as failed without regenerating it', async () => {
     const { replies } = await freshStore();
 
