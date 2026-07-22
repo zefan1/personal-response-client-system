@@ -16,7 +16,7 @@
 - [x] Task 3 桌面候选预览与确认：DTO/恢复 Store 提交 `8848648`；候选回复会话路由提交 `0367fcb`；完整档案预览、严格手机号确认、取消清理、并发任务隔离和自动切到档案页提交 `6dbd854`。
 - [x] Task 4 恢复与桌面提醒：登录、有效会话启动、令牌刷新均恢复服务端任务；账号切换清理、旧 refresh/login 竞态隔离、前后台提醒和通知点击恢复已提交（`2ccf950`）。
 - [x] Task 4.1 真实运行时恢复修复：8081 闭环发现候选表保存了脱敏手机号，刷新后无法重新匹配候选；已按 RED/GREEN 改为持久化 `phoneFull`，提交 `3b425b9`。刷新后仍能读取 4 个候选并确认第二位，READY 回到原 `replySessionId`，连续查询未重复调用 Skill/LLM。
-- [x] Task 4.2 Windows 通知身份前置：主进程在 `app.whenReady()` 前、仅在 Windows 设置 AppUserModelId；未打包运行使用 `process.execPath`，打包运行使用稳定产品 ID。代码前置条件已通过 2 项回归测试和复审，但开始菜单/ToastActivator 注册与真实通知点击仍属于 Task 5。
+- [x] Task 4.2 Windows 通知身份前置：主进程在 `app.whenReady()` 前、仅在 Windows 设置 AppUserModelId；未打包运行使用 `process.execPath`，打包运行使用稳定产品 ID。代码前置条件已通过 2 项回归测试和复审，提交 `f38a725`；开始菜单/ToastActivator 注册与真实通知点击仍属于 Task 5。
 - [ ] Task 5 全量验证与人工验收
 
 ## 本次验证证据
