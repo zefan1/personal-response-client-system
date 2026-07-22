@@ -34,11 +34,16 @@ const rendererSmokeApiBaseUrl = process.env.PDA_SMOKE_API_BASE_URL ?? 'http://lo
 const rendererSmokeAccessToken = process.env.PDA_RENDERER_SMOKE_ACCESS_TOKEN ?? '';
 const rendererSmokeScreenshotDir = process.env.PDA_RENDERER_SMOKE_SCREENSHOT_DIR ?? '';
 const smokeUserDataDir = process.env.PDA_ELECTRON_SMOKE_USER_DATA_DIR;
+const WINDOWS_APP_USER_MODEL_ID = app.isPackaged ? 'com.privateflow.private-domain-assistant' : process.execPath;
 const clipboardImageHistory: ClipboardHistoryItem[] = [];
 let clipboardPollTimer: NodeJS.Timeout | null = null;
 let onlineStatusPollTimer: NodeJS.Timeout | null = null;
 let lastBroadcastOnlineStatus: boolean | null = null;
 let mainWindow: BrowserWindow | null = null;
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
+}
 
 if (isSmoke && smokeUserDataDir) {
   mkdirSync(smokeUserDataDir, { recursive: true });

@@ -3,9 +3,9 @@
 ## 当前状态
 
 - 基线提交：`7fb9c7f7fe8aa411a4fd390b91ecf1f87122280f`
-- 当前任务：`Task 5 - 真实桌面截图与 Windows 通知点击验收。`
-- 最近验证：`2026-07-22：修复候选完整手机号持久化后，后端全量 549 项，失败 0、错误 0、跳过 2；前端最近一次全量 39 个文件 359/359 通过；npm run typecheck 通过。`
-- 未解决阻塞：`自动化代码门禁已通过。真实微信、企业微信、抖音网页截图，以及 Windows 通知点击恢复尚未验收；在这些项目完成前，整个功能不能标记完成。`
+- 当前任务：`Task 5 - 真实微信/企微/抖音截图，以及安装态 Windows 通知点击验收。`
+- 最近验证：`2026-07-22：后端全量 549 项，失败 0、错误 0、跳过 2；前端全量 40 个文件 361/361 通过；npm run typecheck 通过。`
+- 未解决阻塞：`真实企业微信当前是内部群、Chrome 当前不是抖音页、微信没有可见主窗口，均不能作为客户截图验收。Windows 开发态 Notification.isSupported() 为 true，但独立探测通知也未进入通知中心；Electron 官方要求的开始菜单快捷方式/ToastActivator 注册尚未在安装包中形成闭环。`
 - 用户授权：`用户明确要求不新开 worktree，在当前工作区开发。必须保留并兼容已有未提交改动。`
 
 ## 完成记录
@@ -15,7 +15,8 @@
 - [x] Task 2 编排与 API：多客户识别仅创建 `WAITING_CUSTOMER`；列表、单任务、确认、重试、取消 5 个 REST 路由已接通。确认/重试共用原聊天与 `CHAT_RECOGNIZE` 生成；活跃生成不会被同进程轮询误恢复，READY 查询不重复调用 Skill/LLM。
 - [x] Task 3 桌面候选预览与确认：DTO/恢复 Store 提交 `8848648`；候选回复会话路由提交 `0367fcb`；完整档案预览、严格手机号确认、取消清理、并发任务隔离和自动切到档案页提交 `6dbd854`。
 - [x] Task 4 恢复与桌面提醒：登录、有效会话启动、令牌刷新均恢复服务端任务；账号切换清理、旧 refresh/login 竞态隔离、前后台提醒和通知点击恢复已提交（`2ccf950`）。
-- [x] Task 4.1 真实运行时恢复修复：8081 闭环发现候选表保存了脱敏手机号，刷新后无法重新匹配候选；已按 RED/GREEN 改为持久化 `phoneFull`，刷新后仍能读取 4 个候选并确认第二位，READY 回到原 `replySessionId`，连续查询未重复调用 Skill/LLM。
+- [x] Task 4.1 真实运行时恢复修复：8081 闭环发现候选表保存了脱敏手机号，刷新后无法重新匹配候选；已按 RED/GREEN 改为持久化 `phoneFull`，提交 `3b425b9`。刷新后仍能读取 4 个候选并确认第二位，READY 回到原 `replySessionId`，连续查询未重复调用 Skill/LLM。
+- [x] Task 4.2 Windows 通知身份前置：主进程在 `app.whenReady()` 前、仅在 Windows 设置 AppUserModelId；未打包运行使用 `process.execPath`，打包运行使用稳定产品 ID。代码前置条件已通过 2 项回归测试和复审，但开始菜单/ToastActivator 注册与真实通知点击仍属于 Task 5。
 - [ ] Task 5 全量验证与人工验收
 
 ## 本次验证证据
@@ -31,9 +32,11 @@
 - 恢复与桌面提醒：从 Git 索引导出的精确提交快照运行 `App.test.ts`、`customerProfileStore.test.ts`、`CustomerProfilePanel.test.ts`、`ReplySuggestionPanel.test.ts`、`replySuggestionStore.test.ts`、`pendingReplyTaskStore.test.ts`，6 个文件 119/119 通过；`npm run typecheck` 通过；`git diff --cached --check` 通过；提交为 `2ccf950`。
 - 候选手机号修复定向验证：`C:\Users\85314\AppData\Local\Temp\codex-maven-20260722\apache-maven-3.9.11\bin\mvn.cmd -q -Dtest=PendingReplyTaskRepositoryTest,PendingReplyTaskRepositoryTransactionTest,PendingReplyTaskServiceTest,ChatOrchestrationServiceTest,ChatControllerTest test` 退出码 0；5 个测试类合计 85 项，失败 0、错误 0、跳过 0。
 - 全量后端：`C:\Users\85314\AppData\Local\Temp\codex-maven-20260722\apache-maven-3.9.11\bin\mvn.cmd -q test` 退出码 0；127 份 Surefire 报告合计 549 项，失败 0、错误 0、跳过 2。
-- 全量前端：`npm test` 最终 39 个文件、359/359 通过；`npm run typecheck` 通过。第一次全量发现 4 个旧测试未包含新增 `replySessionId`，已按失败输出最小修正；并行 Maven 时出现一次无关 `AlertBell.test.ts` 超时，单文件 6/6 及无并行的后续全量均通过。
+- 8081 桌面辅助闭环（不替代真实截图）：文字通道任务 `e0752950-...` 持久状态从 `WAITING_CUSTOMER` 到 `READY`，原会话 `reply-1784728183083-1`，4 个候选后四位为 `2810/2921/5754/5922`。先后预览第一、第二档案时 `CALL_SKILL=0`；明确确认第二位后 `selected_phone` 后四位为 `2921`、`CALL_SKILL=1`；退出并重新登录后 READY 回填同一会话，审计数仍为 1。
+- Windows 通知真实探测：Electron 已确认失去前台焦点，`Notification.isSupported()` 为 true；补充 AppUserModelId 后，应用通知和同一 Electron 可执行文件发出的独立探测通知均未进入 Windows 通知中心。临时探测脚本和开始菜单快捷方式已清理，不能把通知点击记为通过。
+- 全量前端：`npm test` 最终 40 个文件、361/361 通过；`npm run typecheck` 通过。新增 2 项主进程启动契约测试；已有工作台、管理后台未提交改动也在同一工作区通过全量门禁。
 - 公共契约、模块依赖、业务决策和桌面 A/B/D 开发手册已在父目录 `C:\Users\85314\Desktop\私域工具` 增量回填；这些共享文档不属于嵌套 Git 仓库，不能随本仓库提交。
-- 真实人工验收清单：`dev-progress/manual-tests/multi_customer_reply_resume_20260722.md` 已创建，当前全部未执行。
+- 真实人工验收清单：`dev-progress/manual-tests/multi_customer_reply_resume_20260722.md` 已记录辅助闭环和通知阻塞；真实平台截图项目仍全部未完成。
 
 ## 共享文件规则
 
