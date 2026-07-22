@@ -208,6 +208,32 @@ describe('ReplySuggestionPanel', () => {
     app.unmount();
   });
 
+  it('retries recognition instead of regeneration for a fallback without a matched customer', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    const recognizeRequests: unknown[] = [];
+    eventBus.on('desktop:recognize-request', (payload) => recognizeRequests.push(payload));
+
+    eventBus.emit('recognize:result', {
+      response: {
+        ...response('19900001111', [{ text: 'fallback reply', direction: 'SYSTEM_FALLBACK', reason: 'down' }]),
+        needsCustomerIdentifier: true,
+        match: { matchType: 'NONE' }
+      }
+    });
+    await flushUi();
+
+    const retryButton = [...host.querySelectorAll('.reply-primary-actions button')]
+      .find((button) => button.textContent?.includes('重新识别')) as HTMLButtonElement | undefined;
+    expect(retryButton).toBeTruthy();
+
+    retryButton?.click();
+    await flushUi();
+
+    expect(recognizeRequests).toEqual([{}]);
+    expect(mocks.postJson).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
   it('keeps multiple customer tasks in the queue and can switch back to a previous reply', async () => {
     const { app, host, eventBus } = await mountPanel();
 

@@ -486,6 +486,25 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.suggestions.map((item) => item.text)).toEqual(['Recovered']);
   });
 
+  it('offers manual recognition retry when a fallback response has no matched customer', async () => {
+    const { replies } = await freshStore();
+
+    replies.showRecognizeResult({
+      ...response('19900001111', [{ text: 'fallback', direction: 'SYSTEM_FALLBACK', reason: 'down' }]),
+      needsCustomerIdentifier: true,
+      match: { matchType: 'NONE' }
+    });
+
+    expect(replies.replySuggestionState.isFallbackMode).toBe(true);
+    expect(replies.replySuggestionState.fallbackBannerText).toContain('重新识别');
+    expect(replies.replySuggestionState.showRegenerateButton).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(postJsonMock).not.toHaveBeenCalled();
+    expect(replies.replySuggestionState.fallbackRetryCount).toBe(0);
+  });
+
   it('stops fallback retry and exposes manual regenerate after configured automatic retries fail', async () => {
     const { replies } = await freshStore();
     replies.showRecognizeResult(response('18800001111', [{ text: 'fallback', direction: 'SYSTEM_FALLBACK', reason: 'down' }]));

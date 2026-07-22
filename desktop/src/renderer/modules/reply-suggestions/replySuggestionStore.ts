@@ -699,6 +699,10 @@ function markSavedReplyProtocolFailure(session: ReplySession): void {
 }
 
 function enterFallbackMode(session: ReplySession, text: string, allowAutomaticRetry = true): void {
+  const requiresManualRecognition = allowAutomaticRetry
+    && session.currentScene === 'CHAT_RECOGNIZE'
+    && session.currentMatchType === 'NONE';
+  const canAutomaticallyRetry = allowAutomaticRetry && !requiresManualRecognition;
   session.status = 'FALLBACK';
   session.loadingMode = 'NONE';
   session.progressStage = 'DONE';
@@ -708,13 +712,15 @@ function enterFallbackMode(session: ReplySession, text: string, allowAutomaticRe
     session.replySource = { source: 'FALLBACK', label: '系统兜底', detail: 'AI 服务不可用，已使用降级回复' };
   }
   session.fallbackText = text;
-  session.fallbackBannerText = allowAutomaticRetry
+  session.fallbackBannerText = canAutomaticallyRetry
     ? 'AI 助手暂时不可用，正在自动重试恢复...'
-    : 'AI 助手暂时不可用，已展示保存的降级回复';
+    : requiresManualRecognition
+      ? 'AI 助手暂时不可用，请重新识别当前聊天'
+      : 'AI 助手暂时不可用，已展示保存的降级回复';
   session.suggestions = [{ text, direction: FALLBACK_DIRECTION, reason: '系统降级回复' }];
-  session.showRegenerateButton = false;
+  session.showRegenerateButton = requiresManualRecognition;
   session.updatedAt = Date.now();
-  if (allowAutomaticRetry) {
+  if (canAutomaticallyRetry) {
     startFallbackRetry(session);
   }
 }

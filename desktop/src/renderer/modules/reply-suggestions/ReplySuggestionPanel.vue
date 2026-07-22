@@ -32,9 +32,9 @@
           v-if="state.showRegenerateButton"
           class="secondary small"
           :disabled="state.regenerating"
-          @click="regenerateReplies(false)"
+          @click="retryFallbackOrRegenerate"
         >
-          {{ state.regenerating ? '生成中...' : '换一组' }}
+          {{ shouldRetryRecognition() ? '重新识别' : state.regenerating ? '生成中...' : '换一组' }}
         </button>
         <button class="secondary small" :disabled="!state.currentPhone || Boolean(state.activeHelpId)" @click="requestLeaderHelp">
           {{ state.activeHelpId ? '等待组长回复...' : '求助组长' }}
@@ -451,6 +451,20 @@ async function handleTextSubmit(): Promise<void> {
 
 function requestGlobalRecognize(): void {
   eventBus.emit('desktop:recognize-request', {});
+}
+
+function retryFallbackOrRegenerate(): void {
+  if (shouldRetryRecognition()) {
+    requestGlobalRecognize();
+    return;
+  }
+  void regenerateReplies(false);
+}
+
+function shouldRetryRecognition(): boolean {
+  return state.isFallbackMode
+    && state.currentScene === 'CHAT_RECOGNIZE'
+    && state.currentMatchType === 'NONE';
 }
 
 function retryRecognize(sessionId?: string): void {
