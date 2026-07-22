@@ -3,8 +3,8 @@
 ## 当前状态
 
 - 基线提交：`7fb9c7f7fe8aa411a4fd390b91ecf1f87122280f`
-- 当前任务：`Task 3 - 桌面端任务 DTO、恢复 Store 与候选预览/确认`
-- 最近验证：`2026-07-22：C:\Users\85314\AppData\Local\Temp\codex-maven-20260722\apache-maven-3.9.11\bin\mvn.cmd -q -Dtest=ChatControllerTest,ChatOrchestrationServiceTest,PendingReplyTaskServiceTest,PendingReplyTaskRepositoryTest,PendingReplyTaskRepositoryTransactionTest test`，84 项通过（11 Controller、39 编排、8 服务、24 仓储、2 事务），0 failures/errors/skips。`
+- 当前任务：`Task 3b - 候选完整档案预览与明确确认。桌面任务 DTO 和恢复 Store 已完成并提交。`
+- 最近验证：`2026-07-22：在 desktop 运行 npm test -- --run src/renderer/modules/chat-recognition/recognitionStore.test.ts src/renderer/modules/reply-suggestions/replySuggestionStore.test.ts src/renderer/modules/reply-suggestions/pendingReplyTaskStore.test.ts，43 项通过；npm run typecheck 通过。`
 - 未解决阻塞：`无。后端生命周期和 5 个 REST 路由已在当前工作树接通；共享 ChatOrchestrationService/测试含其他会话改动，尚未做隔离提交。待完成桌面端恢复、候选档案预览/确认、登录/重启恢复和提醒。真实桌面截图验收尚未开始。`
 - 用户授权：`用户明确要求不新开 worktree，在当前工作区开发。必须保留并兼容已有未提交改动。`
 
@@ -13,7 +13,7 @@
 - [x] Task 0 基线与契约：设计、实施计划、并行边界和本断点已提交（`b595a85`、`c7c93ed`、`7fb9c7f`、`90f9c7e`）。
 - [x] Task 1 数据库与状态机：`V75`、`PendingReplyTask*`、`ChatTaskConfig`、原子创建/领取、READY 严格持久化和恢复 SQL 已实现。已验证候选原子领取、事务回滚、超时边界、过期和旧生成不覆盖新领取。
 - [x] Task 2 编排与 API：多客户识别仅创建 `WAITING_CUSTOMER`；列表、单任务、确认、重试、取消 5 个 REST 路由已接通。确认/重试共用原聊天与 `CHAT_RECOGNIZE` 生成；活跃生成不会被同进程轮询误恢复，READY 查询不重复调用 Skill/LLM。
-- [ ] Task 3 桌面候选预览与确认
+- [ ] Task 3 桌面候选预览与确认（DTO、识别请求 replySessionId、恢复 Store 和 READY 原会话回填已完成并提交 `8848648`；候选档案预览/确认待完成）
 - [ ] Task 4 恢复与桌面提醒
 - [ ] Task 5 全量验证与人工验收
 
@@ -25,6 +25,7 @@
 - `ChatOrchestrationServiceTest`：39 项通过。覆盖多客户不提前调用 Skill/LLM、确认第二候选、REST 委托、重试原聊天、失败回退、活跃生成保护和 READY 写入。
 - `ChatControllerTest`：11 项通过。覆盖 5 个任务 REST 路由的 path/body/JSON 绑定。
 - 上述命令的两个 WARN 来自故意模拟“失败状态写入也失败”和“标签读取降级”的测试分支；Maven 退出码为 0。
+- 桌面任务 DTO 与恢复 Store：指定 3 个 Vitest 文件 43 项通过，`npm run typecheck` 通过。覆盖多客户不提前显示生成、服务端任务恢复、READY 只展示持久化结果、并发刷新防旧结果覆盖、服务端快照清理和显式打开已关闭任务；提交为 `8848648`。
 
 ## 共享文件规则
 
@@ -38,5 +39,5 @@
 1. `git status --short --branch`
 2. 阅读本文件、`docs/superpowers/specs/2026-07-21-multi-customer-profile-selection-reply-resume-design.md` 和 `docs/superpowers/plans/2026-07-22-multi-customer-profile-selection-reply-resume.md`。
 3. 先运行 `C:\Users\85314\AppData\Local\Temp\codex-maven-20260722\apache-maven-3.9.11\bin\mvn.cmd -q -Dtest=PendingReplyTaskRepositoryTest,PendingReplyTaskRepositoryTransactionTest,ChatOrchestrationServiceTest test`，确认当前后端基座仍为绿。
-4. 从 `Task 3` 的桌面端 DTO、恢复 Store 和“查看档案/确认客户”分离继续；不得重新审查已通过的后端边界，除非新测试发现真实回归。
+4. 从 `Task 3b` 的“查看档案/确认客户”分离继续；不得重新实现已提交的桌面任务 Store，也不得重新审查已通过的后端边界，除非新测试发现真实回归。
 5. 完成一个阶段后，更新本文件中的当前任务、测试证据、未完成项和本功能专属 Git 提交。
