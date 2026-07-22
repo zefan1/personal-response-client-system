@@ -13,6 +13,7 @@ import com.privateflow.modules.skill.Suggestion;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -89,6 +90,57 @@ class PendingReplyTaskRepositoryTest {
     assertThat(repository.claim(task.taskId(), "keeper-1", "18800002222")).isFalse();
     assertThat(repository.findOwned(task.taskId(), "keeper-1").orElseThrow().status())
         .isEqualTo(PendingReplyTaskStatus.GENERATING);
+  }
+
+  @Test
+  void failedTaskCannotBeReclaimedWithAnotherCandidatePhone() {
+    PendingReplyTask task = repository.create(new PendingReplyTaskDraft(
+        "reply-retry-same-customer",
+        "keeper-1",
+        "same-name customer",
+        null,
+        null,
+        "TUAN_GOU",
+        "customer_sheet",
+        "I want to know more",
+        List.of(Map.of("role", "client", "text", "I want to know more")),
+        List.of(
+            candidate("18800001111", "same-name customer A"),
+            candidate("18800002222", "same-name customer B"))));
+    assertThat(repository.claim(task.taskId(), "keeper-1", "18800001111")).isTrue();
+    assertThat(repository.markFailed(task.taskId(), "keeper-1", ApiErrorCodes.INTERNAL_ERROR)).isTrue();
+
+    assertThat(repository.claim(task.taskId(), "keeper-1", "18800002222")).isFalse();
+
+    PendingReplyTask failed = repository.findOwned(task.taskId(), "keeper-1").orElseThrow();
+    assertThat(failed.status()).isEqualTo(PendingReplyTaskStatus.FAILED);
+    assertThat(failed.selectedPhone()).isEqualTo("18800001111");
+  }
+
+  @Test
+  void failedTaskRetriesOnlyWithItsOriginalSelectedPhone() {
+    PendingReplyTask task = repository.create(new PendingReplyTaskDraft(
+        "reply-retry-original-customer",
+        "keeper-1",
+        "same-name customer",
+        null,
+        null,
+        "TUAN_GOU",
+        "customer_sheet",
+        "I want to know more",
+        List.of(Map.of("role", "client", "text", "I want to know more")),
+        List.of(
+            candidate("18800001111", "same-name customer A"),
+            candidate("18800002222", "same-name customer B"))));
+    assertThat(repository.claim(task.taskId(), "keeper-1", "18800001111")).isTrue();
+    assertThat(repository.markFailed(task.taskId(), "keeper-1", ApiErrorCodes.INTERNAL_ERROR)).isTrue();
+
+    assertThat(repository.claimRetry(task.taskId(), "keeper-1", "18800002222")).isFalse();
+    assertThat(repository.claimRetry(task.taskId(), "keeper-1", "18800001111")).isTrue();
+
+    PendingReplyTask generating = repository.findOwned(task.taskId(), "keeper-1").orElseThrow();
+    assertThat(generating.status()).isEqualTo(PendingReplyTaskStatus.GENERATING);
+    assertThat(generating.selectedPhone()).isEqualTo("18800001111");
   }
 
   @Test
@@ -208,7 +260,7 @@ class PendingReplyTaskRepositoryTest {
   }
 
   @Test
-  void markReadyDoesNotOverwriteAReplyTaskClaimedAgainForAnotherCustomer() {
+  void markReadyDoesNotOverwriteAReplyTaskRetriedForTheSameCustomer() {
     PendingReplyTask task = repository.create(new PendingReplyTaskDraft(
         "reply-100-1",
         "keeper-1",
@@ -226,7 +278,7 @@ class PendingReplyTaskRepositoryTest {
     PendingReplyTaskRepository interleavingRepository = new PendingReplyTaskRepository(
         new ReadyResultInterleavingJdbcTemplate(jdbcTemplate.getDataSource(), () -> {
           assertThat(repository.markFailed(task.taskId(), "keeper-1", "80-10004")).isTrue();
-          assertThat(repository.claim(task.taskId(), "keeper-1", "18800002222")).isTrue();
+          assertThat(repository.claimRetry(task.taskId(), "keeper-1", "18800001111")).isTrue();
         }),
         new ObjectMapper());
 
@@ -237,7 +289,7 @@ class PendingReplyTaskRepositoryTest {
 
     PendingReplyTask current = repository.findOwned(task.taskId(), "keeper-1").orElseThrow();
     assertThat(current.status()).isEqualTo(PendingReplyTaskStatus.GENERATING);
-    assertThat(current.selectedPhone()).isEqualTo("18800002222");
+    assertThat(current.selectedPhone()).isEqualTo("18800001111");
     assertThat(current.resultJson()).isNull();
   }
 
@@ -562,6 +614,47 @@ class PendingReplyTaskRepositoryTest {
   }
 
   @Test
+  void recoveryExcludesActiveGenerationButFailsOtherStaleGeneration() {
+    LocalDateTime now = LocalDateTime.of(2026, 7, 22, 12, 0);
+    PendingReplyTask active = createTask("reply-active-stale", "keeper-1");
+    PendingReplyTask abandoned = createTask("reply-abandoned-stale", "keeper-1");
+    assertThat(repository.claim(active.taskId(), "keeper-1", "18800001111")).isTrue();
+    assertThat(repository.claim(abandoned.taskId(), "keeper-1", "18800001111")).isTrue();
+    jdbcTemplate.update(
+        "UPDATE pending_reply_tasks SET generation_started_at = ? WHERE task_id IN (?, ?)",
+        Timestamp.valueOf(now.minusSeconds(121)),
+        active.taskId(),
+        abandoned.taskId());
+    Integer activeVersion = jdbcTemplate.queryForObject(
+        "SELECT version FROM pending_reply_tasks WHERE task_id = ?",
+        Integer.class,
+        active.taskId());
+    Integer abandonedVersion = jdbcTemplate.queryForObject(
+        "SELECT version FROM pending_reply_tasks WHERE task_id = ?",
+        Integer.class,
+        abandoned.taskId());
+
+    int recovered = repository.recoverExpiredAndStalledTasks(
+        now,
+        120,
+        Set.of(active.taskId()));
+
+    assertThat(recovered).isOne();
+    assertThat(repository.findOwned(active.taskId(), "keeper-1").orElseThrow().status())
+        .isEqualTo(PendingReplyTaskStatus.GENERATING);
+    assertThat(repository.findOwned(abandoned.taskId(), "keeper-1").orElseThrow().status())
+        .isEqualTo(PendingReplyTaskStatus.FAILED);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT version FROM pending_reply_tasks WHERE task_id = ?",
+        Integer.class,
+        active.taskId())).isEqualTo(activeVersion);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT version FROM pending_reply_tasks WHERE task_id = ?",
+        Integer.class,
+        abandoned.taskId())).isEqualTo(abandonedVersion + 1);
+  }
+
+  @Test
   void activeTasksAreOwnerScopedUnexpiredAndStablyOrderedByCreationTime() {
     LocalDateTime now = LocalDateTime.of(2026, 7, 22, 12, 0);
     PendingReplyTask waiting = createTask("reply-waiting-active", "keeper-1");
@@ -598,6 +691,41 @@ class PendingReplyTaskRepositoryTest {
         .containsExactly(waiting.taskId(), ready.taskId());
     assertThat(tasks).extracting(PendingReplyTask::status)
         .containsExactly(PendingReplyTaskStatus.WAITING_CUSTOMER, PendingReplyTaskStatus.READY);
+  }
+
+  @Test
+  void cancelOnlyTransitionsWaitingOrFailedTaskAndIncrementsVersionOnce() {
+    PendingReplyTask waiting = createTask("reply-cancel-waiting", "keeper-1");
+    PendingReplyTask failed = createClaimedTask();
+    assertThat(repository.markFailed(failed.taskId(), "keeper-1", ApiErrorCodes.INTERNAL_ERROR)).isTrue();
+    PendingReplyTask generating = createClaimedTask();
+    PendingReplyTask ready = createTask("reply-cancel-ready", "keeper-1");
+    assertThat(repository.claim(ready.taskId(), "keeper-1", "18800001111")).isTrue();
+    assertThat(repository.markReady(ready.taskId(), "keeper-1", displayableResponse("18800001111"))).isTrue();
+    Integer versionBeforeCancel = jdbcTemplate.queryForObject(
+        "SELECT version FROM pending_reply_tasks WHERE task_id = ?",
+        Integer.class,
+        waiting.taskId());
+
+    assertThat(repository.cancel(waiting.taskId(), "keeper-1")).isTrue();
+    assertThat(repository.cancel(waiting.taskId(), "keeper-1")).isFalse();
+    assertThat(repository.cancel(failed.taskId(), "keeper-1")).isTrue();
+    assertThat(repository.cancel(generating.taskId(), "keeper-1")).isFalse();
+    assertThat(repository.cancel(ready.taskId(), "keeper-1")).isFalse();
+    assertThat(repository.cancel(waiting.taskId(), "keeper-2")).isFalse();
+
+    assertThat(repository.findOwned(waiting.taskId(), "keeper-1").orElseThrow().status())
+        .isEqualTo(PendingReplyTaskStatus.CANCELLED);
+    assertThat(repository.findOwned(failed.taskId(), "keeper-1").orElseThrow().status())
+        .isEqualTo(PendingReplyTaskStatus.CANCELLED);
+    assertThat(repository.findOwned(generating.taskId(), "keeper-1").orElseThrow().status())
+        .isEqualTo(PendingReplyTaskStatus.GENERATING);
+    assertThat(repository.findOwned(ready.taskId(), "keeper-1").orElseThrow().status())
+        .isEqualTo(PendingReplyTaskStatus.READY);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT version FROM pending_reply_tasks WHERE task_id = ?",
+        Integer.class,
+        waiting.taskId())).isEqualTo(versionBeforeCancel + 1);
   }
 
   private PendingReplyTask createClaimedTask() {

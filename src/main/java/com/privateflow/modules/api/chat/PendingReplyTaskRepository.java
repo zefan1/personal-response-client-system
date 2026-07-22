@@ -8,9 +8,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -86,7 +89,7 @@ public class PendingReplyTaskRepository {
         SET status = ?, selected_phone = ?, generation_started_at = CURRENT_TIMESTAMP,
             error_code = NULL, updated_at = CURRENT_TIMESTAMP, version = version + 1
         WHERE task_id = ? AND username = ?
-          AND status IN (?, ?)
+          AND status = ?
           AND expires_at > CURRENT_TIMESTAMP
           AND EXISTS (
             SELECT 1
@@ -100,8 +103,30 @@ public class PendingReplyTaskRepository {
         taskId,
         username,
         PendingReplyTaskStatus.WAITING_CUSTOMER.name(),
-        PendingReplyTaskStatus.FAILED.name(),
         phone) == 1;
+  }
+
+  public boolean claimRetry(String taskId, String username, String selectedPhone) {
+    return jdbcTemplate.update("""
+        UPDATE pending_reply_tasks
+        SET status = ?, generation_started_at = CURRENT_TIMESTAMP,
+            error_code = NULL, updated_at = CURRENT_TIMESTAMP, version = version + 1
+        WHERE task_id = ? AND username = ? AND status = ?
+          AND selected_phone = ?
+          AND expires_at > CURRENT_TIMESTAMP
+          AND EXISTS (
+            SELECT 1
+            FROM pending_reply_task_candidates candidate
+            WHERE candidate.task_id = pending_reply_tasks.id
+              AND candidate.phone = ?
+          )
+        """,
+        PendingReplyTaskStatus.GENERATING.name(),
+        taskId,
+        username,
+        PendingReplyTaskStatus.FAILED.name(),
+        selectedPhone,
+        selectedPhone) == 1;
   }
 
   public Optional<PendingReplyTask> findOwned(String taskId, String username) {
@@ -194,8 +219,30 @@ public class PendingReplyTaskRepository {
         PendingReplyTaskStatus.GENERATING.name()) == 1;
   }
 
+  public boolean cancel(String taskId, String username) {
+    return jdbcTemplate.update("""
+        UPDATE pending_reply_tasks
+        SET status = ?, error_code = NULL, finished_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP, version = version + 1
+        WHERE task_id = ? AND username = ? AND status IN (?, ?)
+        """,
+        PendingReplyTaskStatus.CANCELLED.name(),
+        taskId,
+        username,
+        PendingReplyTaskStatus.WAITING_CUSTOMER.name(),
+        PendingReplyTaskStatus.FAILED.name()) == 1;
+  }
+
   @Transactional
   public int recoverExpiredAndStalledTasks(LocalDateTime now, int generatingTimeoutSeconds) {
+    return recoverExpiredAndStalledTasks(now, generatingTimeoutSeconds, Set.of());
+  }
+
+  @Transactional
+  public int recoverExpiredAndStalledTasks(
+      LocalDateTime now,
+      int generatingTimeoutSeconds,
+      Set<String> activeTaskIds) {
     if (now == null || generatingTimeoutSeconds <= 0) {
       throw new IllegalArgumentException("invalid pending reply task recovery parameters");
     }
@@ -210,17 +257,28 @@ public class PendingReplyTaskRepository {
         PendingReplyTaskStatus.WAITING_CUSTOMER.name(),
         PendingReplyTaskStatus.FAILED.name(),
         timestamp);
-    recovered += jdbcTemplate.update("""
+    List<String> activeIds = activeTaskIds == null
+        ? List.of()
+        : activeTaskIds.stream().filter(taskId -> !blank(taskId)).sorted().toList();
+    String activeExclusion = activeIds.isEmpty()
+        ? ""
+        : " AND task_id NOT IN ("
+            + String.join(", ", Collections.nCopies(activeIds.size(), "?"))
+            + ")";
+    String stalledSql = """
         UPDATE pending_reply_tasks
         SET status = ?, error_code = ?, finished_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP, version = version + 1
         WHERE status = ? AND generation_started_at IS NOT NULL
           AND generation_started_at < ?
-        """,
-        PendingReplyTaskStatus.FAILED.name(),
-        ApiErrorCodes.INTERNAL_ERROR,
-        PendingReplyTaskStatus.GENERATING.name(),
-        Timestamp.valueOf(now.minusSeconds(generatingTimeoutSeconds)));
+        """ + activeExclusion;
+    List<Object> stalledParameters = new ArrayList<>();
+    stalledParameters.add(PendingReplyTaskStatus.FAILED.name());
+    stalledParameters.add(ApiErrorCodes.INTERNAL_ERROR);
+    stalledParameters.add(PendingReplyTaskStatus.GENERATING.name());
+    stalledParameters.add(Timestamp.valueOf(now.minusSeconds(generatingTimeoutSeconds)));
+    stalledParameters.addAll(activeIds);
+    recovered += jdbcTemplate.update(stalledSql, stalledParameters.toArray());
     return recovered;
   }
 
