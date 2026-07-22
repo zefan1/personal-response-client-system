@@ -101,6 +101,7 @@ describe('ClipboardCaptureConfirmAgent', () => {
       imageBase64: 'clipboard-image',
       textMessage: undefined,
       customerIdentifier: undefined,
+      replySessionId: expect.stringMatching(/^reply-/),
       source: 'CLIPBOARD_SCREENSHOT'
     }, 0);
     expect(recognition.recognitionState.pendingClipboardImage).toBeNull();

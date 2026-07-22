@@ -94,6 +94,7 @@ describe('ChatRecognitionPanel', () => {
       imageBase64: 'button-image',
       textMessage: undefined,
       customerIdentifier: undefined,
+      replySessionId: expect.stringMatching(/^reply-/),
       source: 'BUTTON_CLICK'
     }, 0);
     expect(events[0]).toMatchObject({ event: 'recognize:start', payload: { source: 'BUTTON_CLICK' } });
@@ -142,6 +143,7 @@ describe('ChatRecognitionPanel', () => {
       imageBase64: undefined,
       textMessage: 'customer wants appointment',
       customerIdentifier: 'Alice',
+      replySessionId: expect.stringMatching(/^reply-/),
       source: 'CLIPBOARD_TEXT'
     }, 0);
     expect(host.querySelector('.two-box')).toBeFalsy();
@@ -170,6 +172,7 @@ describe('ChatRecognitionPanel', () => {
       imageBase64: undefined,
       textMessage: 'fallback text',
       customerIdentifier: '',
+      replySessionId: expect.stringMatching(/^reply-/),
       source: 'CLIPBOARD_TEXT'
     }, 0);
     app.unmount();
