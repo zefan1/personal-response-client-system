@@ -2,6 +2,7 @@ import { computed, reactive } from 'vue';
 import { getJson } from '../../shared/apiClient';
 import {
   removeMissingPendingReplySessions,
+  removePendingReplyTaskSession,
   restoreAndActivatePendingReplyTask,
   syncPendingReplyTaskIntoSession
 } from './replySuggestionStore';
@@ -58,4 +59,16 @@ export function openPendingReplyTask(taskId: string): boolean {
   if (!restoreAndActivatePendingReplyTask(task)) return false;
   pendingReplyTaskState.activeTaskId = taskId;
   return true;
+}
+
+export function removePendingReplyTask(taskId: string, replySessionId = ''): void {
+  const task = pendingReplyTaskState.tasks.find((item) => item.taskId === taskId);
+  const sessionId = replySessionId || task?.replySessionId || '';
+  pendingReplyTaskState.tasks = pendingReplyTaskState.tasks.filter((item) => item.taskId !== taskId);
+  if (pendingReplyTaskState.activeTaskId === taskId) {
+    pendingReplyTaskState.activeTaskId = '';
+  }
+  if (sessionId) {
+    removePendingReplyTaskSession(taskId, sessionId);
+  }
 }

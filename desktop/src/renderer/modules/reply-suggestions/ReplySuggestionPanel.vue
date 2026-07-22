@@ -163,7 +163,7 @@
               type="button"
               @click="selectCandidateForSession(session.sessionId, candidate)"
             >
-              {{ candidateLabel(candidate) }}
+              查看档案 · {{ candidateLabel(candidate) }}
             </button>
           </div>
         </article>
@@ -256,7 +256,7 @@
               type="button"
               @click="selectCandidateForSession(activeSession.sessionId, candidate)"
             >
-              {{ candidateLabel(candidate) }}
+              查看档案 · {{ candidateLabel(candidate) }}
             </button>
             <button
               class="icon-close-button"
@@ -339,6 +339,7 @@ import {
   selectReply,
   showRecognizeResult,
   startGenerateLoading,
+  startPendingTaskGeneration,
   startRecognizeLoading,
   stopForFailure,
   stopForImageFailure,
@@ -401,6 +402,7 @@ onMounted(() => {
   disposers.push(eventBus.on<RecognizeFailurePayload>('recognize:failed', stopForFailure));
   disposers.push(eventBus.on<RecognizeFailurePayload>('recognize:timeout', stopForTimeout));
   disposers.push(eventBus.on<CustomerSelectedPayload>('customer:selected', startGenerateLoading));
+  disposers.push(eventBus.on<{ sessionId: string; taskId: string; phone: string }>('reply-task:generating', startPendingTaskGeneration));
   disposers.push(eventBus.on<{ phone?: string; reason?: string }>('help:timeout', handleHelpTimeout));
   disposers.push(eventBus.on<{ helpId?: string | number; phone?: string }>('help:pending', handleHelpPending));
   disposers.push(eventBus.on<{ helpId?: string | number; phone?: string }>('help:resolved', handleHelpResolved));

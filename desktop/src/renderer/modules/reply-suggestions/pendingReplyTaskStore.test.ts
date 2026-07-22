@@ -156,6 +156,18 @@ describe('pendingReplyTaskStore', () => {
     });
     expect(pending.openPendingReplyTask('missing-task')).toBe(false);
   });
+
+  it('removes a cancelled task and its original multiple-match session immediately', async () => {
+    const { pending, replies } = await freshStores();
+    pending.syncPendingReplyTask(task('WAITING_CUSTOMER'));
+
+    pending.removePendingReplyTask('task-1', 'reply-session-1');
+
+    expect(pending.pendingReplyTaskState.tasks).toEqual([]);
+    expect(pending.pendingReplyTaskState.activeTaskId).toBe('');
+    expect(replies.replySuggestionState.sessions).toEqual([]);
+    expect(pending.openPendingReplyTask('task-1')).toBe(false);
+  });
 });
 
 function task(

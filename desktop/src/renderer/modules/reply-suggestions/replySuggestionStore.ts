@@ -170,6 +170,29 @@ export function startGenerateLoading(payload: CustomerSelectedPayload): void {
   activateSession(session.sessionId);
 }
 
+export function startPendingTaskGeneration(payload: {
+  sessionId: string;
+  taskId: string;
+  phone: string;
+}): void {
+  if (isDismissedSession(payload.sessionId)) return;
+  const session = replySuggestionState.sessions.find((item) => item.sessionId === payload.sessionId);
+  if (!session) return;
+  stopFallbackRetry(session.sessionId);
+  session.pendingTaskId = payload.taskId;
+  session.pendingTaskStatus = 'GENERATING';
+  session.currentPhone = payload.phone;
+  session.currentScene = 'CHAT_RECOGNIZE';
+  session.currentStageText = '正在生成回复...';
+  session.progressStage = 'GENERATING';
+  session.failureReason = '';
+  session.suggestions = [];
+  session.status = 'LOADING';
+  session.loadingMode = 'SIMPLE';
+  session.updatedAt = Date.now();
+  activateSession(session.sessionId);
+}
+
 export function pauseForMultipleMatch(payload: RecognizeStartPayload & {
   taskId?: string;
   candidates?: ReplyCandidate[];
@@ -191,6 +214,22 @@ export function pauseForMultipleMatch(payload: RecognizeStartPayload & {
     clearSkeletonTimer();
   }
   syncActiveSessionToState();
+}
+
+export function restorePendingTaskWaiting(payload: {
+  sessionId: string;
+  taskId: string;
+  candidates: ReplyCandidate[];
+}): void {
+  const session = replySuggestionState.sessions.find((item) =>
+    item.sessionId === payload.sessionId && item.pendingTaskId === payload.taskId
+  );
+  if (!session) return;
+  pauseForMultipleMatch({
+    sessionId: payload.sessionId,
+    taskId: payload.taskId,
+    candidates: payload.candidates
+  });
 }
 
 export function syncPendingReplyTaskIntoSession(task: PendingReplyTask): void {
@@ -288,6 +327,9 @@ export function showRecognizeResult(payload: RecognizeResultPayload): void {
     && activeReplySession.value.sessionId !== session.sessionId
   );
   showChatResponse(session, response, 'CHAT_RECOGNIZE');
+  if (sourceFromPayload(payload) === 'PENDING_REPLY_TASK' && session.pendingTaskId) {
+    session.pendingTaskStatus = 'READY';
+  }
   if (!shouldKeepCurrentLoadingTask) {
     activateSession(session.sessionId);
   } else {
@@ -502,6 +544,15 @@ export function removeMissingPendingReplySessions(currentTaskIds: ReadonlySet<st
   missingSessionIds.forEach(closeReplySession);
 }
 
+export function removePendingReplyTaskSession(taskId: string, sessionId: string): void {
+  const session = replySuggestionState.sessions.find((item) =>
+    item.sessionId === sessionId && item.pendingTaskId === taskId
+  );
+  if (session) {
+    closeReplySession(session.sessionId);
+  }
+}
+
 export function restoreAndActivatePendingReplyTask(task: PendingReplyTask): boolean {
   if (!task?.taskId || !task.replySessionId) return false;
   dismissedSessionIds.delete(task.replySessionId);
@@ -519,12 +570,11 @@ export function selectCandidateForSession(sessionId: string, candidate: ReplyCan
   const session = replySuggestionState.sessions.find((item) => item.sessionId === sessionId);
   if (!session || !candidate.phone) return;
   activateSession(sessionId);
-  eventBus.emit('customer:selected', {
+  eventBus.emit('candidate:preview', {
     sessionId,
-    phone: candidate.phone,
-    scene: 'CHAT_RECOGNIZE',
-    leadType: candidate.leadType ?? '',
-    sourceFrom: 'CANDIDATE_LIST'
+    taskId: session.pendingTaskId,
+    candidate,
+    candidates: session.candidates.slice()
   });
 }
 

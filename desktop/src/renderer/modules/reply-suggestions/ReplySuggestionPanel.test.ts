@@ -281,14 +281,15 @@ describe('ReplySuggestionPanel', () => {
     app.unmount();
   });
 
-  it('lets users choose a candidate directly from a multiple-match queue task', async () => {
+  it('opens a candidate profile instead of selecting directly from a multiple-match task', async () => {
     const { app, host, eventBus } = await mountPanel();
-    const selected: unknown[] = [];
-    eventBus.on('customer:selected', (payload) => selected.push(payload));
+    const previewed: unknown[] = [];
+    eventBus.on('candidate:preview', (payload) => previewed.push(payload));
 
     eventBus.emit('recognize:start', { sessionId: 'session-multiple', source: 'BUTTON_CLICK' });
     eventBus.emit('recognize:multiple', {
       sessionId: 'session-multiple',
+      taskId: 'task-1',
       candidates: [
         { phone: '18800001111', nickname: 'Alice', leadType: 'TUAN_GOU' },
         { phone: '18800002222', nickname: 'Betty', leadType: 'XIAN_SUO' }
@@ -300,17 +301,49 @@ describe('ReplySuggestionPanel', () => {
     expect(host.querySelector('.reply-multiple-state')).toBeTruthy();
     expect(host.textContent).toContain('Alice');
     expect(host.textContent).toContain('Betty');
+    expect(host.querySelector('.reply-candidate-actions button')?.textContent).toContain('查看档案');
 
     (host.querySelector('.reply-candidate-actions button') as HTMLButtonElement | null)?.click();
     await flushUi();
 
-    expect(selected).toEqual([{
+    expect(previewed).toEqual([{
       sessionId: 'session-multiple',
-      phone: '18800001111',
-      scene: 'CHAT_RECOGNIZE',
-      leadType: 'TUAN_GOU',
-      sourceFrom: 'CANDIDATE_LIST'
+      taskId: 'task-1',
+      candidate: { phone: '18800001111', nickname: 'Alice', leadType: 'TUAN_GOU' },
+      candidates: [
+        { phone: '18800001111', nickname: 'Alice', leadType: 'TUAN_GOU' },
+        { phone: '18800002222', nickname: 'Betty', leadType: 'XIAN_SUO' }
+      ]
     }]);
+    app.unmount();
+  });
+
+  it('updates the original session when pending task confirmation starts without posting HTTP', async () => {
+    const { app, eventBus } = await mountPanel();
+    eventBus.emit('recognize:start', { sessionId: 'session-multiple', source: 'BUTTON_CLICK' });
+    eventBus.emit('recognize:multiple', {
+      sessionId: 'session-multiple',
+      taskId: 'task-1',
+      candidates: [{ phone: '18800001111', nickname: 'Alice', leadType: 'TUAN_GOU' }]
+    });
+    await flushUi();
+    mocks.postJson.mockClear();
+
+    eventBus.emit('reply-task:generating', {
+      sessionId: 'session-multiple',
+      taskId: 'task-1',
+      phone: '18800001111'
+    });
+    await flushUi();
+
+    const { activeReplySession } = await import('./replySuggestionStore');
+    expect(activeReplySession.value).toMatchObject({
+      sessionId: 'session-multiple',
+      status: 'LOADING',
+      pendingTaskStatus: 'GENERATING',
+      currentPhone: '18800001111'
+    });
+    expect(mocks.postJson).not.toHaveBeenCalled();
     app.unmount();
   });
 

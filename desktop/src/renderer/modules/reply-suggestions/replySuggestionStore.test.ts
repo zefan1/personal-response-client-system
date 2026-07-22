@@ -270,6 +270,34 @@ describe('replySuggestionStore', () => {
     });
   });
 
+  it('marks the original pending task session as generating without making HTTP requests', async () => {
+    const { replies } = await freshStore();
+    replies.startRecognizeLoading({ sessionId: 'reply-session-1', source: 'BUTTON_CLICK' });
+    replies.pauseForMultipleMatch({
+      sessionId: 'reply-session-1',
+      taskId: 'task-1',
+      candidates: [{ phone: '18800001111', nickname: 'Alice' }]
+    });
+
+    replies.startPendingTaskGeneration({
+      sessionId: 'reply-session-1',
+      taskId: 'task-1',
+      phone: '18800001111'
+    });
+
+    expect(replies.replySuggestionState.sessions).toHaveLength(1);
+    expect(replies.activeReplySession.value).toMatchObject({
+      sessionId: 'reply-session-1',
+      status: 'LOADING',
+      pendingTaskId: 'task-1',
+      pendingTaskStatus: 'GENERATING',
+      currentPhone: '18800001111',
+      progressStage: 'GENERATING',
+      currentStageText: '正在生成回复...'
+    });
+    expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
   it('restores a ready server task into the same session without posting generation', async () => {
     const { replies } = await freshStore();
     replies.syncPendingReplyTaskIntoSession(pendingTask('WAITING_CUSTOMER'));
