@@ -94,11 +94,12 @@ public class ConfigAdminService {
         || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.") || key.startsWith("health.")
         || key.startsWith("desktop.")
         || key.startsWith("tag.") || key.startsWith("version.") || key.startsWith("notice.") || key.startsWith("audit.")
-        || key.startsWith("chat.")) {
+        || key.startsWith("chat.") || key.startsWith("supervision.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
           || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")
           || key.endsWith("_chars") || key.endsWith("_rows") || key.endsWith("_seconds") || key.endsWith("_bytes")
-          || key.endsWith("_px") || key.endsWith("_threshold") || key.endsWith("_quality") || key.endsWith("_tokens") || "audit.list_page_size_default".equals(key)
+          || key.endsWith("_px") || key.endsWith("_threshold") || key.endsWith("_quality") || key.endsWith("_tokens")
+          || key.endsWith("_cap") || key.endsWith("_concurrency") || "audit.list_page_size_default".equals(key)
           || "skill.circuit_breaker_min_calls".equals(key) || "image.consecutive_failures_alert".equals(key)) {
         int parsed;
         try {
@@ -117,7 +118,8 @@ public class ConfigAdminService {
         }
         validateDecimalRange(key, parsed);
       }
-      if ("skill.system_prompt_red_lines".equals(key) || "match.tag_removal_rules".equals(key)) {
+      if ("skill.system_prompt_red_lines".equals(key) || "match.tag_removal_rules".equals(key)
+          || "supervision.conversion_target_stages_json".equals(key)) {
         validateJsonArray(key, value);
       }
       if ("table.alert_notify_target".equals(key) && !("ADMIN".equals(value) || "LEADER".equals(value) || "BOTH".equals(value))) {
@@ -292,6 +294,27 @@ public class ConfigAdminService {
     }
     if ("chat.pending_reply_generating_timeout_s".equals(key) && (value < 30 || value > 600)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.pending_reply_generating_timeout_s range is 30-600");
+    }
+    if ("supervision.record_retention_days".equals(key) && (value < 30 || value > 730)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "supervision.record_retention_days range is 30-730");
+    }
+    if ("supervision.technical_log_retention_days".equals(key) && (value < 7 || value > 180)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "supervision.technical_log_retention_days range is 7-180");
+    }
+    if ("supervision.processing_sla_minutes".equals(key) && (value < 15 || value > 10080)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "supervision.processing_sla_minutes range is 15-10080");
+    }
+    if ("chat.expired_reply_task_retention_days".equals(key) && (value < 1 || value > 14)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.expired_reply_task_retention_days range is 1-14");
+    }
+    if ("chat.unfinished_task_cap".equals(key) && (value < 10 || value > 50)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.unfinished_task_cap range is 10-50");
+    }
+    if ("chat.recent_task_display_cap".equals(key) && (value < 20 || value > 100)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.recent_task_display_cap range is 20-100");
+    }
+    if ("chat.recognition_concurrency".equals(key) && (value < 1 || value > 16)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.recognition_concurrency range is 1-16");
     }
     if ("system.audit_log_retention_days".equals(key) && (value < 30 || value > 365)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.audit_log_retention_days range is 30-365");

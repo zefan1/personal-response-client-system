@@ -61,6 +61,14 @@ class ConfigAdminServiceTest {
     insertConfig("desktop.clipboard_screenshot_confirm_prompt_s", "10");
     insertConfig("chat.pending_reply_ttl_hours", "24");
     insertConfig("chat.pending_reply_generating_timeout_s", "120");
+    insertConfig("supervision.record_retention_days", "180");
+    insertConfig("supervision.technical_log_retention_days", "30");
+    insertConfig("supervision.processing_sla_minutes", "1440");
+    insertConfig("supervision.conversion_target_stages_json", "[]");
+    insertConfig("chat.expired_reply_task_retention_days", "3");
+    insertConfig("chat.unfinished_task_cap", "20");
+    insertConfig("chat.recent_task_display_cap", "30");
+    insertConfig("chat.recognition_concurrency", "4");
     secretCipher = new SecretCipher("test-secret-key");
     service = new ConfigAdminService(
         jdbcTemplate,
@@ -214,6 +222,45 @@ class ConfigAdminServiceTest {
     assertThatThrownBy(() -> service.update("chat.pending_reply_generating_timeout_s", Map.of("value", "601")))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("chat.pending_reply_generating_timeout_s range is 30-600");
+  }
+
+  @Test
+  void supervisionGovernanceAndReplyQueueConfigsValidateExactRanges() {
+    assertValidRange("supervision.record_retention_days", 30, 730);
+    assertValidRange("supervision.technical_log_retention_days", 7, 180);
+    assertValidRange("supervision.processing_sla_minutes", 15, 10080);
+    assertValidRange("chat.expired_reply_task_retention_days", 1, 14);
+    assertValidRange("chat.unfinished_task_cap", 10, 50);
+    assertValidRange("chat.recent_task_display_cap", 20, 100);
+    assertValidRange("chat.recognition_concurrency", 1, 16);
+  }
+
+  @Test
+  void supervisionConversionTargetStagesRequiresJsonArray() {
+    service.update("supervision.conversion_target_stages_json", Map.of("value", "[]"));
+    service.update("supervision.conversion_target_stages_json", Map.of("value", "[\"FOLLOW_UP\",\"PAID\"]"));
+
+    assertThatThrownBy(() -> service.update(
+        "supervision.conversion_target_stages_json", Map.of("value", "{\"stage\":\"PAID\"}")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("supervision.conversion_target_stages_json must be JSON array");
+    assertThatThrownBy(() -> service.update(
+        "supervision.conversion_target_stages_json", Map.of("value", "not-json")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("supervision.conversion_target_stages_json must be JSON array");
+  }
+
+  private void assertValidRange(String key, int minimum, int maximum) {
+    service.update(key, Map.of("value", String.valueOf(minimum)));
+    service.update(key, Map.of("value", String.valueOf(maximum)));
+
+    String range = key + " range is " + minimum + "-" + maximum;
+    assertThatThrownBy(() -> service.update(key, Map.of("value", String.valueOf(minimum - 1))))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining(range);
+    assertThatThrownBy(() -> service.update(key, Map.of("value", String.valueOf(maximum + 1))))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining(range);
   }
 
   private void insertConfig(String key, String value) {
