@@ -70,6 +70,9 @@ class ConfigAdminServiceTest {
     insertConfig("chat.unfinished_task_cap", "20");
     insertConfig("chat.recent_task_display_cap", "30");
     insertConfig("chat.recognition_concurrency", "4");
+    insertConfig("chat.recognition_temp_root", "uploads/temporary-recognition");
+    insertConfig("chat.recognition_temp_ttl_seconds", "600");
+    insertConfig("chat.recognition_temp_max_total_bytes", "104857600");
     secretCipher = new SecretCipher("test-secret-key");
     service = new ConfigAdminService(
         jdbcTemplate,
@@ -234,6 +237,13 @@ class ConfigAdminServiceTest {
     assertValidRange("chat.unfinished_task_cap", 10, 50);
     assertValidRange("chat.recent_task_display_cap", 20, 100);
     assertValidRange("chat.recognition_concurrency", 1, 16);
+    assertValidRange("chat.recognition_temp_ttl_seconds", 60, 600);
+    assertValidRange("chat.recognition_temp_max_total_bytes", 10485760, 524288000);
+
+    service.update("chat.recognition_temp_root", Map.of("value", "uploads/temporary-recognition-v2"));
+    assertThatThrownBy(() -> service.update("chat.recognition_temp_root", Map.of("value", "/")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("chat.recognition_temp_root must be a non-root storage path");
   }
 
   @Test

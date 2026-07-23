@@ -143,6 +143,9 @@ public class ConfigAdminService {
       if (key.endsWith(".storage.root")) {
         validateStorageRoot(key, value);
       }
+      if ("chat.recognition_temp_root".equals(key)) {
+        validateStorageRoot(key, value);
+      }
       if (key.endsWith(".storage.public_base_url")) {
         validatePublicBaseUrl(key, value);
       }
@@ -318,6 +321,14 @@ public class ConfigAdminService {
     }
     if ("chat.recognition_concurrency".equals(key) && (value < 1 || value > 16)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.recognition_concurrency range is 1-16");
+    }
+    if ("chat.recognition_temp_ttl_seconds".equals(key) && (value < 60 || value > 600)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.recognition_temp_ttl_seconds range is 60-600");
+    }
+    if ("chat.recognition_temp_max_total_bytes".equals(key)
+        && (value < 10485760 || value > 524288000)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID,
+          "chat.recognition_temp_max_total_bytes range is 10485760-524288000");
     }
     if ("system.audit_log_retention_days".equals(key) && (value < 30 || value > 365)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.audit_log_retention_days range is 30-365");
