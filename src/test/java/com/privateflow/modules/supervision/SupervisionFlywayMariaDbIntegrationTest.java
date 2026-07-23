@@ -85,14 +85,14 @@ class SupervisionFlywayMariaDbIntegrationTest {
     MigrateResult first = flyway.migrate();
     MigrateResult second = flyway.migrate();
 
-    assertThat(first.targetSchemaVersion).isEqualTo("76");
+    assertThat(first.targetSchemaVersion).isEqualTo("77");
     assertThat(first.migrationsExecuted).isGreaterThan(0);
     assertThat(second.migrationsExecuted).isZero();
     try (var connection = DriverManager.getConnection(url, username, password);
          var statement = connection.createStatement()) {
       assertThat(queryCount(statement, """
           SELECT COUNT(*) FROM flyway_schema_history
-          WHERE version='76' AND success=1
+          WHERE version='77' AND success=1
           """)).isEqualTo(1);
       assertThat(queryCount(statement, """
           SELECT COUNT(*) FROM information_schema.TABLES
@@ -133,6 +133,17 @@ class SupervisionFlywayMariaDbIntegrationTest {
               'idx_supervision_event_channel_time'
             )
           """)).isEqualTo(5);
+      assertThat(queryCount(statement, """
+          SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
+          WHERE TABLE_SCHEMA=DATABASE()
+            AND (
+              (TABLE_NAME='supervision_events' AND INDEX_NAME='idx_supervision_events_occurred_at')
+              OR (TABLE_NAME='llm_call_logs' AND INDEX_NAME='idx_llm_call_logs_created_at')
+              OR (TABLE_NAME='skill_call_logs' AND INDEX_NAME='idx_skill_call_logs_created_at')
+              OR (TABLE_NAME='pending_reply_tasks'
+                  AND INDEX_NAME='idx_pending_reply_tasks_status_finished_at')
+            )
+          """)).isEqualTo(4);
       assertThat(queryCount(statement, """
           SELECT COUNT(*) FROM information_schema.STATISTICS
           WHERE TABLE_SCHEMA=DATABASE()

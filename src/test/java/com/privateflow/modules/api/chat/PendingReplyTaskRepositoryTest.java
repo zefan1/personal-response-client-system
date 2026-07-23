@@ -11,9 +11,11 @@ import java.sql.Timestamp;
 import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.Suggestion;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -792,6 +794,43 @@ class PendingReplyTaskRepositoryTest {
     assertThat(repository.findOwned(generatingOld.taskId(), "keeper-1")).isPresent();
   }
 
+  @Test
+  void createUsesShanghaiTimeForTheFullTwentyFourHourTtlWhenJvmDefaultIsUtc() {
+    TimeZone originalDefault = TimeZone.getDefault();
+    TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+    try {
+      LocalDateTime lowerBound = toMicroseconds(
+          LocalDateTime.now(ZoneId.of("Asia/Shanghai")).plusHours(24));
+
+      PendingReplyTask task = createTask("reply-utc-ttl", "keeper-1");
+
+      LocalDateTime upperBound = toMicroseconds(
+          LocalDateTime.now(ZoneId.of("Asia/Shanghai")).plusHours(24));
+      assertThat(task.expiresAt()).isBetween(lowerBound, upperBound);
+    } finally {
+      TimeZone.setDefault(originalDefault);
+    }
+  }
+
+  @Test
+  void activeGenerationCreatedUnderUtcDoesNotBecomeStaleInShanghaiTime() {
+    TimeZone originalDefault = TimeZone.getDefault();
+    TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+    try {
+      PendingReplyTask task = createTask("reply-utc-generation", "keeper-1");
+      assertThat(repository.claim(task.taskId(), "keeper-1", "18800001111")).isTrue();
+
+      repository.recoverExpiredAndStalledTasks(
+          LocalDateTime.now(ZoneId.of("Asia/Shanghai")),
+          120);
+
+      assertThat(repository.findOwned(task.taskId(), "keeper-1").orElseThrow().status())
+          .isEqualTo(PendingReplyTaskStatus.GENERATING);
+    } finally {
+      TimeZone.setDefault(originalDefault);
+    }
+  }
+
   private PendingReplyTask createClaimedTask() {
     PendingReplyTask task = repository.create(new PendingReplyTaskDraft(
         "reply-100-1",
@@ -819,6 +858,10 @@ class PendingReplyTaskRepositoryTest {
         Timestamp.valueOf(expiresAt),
         finishedAt == null ? null : Timestamp.valueOf(finishedAt),
         task.taskId());
+  }
+
+  private LocalDateTime toMicroseconds(LocalDateTime value) {
+    return value.withNano((value.getNano() / 1_000) * 1_000);
   }
 
   private PendingReplyTask createTask(String replySessionId, String username) {

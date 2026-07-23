@@ -1,11 +1,11 @@
 package com.privateflow.modules.supervision;
 
-import com.privateflow.modules.api.chat.ChatTaskConfig;
 import com.privateflow.modules.api.chat.PendingReplyTaskRepository;
+import com.privateflow.modules.api.chat.PendingReplyTaskService;
+import com.privateflow.modules.api.chat.ReplyTaskClock;
 import com.privateflow.modules.llm.LlmCallAnalyticsRepository;
 import com.privateflow.modules.skill.admin.SkillCallAnalyticsRepository;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Objects;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -13,34 +13,34 @@ import org.springframework.stereotype.Component;
 @Component
 public class SupervisionCleanupScheduler {
 
-  private static final String BUSINESS_TIME_ZONE_ID = "Asia/Shanghai";
-  private static final ZoneId BUSINESS_TIME_ZONE = ZoneId.of(BUSINESS_TIME_ZONE_ID);
-
   private final SupervisionConfig supervisionConfig;
-  private final ChatTaskConfig chatTaskConfig;
+  private final ReplyTaskClock taskClock;
   private final SupervisionEventRepository supervisionEventRepository;
   private final LlmCallAnalyticsRepository llmCallAnalyticsRepository;
   private final SkillCallAnalyticsRepository skillCallAnalyticsRepository;
   private final PendingReplyTaskRepository pendingReplyTaskRepository;
+  private final PendingReplyTaskService pendingReplyTaskService;
 
   public SupervisionCleanupScheduler(
       SupervisionConfig supervisionConfig,
-      ChatTaskConfig chatTaskConfig,
+      ReplyTaskClock taskClock,
       SupervisionEventRepository supervisionEventRepository,
       LlmCallAnalyticsRepository llmCallAnalyticsRepository,
       SkillCallAnalyticsRepository skillCallAnalyticsRepository,
-      PendingReplyTaskRepository pendingReplyTaskRepository) {
+      PendingReplyTaskRepository pendingReplyTaskRepository,
+      PendingReplyTaskService pendingReplyTaskService) {
     this.supervisionConfig = supervisionConfig;
-    this.chatTaskConfig = chatTaskConfig;
+    this.taskClock = taskClock;
     this.supervisionEventRepository = supervisionEventRepository;
     this.llmCallAnalyticsRepository = llmCallAnalyticsRepository;
     this.skillCallAnalyticsRepository = skillCallAnalyticsRepository;
     this.pendingReplyTaskRepository = pendingReplyTaskRepository;
+    this.pendingReplyTaskService = pendingReplyTaskService;
   }
 
-  @Scheduled(cron = "0 10 4 * * *", zone = BUSINESS_TIME_ZONE_ID)
+  @Scheduled(cron = "0 10 4 * * *", zone = ReplyTaskClock.BUSINESS_TIME_ZONE_ID)
   public void cleanup() {
-    cleanupAt(LocalDateTime.now(BUSINESS_TIME_ZONE));
+    cleanupAt(taskClock.now());
   }
 
   public void cleanupAt(LocalDateTime now) {
@@ -48,9 +48,7 @@ public class SupervisionCleanupScheduler {
     supervisionEventRepository.deleteEventsBefore(now.minusDays(supervisionConfig.recordRetentionDays()));
     llmCallAnalyticsRepository.deleteBefore(now.minusDays(supervisionConfig.technicalLogRetentionDays()));
     skillCallAnalyticsRepository.deleteBefore(now.minusDays(supervisionConfig.technicalLogRetentionDays()));
-    pendingReplyTaskRepository.recoverExpiredAndStalledTasks(
-        now,
-        chatTaskConfig.pendingReplyGeneratingTimeoutSeconds());
+    pendingReplyTaskService.recoverTasksAt(now);
     pendingReplyTaskRepository.deletePhysicallyExpiredBefore(
         now.minusDays(supervisionConfig.expiredReplyTaskRetentionDays()));
   }

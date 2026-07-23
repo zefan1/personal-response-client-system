@@ -22,6 +22,7 @@ import com.privateflow.modules.skill.Suggestion;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,6 +49,20 @@ class PendingReplyTaskServiceTest {
   private CustomerSummaryMapper customerSummaryMapper;
 
   private PendingReplyTaskService service;
+
+  @Test
+  void hasExactlyOneAutowiredConstructorForSpringInjection() {
+    long autowiredConstructors = java.util.Arrays.stream(PendingReplyTaskService.class.getConstructors())
+        .filter(constructor -> constructor.isAnnotationPresent(Autowired.class))
+        .count();
+
+    assertThat(autowiredConstructors).isEqualTo(1);
+    assertThat(java.util.Arrays.stream(PendingReplyTaskService.class.getConstructors())
+        .filter(constructor -> constructor.isAnnotationPresent(Autowired.class))
+        .findFirst()
+        .orElseThrow()
+        .getParameterCount()).isEqualTo(6);
+  }
 
   @BeforeEach
   void setUp() {

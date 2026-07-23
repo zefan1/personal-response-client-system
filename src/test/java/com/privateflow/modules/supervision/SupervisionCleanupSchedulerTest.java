@@ -5,13 +5,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.common.events.ConfigChangedEvent;
 import com.privateflow.modules.api.chat.ChatTaskConfig;
+import com.privateflow.modules.api.chat.ChatReplySource;
+import com.privateflow.modules.api.chat.ChatResponse;
 import com.privateflow.modules.api.chat.PendingReplyTaskRepository;
+import com.privateflow.modules.api.chat.PendingReplyTaskService;
 import com.privateflow.modules.api.chat.PendingReplyTaskStatus;
+import com.privateflow.modules.api.chat.ReplyTaskClock;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import com.privateflow.modules.llm.LlmCallAnalyticsRepository;
+import com.privateflow.modules.skill.SkillResponse;
+import com.privateflow.modules.skill.Suggestion;
 import com.privateflow.modules.skill.admin.SkillCallAnalyticsRepository;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +35,9 @@ class SupervisionCleanupSchedulerTest {
   private SystemConfigRepository configRepository;
   private SupervisionConfig supervisionConfig;
   private ChatTaskConfig chatTaskConfig;
+  private ReplyTaskClock replyTaskClock;
+  private PendingReplyTaskRepository pendingReplyTaskRepository;
+  private PendingReplyTaskService pendingReplyTaskService;
   private SupervisionCleanupScheduler scheduler;
 
   @BeforeEach
@@ -72,7 +82,7 @@ class SupervisionCleanupSchedulerTest {
           client_message VARCHAR(255) NOT NULL,
           chat_context_json VARCHAR(255) NOT NULL,
           selected_phone VARCHAR(32),
-          result_json VARCHAR(255),
+          result_json CLOB,
           error_code VARCHAR(32),
           generation_started_at TIMESTAMP,
           finished_at TIMESTAMP,
@@ -93,13 +103,26 @@ class SupervisionCleanupSchedulerTest {
     configRepository = new SystemConfigRepository(jdbcTemplate);
     supervisionConfig = new SupervisionConfig(configRepository);
     chatTaskConfig = new ChatTaskConfig(configRepository);
+    replyTaskClock = new ReplyTaskClock();
+    pendingReplyTaskRepository = new PendingReplyTaskRepository(
+        jdbcTemplate,
+        new ObjectMapper(),
+        replyTaskClock);
+    pendingReplyTaskService = new PendingReplyTaskService(
+        pendingReplyTaskRepository,
+        chatTaskConfig,
+        null,
+        null,
+        null,
+        replyTaskClock);
     scheduler = new SupervisionCleanupScheduler(
         supervisionConfig,
-        chatTaskConfig,
+        replyTaskClock,
         new SupervisionEventRepository(jdbcTemplate, new ObjectMapper()),
         new LlmCallAnalyticsRepository(jdbcTemplate),
         new SkillCallAnalyticsRepository(jdbcTemplate),
-        new PendingReplyTaskRepository(jdbcTemplate, new ObjectMapper()));
+        pendingReplyTaskRepository,
+        pendingReplyTaskService);
   }
 
   @Test
@@ -182,6 +205,10 @@ class SupervisionCleanupSchedulerTest {
         NOW.minusDays(10), null);
     insertTask("generating-recovered-this-run", PendingReplyTaskStatus.GENERATING,
         NOW.minusDays(10), NOW.minusSeconds(301));
+    insertTask("generating-active-this-run", PendingReplyTaskStatus.GENERATING,
+        NOW.minusDays(10), NOW.minusSeconds(301));
+    setTaskSelectedPhone("generating-active-this-run", "18800001111");
+    pendingReplyTaskService.beginGeneration("generating-active-this-run");
     insertTask("generating-within-chat-timeout", PendingReplyTaskStatus.GENERATING,
         NOW.plusHours(1), NOW.minusSeconds(121));
 
@@ -199,6 +226,12 @@ class SupervisionCleanupSchedulerTest {
     assertThat(taskExists("generating-recovered-this-run")).isTrue();
     assertThat(taskStatus("generating-recovered-this-run"))
         .isEqualTo(PendingReplyTaskStatus.FAILED.name());
+    assertThat(taskStatus("generating-active-this-run"))
+        .isEqualTo(PendingReplyTaskStatus.GENERATING.name());
+    assertThat(pendingReplyTaskRepository.markReady(
+        "generating-active-this-run",
+        "keeper-1",
+        displayableResponse("18800001111"))).isTrue();
     assertThat(taskStatus("generating-within-chat-timeout"))
         .isEqualTo(PendingReplyTaskStatus.GENERATING.name());
   }
@@ -268,6 +301,13 @@ class SupervisionCleanupSchedulerTest {
         taskId);
   }
 
+  private void setTaskSelectedPhone(String taskId, String phone) {
+    jdbcTemplate.update(
+        "UPDATE pending_reply_tasks SET selected_phone = ? WHERE task_id = ?",
+        phone,
+        taskId);
+  }
+
   private int countRows(String table) {
     Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
     return count == null ? 0 : count;
@@ -282,6 +322,17 @@ class SupervisionCleanupSchedulerTest {
   private String taskStatus(String taskId) {
     return jdbcTemplate.queryForObject(
         "SELECT status FROM pending_reply_tasks WHERE task_id = ?", String.class, taskId);
+  }
+
+  private ChatResponse displayableResponse(String phone) {
+    return new ChatResponse(
+        phone,
+        "same-name customer",
+        false,
+        null,
+        new SkillResponse(List.of(new Suggestion("reply text", "NEXT_STEP", "")), null, null, null),
+        null,
+        ChatReplySource.skill());
   }
 
   private static final class FailingSystemConfigRepository extends SystemConfigRepository {
