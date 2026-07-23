@@ -1,8 +1,12 @@
 package com.privateflow.modules.supervision;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.common.events.ConfigChangedEvent;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import jakarta.annotation.PostConstruct;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
@@ -12,7 +16,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class SupervisionConfig {
 
-  private static final Settings DEFAULTS = new Settings(180, 30, 3, 20, 30, 4, 1440);
+  private static final Settings DEFAULTS = new Settings(180, 30, 3, 20, 30, 4, 1440, Set.of());
   private static final Set<String> MANAGED_PREFIXES = Set.of("supervision.", "chat.");
   private static final Set<String> MANAGED_CHAT_KEYS = Set.of(
       "chat.expired_reply_task_retention_days",
@@ -21,6 +25,7 @@ public class SupervisionConfig {
       "chat.recognition_concurrency");
 
   private final SystemConfigRepository configRepository;
+  private final ObjectMapper objectMapper = new ObjectMapper();
   private final AtomicReference<Settings> current = new AtomicReference<>(DEFAULTS);
 
   public SupervisionConfig(SystemConfigRepository configRepository) {
@@ -60,6 +65,10 @@ public class SupervisionConfig {
     return snapshot().processingSlaMinutes();
   }
 
+  public Set<String> conversionTargetStages() {
+    return snapshot().conversionTargetStages();
+  }
+
   public Settings snapshot() {
     return current.get();
   }
@@ -81,7 +90,8 @@ public class SupervisionConfig {
           readOrDefault(values, "chat.unfinished_task_cap", 20, 10, 50),
           readOrDefault(values, "chat.recent_task_display_cap", 30, 20, 100),
           readOrDefault(values, "chat.recognition_concurrency", 4, 1, 16),
-          readOrDefault(values, "supervision.processing_sla_minutes", 1440, 15, 10080)));
+          readOrDefault(values, "supervision.processing_sla_minutes", 1440, 15, 10080),
+          readConversionTargetStages(values)));
     } catch (RuntimeException ignored) {
       // Keep the last complete, valid snapshot when configuration is unavailable or invalid.
     }
@@ -106,6 +116,29 @@ public class SupervisionConfig {
     return value;
   }
 
+  private Set<String> readConversionTargetStages(Map<String, String> values) {
+    String raw = values.get("supervision.conversion_target_stages_json");
+    if (raw == null || raw.isBlank()) {
+      return Set.of();
+    }
+    try {
+      JsonNode node = objectMapper.readTree(raw);
+      if (!node.isArray()) {
+        throw new IllegalArgumentException("invalid supervision conversion target stages");
+      }
+      Set<String> stages = new LinkedHashSet<>();
+      for (JsonNode value : node) {
+        if (!value.isTextual() || value.asText().isBlank()) {
+          throw new IllegalArgumentException("invalid supervision conversion target stages");
+        }
+        stages.add(value.asText().trim());
+      }
+      return Set.copyOf(stages);
+    } catch (JsonProcessingException ex) {
+      throw new IllegalArgumentException("invalid supervision conversion target stages", ex);
+    }
+  }
+
   public record Settings(
       int recordRetentionDays,
       int technicalLogRetentionDays,
@@ -113,6 +146,7 @@ public class SupervisionConfig {
       int unfinishedTaskCap,
       int recentTaskDisplayCap,
       int recognitionConcurrency,
-      int processingSlaMinutes) {
+      int processingSlaMinutes,
+      Set<String> conversionTargetStages) {
   }
 }
