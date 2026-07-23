@@ -20,6 +20,7 @@ import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -166,6 +167,31 @@ class SupervisionCleanupSchedulerTest {
   }
 
   @Test
+  void governanceConfigRefreshReadsAllManagedValuesWithOneRepositoryQuery() {
+    SystemConfigRepository repository = org.mockito.Mockito.mock(SystemConfigRepository.class);
+    org.mockito.Mockito.when(repository.findByPrefixes(Set.of("supervision.", "chat.")))
+        .thenReturn(Map.of(
+            "supervision.record_retention_days", "200",
+            "supervision.technical_log_retention_days", "30",
+            "supervision.processing_sla_minutes", "1440",
+            "chat.expired_reply_task_retention_days", "3",
+            "chat.unfinished_task_cap", "20",
+            "chat.recent_task_display_cap", "30",
+            "chat.recognition_concurrency", "4"));
+    SupervisionConfig config = new SupervisionConfig(repository);
+
+    config.refresh();
+
+    SupervisionConfig.Settings settings = config.snapshot();
+    assertThat(settings.recordRetentionDays()).isEqualTo(200);
+    assertThat(settings.technicalLogRetentionDays()).isEqualTo(30);
+    assertThat(settings.expiredReplyTaskRetentionDays()).isEqualTo(3);
+    org.mockito.Mockito.verify(repository).findByPrefixes(Set.of("supervision.", "chat."));
+    org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+        .findByPrefix(org.mockito.Mockito.anyString());
+  }
+
+  @Test
   void governanceConfigKeepsItsLastSnapshotWhenConfigurationReadFails() {
     FailingSystemConfigRepository failingRepository = new FailingSystemConfigRepository(jdbcTemplate);
     SupervisionConfig config = new SupervisionConfig(failingRepository);
@@ -179,6 +205,55 @@ class SupervisionCleanupSchedulerTest {
     assertThat(config.recordRetentionDays()).isEqualTo(200);
     assertThat(config.technicalLogRetentionDays()).isEqualTo(30);
     assertThat(config.recognitionConcurrency()).isEqualTo(8);
+  }
+
+  @Test
+  void cleanupKeepsItsInitialRetentionSnapshotWhenConfigChangesAfterEventCleanup() {
+    SystemConfigRepository changingConfigRepository = org.mockito.Mockito.mock(SystemConfigRepository.class);
+    org.mockito.Mockito.when(changingConfigRepository.findByPrefixes(Set.of("supervision.", "chat.")))
+        .thenReturn(
+            Map.of(
+                "supervision.record_retention_days", "180",
+                "supervision.technical_log_retention_days", "30",
+                "supervision.processing_sla_minutes", "1440",
+                "chat.expired_reply_task_retention_days", "3",
+                "chat.unfinished_task_cap", "20",
+                "chat.recent_task_display_cap", "30",
+                "chat.recognition_concurrency", "4"),
+            Map.of(
+                "supervision.record_retention_days", "200",
+                "supervision.technical_log_retention_days", "7",
+                "supervision.processing_sla_minutes", "1440",
+                "chat.expired_reply_task_retention_days", "14",
+                "chat.unfinished_task_cap", "20",
+                "chat.recent_task_display_cap", "30",
+                "chat.recognition_concurrency", "4"));
+    SupervisionConfig changingConfig = new SupervisionConfig(changingConfigRepository);
+    changingConfig.refresh();
+    SupervisionEventRepository eventRepository = org.mockito.Mockito.mock(SupervisionEventRepository.class);
+    LlmCallAnalyticsRepository llmRepository = org.mockito.Mockito.mock(LlmCallAnalyticsRepository.class);
+    SkillCallAnalyticsRepository skillRepository = org.mockito.Mockito.mock(SkillCallAnalyticsRepository.class);
+    PendingReplyTaskRepository taskRepository = org.mockito.Mockito.mock(PendingReplyTaskRepository.class);
+    PendingReplyTaskService taskService = org.mockito.Mockito.mock(PendingReplyTaskService.class);
+    SupervisionCleanupScheduler changingScheduler = new SupervisionCleanupScheduler(
+        changingConfig,
+        replyTaskClock,
+        eventRepository,
+        llmRepository,
+        skillRepository,
+        taskRepository,
+        taskService);
+    org.mockito.Mockito.doAnswer(invocation -> {
+      changingConfig.onConfigChanged(new ConfigChangedEvent("supervision.technical_log_retention_days"));
+      return 0;
+    }).when(eventRepository).deleteEventsBefore(NOW.minusDays(180));
+
+    changingScheduler.cleanupAt(NOW);
+
+    org.mockito.Mockito.verify(eventRepository).deleteEventsBefore(NOW.minusDays(180));
+    org.mockito.Mockito.verify(llmRepository).deleteBefore(NOW.minusDays(30));
+    org.mockito.Mockito.verify(skillRepository).deleteBefore(NOW.minusDays(30));
+    org.mockito.Mockito.verify(taskRepository).deletePhysicallyExpiredBefore(NOW.minusDays(3));
   }
 
   @Test
@@ -344,11 +419,11 @@ class SupervisionCleanupSchedulerTest {
     }
 
     @Override
-    public Map<String, String> findByPrefix(String prefix) {
+    public Map<String, String> findByPrefixes(Set<String> prefixes) {
       if (failReads) {
         throw new IllegalStateException("configuration store unavailable");
       }
-      return super.findByPrefix(prefix);
+      return super.findByPrefixes(prefixes);
     }
 
     private void failReads() {

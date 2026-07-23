@@ -45,11 +45,12 @@ public class SupervisionCleanupScheduler {
 
   public void cleanupAt(LocalDateTime now) {
     Objects.requireNonNull(now, "cleanup time is required");
-    supervisionEventRepository.deleteEventsBefore(now.minusDays(supervisionConfig.recordRetentionDays()));
-    llmCallAnalyticsRepository.deleteBefore(now.minusDays(supervisionConfig.technicalLogRetentionDays()));
-    skillCallAnalyticsRepository.deleteBefore(now.minusDays(supervisionConfig.technicalLogRetentionDays()));
+    SupervisionConfig.Settings settings = supervisionConfig.snapshot();
+    supervisionEventRepository.deleteEventsBefore(now.minusDays(settings.recordRetentionDays()));
+    llmCallAnalyticsRepository.deleteBefore(now.minusDays(settings.technicalLogRetentionDays()));
+    skillCallAnalyticsRepository.deleteBefore(now.minusDays(settings.technicalLogRetentionDays()));
     pendingReplyTaskService.recoverTasksAt(now);
     pendingReplyTaskRepository.deletePhysicallyExpiredBefore(
-        now.minusDays(supervisionConfig.expiredReplyTaskRetentionDays()));
+        now.minusDays(settings.expiredReplyTaskRetentionDays()));
   }
 }

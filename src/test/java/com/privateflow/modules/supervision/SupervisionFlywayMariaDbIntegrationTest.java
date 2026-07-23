@@ -20,6 +20,9 @@ class SupervisionFlywayMariaDbIntegrationTest {
 
   @Test
   void rejectsMigrationUrlsOutsideTheDedicatedTemporaryDatabasePrefix() {
+    assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("pda_v77_it_");
     assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
         "jdbc:mariadb://127.0.0.1:3306/private_domain_assistant_dev"))
         .isInstanceOf(IllegalArgumentException.class)
@@ -37,6 +40,14 @@ class SupervisionFlywayMariaDbIntegrationTest {
         .hasMessageContaining("pda_v77_it_");
     assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
         "jdbc:mariadb://127.0.0.1:3306/pda_v77_it_abc/another_database"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("pda_v77_it_");
+    assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
+        "jdbc:mariadb://127.0.0.1:3306/pda_v77_it_abc?x=1"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("pda_v77_it_");
+    assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
+        "jdbc:mariadb://127.0.0.1:3306/pda_v77_it_abc#fragment"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("pda_v77_it_");
   }

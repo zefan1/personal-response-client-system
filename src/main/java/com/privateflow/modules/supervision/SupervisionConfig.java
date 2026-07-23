@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 public class SupervisionConfig {
 
   private static final Settings DEFAULTS = new Settings(180, 30, 3, 20, 30, 4, 1440);
+  private static final Set<String> MANAGED_PREFIXES = Set.of("supervision.", "chat.");
   private static final Set<String> MANAGED_CHAT_KEYS = Set.of(
       "chat.expired_reply_task_retention_days",
       "chat.unfinished_task_cap",
@@ -32,31 +33,35 @@ public class SupervisionConfig {
   }
 
   public int recordRetentionDays() {
-    return current.get().recordRetentionDays();
+    return snapshot().recordRetentionDays();
   }
 
   public int technicalLogRetentionDays() {
-    return current.get().technicalLogRetentionDays();
+    return snapshot().technicalLogRetentionDays();
   }
 
   public int expiredReplyTaskRetentionDays() {
-    return current.get().expiredReplyTaskRetentionDays();
+    return snapshot().expiredReplyTaskRetentionDays();
   }
 
   public int unfinishedTaskCap() {
-    return current.get().unfinishedTaskCap();
+    return snapshot().unfinishedTaskCap();
   }
 
   public int recentTaskDisplayCap() {
-    return current.get().recentTaskDisplayCap();
+    return snapshot().recentTaskDisplayCap();
   }
 
   public int recognitionConcurrency() {
-    return current.get().recognitionConcurrency();
+    return snapshot().recognitionConcurrency();
   }
 
   public int processingSlaMinutes() {
-    return current.get().processingSlaMinutes();
+    return snapshot().processingSlaMinutes();
+  }
+
+  public Settings snapshot() {
+    return current.get();
   }
 
   @EventListener
@@ -68,16 +73,15 @@ public class SupervisionConfig {
 
   public void refresh() {
     try {
-      Map<String, String> supervisionValues = configRepository.findByPrefix("supervision.");
-      Map<String, String> chatValues = configRepository.findByPrefix("chat.");
+      Map<String, String> values = configRepository.findByPrefixes(MANAGED_PREFIXES);
       current.set(new Settings(
-          readOrDefault(supervisionValues, "supervision.record_retention_days", 180, 30, 730),
-          readOrDefault(supervisionValues, "supervision.technical_log_retention_days", 30, 7, 180),
-          readOrDefault(chatValues, "chat.expired_reply_task_retention_days", 3, 1, 14),
-          readOrDefault(chatValues, "chat.unfinished_task_cap", 20, 10, 50),
-          readOrDefault(chatValues, "chat.recent_task_display_cap", 30, 20, 100),
-          readOrDefault(chatValues, "chat.recognition_concurrency", 4, 1, 16),
-          readOrDefault(supervisionValues, "supervision.processing_sla_minutes", 1440, 15, 10080)));
+          readOrDefault(values, "supervision.record_retention_days", 180, 30, 730),
+          readOrDefault(values, "supervision.technical_log_retention_days", 30, 7, 180),
+          readOrDefault(values, "chat.expired_reply_task_retention_days", 3, 1, 14),
+          readOrDefault(values, "chat.unfinished_task_cap", 20, 10, 50),
+          readOrDefault(values, "chat.recent_task_display_cap", 30, 20, 100),
+          readOrDefault(values, "chat.recognition_concurrency", 4, 1, 16),
+          readOrDefault(values, "supervision.processing_sla_minutes", 1440, 15, 10080)));
     } catch (RuntimeException ignored) {
       // Keep the last complete, valid snapshot when configuration is unavailable or invalid.
     }
@@ -102,7 +106,7 @@ public class SupervisionConfig {
     return value;
   }
 
-  private record Settings(
+  public record Settings(
       int recordRetentionDays,
       int technicalLogRetentionDays,
       int expiredReplyTaskRetentionDays,
