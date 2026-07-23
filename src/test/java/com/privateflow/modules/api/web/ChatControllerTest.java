@@ -14,6 +14,7 @@ import com.privateflow.modules.api.chat.ChatOrchestrationService;
 import com.privateflow.modules.api.chat.ChatReplySource;
 import com.privateflow.modules.api.chat.ChatRecognizeRequest;
 import com.privateflow.modules.api.chat.ChatResponse;
+import com.privateflow.modules.api.chat.AiUsageRequest;
 import com.privateflow.modules.api.chat.GenerateRequest;
 import com.privateflow.modules.api.chat.PendingReplyTaskSelectRequest;
 import com.privateflow.modules.api.chat.PendingReplyTaskStatus;
@@ -22,6 +23,7 @@ import com.privateflow.modules.api.chat.RegenerateRequest;
 import com.privateflow.modules.api.chat.SendConfirmRequest;
 import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.Suggestion;
+import com.privateflow.modules.supervision.SupervisionEventService;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -35,13 +37,15 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class ChatControllerTest {
 
   private ChatOrchestrationService service;
+  private SupervisionEventService supervisionEventService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     service = org.mockito.Mockito.mock(ChatOrchestrationService.class);
+    supervisionEventService = org.mockito.Mockito.mock(SupervisionEventService.class);
     mockMvc = MockMvcBuilders
-        .standaloneSetup(new ChatController(service))
+        .standaloneSetup(new ChatController(service, supervisionEventService))
         .setControllerAdvice(new GlobalApiExceptionHandler())
         .build();
   }
@@ -118,6 +122,27 @@ class ChatControllerTest {
     verify(service).sendConfirm(captor.capture());
     org.junit.jupiter.api.Assertions.assertEquals("Reply A", captor.getValue().sentText());
     org.junit.jupiter.api.Assertions.assertEquals("comfort", captor.getValue().selectedDirection());
+  }
+
+  @Test
+  void aiUsageRecordsCopiedReplyWithoutCallingSendConfirmFlow() throws Exception {
+    when(supervisionEventService.recordAiUsage(any())).thenReturn(Map.of(
+        "recorded", true,
+        "semantic", "COPIED_AI_REPLY"));
+
+    mockMvc.perform(post("/api/v1/chat/ai-usage")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"phone\":\"18800001111\",\"taskId\":\"task-1\",\"replySessionId\":\"reply-session-1\",\"replySource\":\"LLM_WITH_SKILL\",\"copiedText\":\"Reply A\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.data.recorded").value(true))
+        .andExpect(jsonPath("$.data.semantic").value("COPIED_AI_REPLY"));
+
+    ArgumentCaptor<AiUsageRequest> captor = ArgumentCaptor.forClass(AiUsageRequest.class);
+    verify(supervisionEventService).recordAiUsage(captor.capture());
+    org.junit.jupiter.api.Assertions.assertEquals("Reply A", captor.getValue().copiedText());
+    org.junit.jupiter.api.Assertions.assertEquals("LLM_WITH_SKILL", captor.getValue().replySource());
+    org.mockito.Mockito.verifyNoInteractions(service);
   }
 
   @Test

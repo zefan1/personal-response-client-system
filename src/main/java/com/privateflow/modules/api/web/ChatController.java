@@ -1,6 +1,7 @@
 package com.privateflow.modules.api.web;
 
 import com.privateflow.modules.api.chat.ChatOrchestrationService;
+import com.privateflow.modules.api.chat.AiUsageRequest;
 import com.privateflow.modules.api.chat.ChatRecognizeRequest;
 import com.privateflow.modules.api.chat.ChatResponse;
 import com.privateflow.modules.api.chat.GenerateRequest;
@@ -9,6 +10,7 @@ import com.privateflow.modules.api.chat.PendingReplyTaskView;
 import com.privateflow.modules.api.chat.RegenerateRequest;
 import com.privateflow.modules.api.chat.SendConfirmRequest;
 import com.privateflow.modules.match.ApiResponse;
+import com.privateflow.modules.supervision.SupervisionEventService;
 import java.util.List;
 import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,9 +25,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class ChatController {
 
   private final ChatOrchestrationService orchestrationService;
+  private final SupervisionEventService supervisionEventService;
 
-  public ChatController(ChatOrchestrationService orchestrationService) {
+  public ChatController(
+      ChatOrchestrationService orchestrationService,
+      SupervisionEventService supervisionEventService) {
     this.orchestrationService = orchestrationService;
+    this.supervisionEventService = supervisionEventService;
   }
 
   @PostMapping("/recognize")
@@ -73,5 +79,10 @@ public class ChatController {
   @PostMapping("/send-confirm")
   public ApiResponse<Map<String, Object>> sendConfirm(@RequestBody SendConfirmRequest request) {
     return ApiResponse.ok(orchestrationService.sendConfirm(request));
+  }
+
+  @PostMapping("/ai-usage")
+  public ApiResponse<Map<String, Object>> recordAiUsage(@RequestBody AiUsageRequest request) {
+    return ApiResponse.ok(supervisionEventService.recordAiUsage(request));
   }
 }
