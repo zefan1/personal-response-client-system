@@ -283,6 +283,23 @@ public class PendingReplyTaskRepository {
     return recovered;
   }
 
+  @Transactional
+  public int deletePhysicallyExpiredBefore(LocalDateTime cutoff) {
+    if (cutoff == null) {
+      throw new IllegalArgumentException("pending reply task cleanup cutoff is required");
+    }
+    return jdbcTemplate.update("""
+        DELETE FROM pending_reply_tasks
+        WHERE expires_at < ?
+          AND status IN (?, ?, ?, ?)
+        """,
+        Timestamp.valueOf(cutoff),
+        PendingReplyTaskStatus.EXPIRED.name(),
+        PendingReplyTaskStatus.CANCELLED.name(),
+        PendingReplyTaskStatus.READY.name(),
+        PendingReplyTaskStatus.FAILED.name());
+  }
+
   public List<PendingReplyTask> findActiveOwned(String username, LocalDateTime now) {
     if (blank(username) || now == null) {
       return List.of();

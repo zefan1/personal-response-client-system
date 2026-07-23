@@ -52,6 +52,13 @@ public class LlmCallAnalyticsRepository {
     return new LlmCallAnalytics(summary == null ? new LlmCallAnalytics.Summary(0, 0.0, 0) : summary, details);
   }
 
+  public int deleteBefore(LocalDateTime cutoff) {
+    if (cutoff == null) {
+      throw new IllegalArgumentException("LLM call cleanup cutoff is required");
+    }
+    return jdbcTemplate.update("DELETE FROM llm_call_logs WHERE created_at < ?", cutoff);
+  }
+
   private String buildWhere(int days, String scene, String leadType, List<Object> args) {
     StringBuilder where = new StringBuilder(" WHERE created_at >= ?");
     args.add(LocalDateTime.now().minusDays(Math.max(1, Math.min(days, 90))));

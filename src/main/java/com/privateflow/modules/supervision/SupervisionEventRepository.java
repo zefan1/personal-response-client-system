@@ -2,6 +2,8 @@ package com.privateflow.modules.supervision;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -55,6 +57,15 @@ public class SupervisionEventRepository {
         event.copiedReplySnapshot(),
         metadataJson(event),
         event.occurredAt());
+  }
+
+  public int deleteEventsBefore(LocalDateTime cutoff) {
+    if (cutoff == null) {
+      throw new IllegalArgumentException("supervision event cleanup cutoff is required");
+    }
+    return jdbcTemplate.update(
+        "DELETE FROM supervision_events WHERE occurred_at < ?",
+        Timestamp.valueOf(cutoff));
   }
 
   private String metadataJson(SupervisionEventCommand event) {
