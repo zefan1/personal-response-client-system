@@ -11,3 +11,4 @@ desktop/dist/
 desktop/release/
 .tools/
 scripts/__pycache__/
+.worktrees/
