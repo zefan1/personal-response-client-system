@@ -54,7 +54,7 @@ class SupervisionEventServiceTest {
         "18800001111",
         "task-1",
         "reply-session-1",
-        "LLM_WITH_SKILL",
+        "LLM",
         "\u60a8\u597d\uff0c\u6211\u5148\u4e3a\u60a8\u68b3\u7406\u4e00\u4e0b\u3002"));
 
     assertThat(result).containsEntry("recorded", true)
@@ -71,7 +71,7 @@ class SupervisionEventServiceTest {
     assertThat(event.assignedKeeper()).isEqualTo("keeper-1");
     assertThat(event.taskId()).isEqualTo("task-1");
     assertThat(event.replySessionId()).isEqualTo("reply-session-1");
-    assertThat(event.replySource()).isEqualTo("LLM_WITH_SKILL");
+    assertThat(event.replySource()).isEqualTo("LLM");
     assertThat(event.generatedReplySnapshot()).isNull();
     assertThat(event.copiedReplySnapshot()).isEqualTo("\u60a8\u597d\uff0c\u6211\u5148\u4e3a\u60a8\u68b3\u7406\u4e00\u4e0b\u3002");
     assertThat(event.metadata()).containsEntry("customerId", 7L)
@@ -100,6 +100,53 @@ class SupervisionEventServiceTest {
   }
 
   @Test
+  void rejectsUnauthenticatedCopyWithoutReadingOrWritingCustomerData() {
+    assertThatThrownBy(() -> service.recordAiUsage(request("\u53ef\u590d\u5236\u56de\u590d")))
+        .isInstanceOf(ApiException.class)
+        .extracting(error -> ((ApiException) error).getErrorCode())
+        .isEqualTo(ApiErrorCodes.AUTH_FAILED);
+
+    verifyNoInteractions(customerRepository, customerAccessService, eventRepository);
+  }
+
+  @Test
+  void rejectsMissingCustomerWithoutWritingAnEvent() {
+    when(customerRepository.findByPhone("18800001111")).thenReturn(Optional.empty());
+    AuthContext.set(new AuthUser("keeper-auth", "\u7ba1\u5bb6", Role.KEEPER, null));
+
+    assertThatThrownBy(() -> service.recordAiUsage(request("\u53ef\u590d\u5236\u56de\u590d")))
+        .isInstanceOf(ApiException.class)
+        .extracting(error -> ((ApiException) error).getErrorCode())
+        .isEqualTo(ApiErrorCodes.BAD_REQUEST);
+
+    verifyNoInteractions(customerAccessService, eventRepository);
+  }
+
+  @Test
+  void rejectsMissingOrForgedReplySourceBeforeReadingCustomer() {
+    AuthContext.set(new AuthUser("keeper-auth", "\u7ba1\u5bb6", Role.KEEPER, null));
+
+    assertThatThrownBy(() -> service.recordAiUsage(new AiUsageRequest(
+        "18800001111", "task-1", "reply-session-1", null, "\u53ef\u590d\u5236\u56de\u590d")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("replySource");
+    assertThatThrownBy(() -> service.recordAiUsage(new AiUsageRequest(
+        "18800001111", "task-1", "reply-session-1", "  ", "\u53ef\u590d\u5236\u56de\u590d")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("replySource");
+    assertThatThrownBy(() -> service.recordAiUsage(new AiUsageRequest(
+        "18800001111", "task-1", "reply-session-1", "LLM_WITH_SKILL", "\u53ef\u590d\u5236\u56de\u590d")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("replySource");
+    assertThatThrownBy(() -> service.recordAiUsage(new AiUsageRequest(
+        "18800001111", "task-1", "reply-session-1", "FORGED", "\u53ef\u590d\u5236\u56de\u590d")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("replySource");
+
+    verifyNoInteractions(customerRepository, customerAccessService, eventRepository);
+  }
+
+  @Test
   void rejectsBlankOrOversizedCopiedTextBeforeReadingCustomer() {
     assertThatThrownBy(() -> service.recordAiUsage(request("  ")))
         .isInstanceOf(ApiException.class)
@@ -118,11 +165,11 @@ class SupervisionEventServiceTest {
     AuthContext.set(new AuthUser("keeper-auth", "\u7ba1\u5bb6", Role.KEEPER, null));
 
     assertThatThrownBy(() -> service.recordAiUsage(new AiUsageRequest(
-        "18800001111", "t".repeat(37), "reply-session-1", "LLM_WITH_SKILL", "\u53ef\u590d\u5236\u56de\u590d")))
+        "18800001111", "t".repeat(37), "reply-session-1", "LLM", "\u53ef\u590d\u5236\u56de\u590d")))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("taskId");
     assertThatThrownBy(() -> service.recordAiUsage(new AiUsageRequest(
-        "18800001111", "task-1", "s".repeat(81), "LLM_WITH_SKILL", "\u53ef\u590d\u5236\u56de\u590d")))
+        "18800001111", "task-1", "s".repeat(81), "LLM", "\u53ef\u590d\u5236\u56de\u590d")))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("replySessionId");
     assertThatThrownBy(() -> service.recordAiUsage(new AiUsageRequest(
@@ -147,7 +194,7 @@ class SupervisionEventServiceTest {
         "18800001111",
         "task-1",
         "reply-session-1",
-        "LLM_WITH_SKILL",
+        "LLM",
         copiedText);
   }
 
@@ -175,7 +222,7 @@ class SupervisionEventServiceTest {
         null,
         "task-1",
         "reply-session-1",
-        "LLM_WITH_SKILL",
+        "LLM",
         null,
         null,
         "\u53ef\u590d\u5236\u56de\u590d",

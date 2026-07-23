@@ -132,7 +132,7 @@ class ChatControllerTest {
 
     mockMvc.perform(post("/api/v1/chat/ai-usage")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"phone\":\"18800001111\",\"taskId\":\"task-1\",\"replySessionId\":\"reply-session-1\",\"replySource\":\"LLM_WITH_SKILL\",\"copiedText\":\"Reply A\"}"))
+            .content("{\"phone\":\"18800001111\",\"taskId\":\"task-1\",\"replySessionId\":\"reply-session-1\",\"replySource\":\"LLM\",\"copiedText\":\"Reply A\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.recorded").value(true))
@@ -141,7 +141,7 @@ class ChatControllerTest {
     ArgumentCaptor<AiUsageRequest> captor = ArgumentCaptor.forClass(AiUsageRequest.class);
     verify(supervisionEventService).recordAiUsage(captor.capture());
     org.junit.jupiter.api.Assertions.assertEquals("Reply A", captor.getValue().copiedText());
-    org.junit.jupiter.api.Assertions.assertEquals("LLM_WITH_SKILL", captor.getValue().replySource());
+    org.junit.jupiter.api.Assertions.assertEquals("LLM", captor.getValue().replySource());
     org.mockito.Mockito.verifyNoInteractions(service);
   }
 

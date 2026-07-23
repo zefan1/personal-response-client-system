@@ -5,6 +5,7 @@ import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.api.chat.AiUsageRequest;
+import com.privateflow.modules.api.chat.ChatReplySource;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.infra.CustomerRepository;
 import com.privateflow.modules.customer.service.CustomerAccessService;
@@ -90,12 +91,23 @@ public class SupervisionEventService {
     validateOptionalLength("taskId", request.taskId(), MAX_TASK_ID_CHARS);
     validateOptionalLength("replySessionId", request.replySessionId(), MAX_REPLY_SESSION_ID_CHARS);
     validateOptionalLength("replySource", request.replySource(), MAX_REPLY_SOURCE_CHARS);
+    validateReplySource(request.replySource());
   }
 
   private void validateOptionalLength(String field, String value, int maxLength) {
     String normalized = trimToNull(value);
     if (normalized != null && normalized.length() > maxLength) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, field + " exceeds " + maxLength + " characters");
+    }
+  }
+
+  private void validateReplySource(String value) {
+    String source = trimToNull(value);
+    if (source == null
+        || (!ChatReplySource.llm().source().equals(source)
+            && !ChatReplySource.skill().source().equals(source)
+            && !ChatReplySource.fallback(null).source().equals(source))) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "replySource is invalid");
     }
   }
 
