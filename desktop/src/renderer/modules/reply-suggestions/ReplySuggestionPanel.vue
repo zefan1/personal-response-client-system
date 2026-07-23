@@ -7,7 +7,6 @@
       </div>
       <div class="reply-header-actions">
         <span class="status-pill">{{ sceneLabel(state.currentScene) }}</span>
-        <button class="primary small" type="button" @click="requestGlobalRecognize">识别聊天</button>
         <button class="secondary small" type="button" @click="toggleTextMode">
           {{ recognitionFallbackState.isTwoBoxMode ? '收起文字' : '文字通道' }}
         </button>
@@ -23,7 +22,7 @@
             {{ replySourceLabel(state.replySource.source, state.replySource.label) }}
           </span>
         </div>
-        <button class="primary small" @click="selectReply(primarySuggestion)">复制</button>
+        <button class="primary small reply-primary-copy" @click="selectReply(primarySuggestion)">复制</button>
       </div>
       <p class="reply-text">{{ primarySuggestion.text }}</p>
       <p class="reason">{{ primarySuggestion.reason || '推荐理由暂缺' }}</p>
@@ -100,13 +99,60 @@
       </div>
     </section>
 
-    <section v-if="state.sessions.length" class="reply-task-queue" aria-label="待处理队列">
+    <section v-if="state.sessions.length || state.archivedSessions.length" class="reply-task-queue" aria-label="待处理队列">
       <div class="section-inline-head compact">
         <div>
           <h3>待处理队列</h3>
           <p class="hint-text">{{ queueSummary }}</p>
         </div>
+        <div class="reply-queue-controls">
+          <button
+            v-if="queuedSessions.length"
+            class="secondary small reply-queue-clear"
+            type="button"
+            @click="archiveQueuedSessions"
+          >
+            清空
+          </button>
+          <button
+            class="secondary small reply-archive-toggle"
+            type="button"
+            :aria-expanded="archivePanelOpen"
+            @click="archivePanelOpen = !archivePanelOpen"
+          >
+            已暂存 {{ state.archivedSessions.length }}
+          </button>
+        </div>
       </div>
+
+      <div v-if="lastArchivedSessionIds.length" class="reply-archive-undo">
+        <span>已暂存 {{ lastArchivedSessionIds.length }} 个队列任务</span>
+        <button class="secondary small" type="button" @click="undoArchive">撤销</button>
+      </div>
+
+      <section v-if="archivePanelOpen" class="reply-archive-panel" aria-label="已暂存回复">
+        <input
+          v-model="archiveSearch"
+          class="reply-archive-search"
+          inputmode="search"
+          placeholder="搜索昵称或手机号后四位"
+        />
+        <div v-if="filteredArchivedSessions.length" class="reply-archive-list">
+          <article v-for="session in filteredArchivedSessions" :key="session.sessionId" class="reply-archive-row">
+            <div class="reply-archive-copy">
+              <strong>{{ sessionLabel(session) }}</strong>
+              <div class="reply-archive-meta">
+                <time :datetime="archiveIsoTime(session)">{{ archiveTimeText(session) }}</time>
+                <span>{{ queueRowText(session) }}</span>
+              </div>
+            </div>
+            <button class="secondary small reply-archive-restore" type="button" @click="restoreArchivedSession(session.sessionId)">
+              恢复
+            </button>
+          </article>
+        </div>
+        <p v-else class="reply-queue-empty">没有匹配的暂存回复。</p>
+      </section>
 
       <div v-if="queuedSessions.length" class="reply-task-list">
         <article
@@ -323,6 +369,7 @@ import type { SuggestionShowPayload } from '../copy-backfill/types';
 import {
   activateSession,
   activeReplySession,
+  archiveQueuedReplySessions,
   cleanupReplySuggestionStore,
   closeReplySession,
   handleAbnormalAlert,
@@ -335,6 +382,7 @@ import {
   regenerateReplies,
   replySuggestionState as state,
   requestLeaderHelp,
+  restoreArchivedReplySession,
   selectCandidateForSession,
   selectReply,
   showRecognizeResult,
@@ -348,6 +396,7 @@ import {
 } from './replySuggestionStore';
 import type {
   AbnormalAlertPayload,
+  ArchivedReplySession,
   CustomerSelectedPayload,
   ProfileSuggestionsPayload,
   RecognizeFailurePayload,
@@ -370,7 +419,20 @@ const copySuggestionItems = computed(() => copyBackfillState.suggestionToastSugg
 const pendingCopySuggestionCount = computed(() => copySuggestionItems.value.filter((item) => !item.resolved).length);
 const activeSession = computed(() => activeReplySession.value);
 const pendingRemovalSessionId = ref('');
+const archivePanelOpen = ref(false);
+const archiveSearch = ref('');
+const lastArchivedSessionIds = ref<string[]>([]);
 const queuedSessions = computed(() => state.sessions.filter((session) => session.sessionId !== state.activeSessionId));
+const filteredArchivedSessions = computed(() => {
+  const query = archiveSearch.value.trim().toLowerCase();
+  if (!query) return state.archivedSessions;
+  const phoneSuffix = query.replace(/\D/g, '');
+  return state.archivedSessions.filter((session) => {
+    const nicknameMatches = session.currentNickname.toLowerCase().includes(query);
+    const phoneMatches = Boolean(phoneSuffix) && session.currentPhone.endsWith(phoneSuffix);
+    return nicknameMatches || phoneMatches;
+  });
+});
 const primarySuggestion = computed(() => state.suggestions[0] ?? null);
 const secondarySuggestions = computed(() => state.suggestions.slice(1));
 const queueSummary = computed(() => {
@@ -489,6 +551,27 @@ function confirmRemoveSession(sessionId: string): void {
   }
 }
 
+function archiveQueuedSessions(): void {
+  const archivedSessions = archiveQueuedReplySessions();
+  lastArchivedSessionIds.value = archivedSessions.map((session) => session.sessionId);
+}
+
+function restoreArchivedSession(sessionId: string): void {
+  if (!restoreArchivedReplySession(sessionId)) return;
+  lastArchivedSessionIds.value = lastArchivedSessionIds.value.filter((id) => id !== sessionId);
+  archivePanelOpen.value = false;
+  archiveSearch.value = '';
+}
+
+function undoArchive(): void {
+  const activeSessionId = state.activeSessionId;
+  lastArchivedSessionIds.value.forEach((sessionId) => restoreArchivedReplySession(sessionId));
+  if (activeSessionId) {
+    activateSession(activeSessionId);
+  }
+  lastArchivedSessionIds.value = [];
+}
+
 function copySessionReply(session: ReplySession): void {
   activateSession(session.sessionId);
   const firstSuggestion = session.suggestions[0];
@@ -581,7 +664,10 @@ function queueRowText(session: ReplySession): string {
 }
 
 function sessionTimeText(session: ReplySession): string {
-  const timestamp = session.updatedAt || session.createdAt;
+  return relativeTimeText(session.updatedAt || session.createdAt);
+}
+
+function relativeTimeText(timestamp: number): string {
   const elapsedMs = Math.max(0, Date.now() - timestamp);
   const elapsedMinutes = Math.floor(elapsedMs / 60000);
   if (elapsedMinutes < 1) {
@@ -599,6 +685,14 @@ function sessionTimeText(session: ReplySession): string {
 
 function sessionIsoTime(session: ReplySession): string {
   return new Date(session.updatedAt || session.createdAt).toISOString();
+}
+
+function archiveIsoTime(session: ArchivedReplySession): string {
+  return new Date(session.archivedAt).toISOString();
+}
+
+function archiveTimeText(session: ArchivedReplySession): string {
+  return `暂存于 ${relativeTimeText(session.archivedAt)}`;
 }
 
 function sessionStatusClass(session: ReplySession): string {

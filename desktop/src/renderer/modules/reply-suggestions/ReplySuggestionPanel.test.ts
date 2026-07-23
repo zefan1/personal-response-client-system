@@ -258,6 +258,75 @@ describe('ReplySuggestionPanel', () => {
     app.unmount();
   });
 
+  it('archives queued replies and restores the matching original reply from the local archive', async () => {
+    const { app, host, eventBus } = await mountPanel();
+
+    eventBus.emit('recognize:start', { sessionId: 'session-a', source: 'BUTTON_CLICK' });
+    eventBus.emit('recognize:result', { sessionId: 'session-a', response: response('18800001111', [suggestion('First reply')]) });
+    eventBus.emit('recognize:start', { sessionId: 'session-b', source: 'BUTTON_CLICK' });
+    eventBus.emit('recognize:result', { sessionId: 'session-b', response: response('18800002222', [suggestion('Second reply')]) });
+    await flushUi();
+
+    const clearButton = host.querySelector('.reply-queue-clear') as HTMLButtonElement | null;
+    expect(clearButton).toBeTruthy();
+    clearButton?.click();
+    await flushUi();
+
+    expect(host.querySelectorAll('.reply-task-row')).toHaveLength(0);
+    expect(host.querySelector('.reply-archive-toggle')?.textContent).toContain('已暂存 1');
+
+    (host.querySelector('.reply-archive-toggle') as HTMLButtonElement | null)?.click();
+    await flushUi();
+    const searchInput = host.querySelector('.reply-archive-search') as HTMLInputElement | null;
+    expect(searchInput).toBeTruthy();
+    if (searchInput) {
+      searchInput.value = '1111';
+      searchInput.dispatchEvent(new Event('input'));
+    }
+    await flushUi();
+
+    expect(host.querySelector('.reply-archive-list')?.textContent).toContain('Alice');
+    (host.querySelector('.reply-archive-restore') as HTMLButtonElement | null)?.click();
+    await flushUi();
+
+    expect(host.textContent).toContain('First reply');
+    expect(host.querySelector('.reply-archive-toggle')?.textContent).toContain('已暂存 0');
+    app.unmount();
+  });
+
+  it('undoes queue archival while keeping the previously active reply selected', async () => {
+    const { app, host, eventBus } = await mountPanel();
+
+    eventBus.emit('recognize:start', { sessionId: 'session-a', source: 'BUTTON_CLICK' });
+    eventBus.emit('recognize:result', { sessionId: 'session-a', response: response('18800001111', [suggestion('First reply')]) });
+    eventBus.emit('recognize:start', { sessionId: 'session-b', source: 'BUTTON_CLICK' });
+    eventBus.emit('recognize:result', { sessionId: 'session-b', response: response('18800002222', [suggestion('Second reply')]) });
+    await flushUi();
+
+    (host.querySelector('.reply-queue-clear') as HTMLButtonElement | null)?.click();
+    await flushUi();
+    const undoButton = [...host.querySelectorAll('.reply-archive-undo button')]
+      .find((button) => button.textContent?.trim() === '撤销') as HTMLButtonElement | undefined;
+    expect(undoButton).toBeTruthy();
+    undoButton?.click();
+    await flushUi();
+
+    expect(host.querySelectorAll('.reply-task-row')).toHaveLength(1);
+    expect(host.querySelector('.reply-primary-card')?.textContent).toContain('Second reply');
+    app.unmount();
+  });
+
+  it('removes the duplicate header recognition action and keeps the primary copy control fixed', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    eventBus.emit('recognize:result', { response: response('18800001111', [suggestion('Primary reply')]) });
+    await flushUi();
+
+    const headerButtons = [...host.querySelectorAll('.reply-hero button')];
+    expect(headerButtons.some((button) => button.textContent?.trim() === '识别聊天')).toBe(false);
+    expect(host.querySelector('.reply-primary-copy')).toBeTruthy();
+    app.unmount();
+  });
+
   it('keeps the full reply workflow while promoting the first suggestion above the task queue', async () => {
     const { app, host, eventBus } = await mountPanel();
 

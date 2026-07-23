@@ -167,3 +167,7 @@ export type ReplySession = {
   activeHelpId: string | number | '';
   toast: string;
 };
+
+export type ArchivedReplySession = ReplySession & {
+  archivedAt: number;
+};

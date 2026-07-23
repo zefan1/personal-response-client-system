@@ -214,6 +214,68 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.activeSessionId).toBe('session-reusable');
   });
 
+  it('archives queued replies without changing the active reply and restores the original reply', async () => {
+    const { replies } = await freshStore();
+    replies.showRecognizeResult({
+      sessionId: 'session-a',
+      response: response('18800001111', [suggestion('First reply')])
+    });
+    replies.showRecognizeResult({
+      sessionId: 'session-b',
+      response: response('18800002222', [suggestion('Second reply')])
+    });
+
+    const archived = replies.archiveQueuedReplySessions();
+
+    expect(replies.replySuggestionState.activeSessionId).toBe('session-b');
+    expect(replies.replySuggestionState.sessions).toEqual([
+      expect.objectContaining({ sessionId: 'session-b' })
+    ]);
+    expect(archived).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-a',
+        currentNickname: 'Alice',
+        currentPhone: '18800001111',
+        suggestions: [suggestion('First reply')]
+      })
+    ]);
+    expect(replies.replySuggestionState.archivedSessions).toHaveLength(1);
+
+    expect(replies.restoreArchivedReplySession('session-a')).toBe(true);
+    expect(replies.replySuggestionState.activeSessionId).toBe('session-a');
+    expect(replies.replySuggestionState.suggestions).toEqual([suggestion('First reply')]);
+    expect(replies.replySuggestionState.archivedSessions).toEqual([]);
+  });
+
+  it('persists archived replies across a store cleanup and restores the original reply after hydration', async () => {
+    const { replies } = await freshStore();
+    replies.hydrateReplySuggestionStore();
+    replies.showRecognizeResult({
+      sessionId: 'session-a',
+      response: response('18800001111', [suggestion('First reply')])
+    });
+    replies.showRecognizeResult({
+      sessionId: 'session-b',
+      response: response('18800002222', [suggestion('Second reply')])
+    });
+    replies.archiveQueuedReplySessions();
+    replies.cleanupReplySuggestionStore();
+
+    vi.resetModules();
+    const restored = await import('./replySuggestionStore');
+    restored.hydrateReplySuggestionStore();
+
+    expect(restored.replySuggestionState.archivedSessions).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-a',
+        currentPhone: '18800001111',
+        suggestions: [suggestion('First reply')]
+      })
+    ]);
+    expect(restored.restoreArchivedReplySession('session-a')).toBe(true);
+    expect(restored.replySuggestionState.suggestions).toEqual([suggestion('First reply')]);
+  });
+
   it('persists account A before clearing memory and never writes the cleanup snapshot under account B', async () => {
     const { replies } = await freshStore();
     localStorage.setItem('desktop_config', JSON.stringify({ accountUsername: 'account-a' }));
