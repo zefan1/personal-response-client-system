@@ -3537,6 +3537,87 @@ textarea {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.ops-filter-bar.supervision {
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+}
+
+.ops-filter-bar.supervision label,
+.supervision-events-head > label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: #475467;
+  font-size: 13px;
+}
+
+.ops-supervision-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ops-supervision-metric {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.ops-supervision-metric > span,
+.ops-supervision-metric small {
+  color: #475467;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.ops-supervision-metric > strong {
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.ops-supervision-metric > p {
+  margin: 0;
+  color: #344054;
+  font-weight: 700;
+}
+
+.supervision-events-head {
+  margin-top: 4px;
+}
+
+.ops-table-row.supervision-event {
+  min-width: 1020px;
+  grid-template-columns: minmax(120px, 1fr) minmax(90px, 0.8fr) minmax(90px, 0.75fr) minmax(100px, 0.85fr) minmax(130px, 1fr) minmax(80px, 0.65fr) minmax(220px, 2fr);
+}
+
+.ops-table-row.supervision-event > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ops-table-row.supervision-event > span:nth-child(5) {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ops-table-row.supervision-event > span:nth-child(5) small {
+  color: #667085;
+  overflow-wrap: anywhere;
+}
+
+.ops-supervision-reply-preview {
+  color: #344054;
+  line-height: 1.45;
+}
+
+.governance-settings label:last-child select[multiple] {
+  min-height: 92px;
+}
+
 .ops-filter-bar.tag-filters {
   grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(140px, 0.8fr));
 }
@@ -4141,6 +4222,8 @@ textarea {
 
   .ops-filter-bar.tag-filters,
   .ops-filter-bar.tag-value-filters,
+  .ops-filter-bar.supervision,
+  .ops-supervision-metric-grid,
   .ops-tag-detail-grid,
   .ops-form-section-head,
   .ops-rule-tag-condition {

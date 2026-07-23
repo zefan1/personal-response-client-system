@@ -146,7 +146,15 @@ const apiData: Record<string, unknown> = {
     'datasource.mapping_version_max': '50',
     'datasource.import_max_rows': '5000',
     'datasource.manual_sync_timeout_s': '60',
-    'datasource.sync_status_refresh_s': '30'
+    'datasource.sync_status_refresh_s': '30',
+    'supervision.record_retention_days': '180',
+    'supervision.technical_log_retention_days': '30',
+    'supervision.processing_sla_minutes': '1440',
+    'supervision.conversion_target_stages_json': '["已成交"]',
+    'chat.expired_reply_task_retention_days': '3',
+    'chat.unfinished_task_cap': '20',
+    'chat.recent_task_display_cap': '30',
+    'chat.recognition_concurrency': '4'
   },
   '/admin/api/v1/datasources': {
     items: [{ id: 10, name: '企微客资表', sheetId: 'sheet-a', sourceTable: 'leads', enabled: true }]
@@ -437,6 +445,28 @@ const apiData: Record<string, unknown> = {
     ],
     targetTypes: [{ type: 'notice', label: '公告' }]
   },
+  '/admin/api/v1/supervision/metadata': {
+    operators: ['alice'],
+    channels: ['WECHAT'],
+    leadSources: ['ads-form'],
+    customerStages: ['跟进中', '已成交'],
+    eventTypes: ['REPLY_COPIED']
+  },
+  '/admin/api/v1/supervision/metrics': {
+    metrics: {
+      AI_USAGE_RATE: { numerator: 2, denominator: 4, rate: 0.5, numeratorLabel: '已复制客户', denominatorLabel: '已生成客户', conversionTargetConfigured: true },
+      AI_COVERAGE: { numerator: 3, denominator: 5, rate: 0.6, numeratorLabel: 'AI 已处理客户', denominatorLabel: '进入待处理客户', conversionTargetConfigured: true },
+      PROCESSING_EFFICIENCY: { numerator: 4, denominator: 5, rate: 0.8, numeratorLabel: 'SLA 内处理客户', denominatorLabel: '进入待处理客户', conversionTargetConfigured: true },
+      EMPLOYEE_CONVERSION: { numerator: 1, denominator: 4, rate: 0.25, numeratorLabel: '目标阶段客户', denominatorLabel: '归属客户', conversionTargetConfigured: true },
+      AI_ASSOCIATED_CONVERSION: { numerator: 1, denominator: 2, rate: 0.5, numeratorLabel: '目标阶段 AI 客户', denominatorLabel: '已复制 AI 回复客户', conversionTargetConfigured: true }
+    }
+  },
+  '/admin/api/v1/supervision/events': {
+    items: [{ id: 91, eventType: 'REPLY_COPIED', operatorUsername: 'alice', customerPhoneMasked: '138****0001', channelCode: 'WECHAT', leadSource: 'ads-form', replySource: 'LLM', replyPreview: '您好，已为您整理可选方案。', occurredAt: '2026-07-03T09:00:00Z' }],
+    total: 1,
+    page: 1,
+    pageSize: 20
+  },
   '/admin/api/v1/health': {
     status: 'OK',
     refreshIntervalS: 45,
@@ -574,6 +604,8 @@ describe('AdminConsole product surface', () => {
       '跟进规则引擎配置',
       '客户标签与分层',
       '运营分析看板',
+      '主管监督记录',
+      '数据保留与任务设置',
       '版本管理',
       '系统公告',
       '操作审计日志',
@@ -1968,6 +2000,62 @@ describe('AdminConsole product surface', () => {
     expect(apiMocks.getJson.mock.calls.length).toBeGreaterThan(0);
     expect(apiMocks.getJson.mock.calls.every((call) => String(call[0]).startsWith('/admin/api/v1/tags/'))).toBe(true);
 
+    app.unmount();
+  });
+
+  it('loads supervisor metrics and saves governance settings from the administrator console', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '主管监督记录').click();
+    await flushSave();
+    await flushSave();
+
+    expect(mainText(host)).toContain('AI 使用率');
+    expect(mainText(host)).toContain('已复制客户');
+    expect(mainText(host)).toContain('转换目标已配置');
+    expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringContaining('/admin/api/v1/supervision/metrics'));
+    expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringContaining('/admin/api/v1/supervision/events'));
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/supervision/metadata');
+    const eventTypeSelect = controlByLabel<HTMLSelectElement>(host, '事件类型');
+    expect([...eventTypeSelect.options].map((option) => option.value)).toEqual(['', 'REPLY_COPIED']);
+
+    findSubnavButton(host, '数据保留与任务设置').click();
+    await flushSave();
+    const retentionInput = controlByLabel<HTMLInputElement>(host, '主管监督记录保留天数');
+    setInputValue(retentionInput, '200');
+    findButton(host, '保存治理设置').click();
+    await flushSave();
+
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/supervision.record_retention_days', { value: '200' });
+    expect(mainText(host)).toContain('转换目标阶段');
+    app.unmount();
+  });
+
+  it('reloads current governance settings and reports partial-save risk when one update fails', async () => {
+    const { app, host } = await mountConsole();
+    findSubnavButton(host, '数据保留与任务设置').click();
+    await flushSave();
+    apiMocks.getJson.mockClear();
+    apiMocks.putJson.mockImplementation(async (path: string) => path.endsWith('technical_log_retention_days')
+      ? { success: false, data: null, errorCode: '70-10001', message: 'range invalid' }
+      : { success: true, data: {}, errorCode: null, message: null });
+
+    findButton(host, '保存治理设置').click();
+    await flushSave();
+    await flushSave();
+
+    expect(mainText(host)).toContain('保存未完全成功，当前生效设置已重新加载');
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/configs');
+    app.unmount();
+  });
+
+  it('does not display supervisor pages or request supervisor endpoints for tag-only managers', async () => {
+    const { app, host } = await mountConsole({ accountName: '组长', tagManagementOnly: true });
+    await flushSave();
+
+    expect(mainText(host)).not.toContain('主管监督记录');
+    expect(mainText(host)).not.toContain('数据保留与任务设置');
+    expect(apiMocks.getJson.mock.calls.map((call) => String(call[0])).every((path) => !path.startsWith('/admin/api/v1/supervision/'))).toBe(true);
     app.unmount();
   });
 

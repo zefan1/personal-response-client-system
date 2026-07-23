@@ -1518,6 +1518,154 @@
           </section>
         </article>
 
+        <article v-if="activeSection.key === 'supervision-dashboard'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>主管监督记录</h2>
+              <p>按员工、渠道和线索来源核对 AI 使用、处理效率与转化口径；复制仅表示已使用 AI，不表示已发送。</p>
+            </div>
+            <button class="secondary small" type="button" :disabled="loading" @click="applySupervisionFilters">应用筛选</button>
+          </div>
+          <div class="ops-filter-bar supervision">
+            <label>
+              <span class="ops-label-title">开始日期</span>
+              <input v-model="supervisionFilters.from" type="date" />
+            </label>
+            <label>
+              <span class="ops-label-title">结束日期</span>
+              <input v-model="supervisionFilters.to" type="date" />
+            </label>
+            <label>
+              <span class="ops-label-title">员工</span>
+              <select v-model="supervisionFilters.operator">
+                <option value="">全部员工</option>
+                <option v-for="operator in supervisionMetadata.operators" :key="operator" :value="operator">{{ operator }}</option>
+              </select>
+            </label>
+            <label>
+              <span class="ops-label-title">渠道</span>
+              <select v-model="supervisionFilters.channel">
+                <option value="">全部渠道</option>
+                <option v-for="channel in supervisionMetadata.channels" :key="channel" :value="channel">{{ channel }}</option>
+              </select>
+            </label>
+            <label>
+              <span class="ops-label-title">线索来源</span>
+              <select v-model="supervisionFilters.leadSource">
+                <option value="">全部线索来源</option>
+                <option v-for="source in supervisionMetadata.leadSources" :key="source" :value="source">{{ source }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="ops-supervision-metric-grid">
+            <section v-for="metric in supervisionMetricCards" :key="metric.key" class="ops-supervision-metric">
+              <span>{{ metric.label }}</span>
+              <strong>{{ percentLabel(metric.rate) }}</strong>
+              <p>{{ metric.numerator }} / {{ metric.denominator }}</p>
+              <small>{{ metric.numeratorLabel }} / {{ metric.denominatorLabel }}</small>
+              <small v-if="metric.conversionTargetConfigured === false" class="warn-text">尚未配置转换目标阶段</small>
+            </section>
+          </div>
+          <p v-if="!supervisionMetricCards.length" class="ops-empty">暂无监督指标数据。</p>
+
+          <div class="ops-panel-head supervision-events-head">
+            <div>
+              <h3>监督事件明细</h3>
+              <p>客户手机号已脱敏；不展示截图、OCR 或原始图片数据。</p>
+            </div>
+            <label>
+              <span class="ops-label-title">事件类型</span>
+              <select v-model="supervisionFilters.eventType" @change="applySupervisionFilters">
+                <option value="">全部事件</option>
+                <option v-for="eventType in supervisionMetadata.eventTypes" :key="eventType" :value="eventType">{{ supervisionEventLabel(eventType) }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="ops-table supervision-events">
+            <div class="ops-table-row supervision-event head">
+              <span>时间</span>
+              <span>事件</span>
+              <span>员工</span>
+              <span>客户</span>
+              <span>渠道/来源</span>
+              <span>回复来源</span>
+              <span>回复预览</span>
+            </div>
+            <div v-for="event in supervisionEvents" :key="event.id" class="ops-table-row supervision-event">
+              <span>{{ formatDate(event.occurredAt) }}</span>
+              <span>{{ supervisionEventLabel(event.eventType) }}</span>
+              <span>{{ event.operatorUsername || '-' }}</span>
+              <span>{{ event.customerPhoneMasked || '-' }}</span>
+              <span>{{ event.channelCode || '-' }}<small v-if="event.leadSource">{{ event.leadSource }}</small></span>
+              <span>{{ event.replySource || '-' }}</span>
+              <span class="ops-supervision-reply-preview">{{ event.replyPreview || '无回复文本' }}</span>
+            </div>
+            <p v-if="!supervisionEvents.length" class="ops-empty">当前筛选没有监督事件。</p>
+          </div>
+          <div class="ops-pagination">
+            <span>共 {{ supervisionEventPage.total }} 条，第 {{ supervisionEventPage.page }} / {{ supervisionEventTotalPages }} 页</span>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="supervisionEventPage.page <= 1 || loading" @click="changeSupervisionEventPage(supervisionEventPage.page - 1)">上一页</button>
+              <button class="secondary small" type="button" :disabled="supervisionEventPage.page >= supervisionEventTotalPages || loading" @click="changeSupervisionEventPage(supervisionEventPage.page + 1)">下一页</button>
+            </div>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'governance-settings'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>数据保留与任务设置</h2>
+              <p>仅管理员可修改监督记录、技术日志与员工任务容量；员工工作台不提供这些设置。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveGovernanceSettings">保存治理设置</button>
+          </div>
+          <div class="ops-form-grid governance-settings">
+            <label>
+              <span class="ops-label-title">主管监督记录保留天数</span>
+              <input v-model.number="governanceDraft.recordRetentionDays" type="number" min="30" max="730" />
+              <small>范围 30-730 天</small>
+            </label>
+            <label>
+              <span class="ops-label-title">技术日志保留天数</span>
+              <input v-model.number="governanceDraft.technicalLogRetentionDays" type="number" min="7" max="180" />
+              <small>范围 7-180 天</small>
+            </label>
+            <label>
+              <span class="ops-label-title">处理 SLA 分钟</span>
+              <input v-model.number="governanceDraft.processingSlaMinutes" type="number" min="15" max="10080" />
+              <small>范围 15-10080 分钟</small>
+            </label>
+            <label>
+              <span class="ops-label-title">过期回复任务保留天数</span>
+              <input v-model.number="governanceDraft.expiredReplyTaskRetentionDays" type="number" min="1" max="14" />
+              <small>范围 1-14 天</small>
+            </label>
+            <label>
+              <span class="ops-label-title">未完成任务上限</span>
+              <input v-model.number="governanceDraft.unfinishedTaskCap" type="number" min="10" max="50" />
+              <small>每名员工范围 10-50 条</small>
+            </label>
+            <label>
+              <span class="ops-label-title">最近任务显示上限</span>
+              <input v-model.number="governanceDraft.recentTaskDisplayCap" type="number" min="20" max="100" />
+              <small>范围 20-100 条</small>
+            </label>
+            <label>
+              <span class="ops-label-title">识图并发</span>
+              <input v-model.number="governanceDraft.recognitionConcurrency" type="number" min="1" max="16" />
+              <small>全局范围 1-16 个任务</small>
+            </label>
+            <label>
+              <span class="ops-label-title">转换目标阶段</span>
+              <select v-model="governanceDraft.conversionTargetStages" multiple :size="Math.min(6, Math.max(3, supervisionMetadata.customerStages.length))">
+                <option v-for="stage in supervisionMetadata.customerStages" :key="stage" :value="stage">{{ stage }}</option>
+              </select>
+              <small>选项来自当前客户档案的阶段值，不预设业务阶段。</small>
+            </label>
+          </div>
+          <p v-if="!supervisionMetadata.customerStages.length" class="ops-empty">当前没有可配置的客户阶段，请先同步或导入客户档案数据。</p>
+        </article>
+
         <article v-if="activeSection.key === 'version-management'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
@@ -2013,6 +2161,8 @@ type SectionKey =
   | 'followup-rules'
   | 'customer-tags'
   | 'analytics-dashboard'
+  | 'supervision-dashboard'
+  | 'governance-settings'
   | 'version-management'
   | 'system-notices'
   | 'audit-logs'
@@ -2080,6 +2230,28 @@ type AdminNavGroup = {
   pages: AdminSection[];
 };
 
+const SUPERVISION_METRIC_DEFINITIONS = [
+  { key: 'AI_USAGE_RATE', label: 'AI 使用率' },
+  { key: 'AI_COVERAGE', label: 'AI 覆盖率' },
+  { key: 'PROCESSING_EFFICIENCY', label: '处理效率' },
+  { key: 'EMPLOYEE_CONVERSION', label: '员工转化率' },
+  { key: 'AI_ASSOCIATED_CONVERSION', label: 'AI 关联转化率' }
+];
+
+const SUPERVISION_EVENT_LABELS: Record<string, string> = {
+  TASK_CREATED: '创建任务',
+  PENDING_ENTERED: '进入待处理',
+  RECOGNITION_SUCCEEDED: '识别成功',
+  RECOGNITION_FAILED: '识别失败',
+  CUSTOMER_SELECTED: '选择客户',
+  REPLY_GENERATED: '生成回复',
+  REPLY_COPIED: '复制 AI 回复',
+  REPLY_REGENERATED: '重新生成回复',
+  HELP_REQUESTED: '请求协助',
+  TEMPLATE_SAVED: '保存模板',
+  TEMPLATE_COPIED: '复制模板'
+};
+
 const sections: AdminSection[] = [
   { key: 'skill-scenes', groupKey: 'config-center', group: '运营 A', module: 'A', title: 'Skill 场景管理', subtitle: '场景绑定、测试、调用监控', description: '按业务场景和线索类型维护 AI 路由，测试真实话术效果并观察调用质量。', primaryAction: '新增 Skill 绑定' },
   { key: 'configuration-center', groupKey: 'config-center', group: '运营 B', module: 'B', title: '配置中心', subtitle: 'AI、LLM、识图、Prompt', description: '集中管理 Skill 环境、LLM 思考环境、识图环境、Prompt 模板、企业红线和降级回复。', primaryAction: '新增 Skill 环境' },
@@ -2089,10 +2261,12 @@ const sections: AdminSection[] = [
   { key: 'followup-rules', groupKey: 'org-rules-tags', group: '运营 F', module: 'F', title: '跟进规则引擎配置', subtitle: '条件、动作、启停', description: '配置跟进提醒、标签建议和通知组长的业务规则。', primaryAction: '新增规则' },
   { key: 'customer-tags', groupKey: 'org-rules-tags', group: '运营 G', module: 'G', title: '客户标签与分层', subtitle: '标签分类、标签值、合并', description: '维护 AI 和运营共用的客户标签分类、标签值和历史合并关系。', primaryAction: '新增分类' },
   { key: 'analytics-dashboard', groupKey: 'insight-ops', group: '运营 H', module: 'H', title: '运营分析看板', subtitle: '使用、漏斗、来源、风险', description: '查看 AI 使用、转化漏斗、同事效能、客户来源、阶段、风险和内容排行。', primaryAction: '导出当前看板' },
-  { key: 'version-management', groupKey: 'insight-ops', group: '运营 I', module: 'I', title: '版本管理', subtitle: '桌面版本、发布、撤回', description: '管理桌面端版本、发布策略、灰度和撤回记录。', primaryAction: '新增版本' },
-  { key: 'system-notices', groupKey: 'insight-ops', group: '运营 J', module: 'J', title: '系统公告', subtitle: '公告、排期、停止', description: '发布工具能力变化、维护窗口和故障通知。', primaryAction: '新增公告' },
-  { key: 'audit-logs', groupKey: 'insight-ops', group: '运营 K', module: 'K', title: '操作审计日志', subtitle: '查询、详情、导出', description: '查询、筛选和导出关键后台操作，审计日志不可修改。', primaryAction: '导出 CSV' },
-  { key: 'system-health', groupKey: 'insight-ops', group: '运营 L', module: 'L', title: '系统健康监控', subtitle: 'DB、缓存、AI、识图、表格', description: '监控数据库、缓存、Skill、识图和表格通道状态，查看故障与恢复情况。', primaryAction: '手动刷新' }
+  { key: 'supervision-dashboard', groupKey: 'insight-ops', group: '运营 I', module: 'I', title: '主管监督记录', subtitle: '指标、事件、质量追溯', description: '按员工、渠道和线索来源核对 AI 使用、处理效率和转化口径。', primaryAction: '应用筛选' },
+  { key: 'governance-settings', groupKey: 'insight-ops', group: '运营 J', module: 'J', title: '数据保留与任务设置', subtitle: '留存、SLA、任务容量', description: '集中设置监督记录、技术日志和任务队列的留存与容量。', primaryAction: '保存治理设置' },
+  { key: 'version-management', groupKey: 'insight-ops', group: '运营 K', module: 'K', title: '版本管理', subtitle: '桌面版本、发布、撤回', description: '管理桌面端版本、发布策略、灰度和撤回记录。', primaryAction: '新增版本' },
+  { key: 'system-notices', groupKey: 'insight-ops', group: '运营 L', module: 'L', title: '系统公告', subtitle: '公告、排期、停止', description: '发布工具能力变化、维护窗口和故障通知。', primaryAction: '新增公告' },
+  { key: 'audit-logs', groupKey: 'insight-ops', group: '运营 M', module: 'M', title: '操作审计日志', subtitle: '查询、详情、导出', description: '查询、筛选和导出关键后台操作，审计日志不可修改。', primaryAction: '导出 CSV' },
+  { key: 'system-health', groupKey: 'insight-ops', group: '运营 N', module: 'N', title: '系统健康监控', subtitle: 'DB、缓存、AI、识图、表格', description: '监控数据库、缓存、Skill、识图和表格通道状态，查看故障与恢复情况。', primaryAction: '手动刷新' }
 ];
 
 const SKILL_SCENE_OPTIONS = [
@@ -2223,7 +2397,7 @@ const allNavGroups: AdminNavGroup[] = [
   { key: 'config-center', title: '配置中心', subtitle: 'Skill、AI、识图、Prompt', defaultKey: 'skill-scenes', pages: sections.filter((section) => section.groupKey === 'config-center') },
   { key: 'data-content', title: '数据源与内容', subtitle: '数据对接、速搜内容', defaultKey: 'data-integration', pages: sections.filter((section) => section.groupKey === 'data-content') },
   { key: 'org-rules-tags', title: '组织与规则', subtitle: '账号、规则、标签', defaultKey: 'account-permissions', pages: sections.filter((section) => section.groupKey === 'org-rules-tags') },
-  { key: 'insight-ops', title: '分析与系统', subtitle: '看板、版本、公告、审计、健康', defaultKey: 'analytics-dashboard', pages: sections.filter((section) => section.groupKey === 'insight-ops') }
+  { key: 'insight-ops', title: '分析与系统', subtitle: '看板、监督、配置、审计', defaultKey: 'analytics-dashboard', pages: sections.filter((section) => section.groupKey === 'insight-ops') }
 ];
 
 const navGroups = computed<AdminNavGroup[]>(() => tagManagementOnly.value
@@ -2537,6 +2711,34 @@ const loginDesktopDraft = reactive({
   workbenchRefreshIntervalS: 60,
   skillSubscriptionExpireAt: ''
 });
+const supervisionMetrics = ref<Record<string, AnyRecord>>({});
+const supervisionEvents = ref<AnyRecord[]>([]);
+const supervisionMetadata = reactive({
+  operators: [] as string[],
+  channels: [] as string[],
+  leadSources: [] as string[],
+  customerStages: [] as string[],
+  eventTypes: [] as string[]
+});
+const supervisionFilters = reactive({
+  from: localDateInput(29),
+  to: localDateInput(0),
+  operator: '',
+  channel: '',
+  leadSource: '',
+  eventType: ''
+});
+const supervisionEventPage = reactive({ total: 0, page: 1, pageSize: 20 });
+const governanceDraft = reactive({
+  recordRetentionDays: 180,
+  technicalLogRetentionDays: 30,
+  processingSlaMinutes: 1440,
+  expiredReplyTaskRetentionDays: 3,
+  unfinishedTaskCap: 20,
+  recentTaskDisplayCap: 30,
+  recognitionConcurrency: 4,
+  conversionTargetStages: [] as string[]
+});
 
 let healthTimer: number | null = null;
 let analyticsTimer: number | null = null;
@@ -2606,10 +2808,25 @@ const activeMetrics = computed(() => {
       { label: '健康', value: healthStatusText.value, help: '系统、AI、表格、缓存状态' },
       { label: '告警', value: filteredHealthAlerts.value.length, help: '按恢复状态筛选' },
       { label: '最近刷新', value: healthLastRefreshAt.value || '未刷新', help: '连续失败会暂停自动刷新' }
+    ],
+    'supervision-dashboard': [
+      { label: '监督指标', value: supervisionMetricCards.value.length, help: '五项分子、分母和比率口径' },
+      { label: '事件记录', value: supervisionEventPage.total, help: '按当前筛选查看脱敏明细' },
+      { label: '转换目标', value: supervisionMetrics.value.EMPLOYEE_CONVERSION?.conversionTargetConfigured ? '已配置' : '未配置', help: '未配置时转换率明确标记' }
+    ],
+    'governance-settings': [
+      { label: '监督留存', value: `${governanceDraft.recordRetentionDays} 天`, help: '主管监督记录保留期限' },
+      { label: '技术日志', value: `${governanceDraft.technicalLogRetentionDays} 天`, help: 'LLM 与 Skill 技术日志期限' },
+      { label: '识图并发', value: governanceDraft.recognitionConcurrency, help: '全局并发任务数量' }
     ]
   };
   return metricsBySection[activeSectionKey.value] ?? [];
 });
+const supervisionMetricCards = computed(() => SUPERVISION_METRIC_DEFINITIONS
+  .map((definition) => ({ key: definition.key, label: definition.label, ...supervisionMetrics.value[definition.key] }))
+  .filter((metric) => metric.numerator !== undefined && metric.denominator !== undefined));
+const supervisionEventTotalPages = computed(() => Math.max(1, Math.ceil(
+  supervisionEventPage.total / supervisionEventPage.pageSize)));
 const filteredRules = computed(() => rules.value.filter((rule) => {
   const matchesKeyword = !ruleKeyword.value.trim() || String(rule.name ?? '').includes(ruleKeyword.value.trim());
   const matchesType = !ruleActionType.value || rule.actionType === ruleActionType.value;
@@ -2975,7 +3192,9 @@ async function refreshActiveSection() {
   if (activeSection.value.groupKey === 'config-center') await loadSkillAi();
   if (activeSection.value.groupKey === 'data-content') await loadDataContent();
   if (activeSection.value.groupKey === 'org-rules-tags') await loadOrgRulesTags();
-  if (activeSection.value.groupKey === 'insight-ops') await loadInsightOps();
+  if (activeSectionKey.value === 'supervision-dashboard') await loadSupervisionDashboard();
+  else if (activeSectionKey.value === 'governance-settings') await loadGovernanceSettings();
+  else if (activeSection.value.groupKey === 'insight-ops') await loadInsightOps();
 }
 
 function startPrimaryAction() {
@@ -2987,6 +3206,8 @@ function startPrimaryAction() {
   if (activeSectionKey.value === 'followup-rules') openForm('rule');
   if (activeSectionKey.value === 'customer-tags') openForm(tagView.value === 'categories' ? 'tagCategory' : 'tagValue');
   if (activeSectionKey.value === 'analytics-dashboard') downloadAnalyticsCsv();
+  if (activeSectionKey.value === 'supervision-dashboard') void applySupervisionFilters();
+  if (activeSectionKey.value === 'governance-settings') void saveGovernanceSettings();
   if (activeSectionKey.value === 'version-management') openForm('version');
   if (activeSectionKey.value === 'system-notices') openForm('notice');
   if (activeSectionKey.value === 'audit-logs') void exportAuditLogs();
@@ -3176,6 +3397,179 @@ async function loadInsightOps() {
     }
     await loadAnalyticsDashboard({ silent: true });
   }, '分析与系统运营已刷新');
+}
+
+async function loadSupervisionDashboard() {
+  await runWithNotice(async () => {
+    const [metadataPayload, metricsPayload, eventsPayload] = await Promise.all([
+      getJson<unknown>('/admin/api/v1/supervision/metadata'),
+      getJson<unknown>(supervisionMetricsPath()),
+      getJson<unknown>(supervisionEventsPath())
+    ]);
+    applySupervisionMetadata(recordFromResponse(metadataPayload));
+    const metrics = recordFromResponse(metricsPayload).metrics;
+    supervisionMetrics.value = metrics && typeof metrics === 'object' && !Array.isArray(metrics)
+      ? metrics as Record<string, AnyRecord>
+      : {};
+    applySupervisionEvents(recordFromResponse(eventsPayload));
+  }, '主管监督记录已刷新');
+}
+
+async function applySupervisionFilters() {
+  supervisionEventPage.page = 1;
+  await loadSupervisionDashboard();
+}
+
+async function changeSupervisionEventPage(page: number) {
+  supervisionEventPage.page = Math.max(1, Math.min(page, supervisionEventTotalPages.value));
+  await loadSupervisionDashboard();
+}
+
+async function loadGovernanceSettings() {
+  await runWithNotice(async () => {
+    const [configPayload, metadataPayload] = await Promise.all([
+      getJson<unknown>('/admin/api/v1/configs'),
+      getJson<unknown>('/admin/api/v1/supervision/metadata')
+    ]);
+    configs.value = configEntries(configPayload);
+    applySupervisionMetadata(recordFromResponse(metadataPayload));
+    hydrateGovernanceDraft();
+  }, '治理设置已刷新');
+}
+
+async function saveGovernanceSettings() {
+  await runWithNotice(async () => {
+    const entries = governanceSettingsEntries();
+    validateGovernanceSettings(entries);
+    try {
+      for (const [key, value] of entries) {
+        await putJson(`/admin/api/v1/configs/${key}`, { value: String(value) });
+      }
+    } catch (error) {
+      await reloadGovernanceSettingsAfterSaveFailure(error);
+      return;
+    }
+    await reloadGovernanceSettings();
+  }, '治理设置已保存');
+}
+
+function governanceSettingsEntries(): Array<[string, number | string]> {
+  return [
+    ['supervision.record_retention_days', governanceDraft.recordRetentionDays],
+    ['supervision.technical_log_retention_days', governanceDraft.technicalLogRetentionDays],
+    ['supervision.processing_sla_minutes', governanceDraft.processingSlaMinutes],
+    ['chat.expired_reply_task_retention_days', governanceDraft.expiredReplyTaskRetentionDays],
+    ['chat.unfinished_task_cap', governanceDraft.unfinishedTaskCap],
+    ['chat.recent_task_display_cap', governanceDraft.recentTaskDisplayCap],
+    ['chat.recognition_concurrency', governanceDraft.recognitionConcurrency],
+    ['supervision.conversion_target_stages_json', JSON.stringify(governanceDraft.conversionTargetStages)]
+  ];
+}
+
+function validateGovernanceSettings(entries: Array<[string, number | string]>) {
+  const ranges: Record<string, [number, number]> = {
+    'supervision.record_retention_days': [30, 730],
+    'supervision.technical_log_retention_days': [7, 180],
+    'supervision.processing_sla_minutes': [15, 10080],
+    'chat.expired_reply_task_retention_days': [1, 14],
+    'chat.unfinished_task_cap': [10, 50],
+    'chat.recent_task_display_cap': [20, 100],
+    'chat.recognition_concurrency': [1, 16]
+  };
+  for (const [key, value] of entries) {
+    const range = ranges[key];
+    if (!range) continue;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < range[0] || parsed > range[1]) {
+      throw new Error(`${key} 范围为 ${range[0]}-${range[1]}`);
+    }
+  }
+}
+
+async function reloadGovernanceSettings() {
+  configs.value = configEntries(await getJson<unknown>('/admin/api/v1/configs'));
+  hydrateGovernanceDraft();
+}
+
+async function reloadGovernanceSettingsAfterSaveFailure(error: unknown) {
+  try {
+    await reloadGovernanceSettings();
+  } catch {
+    throw new Error('保存未完全成功，当前生效设置可能已变化，请刷新后重试。');
+  }
+  throw new Error(`保存未完全成功，当前生效设置已重新加载：${humanizeError(error)}`);
+}
+
+function supervisionMetricsPath() {
+  return withQuery('/admin/api/v1/supervision/metrics', {
+    from: supervisionFilters.from,
+    to: supervisionFilters.to,
+    operator: supervisionFilters.operator,
+    channel: supervisionFilters.channel,
+    leadSource: supervisionFilters.leadSource
+  });
+}
+
+function supervisionEventsPath() {
+  return withQuery('/admin/api/v1/supervision/events', {
+    from: supervisionFilters.from,
+    to: supervisionFilters.to,
+    operator: supervisionFilters.operator,
+    channel: supervisionFilters.channel,
+    leadSource: supervisionFilters.leadSource,
+    eventType: supervisionFilters.eventType,
+    page: supervisionEventPage.page,
+    pageSize: supervisionEventPage.pageSize
+  });
+}
+
+function applySupervisionMetadata(metadata: AnyRecord) {
+  supervisionMetadata.operators = stringList(metadata.operators);
+  supervisionMetadata.channels = stringList(metadata.channels);
+  supervisionMetadata.leadSources = stringList(metadata.leadSources);
+  supervisionMetadata.customerStages = stringList(metadata.customerStages);
+  supervisionMetadata.eventTypes = stringList(metadata.eventTypes);
+}
+
+function applySupervisionEvents(payload: AnyRecord) {
+  supervisionEvents.value = listFrom(payload, 'items');
+  supervisionEventPage.total = Number(payload.total ?? 0) || 0;
+  supervisionEventPage.page = Math.max(1, Number(payload.page ?? supervisionEventPage.page) || 1);
+  supervisionEventPage.pageSize = Math.max(1, Number(payload.pageSize ?? supervisionEventPage.pageSize) || 20);
+}
+
+function hydrateGovernanceDraft() {
+  governanceDraft.recordRetentionDays = intConfigValue('supervision.record_retention_days', 180);
+  governanceDraft.technicalLogRetentionDays = intConfigValue('supervision.technical_log_retention_days', 30);
+  governanceDraft.processingSlaMinutes = intConfigValue('supervision.processing_sla_minutes', 1440);
+  governanceDraft.expiredReplyTaskRetentionDays = intConfigValue('chat.expired_reply_task_retention_days', 3);
+  governanceDraft.unfinishedTaskCap = intConfigValue('chat.unfinished_task_cap', 20);
+  governanceDraft.recentTaskDisplayCap = intConfigValue('chat.recent_task_display_cap', 30);
+  governanceDraft.recognitionConcurrency = intConfigValue('chat.recognition_concurrency', 4);
+  governanceDraft.conversionTargetStages = parseTextList(
+    configValue('supervision.conversion_target_stages_json'))
+    .map((stage) => stage.trim())
+    .filter(Boolean);
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item ?? '').trim()).filter(Boolean)
+    : [];
+}
+
+function supervisionEventLabel(value: unknown) {
+  const key = String(value ?? '');
+  return (SUPERVISION_EVENT_LABELS[key] ?? key) || '-';
+}
+
+function localDateInput(daysBefore: number) {
+  const date = new Date();
+  date.setDate(date.getDate() - daysBefore);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 async function loadAnalyticsDashboard(options: { silent?: boolean } = {}) {
