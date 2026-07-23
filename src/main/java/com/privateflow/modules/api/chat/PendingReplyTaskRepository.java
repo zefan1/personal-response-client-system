@@ -290,7 +290,7 @@ public class PendingReplyTaskRepository {
     }
     return jdbcTemplate.update("""
         DELETE FROM pending_reply_tasks
-        WHERE expires_at < ?
+        WHERE finished_at < ?
           AND status IN (?, ?, ?, ?)
         """,
         Timestamp.valueOf(cutoff),

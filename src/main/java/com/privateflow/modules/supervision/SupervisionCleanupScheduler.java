@@ -5,12 +5,16 @@ import com.privateflow.modules.api.chat.PendingReplyTaskRepository;
 import com.privateflow.modules.llm.LlmCallAnalyticsRepository;
 import com.privateflow.modules.skill.admin.SkillCallAnalyticsRepository;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Objects;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
 public class SupervisionCleanupScheduler {
+
+  private static final String BUSINESS_TIME_ZONE_ID = "Asia/Shanghai";
+  private static final ZoneId BUSINESS_TIME_ZONE = ZoneId.of(BUSINESS_TIME_ZONE_ID);
 
   private final SupervisionConfig supervisionConfig;
   private final ChatTaskConfig chatTaskConfig;
@@ -34,9 +38,9 @@ public class SupervisionCleanupScheduler {
     this.pendingReplyTaskRepository = pendingReplyTaskRepository;
   }
 
-  @Scheduled(cron = "0 10 4 * * *")
+  @Scheduled(cron = "0 10 4 * * *", zone = BUSINESS_TIME_ZONE_ID)
   public void cleanup() {
-    cleanupAt(LocalDateTime.now());
+    cleanupAt(LocalDateTime.now(BUSINESS_TIME_ZONE));
   }
 
   public void cleanupAt(LocalDateTime now) {

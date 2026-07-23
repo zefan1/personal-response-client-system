@@ -759,24 +759,26 @@ class PendingReplyTaskRepositoryTest {
   }
 
   @Test
-  void physicalCleanupDeletesOnlyOldTerminalTasks() {
+  void physicalCleanupDeletesOnlyTerminalTasksFinishedBeforeTheRetentionCutoff() {
     LocalDateTime cutoff = LocalDateTime.of(2026, 7, 20, 0, 0);
     PendingReplyTask expiredOld = createTask("reply-expired-old", "keeper-1");
     PendingReplyTask readyOld = createTask("reply-ready-old", "keeper-1");
     PendingReplyTask failedOld = createTask("reply-failed-old", "keeper-1");
     PendingReplyTask cancelledOld = createTask("reply-cancelled-old", "keeper-1");
-    PendingReplyTask expiredAtBoundary = createTask("reply-expired-boundary", "keeper-1");
+    PendingReplyTask expiredAtFinishBoundary = createTask("reply-expired-finish-boundary", "keeper-1");
+    PendingReplyTask readyWithoutFinishTime = createTask("reply-ready-without-finish-time", "keeper-1");
     PendingReplyTask waitingOld = createTask("reply-waiting-old", "keeper-1");
     PendingReplyTask generatingOld = createTask("reply-generating-old", "keeper-1");
     LocalDateTime oldExpiry = cutoff.minusSeconds(1);
 
-    setTaskStatusAndExpiry(expiredOld, PendingReplyTaskStatus.EXPIRED, oldExpiry);
-    setTaskStatusAndExpiry(readyOld, PendingReplyTaskStatus.READY, oldExpiry);
-    setTaskStatusAndExpiry(failedOld, PendingReplyTaskStatus.FAILED, oldExpiry);
-    setTaskStatusAndExpiry(cancelledOld, PendingReplyTaskStatus.CANCELLED, oldExpiry);
-    setTaskStatusAndExpiry(expiredAtBoundary, PendingReplyTaskStatus.EXPIRED, cutoff);
-    setTaskStatusAndExpiry(waitingOld, PendingReplyTaskStatus.WAITING_CUSTOMER, oldExpiry);
-    setTaskStatusAndExpiry(generatingOld, PendingReplyTaskStatus.GENERATING, oldExpiry);
+    setTaskStatusAndTimes(expiredOld, PendingReplyTaskStatus.EXPIRED, oldExpiry, oldExpiry);
+    setTaskStatusAndTimes(readyOld, PendingReplyTaskStatus.READY, oldExpiry, oldExpiry);
+    setTaskStatusAndTimes(failedOld, PendingReplyTaskStatus.FAILED, oldExpiry, oldExpiry);
+    setTaskStatusAndTimes(cancelledOld, PendingReplyTaskStatus.CANCELLED, oldExpiry, oldExpiry);
+    setTaskStatusAndTimes(expiredAtFinishBoundary, PendingReplyTaskStatus.EXPIRED, oldExpiry, cutoff);
+    setTaskStatusAndTimes(readyWithoutFinishTime, PendingReplyTaskStatus.READY, oldExpiry, null);
+    setTaskStatusAndTimes(waitingOld, PendingReplyTaskStatus.WAITING_CUSTOMER, oldExpiry, null);
+    setTaskStatusAndTimes(generatingOld, PendingReplyTaskStatus.GENERATING, oldExpiry, null);
 
     assertThat(repository.deletePhysicallyExpiredBefore(cutoff)).isEqualTo(4);
 
@@ -784,7 +786,8 @@ class PendingReplyTaskRepositoryTest {
     assertThat(repository.findOwned(readyOld.taskId(), "keeper-1")).isEmpty();
     assertThat(repository.findOwned(failedOld.taskId(), "keeper-1")).isEmpty();
     assertThat(repository.findOwned(cancelledOld.taskId(), "keeper-1")).isEmpty();
-    assertThat(repository.findOwned(expiredAtBoundary.taskId(), "keeper-1")).isPresent();
+    assertThat(repository.findOwned(expiredAtFinishBoundary.taskId(), "keeper-1")).isPresent();
+    assertThat(repository.findOwned(readyWithoutFinishTime.taskId(), "keeper-1")).isPresent();
     assertThat(repository.findOwned(waitingOld.taskId(), "keeper-1")).isPresent();
     assertThat(repository.findOwned(generatingOld.taskId(), "keeper-1")).isPresent();
   }
@@ -805,14 +808,16 @@ class PendingReplyTaskRepositoryTest {
     return repository.findOwned(task.taskId(), "keeper-1").orElseThrow();
   }
 
-  private void setTaskStatusAndExpiry(
+  private void setTaskStatusAndTimes(
       PendingReplyTask task,
       PendingReplyTaskStatus status,
-      LocalDateTime expiresAt) {
+      LocalDateTime expiresAt,
+      LocalDateTime finishedAt) {
     jdbcTemplate.update(
-        "UPDATE pending_reply_tasks SET status = ?, expires_at = ? WHERE task_id = ?",
+        "UPDATE pending_reply_tasks SET status = ?, expires_at = ?, finished_at = ? WHERE task_id = ?",
         status.name(),
         Timestamp.valueOf(expiresAt),
+        finishedAt == null ? null : Timestamp.valueOf(finishedAt),
         task.taskId());
   }
 

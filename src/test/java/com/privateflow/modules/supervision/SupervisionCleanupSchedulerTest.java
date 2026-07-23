@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.scheduling.annotation.Scheduled;
 
 class SupervisionCleanupSchedulerTest {
 
@@ -172,8 +173,15 @@ class SupervisionCleanupSchedulerTest {
     insertLlmLog(NOW.minusDays(7));
     insertSkillLog(NOW.minusDays(7).minusSeconds(1));
     insertSkillLog(NOW.minusDays(7));
-    insertTask("ready-old", PendingReplyTaskStatus.READY, NOW.minusDays(3).minusSeconds(1), null);
-    insertTask("ready-boundary", PendingReplyTaskStatus.READY, NOW.minusDays(3), null);
+    insertTask("ready-old", PendingReplyTaskStatus.READY, NOW.minusDays(10), null);
+    setTaskFinishedAt("ready-old", NOW.minusDays(3).minusSeconds(1));
+    insertTask("ready-finish-boundary", PendingReplyTaskStatus.READY, NOW.minusDays(10), null);
+    setTaskFinishedAt("ready-finish-boundary", NOW.minusDays(3));
+    insertTask("ready-without-finish-time", PendingReplyTaskStatus.READY, NOW.minusDays(10), null);
+    insertTask("waiting-recovered-this-run", PendingReplyTaskStatus.WAITING_CUSTOMER,
+        NOW.minusDays(10), null);
+    insertTask("generating-recovered-this-run", PendingReplyTaskStatus.GENERATING,
+        NOW.minusDays(10), NOW.minusSeconds(301));
     insertTask("generating-within-chat-timeout", PendingReplyTaskStatus.GENERATING,
         NOW.plusHours(1), NOW.minusSeconds(121));
 
@@ -183,9 +191,26 @@ class SupervisionCleanupSchedulerTest {
     assertThat(countRows("llm_call_logs")).isEqualTo(1);
     assertThat(countRows("skill_call_logs")).isEqualTo(1);
     assertThat(taskExists("ready-old")).isFalse();
-    assertThat(taskExists("ready-boundary")).isTrue();
+    assertThat(taskExists("ready-finish-boundary")).isTrue();
+    assertThat(taskExists("ready-without-finish-time")).isTrue();
+    assertThat(taskExists("waiting-recovered-this-run")).isTrue();
+    assertThat(taskStatus("waiting-recovered-this-run"))
+        .isEqualTo(PendingReplyTaskStatus.EXPIRED.name());
+    assertThat(taskExists("generating-recovered-this-run")).isTrue();
+    assertThat(taskStatus("generating-recovered-this-run"))
+        .isEqualTo(PendingReplyTaskStatus.FAILED.name());
     assertThat(taskStatus("generating-within-chat-timeout"))
         .isEqualTo(PendingReplyTaskStatus.GENERATING.name());
+  }
+
+  @Test
+  void cleanupScheduleIsPinnedToShanghaiBusinessTime() throws NoSuchMethodException {
+    Scheduled scheduled = SupervisionCleanupScheduler.class
+        .getMethod("cleanup")
+        .getAnnotation(Scheduled.class);
+
+    assertThat(scheduled.cron()).isEqualTo("0 10 4 * * *");
+    assertThat(scheduled.zone()).isEqualTo("Asia/Shanghai");
   }
 
   private void putConfig(String key, String value) {
@@ -234,6 +259,13 @@ class SupervisionCleanupSchedulerTest {
         Timestamp.valueOf(expiresAt),
         Timestamp.valueOf(NOW.minusDays(10)),
         Timestamp.valueOf(NOW.minusDays(10)));
+  }
+
+  private void setTaskFinishedAt(String taskId, LocalDateTime finishedAt) {
+    jdbcTemplate.update(
+        "UPDATE pending_reply_tasks SET finished_at = ? WHERE task_id = ?",
+        Timestamp.valueOf(finishedAt),
+        taskId);
   }
 
   private int countRows(String table) {
