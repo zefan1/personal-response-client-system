@@ -19,6 +19,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -70,13 +71,14 @@ class SupervisionMetricsServiceTest {
     assertMetric(report.get("PROCESSING_EFFICIENCY"), 1, 4, 0.25,
         "Customers handled within SLA", "Customers entering pending work", true);
     assertMetric(report.get("EMPLOYEE_CONVERSION"), 1, 3, 1.0 / 3,
-        "Customers at configured target stages", "Assigned customers", true);
+        "Assigned customers from the selected period currently at configured target stages",
+        "Assigned customers from the selected period", true);
 
     insertEvent("REPLY_COPIED", "alice", "13800000002", "WECHAT", "ads-form",
         FROM.plusMinutes(40));
     report = service.report(query());
     assertMetric(report.get("AI_ASSOCIATED_CONVERSION"), 1, 2, 0.5,
-        "AI-used customers at configured target stages", "AI copied customers", true);
+        "AI copied customers currently at configured target stages", "AI copied customers", true);
   }
 
   @Test
@@ -93,9 +95,10 @@ class SupervisionMetricsServiceTest {
     Map<String, SupervisionMetric> report = service.report(query());
 
     assertMetric(report.get("EMPLOYEE_CONVERSION"), 0, 3, 0.0,
-        "Customers at configured target stages", "Assigned customers", false);
+        "Assigned customers from the selected period currently at configured target stages",
+        "Assigned customers from the selected period", false);
     assertMetric(report.get("AI_ASSOCIATED_CONVERSION"), 0, 1, 0.0,
-        "AI-used customers at configured target stages", "AI copied customers", false);
+        "AI copied customers currently at configured target stages", "AI copied customers", false);
   }
 
   @Test
@@ -113,17 +116,21 @@ class SupervisionMetricsServiceTest {
   }
 
   @Test
-  void upsertsCurrentMonthMetricsForAllAndEachAvailableDimension() {
-    service.snapshotCurrentMonthAt(LocalDateTime.of(2026, 7, 23, 4, 20));
+  void upsertsPreviousCompleteMonthMetricsForAllAndEachAvailableDimension() {
+    service.snapshotCurrentMonthAt(LocalDateTime.of(2026, 8, 1, 4, 20));
 
     assertThat(snapshotCount("ALL", "ALL", "AI_USAGE_RATE")).isEqualTo(1);
     assertThat(snapshotCount("OPERATOR", "alice", "AI_USAGE_RATE")).isEqualTo(1);
     assertThat(snapshotCount("CHANNEL", "WECHAT", "AI_USAGE_RATE")).isEqualTo(1);
     assertThat(snapshotCount("LEAD_SOURCE", "ads-form", "AI_USAGE_RATE")).isEqualTo(1);
+    assertThat(snapshotMetricMonth("ALL", "ALL", "AI_USAGE_RATE"))
+        .isEqualTo(java.sql.Date.valueOf("2026-07-01"));
 
     insertEvent("REPLY_GENERATED", "alice", "13800000003", "WECHAT", "ads-form",
-        LocalDateTime.of(2026, 7, 23, 3, 0));
-    service.snapshotCurrentMonthAt(LocalDateTime.of(2026, 7, 23, 4, 20));
+        LocalDateTime.of(2026, 7, 31, 23, 0));
+    insertEvent("REPLY_GENERATED", "alice", "13800000005", "WECHAT", "ads-form",
+        LocalDateTime.of(2026, 8, 1, 0, 10));
+    service.snapshotCurrentMonthAt(LocalDateTime.of(2026, 8, 1, 4, 20));
 
     assertThat(snapshotCount("ALL", "ALL", "AI_USAGE_RATE")).isEqualTo(1);
     assertThat(snapshotNumerator("ALL", "ALL", "AI_USAGE_RATE")).isEqualTo(1L);
@@ -141,6 +148,15 @@ class SupervisionMetricsServiceTest {
   }
 
   @Test
+  void injectsTheSharedReplyTaskClockInSpringRuntime() throws NoSuchMethodException {
+    assertThat(SupervisionMetricsService.class.getDeclaredConstructor(
+        SupervisionMetricsRepository.class,
+        SupervisionConfig.class,
+        com.privateflow.modules.api.chat.ReplyTaskClock.class)
+        .isAnnotationPresent(Autowired.class)).isTrue();
+  }
+
+  @Test
   void scheduledSnapshotUsesShanghaiMonthEvenWhenTheRuntimeClockIsUtc() {
     SupervisionMetricsService utcRuntimeService = new SupervisionMetricsService(
         new SupervisionMetricsRepository(jdbcTemplate),
@@ -150,7 +166,7 @@ class SupervisionMetricsServiceTest {
     utcRuntimeService.snapshotCurrentMonth();
 
     assertThat(snapshotMetricMonth("ALL", "ALL", "AI_USAGE_RATE"))
-        .isEqualTo(java.sql.Date.valueOf("2026-08-01"));
+        .isEqualTo(java.sql.Date.valueOf("2026-07-01"));
   }
 
   private void assertMetric(

@@ -6,13 +6,14 @@ import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.api.chat.AiUsageRequest;
 import com.privateflow.modules.api.chat.ChatReplySource;
+import com.privateflow.modules.api.chat.ReplyTaskClock;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.infra.CustomerRepository;
 import com.privateflow.modules.customer.service.CustomerAccessService;
 import java.time.Clock;
-import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -26,13 +27,25 @@ public class SupervisionEventService {
   private final CustomerRepository customerRepository;
   private final CustomerAccessService customerAccessService;
   private final SupervisionEventRepository eventRepository;
-  private final Clock clock;
+  private final ReplyTaskClock taskClock;
 
   public SupervisionEventService(
       CustomerRepository customerRepository,
       CustomerAccessService customerAccessService,
       SupervisionEventRepository eventRepository) {
-    this(customerRepository, customerAccessService, eventRepository, Clock.systemDefaultZone());
+    this(customerRepository, customerAccessService, eventRepository, new ReplyTaskClock());
+  }
+
+  @Autowired
+  SupervisionEventService(
+      CustomerRepository customerRepository,
+      CustomerAccessService customerAccessService,
+      SupervisionEventRepository eventRepository,
+      ReplyTaskClock taskClock) {
+    this.customerRepository = customerRepository;
+    this.customerAccessService = customerAccessService;
+    this.eventRepository = eventRepository;
+    this.taskClock = taskClock;
   }
 
   SupervisionEventService(
@@ -40,10 +53,7 @@ public class SupervisionEventService {
       CustomerAccessService customerAccessService,
       SupervisionEventRepository eventRepository,
       Clock clock) {
-    this.customerRepository = customerRepository;
-    this.customerAccessService = customerAccessService;
-    this.eventRepository = eventRepository;
-    this.clock = clock;
+    this(customerRepository, customerAccessService, eventRepository, new ReplyTaskClock(clock));
   }
 
   public Map<String, Object> recordAiUsage(AiUsageRequest request) {
@@ -77,7 +87,7 @@ public class SupervisionEventService {
         customer.getId(),
         customer.getLeadType(),
         customer.getCustomerStage(),
-        LocalDateTime.now(clock)));
+        taskClock.now()));
     return Map.of("recorded", true, "semantic", "COPIED_AI_REPLY");
   }
 

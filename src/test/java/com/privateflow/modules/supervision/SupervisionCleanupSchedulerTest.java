@@ -164,6 +164,15 @@ class SupervisionCleanupSchedulerTest {
     assertThat(supervisionConfig.recordRetentionDays()).isEqualTo(200);
     assertThat(supervisionConfig.technicalLogRetentionDays()).isEqualTo(30);
     assertThat(supervisionConfig.recognitionConcurrency()).isEqualTo(8);
+
+    putConfig("supervision.record_retention_days", "200");
+    putConfig("supervision.conversion_target_stages_json", "[\"FOLLOW_UP\",\"PAID\"]");
+    supervisionConfig.onConfigChanged(new ConfigChangedEvent("supervision.conversion_target_stages_json"));
+    assertThat(supervisionConfig.conversionTargetStages()).containsExactlyInAnyOrder("FOLLOW_UP", "PAID");
+
+    putConfig("supervision.conversion_target_stages_json", "[\"PAID\",\"PAID\"]");
+    supervisionConfig.onConfigChanged(new ConfigChangedEvent("supervision.conversion_target_stages_json"));
+    assertThat(supervisionConfig.conversionTargetStages()).containsExactlyInAnyOrder("FOLLOW_UP", "PAID");
   }
 
   @Test

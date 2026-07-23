@@ -23,13 +23,15 @@ public class SupervisionMetricsRepository {
 
   public Counts aiUsageRate(SupervisionMetricsQuery query) {
     return new Counts(
-        countDistinctEventCustomers(query, List.of("REPLY_COPIED")),
+        countCandidateCustomersInBaseline(
+            query, List.of("REPLY_COPIED"), List.of("REPLY_GENERATED")),
         countDistinctEventCustomers(query, List.of("REPLY_GENERATED")));
   }
 
   public Counts aiCoverage(SupervisionMetricsQuery query) {
     return new Counts(
-        countDistinctEventCustomers(query, List.of("REPLY_GENERATED", "REPLY_COPIED")),
+        countCandidateCustomersInBaseline(
+            query, List.of("REPLY_GENERATED", "REPLY_COPIED"), List.of("PENDING_ENTERED")),
         countDistinctEventCustomers(query, List.of("PENDING_ENTERED")));
   }
 
@@ -159,6 +161,36 @@ public class SupervisionMetricsRepository {
           AND event.event_type IN (%s)
           AND %s
         """.formatted(placeholders, filters);
+    return queryCount(sql, arguments);
+  }
+
+  private long countCandidateCustomersInBaseline(
+      SupervisionMetricsQuery query,
+      Collection<String> candidateTypes,
+      Collection<String> baselineTypes) {
+    List<Object> arguments = new ArrayList<>();
+    String candidatePlaceholders = placeholders(candidateTypes, arguments);
+    String candidateFilters = eventFilters("candidate", query, arguments);
+    String baselinePlaceholders = placeholders(baselineTypes, arguments);
+    String baselineFilters = eventFilters("baseline", query, arguments);
+    String sql = """
+        SELECT COUNT(DISTINCT candidate.customer_phone)
+        FROM supervision_events candidate
+        WHERE candidate.customer_phone IS NOT NULL
+          AND candidate.event_type IN (%s)
+          AND %s
+          AND EXISTS (
+            SELECT 1
+            FROM supervision_events baseline
+            WHERE baseline.customer_phone = candidate.customer_phone
+              AND baseline.event_type IN (%s)
+              AND %s
+          )
+        """.formatted(
+        candidatePlaceholders,
+        candidateFilters,
+        baselinePlaceholders,
+        baselineFilters);
     return queryCount(sql, arguments);
   }
 

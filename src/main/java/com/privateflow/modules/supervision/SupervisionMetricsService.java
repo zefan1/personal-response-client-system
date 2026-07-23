@@ -5,21 +5,21 @@ import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.Role;
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.auth.AuthUser;
+import com.privateflow.modules.api.chat.ReplyTaskClock;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
-import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
 public class SupervisionMetricsService {
 
-  private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
   private static final List<String> METRIC_KEYS = List.of(
       "AI_USAGE_RATE",
       "AI_COVERAGE",
@@ -29,21 +29,29 @@ public class SupervisionMetricsService {
 
   private final SupervisionMetricsRepository repository;
   private final SupervisionConfig config;
-  private final Clock clock;
+  private final ReplyTaskClock taskClock;
 
   public SupervisionMetricsService(
       SupervisionMetricsRepository repository,
       SupervisionConfig config) {
-    this(repository, config, Clock.system(BUSINESS_ZONE));
+    this(repository, config, new ReplyTaskClock());
+  }
+
+  @Autowired
+  SupervisionMetricsService(
+      SupervisionMetricsRepository repository,
+      SupervisionConfig config,
+      ReplyTaskClock taskClock) {
+    this.repository = repository;
+    this.config = config;
+    this.taskClock = taskClock;
   }
 
   SupervisionMetricsService(
       SupervisionMetricsRepository repository,
       SupervisionConfig config,
       Clock clock) {
-    this.repository = repository;
-    this.config = config;
-    this.clock = clock;
+    this(repository, config, new ReplyTaskClock(clock));
   }
 
   public Map<String, SupervisionMetric> report(SupervisionMetricsQuery query) {
@@ -53,17 +61,18 @@ public class SupervisionMetricsService {
 
   @Scheduled(cron = "0 20 4 1 * *", zone = "Asia/Shanghai")
   public void snapshotCurrentMonth() {
-    snapshotCurrentMonthAt(LocalDateTime.ofInstant(clock.instant(), BUSINESS_ZONE));
+    snapshotCurrentMonthAt(taskClock.now());
   }
 
   void snapshotCurrentMonthAt(LocalDateTime now) {
     if (now == null) {
       throw new IllegalArgumentException("snapshot time is required");
     }
-    LocalDate monthStart = YearMonth.from(now).atDay(1);
+    LocalDate currentMonthStart = YearMonth.from(now).atDay(1);
+    LocalDate previousMonthStart = currentMonthStart.minusMonths(1);
     SupervisionMetricsQuery all = new SupervisionMetricsQuery(
-        monthStart.atStartOfDay(), now, null, null, null);
-    LocalDate metricMonth = monthStart;
+        previousMonthStart.atStartOfDay(), currentMonthStart.atStartOfDay(), null, null, null);
+    LocalDate metricMonth = previousMonthStart;
     writeSnapshot(metricMonth, "ALL", "ALL", calculate(all), now);
     for (String username : repository.operatorUsernames(all)) {
       writeSnapshot(metricMonth, "OPERATOR", username,
@@ -103,12 +112,12 @@ public class SupervisionMetricsService {
         true));
     metrics.put("EMPLOYEE_CONVERSION", SupervisionMetric.of(
         repository.employeeConversion(query, settings.conversionTargetStages()),
-        "Customers at configured target stages",
-        "Assigned customers",
+        "Assigned customers from the selected period currently at configured target stages",
+        "Assigned customers from the selected period",
         targetConfigured));
     metrics.put("AI_ASSOCIATED_CONVERSION", SupervisionMetric.of(
         repository.aiAssociatedConversion(query, settings.conversionTargetStages()),
-        "AI-used customers at configured target stages",
+        "AI copied customers currently at configured target stages",
         "AI copied customers",
         targetConfigured));
     return Map.copyOf(metrics);

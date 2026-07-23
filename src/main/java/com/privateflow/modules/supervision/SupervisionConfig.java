@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class SupervisionConfig {
 
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final Settings DEFAULTS = new Settings(180, 30, 3, 20, 30, 4, 1440, Set.of());
   private static final Set<String> MANAGED_PREFIXES = Set.of("supervision.", "chat.");
   private static final Set<String> MANAGED_CHAT_KEYS = Set.of(
@@ -25,7 +26,6 @@ public class SupervisionConfig {
       "chat.recognition_concurrency");
 
   private final SystemConfigRepository configRepository;
-  private final ObjectMapper objectMapper = new ObjectMapper();
   private final AtomicReference<Settings> current = new AtomicReference<>(DEFAULTS);
 
   public SupervisionConfig(SystemConfigRepository configRepository) {
@@ -121,8 +121,12 @@ public class SupervisionConfig {
     if (raw == null || raw.isBlank()) {
       return Set.of();
     }
+    return parseConversionTargetStages(raw);
+  }
+
+  public static Set<String> parseConversionTargetStages(String raw) {
     try {
-      JsonNode node = objectMapper.readTree(raw);
+      JsonNode node = OBJECT_MAPPER.readTree(raw);
       if (!node.isArray()) {
         throw new IllegalArgumentException("invalid supervision conversion target stages");
       }
@@ -131,7 +135,9 @@ public class SupervisionConfig {
         if (!value.isTextual() || value.asText().isBlank()) {
           throw new IllegalArgumentException("invalid supervision conversion target stages");
         }
-        stages.add(value.asText().trim());
+        if (!stages.add(value.asText().trim())) {
+          throw new IllegalArgumentException("invalid supervision conversion target stages");
+        }
       }
       return Set.copyOf(stages);
     } catch (JsonProcessingException ex) {

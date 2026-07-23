@@ -57,6 +57,21 @@ class SupervisionMetricsRepositoryTest {
   }
 
   @Test
+  void limitsUsageAndCoverageNumeratorsToTheirDenominatorCustomerBaselines() {
+    seedCoreWorkflow();
+    SupervisionMetricsQuery query = query("alice", "WECHAT", "ads-form");
+    insertEvent("REPLY_COPIED", "alice", "13800000005", "WECHAT", "ads-form",
+        FROM.plusHours(2));
+    insertEvent("REPLY_COPIED", "alice", "13800000006", "WECHAT", "ads-form",
+        FROM.plusHours(2));
+
+    assertThat(repository.aiUsageRate(query))
+        .isEqualTo(new SupervisionMetricsRepository.Counts(1, 2));
+    assertThat(repository.aiCoverage(query))
+        .isEqualTo(new SupervisionMetricsRepository.Counts(2, 4));
+  }
+
+  @Test
   void calculatesConversionMetricsFromDynamicTargetStagesAndKeepsZeroNumeratorsHonest() {
     seedCoreWorkflow();
     insertCustomer("13800000008", null, "WECHAT", "ads-form", "SIGNED");

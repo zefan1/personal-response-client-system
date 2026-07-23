@@ -9,6 +9,7 @@ import com.privateflow.modules.api.ai.PromptVersionService;
 import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.security.SecretCipher;
 import com.privateflow.modules.api.ws.WsPushService;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -248,6 +249,12 @@ class ConfigAdminServiceTest {
         "supervision.conversion_target_stages_json", Map.of("value", "not-json")))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("supervision.conversion_target_stages_json must be JSON array");
+    for (String invalid : List.of("[1]", "[null]", "[\" \"]", "[\"PAID\",\"PAID\"]", "[\" PAID \",\"PAID\"]")) {
+      assertThatThrownBy(() -> service.update(
+          "supervision.conversion_target_stages_json", Map.of("value", invalid)))
+          .isInstanceOf(ApiException.class)
+          .hasMessageContaining("supervision.conversion_target_stages_json must be JSON array");
+    }
   }
 
   private void assertValidRange(String key, int minimum, int maximum) {

@@ -22,6 +22,6 @@ public class ReplyTaskClock {
   }
 
   public LocalDateTime now() {
-    return LocalDateTime.now(clock);
+    return LocalDateTime.ofInstant(clock.instant(), BUSINESS_TIME_ZONE);
   }
 }

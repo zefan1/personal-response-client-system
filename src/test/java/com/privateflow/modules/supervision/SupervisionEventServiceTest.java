@@ -77,7 +77,7 @@ class SupervisionEventServiceTest {
     assertThat(event.metadata()).containsEntry("customerId", 7L)
         .containsEntry("leadType", "MOM_CARE")
         .containsEntry("customerStage", "\u5f85\u8ddf\u8fdb");
-    assertThat(event.occurredAt()).isEqualTo(LocalDateTime.of(2026, 7, 23, 2, 30));
+    assertThat(event.occurredAt()).isEqualTo(LocalDateTime.of(2026, 7, 23, 10, 30));
 
     verify(customerRepository).findByPhone("18800001111");
     verify(customerAccessService).canAccess(customer);
@@ -187,6 +187,26 @@ class SupervisionEventServiceTest {
         "customerId", 7L,
         "leadType", "MOM_CARE",
         "customerStage", "\u5f85\u8ddf\u8fdb"));
+  }
+
+  @Test
+  void recordsCopiedReplyUsingShanghaiTimeAtTheUtcMonthBoundary() {
+    Customer customer = customer();
+    when(customerRepository.findByPhone("18800001111")).thenReturn(Optional.of(customer));
+    when(customerAccessService.canAccess(customer)).thenReturn(true);
+    AuthContext.set(new AuthUser("keeper-auth", "\u7ba1\u5bb6", Role.KEEPER, null));
+    SupervisionEventService boundaryService = new SupervisionEventService(
+        customerRepository,
+        customerAccessService,
+        eventRepository,
+        Clock.fixed(Instant.parse("2026-07-31T16:30:00Z"), ZoneOffset.UTC));
+
+    boundaryService.recordAiUsage(request("\u53ef\u590d\u5236\u56de\u590d"));
+
+    ArgumentCaptor<SupervisionEventCommand> captor =
+        ArgumentCaptor.forClass(SupervisionEventCommand.class);
+    verify(eventRepository).insert(captor.capture());
+    assertThat(captor.getValue().occurredAt()).isEqualTo(LocalDateTime.of(2026, 8, 1, 0, 30));
   }
 
   private AiUsageRequest request(String copiedText) {

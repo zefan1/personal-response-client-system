@@ -9,6 +9,7 @@ import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.security.SecretCipher;
 import com.privateflow.modules.api.ws.WsMessage;
 import com.privateflow.modules.api.ws.WsPushService;
+import com.privateflow.modules.supervision.SupervisionConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -118,9 +119,11 @@ public class ConfigAdminService {
         }
         validateDecimalRange(key, parsed);
       }
-      if ("skill.system_prompt_red_lines".equals(key) || "match.tag_removal_rules".equals(key)
-          || "supervision.conversion_target_stages_json".equals(key)) {
+      if ("skill.system_prompt_red_lines".equals(key) || "match.tag_removal_rules".equals(key)) {
         validateJsonArray(key, value);
+      }
+      if ("supervision.conversion_target_stages_json".equals(key)) {
+        validateConversionTargetStages(key, value);
       }
       if ("table.alert_notify_target".equals(key) && !("ADMIN".equals(value) || "LEADER".equals(value) || "BOTH".equals(value))) {
         throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "table.alert_notify_target must be ADMIN, LEADER or BOTH");
@@ -411,6 +414,16 @@ public class ConfigAdminService {
       throw ex;
     } catch (Exception ex) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, key + " must be JSON array");
+    }
+  }
+
+  private void validateConversionTargetStages(String key, String value) {
+    try {
+      SupervisionConfig.parseConversionTargetStages(value);
+    } catch (IllegalArgumentException ex) {
+      throw new ApiException(
+          ApiErrorCodes.CONFIG_INVALID,
+          key + " must be JSON array of distinct nonblank strings");
     }
   }
 
