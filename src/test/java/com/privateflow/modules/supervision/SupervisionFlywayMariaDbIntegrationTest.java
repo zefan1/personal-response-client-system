@@ -1,8 +1,11 @@
 package com.privateflow.modules.supervision;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
 import java.util.Locale;
@@ -14,6 +17,36 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 class SupervisionFlywayMariaDbIntegrationTest {
+
+  @Test
+  void rejectsMigrationUrlsOutsideTheDedicatedTemporaryDatabasePrefix() {
+    assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
+        "jdbc:mariadb://127.0.0.1:3306/private_domain_assistant_dev"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("pda_v77_it_");
+    assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("pda_v77_it_");
+    assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
+        "jdbc:mariadb://127.0.0.1:3306/"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("pda_v77_it_");
+    assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
+        "jdbc:mariadb://127.0.0.1:3306/pda_v76_it_abc"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("pda_v77_it_");
+    assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
+        "jdbc:mariadb://127.0.0.1:3306/pda_v77_it_abc/another_database"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("pda_v77_it_");
+  }
+
+  @Test
+  void acceptsAWellFormedDedicatedTemporaryMigrationUrlWithoutConnecting() {
+    assertThatCode(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
+        "jdbc:mariadb://127.0.0.1:3306/pda_v77_it_abc"))
+        .doesNotThrowAnyException();
+  }
 
   @Test
   void migrationContractDefinesGovernanceStorageWithoutImagePayloads() throws Exception {
@@ -75,6 +108,7 @@ class SupervisionFlywayMariaDbIntegrationTest {
   @EnabledIfEnvironmentVariable(named = "SUPERVISION_FLYWAY_IT", matches = "true")
   void migratesSupervisionStorageAndGovernanceDefaults() throws Exception {
     String url = required("SUPERVISION_FLYWAY_URL");
+    requireTemporaryMigrationUrl(url);
     String username = required("SUPERVISION_FLYWAY_USERNAME");
     String password = System.getenv().getOrDefault("SUPERVISION_FLYWAY_PASSWORD", "");
     Flyway flyway = Flyway.configure()
@@ -209,6 +243,30 @@ class SupervisionFlywayMariaDbIntegrationTest {
       throw new IllegalStateException(key + " is required");
     }
     return value;
+  }
+
+  static void requireTemporaryMigrationUrl(String rawUrl) {
+    String message = "SUPERVISION_FLYWAY_URL must target a pda_v77_it_ temporary database";
+    if (rawUrl == null || rawUrl.isBlank() || !rawUrl.startsWith("jdbc:mariadb://")) {
+      throw new IllegalArgumentException(message);
+    }
+    try {
+      URI uri = URI.create(rawUrl.substring("jdbc:".length()));
+      String database = uri.getPath();
+      if (uri.getHost() == null
+          || uri.getUserInfo() != null
+          || uri.getRawQuery() != null
+          || uri.getRawFragment() != null
+          || database == null
+          || !database.matches("/pda_v77_it_[A-Za-z0-9_]+")) {
+        throw new IllegalArgumentException(message);
+      }
+    } catch (IllegalArgumentException ex) {
+      if (message.equals(ex.getMessage())) {
+        throw ex;
+      }
+      throw new IllegalArgumentException(message, ex);
+    }
   }
 
   private String migrationSql() throws Exception {
