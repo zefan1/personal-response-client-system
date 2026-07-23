@@ -23,6 +23,7 @@ class CustomerSearchServiceTest {
     customer.setPhone("18800001111");
     customer.setNickname("逾期跟进客户");
     customer.setLeadType("TUAN_GOU");
+    customer.setSourceChannel("小红书");
 
     when(queryService.searchByKeyword("1111", 10)).thenReturn(List.of(customer));
     when(accessService.canAccess(customer)).thenReturn(true);
@@ -33,6 +34,7 @@ class CustomerSearchServiceTest {
     assertThat(result.customers()).hasSize(1);
     assertThat(result.customers().get(0).phone()).isEqualTo("188****1111");
     assertThat(result.customers().get(0).phoneFull()).isEqualTo("18800001111");
+    assertThat(result.customers().get(0).sourceChannel()).isEqualTo("小红书");
     verify(queryService).searchByKeyword("1111", 10);
   }
 

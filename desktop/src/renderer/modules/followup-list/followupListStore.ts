@@ -4,13 +4,13 @@ import { loadDesktopConfig } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
 import type { FollowupItem, FollowupReminderPayload, FollowupTab, FollowupTodayResponse, NewLeadAlertPayload, ReminderType } from './types';
 
-const TABS: FollowupTab[] = ['OVERDUE', 'DUE_TODAY', 'APPOINTMENT', 'NEW_LEAD'];
+const TABS: FollowupTab[] = ['DUE_TODAY', 'OVERDUE', 'APPOINTMENT', 'NEW_LEAD'];
 const FOLLOWUP_TIMEOUT_MS = 10000;
 
 export const followupListState = reactive({
   loading: false,
   loaded: false,
-  activeTab: 'OVERDUE' as FollowupTab,
+  activeTab: 'DUE_TODAY' as FollowupTab,
   keeperId: '',
   groups: {
     OVERDUE: [] as FollowupItem[],
@@ -20,7 +20,7 @@ export const followupListState = reactive({
   },
   selectedPhones: new Set<string>(),
   newReminderCount: 0,
-  newReminderTab: 'OVERDUE' as FollowupTab,
+  newReminderTab: 'DUE_TODAY' as FollowupTab,
   lastLoadedAt: 0,
   error: '',
   stale: false
@@ -28,7 +28,7 @@ export const followupListState = reactive({
 
 export const activeFollowupItems = computed(() => followupListState.groups[followupListState.activeTab]);
 export const selectedFollowupItems = computed(() =>
-  TABS.flatMap((tab) => followupListState.groups[tab]).filter((item) => followupListState.selectedPhones.has(item.phoneFull ?? item.phone))
+  activeFollowupItems.value.filter((item) => followupListState.selectedPhones.has(item.phoneFull ?? item.phone))
 );
 
 export async function loadTodayFollowups(): Promise<void> {
@@ -63,6 +63,10 @@ export async function loadTodayFollowups(): Promise<void> {
 }
 
 export function setActiveFollowupTab(tab: FollowupTab): void {
+  if (followupListState.activeTab === tab) {
+    return;
+  }
+  followupListState.selectedPhones.clear();
   followupListState.activeTab = tab;
 }
 
@@ -120,6 +124,7 @@ export function openFollowupCustomer(item: FollowupItem): void {
     phone: item.phoneFull ?? item.phone,
     scene: 'ACTIVE_REPLY',
     leadType: item.leadType ?? '',
+    reminderType: item.reminderType,
     sourceFrom: 'FOLLOWUP_LIST'
   });
 }
@@ -131,6 +136,15 @@ export function toggleFollowupSelection(item: FollowupItem): void {
   } else {
     followupListState.selectedPhones.add(phone);
   }
+}
+
+export function completeFollowup(phone: string, reminderType?: FollowupTab | null): void {
+  if (reminderType !== 'DUE_TODAY' && reminderType !== 'OVERDUE') {
+    return;
+  }
+  followupListState.groups[reminderType] = followupListState.groups[reminderType]
+    .filter((item) => (item.phoneFull ?? item.phone) !== phone);
+  followupListState.selectedPhones.delete(phone);
 }
 
 export function selectAllActiveFollowups(): void {
@@ -150,7 +164,7 @@ export function startBatchTemplate(): void {
 }
 
 export function openNewReminderBanner(): void {
-  followupListState.activeTab = followupListState.newReminderTab;
+  setActiveFollowupTab(followupListState.newReminderTab);
   followupListState.newReminderCount = 0;
 }
 

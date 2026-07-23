@@ -100,6 +100,11 @@ class WebCoreControllerTest {
             .content("{\"refreshToken\":\"refresh\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.refreshToken").value("new-refresh"));
+    mockMvc.perform(post("/api/v1/auth/logout")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"username\":\"admin\",\"refreshToken\":\"new-refresh\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true));
     mockMvc.perform(get("/api/v1/auth/config"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.captchaEnabled").value(true))
@@ -109,6 +114,7 @@ class WebCoreControllerTest {
     verify(authService).login(loginCaptor.capture(), eq("203.0.113.10"), eq(false));
     org.junit.jupiter.api.Assertions.assertEquals("admin", loginCaptor.getValue().loginPhone());
     verify(authService).refresh(any(RefreshRequest.class), any());
+    verify(authService).logout(any(RefreshRequest.class));
   }
 
   @Test

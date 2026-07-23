@@ -95,7 +95,7 @@ describe('workbenchStore', () => {
     });
   });
 
-  it('orders urgent followups by overdue severity, lead type, due time, and configured limit', async () => {
+  it('orders todays followups before overdue items, then uses due time and overdue severity', async () => {
     const { workbench } = await freshStore();
     workbench.workbenchState.followups = [
       followup({ phone: '1', nickname: 'Later', reminderType: 'DUE_TODAY', leadType: 'XIAN_SUO', nextFollowupAt: '2026-07-03T18:00:00' }),
@@ -105,7 +105,7 @@ describe('workbenchStore', () => {
       followup({ phone: '5', nickname: 'New', reminderType: 'NEW_LEAD', leadType: 'TUAN_GOU' })
     ];
 
-    expect(workbench.urgentFollowups.value.map((item) => item.phone)).toEqual(['2', '3', '4']);
+    expect(workbench.urgentFollowups.value.map((item) => item.phone)).toEqual(['4', '1', '2']);
   });
 
   it('uses shared new-lead queues first and falls back to followup data', async () => {
@@ -184,6 +184,25 @@ describe('workbenchStore', () => {
     expect(getJsonMock).toHaveBeenCalledTimes(3);
   });
 
+  it('removes only the confirmed due or overdue row and marks followup data dirty', async () => {
+    const { workbench } = await freshStore();
+    workbench.workbenchState.followups = [
+      followup({ phone: '18800001111', reminderType: 'DUE_TODAY' }),
+      followup({ phone: '18800001111', reminderType: 'OVERDUE' }),
+      followup({ phone: '18800001111', reminderType: 'APPOINTMENT' }),
+      followup({ phone: '18800002222', reminderType: 'DUE_TODAY' })
+    ];
+
+    workbench.completeWorkbenchFollowup('18800001111', 'DUE_TODAY');
+
+    expect(workbench.workbenchState.followups.map((entry) => `${entry.phone}:${entry.reminderType}`)).toEqual([
+      '18800001111:OVERDUE',
+      '18800001111:APPOINTMENT',
+      '18800002222:DUE_TODAY'
+    ]);
+    expect(workbench.workbenchState.followupDataDirty).toBe(true);
+  });
+
   it('merges followup reminders and new leads without duplicate dashboard rows', async () => {
     const { workbench } = await freshStore();
     workbench.workbenchState.followups = [
@@ -225,7 +244,10 @@ describe('workbenchStore', () => {
     eventBus.on('workbench:capture-chat', (payload) => seen.push({ event: 'workbench:capture-chat', payload }));
     eventBus.on('quick-search:show', (payload) => seen.push({ event: 'quick-search:show', payload }));
 
-    workbench.workbenchState.followups = [followup({ phone: '1', reminderType: 'OVERDUE' })];
+    workbench.workbenchState.followups = [
+      followup({ phone: '1', reminderType: 'OVERDUE' }),
+      followup({ phone: '2', reminderType: 'DUE_TODAY' })
+    ];
     workbench.openWorkbenchCustomer('18800002222', 'TUAN_GOU');
     workbench.openAllFollowups();
     workbench.openAllNewLeads();
@@ -235,11 +257,11 @@ describe('workbenchStore', () => {
 
     expect(seen).toEqual([
       { event: 'customer:selected', payload: { phone: '18800002222', scene: 'ACTIVE_REPLY', leadType: 'TUAN_GOU', sourceFrom: 'DASHBOARD' } },
-      { event: 'followup:switch-tab', payload: { tab: 'OVERDUE' } },
+      { event: 'followup:switch-tab', payload: { tab: 'DUE_TODAY' } },
       { event: 'followup:switch-tab', payload: { tab: 'NEW_LEAD' } },
       { event: 'workbench:capture-chat', payload: {} },
       { event: 'quick-search:show', payload: {} },
-      { event: 'followup:switch-tab', payload: { tab: 'OVERDUE' } }
+      { event: 'followup:switch-tab', payload: { tab: 'DUE_TODAY' } }
     ]);
     expect(workbench.workbenchState.toast).toContain('待办队列');
   });

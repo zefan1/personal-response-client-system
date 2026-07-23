@@ -59,6 +59,8 @@ class ConfigAdminServiceTest {
     insertConfig("version.storage.root", "uploads/desktop-releases");
     insertConfig("version.storage.public_base_url", "/downloads/desktop-releases");
     insertConfig("desktop.clipboard_screenshot_confirm_prompt_s", "10");
+    insertConfig("chat.pending_reply_ttl_hours", "24");
+    insertConfig("chat.pending_reply_generating_timeout_s", "120");
     secretCipher = new SecretCipher("test-secret-key");
     service = new ConfigAdminService(
         jdbcTemplate,
@@ -191,6 +193,27 @@ class ConfigAdminServiceTest {
     assertThatThrownBy(() -> service.update("desktop.clipboard_screenshot_confirm_prompt_s", Map.of("value", "abc")))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("config value must be integer");
+  }
+
+  @Test
+  void pendingReplyTaskConfigValidatesRetentionAndGenerationRecoveryRanges() {
+    service.update("chat.pending_reply_ttl_hours", Map.of("value", "1"));
+    service.update("chat.pending_reply_ttl_hours", Map.of("value", "72"));
+    service.update("chat.pending_reply_generating_timeout_s", Map.of("value", "30"));
+    service.update("chat.pending_reply_generating_timeout_s", Map.of("value", "600"));
+
+    assertThatThrownBy(() -> service.update("chat.pending_reply_ttl_hours", Map.of("value", "0")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("chat.pending_reply_ttl_hours range is 1-72");
+    assertThatThrownBy(() -> service.update("chat.pending_reply_ttl_hours", Map.of("value", "73")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("chat.pending_reply_ttl_hours range is 1-72");
+    assertThatThrownBy(() -> service.update("chat.pending_reply_generating_timeout_s", Map.of("value", "29")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("chat.pending_reply_generating_timeout_s range is 30-600");
+    assertThatThrownBy(() -> service.update("chat.pending_reply_generating_timeout_s", Map.of("value", "601")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("chat.pending_reply_generating_timeout_s range is 30-600");
   }
 
   private void insertConfig(String key, String value) {

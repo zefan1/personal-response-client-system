@@ -76,7 +76,7 @@ class CustomerControllerTest {
   @Test
   void searchBindsQueryAndLimit() throws Exception {
     when(customerSearchService.search("Alice", 5)).thenReturn(new CustomerSearchResult(List.of(
-        new CustomerSummary("138****0000", "13800000000", "Alice", "TUAN_GOU", "keeper-1", LocalDateTime.of(2026, 7, 3, 12, 0), "Store A", Confidence.HIGH)), 1));
+        new CustomerSummary("138****0000", "13800000000", "Alice", "Referral", "TUAN_GOU", "keeper-1", LocalDateTime.of(2026, 7, 3, 12, 0), "Store A", Confidence.HIGH)), 1));
 
     mockMvc.perform(get("/api/v1/customers/search").param("q", "Alice").param("limit", "5"))
         .andExpect(status().isOk())

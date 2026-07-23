@@ -218,6 +218,26 @@ describe('App route shell', () => {
     app.unmount();
   });
 
+  it('hides the Skill status chip when no subscription expiry is configured', async () => {
+    installDesktopBridge();
+    apiMocks.getJson.mockResolvedValueOnce({
+      success: true,
+      data: {
+        accountName: 'Admin',
+        role: 'ADMIN',
+        skillStatus: { status: 'UNKNOWN', expireAt: null, daysLeft: null, label: '技能有效期未配置' }
+      },
+      errorCode: null,
+      message: null
+    });
+
+    const { app, host } = await mountAppWithToken('#/desktop');
+
+    expect(host.querySelector('.skill-status')).toBeFalsy();
+    expect(host.textContent).not.toContain('未配置');
+    app.unmount();
+  });
+
   it('keeps browser users inside the operations admin and blocks the web desktop route', async () => {
     const { app, host } = await mountAppWithToken('#/desktop');
 
@@ -502,10 +522,16 @@ describe('App route shell', () => {
   });
 
   it('switches desktop panels, triggers global actions, and opens admin externally', async () => {
-    const [{ captureScreenshot, openAdminConsole }, { triggerRecognize }] = await Promise.all([
+    const [{ captureScreenshot, openAdminConsole }, { triggerRecognize }, { eventBus }, { customerProfileState }] = await Promise.all([
       import('./shared/desktopBridge'),
-      import('./modules/chat-recognition/recognitionStore')
+      import('./modules/chat-recognition/recognitionStore'),
+      import('./shared/eventBus'),
+      import('./modules/customer-profile/customerProfileStore')
     ]);
+    const openedTabs: unknown[] = [];
+    const quickSearchEvents: unknown[] = [];
+    eventBus.on('followup:switch-tab', (payload) => openedTabs.push(payload));
+    eventBus.on('quick-search:show', (payload) => quickSearchEvents.push(payload));
     installDesktopBridge();
     const { app, host } = await mountAppWithToken('#/desktop');
     const navButtons = [...host.querySelectorAll('.desktop-nav-button')] as HTMLButtonElement[];
@@ -530,10 +556,72 @@ describe('App route shell', () => {
     expect(triggerRecognize).toHaveBeenCalledWith('BUTTON_CLICK', { imageBase64: 'capture-image' });
     expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('回复助手');
 
+    navButtons[0].click();
+    await flushUi();
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('工作台');
+
     actionButtons[2].click();
     await flushUi();
     expect((host.querySelector('.task-queue-backdrop') as HTMLElement | null)?.style.display).not.toBe('none');
     expect(host.querySelector('.task-queue-drawer .followup-panel')).toBeTruthy();
+    expect(openedTabs.at(-1)).toEqual({ tab: 'DUE_TODAY' });
+
+    (host.querySelector('.task-queue-drawer .icon-close-button') as HTMLButtonElement | null)?.click();
+    actionButtons[2].click();
+    await flushUi();
+    expect(openedTabs).toEqual([{ tab: 'DUE_TODAY' }, { tab: 'DUE_TODAY' }]);
+
+    eventBus.emit('customer:selected', {
+      phone: '18800002222',
+      scene: 'ACTIVE_REPLY',
+      leadType: 'XIAN_SUO',
+      reminderType: 'DUE_TODAY',
+      sourceFrom: 'FOLLOWUP_LIST'
+    });
+    await flushUi();
+    expect((host.querySelector('.task-queue-backdrop') as HTMLElement | null)?.style.display).toBe('none');
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('客户档案');
+    expect(host.querySelector('.profile-return-button')).toBeTruthy();
+    customerProfileState.profile = {
+      phoneFull: '18800002222',
+      customer: {
+        phone: '188****2222',
+        phoneFull: '18800002222',
+        nickname: '今日待跟进客户',
+        leadType: 'XIAN_SUO',
+        sourceTable: '私域客资管理表'
+      }
+    };
+
+    actionButtons[1].click();
+    await flushUi();
+    expect(quickSearchEvents.at(-1)).toMatchObject({
+      phone: '18800002222',
+      nickname: '今日待跟进客户',
+      reminderType: 'DUE_TODAY',
+      returnToFollowups: true
+    });
+
+    eventBus.emit('customer:selected', {
+      phone: '18800002222',
+      scene: 'CHAT_RECOGNIZE',
+      leadType: 'XIAN_SUO',
+      reminderType: 'DUE_TODAY',
+      sourceFrom: 'FOLLOWUP_LIST'
+    });
+    await flushUi();
+
+    (host.querySelector('.profile-return-button') as HTMLButtonElement | null)?.click();
+    await flushUi();
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('工作台');
+    expect((host.querySelector('.task-queue-backdrop') as HTMLElement | null)?.style.display).not.toBe('none');
+    expect(openedTabs.at(-1)).toEqual({ tab: 'DUE_TODAY' });
+
+    actionButtons[1].click();
+    await flushUi();
+    expect(quickSearchEvents.at(-1)).toEqual(undefined);
+
+    (host.querySelector('.task-queue-drawer .icon-close-button') as HTMLButtonElement | null)?.click();
 
     const adminButton = [...host.querySelectorAll('.desktop-sidebar-actions button')]
       .find((button) => button.textContent?.includes('后台')) as HTMLButtonElement | undefined;
@@ -568,6 +656,34 @@ describe('App route shell', () => {
     expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('客户档案');
     expect((host.querySelector('.customer-panel') as HTMLElement | null)?.style.display).not.toBe('none');
     expect((host.querySelector('.reply-panel') as HTMLElement | null)?.style.display).toBe('none');
+    app.unmount();
+  });
+
+  it('returns to the originating followup list after a template is confirmed as sent', async () => {
+    const { eventBus } = await import('./shared/eventBus');
+    installDesktopBridge();
+    const { app, host } = await mountAppWithToken('#/desktop');
+
+    eventBus.emit('followup:switch-tab', { tab: 'DUE_TODAY' });
+    await flushUi();
+    eventBus.emit('customer:selected', {
+      phone: '18800002222',
+      scene: 'ACTIVE_REPLY',
+      leadType: 'XIAN_SUO',
+      reminderType: 'DUE_TODAY',
+      sourceFrom: 'FOLLOWUP_LIST'
+    });
+    await flushUi();
+
+    expect((host.querySelector('.task-queue-backdrop') as HTMLElement | null)?.style.display).toBe('none');
+    expect(host.querySelector('.profile-return-button')).toBeTruthy();
+
+    eventBus.emit('quick-search:sent', { returnToFollowups: true });
+    await flushUi();
+
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('工作台');
+    expect((host.querySelector('.task-queue-backdrop') as HTMLElement | null)?.style.display).not.toBe('none');
+    expect(host.querySelector('.profile-return-button')).toBeFalsy();
     app.unmount();
   });
 

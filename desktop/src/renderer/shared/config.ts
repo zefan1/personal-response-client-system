@@ -96,7 +96,7 @@ const defaults: DesktopConfig = {
   alertHistoryMaxCount: 50,
   alertHistoryRetentionDays: 7,
   alertBellRefreshIntervalS: 86400,
-  workbenchRefreshIntervalS: 300,
+  workbenchRefreshIntervalS: 60,
   workbenchFollowupListLimit: 5,
   workbenchNewLeadListLimit: 3,
   workbenchMaxNotices: 3,

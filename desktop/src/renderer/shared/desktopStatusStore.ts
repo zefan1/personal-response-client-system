@@ -24,6 +24,7 @@ export type DesktopStatusPayload = {
   };
   runtimeConfig?: {
     clipboardScreenshotConfirmPromptS?: number | null;
+    workbenchRefreshIntervalS?: number | null;
   };
 };
 
@@ -47,7 +48,8 @@ export const desktopStatusState = reactive({
     replyGenerationEnabled: false
   },
   runtimeConfig: {
-    clipboardScreenshotConfirmPromptS: 10
+    clipboardScreenshotConfirmPromptS: 10,
+    workbenchRefreshIntervalS: 60
   }
 });
 
@@ -88,10 +90,13 @@ export function applyDesktopStatus(payload: DesktopStatusPayload): void {
   desktopStatusState.llmStatus.replyGenerationEnabled = payload.llmStatus?.replyGenerationEnabled === true;
 
   const clipboardPromptSeconds = normalizeClipboardPromptSeconds(payload.runtimeConfig?.clipboardScreenshotConfirmPromptS);
+  const workbenchRefreshIntervalS = normalizeWorkbenchRefreshIntervalSeconds(payload.runtimeConfig?.workbenchRefreshIntervalS);
   desktopStatusState.runtimeConfig.clipboardScreenshotConfirmPromptS = clipboardPromptSeconds;
+  desktopStatusState.runtimeConfig.workbenchRefreshIntervalS = workbenchRefreshIntervalS;
   saveDesktopConfig({
     accountPermissions: desktopStatusState.permissions,
-    clipboardScreenshotConfirmPromptS: clipboardPromptSeconds
+    clipboardScreenshotConfirmPromptS: clipboardPromptSeconds,
+    workbenchRefreshIntervalS
   });
 }
 
@@ -111,6 +116,7 @@ export function resetDesktopStatus(): void {
   desktopStatusState.llmStatus.detail = '';
   desktopStatusState.llmStatus.replyGenerationEnabled = false;
   desktopStatusState.runtimeConfig.clipboardScreenshotConfirmPromptS = 10;
+  desktopStatusState.runtimeConfig.workbenchRefreshIntervalS = 60;
 }
 
 function normalizeRole(value?: string): DesktopRole {
@@ -151,4 +157,13 @@ function normalizeClipboardPromptSeconds(value?: number | null): number {
     return integer;
   }
   return 10;
+}
+
+function normalizeWorkbenchRefreshIntervalSeconds(value?: number | null): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 60;
+  }
+  const integer = Math.trunc(parsed);
+  return integer >= 30 && integer <= 300 ? integer : 60;
 }

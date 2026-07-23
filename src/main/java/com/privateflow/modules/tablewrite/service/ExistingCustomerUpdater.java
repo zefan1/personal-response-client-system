@@ -11,6 +11,7 @@ import com.privateflow.modules.tags.TagExchangeResult;
 import com.privateflow.modules.tags.TagExchangeService;
 import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -68,10 +69,13 @@ public class ExistingCustomerUpdater {
   public Map<String, Object> followupFields(CustomerMessageSentEvent event) {
     Map<String, Object> fields = new LinkedHashMap<>();
     fields.put("followupNotes", event.conversationSummary());
-    fields.put("nextFollowupDir", event.selectedDirection());
-    if (event.followupSuggest() != null) {
+    fields.put("lastFollowupAt", LocalDateTime.now().toString());
+    if (event.followupSuggest() != null && !blank(event.followupSuggest().nextFollowupAt())) {
       fields.put("nextFollowupDir", event.followupSuggest().nextFollowupDir());
       fields.put("nextFollowupAt", event.followupSuggest().nextFollowupAt());
+    } else if (event.completeCurrentFollowup()) {
+      fields.put("nextFollowupAt", "");
+      fields.put("nextFollowupDir", "");
     }
     return fields;
   }

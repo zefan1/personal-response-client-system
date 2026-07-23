@@ -71,6 +71,37 @@ class CustomerRepositoryTest {
   }
 
   @Test
+  void keywordSearchMatchesNicknameButNotFollowupNotes() {
+    jdbcTemplate.update("""
+        INSERT INTO customers (phone, nickname, followup_notes, version)
+        VALUES ('18810001001', '林晓雯', '客户希望确认价格和周末时间。', 0)
+        """);
+    jdbcTemplate.update("""
+        INSERT INTO customers (phone, nickname, followup_notes, version)
+        VALUES ('18810001003', '周雅婷', '等待到店检测。', 0)
+        """);
+
+    List<Customer> customers = repository.searchByKeyword("周", 10);
+
+    assertThat(customers).extracting(Customer::getNickname).containsExactly("周雅婷");
+  }
+
+  @Test
+  void keywordSearchMatchesFullPhoneAndPhoneSuffix() {
+    jdbcTemplate.update("""
+        INSERT INTO customers (phone, nickname, version)
+        VALUES ('18810001003', '周雅婷', 0)
+        """);
+
+    assertThat(repository.searchByKeyword("18810001003", 10))
+        .extracting(Customer::getNickname)
+        .containsExactly("周雅婷");
+    assertThat(repository.searchByKeyword("1003", 10))
+        .extracting(Customer::getNickname)
+        .containsExactly("周雅婷");
+  }
+
+  @Test
   void sourceAwareUpsertPassesNormalizedExchangeResultToTagBridge() {
     Customer customer = new Customer();
     customer.setPhone("13800000000");

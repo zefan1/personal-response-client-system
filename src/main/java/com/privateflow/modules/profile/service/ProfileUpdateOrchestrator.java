@@ -79,13 +79,14 @@ public class ProfileUpdateOrchestrator {
       RoutedProfileUpdates routed = confidenceRouter.route(analysis.profileUpdates());
       Map<String, Object> autoWrite = new LinkedHashMap<>();
       routed.high().forEach((field, update) -> autoWrite.put(field, update.value()));
-      autoWrite.put("lastFollowupAt", java.time.LocalDateTime.now());
-      autoWrite.put("followupNotes", fallbackSummary(event));
-      Integer writtenVersion = null;
-      try {
-        writtenVersion = profileWriter.write(event.phone(), autoWrite, customer.getVersion(), true);
-      } catch (ProfileUpdateException ex) {
-        log.warn("profile auto update skipped by conflict, phone={}", event.phone());
+      Integer writtenVersion = customer.getVersion();
+      if (!autoWrite.isEmpty()) {
+        try {
+          writtenVersion = profileWriter.write(event.phone(), autoWrite, customer.getVersion(), true);
+        } catch (ProfileUpdateException ex) {
+          writtenVersion = null;
+          log.warn("profile auto update skipped by conflict, phone={}", event.phone());
+        }
       }
       if (writtenVersion != null
           && customer.getId() != null
@@ -113,10 +114,14 @@ public class ProfileUpdateOrchestrator {
   }
 
   private String conversationText(CustomerMessageSentEvent event) {
+    String customerEvidence = fallbackSummary(event);
+    if (customerEvidence.isBlank()) {
+      return "";
+    }
     if (event.conversationSummary() != null && !event.conversationSummary().isBlank()) {
       return event.conversationSummary();
     }
-    return fallbackSummary(event);
+    return customerEvidence;
   }
 
   private String fallbackSummary(CustomerMessageSentEvent event) {

@@ -60,15 +60,7 @@ public class CustomerRepository {
         WHERE phone NOT LIKE '%*%'
           AND (
              nickname LIKE CONCAT('%', ?, '%')
-           OR source_channel LIKE CONCAT('%', ?, '%')
-           OR intended_store LIKE CONCAT('%', ?, '%')
-           OR intended_project LIKE CONCAT('%', ?, '%')
-           OR followup_notes LIKE CONCAT('%', ?, '%')
         """);
-    args.add(trimmed);
-    args.add(trimmed);
-    args.add(trimmed);
-    args.add(trimmed);
     args.add(trimmed);
     if (!digits.isBlank()) {
       sql.append(" OR phone LIKE CONCAT('%', ?) ");

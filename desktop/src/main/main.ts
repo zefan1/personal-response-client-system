@@ -180,6 +180,32 @@ async function runRendererSmoke(window: BrowserWindow) {
               throw new Error('reply current task actions still share the copy row');
             }
           };
+          const assertVisibleButtonContentFits = (scopeSelector, label) => {
+            const scope = document.querySelector(scopeSelector);
+            if (!scope) {
+              throw new Error('missing button-fit scope: ' + scopeSelector);
+            }
+            const overflowing = [...scope.querySelectorAll('button')]
+              .filter((button) => {
+                const rect = button.getBoundingClientRect();
+                const style = getComputedStyle(button);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.display !== 'none'
+                  && style.visibility !== 'hidden'
+                  && (button.scrollWidth > button.clientWidth + 1 || button.scrollHeight > button.clientHeight + 1);
+              })
+              .map((button) => ({
+                text: button.textContent.trim(),
+                clientWidth: button.clientWidth,
+                scrollWidth: button.scrollWidth,
+                clientHeight: button.clientHeight,
+                scrollHeight: button.scrollHeight
+              }));
+            if (overflowing.length) {
+              throw new Error(label + ' button content overflow: ' + JSON.stringify(overflowing));
+            }
+          };
           const assertDesktopSmoke = async () => {
           await waitForSelector('.workbench-panel');
           await waitForSelector('.customer-panel');
@@ -204,6 +230,12 @@ async function runRendererSmoke(window: BrowserWindow) {
           if (document.documentElement.scrollWidth > window.innerWidth + 1) {
             throw new Error('desktop has horizontal overflow');
           }
+          assertVisibleButtonContentFits('.desktop-shell', '420px desktop');
+          window.resizeTo(360, 560);
+          await delay(250);
+          assertVisibleButtonContentFits('.desktop-shell', '360px desktop');
+          window.resizeTo(420, 760);
+          await delay(250);
           actionButtons[2].click();
           const drawer = await waitForSelector('.task-queue-backdrop');
           if (getComputedStyle(drawer).display === 'none') {
@@ -218,6 +250,46 @@ async function runRendererSmoke(window: BrowserWindow) {
             await delay(50);
             assertActiveFollowupTab(index);
           }
+          const populatedTab = followupTabs.find((tab) => Number(tab.querySelector('span')?.textContent ?? '0') > 0);
+          if (!populatedTab) {
+            throw new Error('followup smoke requires at least one populated tab');
+          }
+          populatedTab.click();
+          await delay(100);
+          const profileAction = await waitForSelector('.followup-profile-button');
+          if (!profileAction || !(profileAction.getAttribute('aria-label') || '').includes('客户档案')) {
+            throw new Error('followup explicit profile action missing');
+          }
+          const firstCheckbox = await waitForSelector('.followup-list input[type="checkbox"]');
+          firstCheckbox.click();
+          await waitForSelector('.batch-bar');
+          assertVisibleButtonContentFits('.task-queue-drawer', '420px task queue');
+          window.resizeTo(360, 560);
+          await delay(250);
+          assertVisibleButtonContentFits('.task-queue-drawer', '360px task queue');
+          window.resizeTo(420, 760);
+          await delay(250);
+          const firstFollowup = document.querySelector('.followup-main');
+          firstFollowup.click();
+          await waitForCondition(
+            () => getComputedStyle(document.querySelector('.task-queue-backdrop')).display === 'none',
+            'task queue closes after opening customer profile'
+          );
+          await waitForCondition(() => {
+            const profile = document.querySelector('.customer-panel .profile-card');
+            const rect = profile?.getBoundingClientRect();
+            return Boolean(profile && rect && rect.width > 0 && rect.height > 0);
+          }, 'customer profile visible after task queue selection');
+          const copyNickname = document.querySelector('.profile-copy-nickname');
+          if (!copyNickname || copyNickname.getAttribute('aria-label') !== '复制客户昵称') {
+            throw new Error('customer nickname copy action missing');
+          }
+          assertVisibleButtonContentFits('.desktop-shell', '420px customer profile');
+          window.resizeTo(360, 560);
+          await delay(250);
+          assertVisibleButtonContentFits('.desktop-shell', '360px customer profile');
+          window.resizeTo(420, 760);
+          await delay(250);
           const closeDrawer = [...document.querySelectorAll('.task-queue-drawer button')]
             .find((button) => (button.getAttribute('aria-label') || '').includes('关闭待办队列'));
           closeDrawer?.click();
@@ -402,6 +474,7 @@ async function runRendererSmoke(window: BrowserWindow) {
     console.log('renderer_smoke=passed');
     app.quit();
   } catch (error) {
+    await captureRendererSmokeScreenshot(window, 'desktop-renderer-smoke-failed.png');
     console.error('renderer_smoke=failed', error);
     app.exit(1);
   }

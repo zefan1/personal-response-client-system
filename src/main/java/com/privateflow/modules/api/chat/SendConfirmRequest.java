@@ -13,6 +13,32 @@ public record SendConfirmRequest(
     List<ChatMessageDto> rawMessages,
     String sentText,
     String selectedDirection,
-    CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest
+    CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest,
+    boolean completeCurrentFollowup
 ) {
+
+  public SendConfirmRequest(
+      String phone,
+      String nickname,
+      boolean isNewCustomer,
+      String sourceTable,
+      String leadType,
+      String conversationSummary,
+      List<ChatMessageDto> rawMessages,
+      String sentText,
+      String selectedDirection,
+      CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest) {
+    this(
+        phone,
+        nickname,
+        isNewCustomer,
+        sourceTable,
+        leadType,
+        conversationSummary,
+        rawMessages,
+        sentText,
+        selectedDirection,
+        followupSuggest,
+        false);
+  }
 }

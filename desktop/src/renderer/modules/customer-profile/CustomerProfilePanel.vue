@@ -20,7 +20,7 @@
     <div class="search-row">
       <input
         v-model="state.keyword"
-        placeholder="粘贴手机号、昵称或备注搜索"
+        placeholder="粘贴手机号或昵称搜索"
         @input="onInput"
         @paste="onPaste"
       />
@@ -31,16 +31,19 @@
 
     <div v-if="state.searchMessage" class="empty-panel customer-search-state">
       <strong>{{ state.searchMessage }}</strong>
-      <p v-if="!state.searchLoading">可换手机号后四位、昵称或微信备注再试</p>
+      <p v-if="!state.searchLoading">可换手机号后四位或昵称再试</p>
     </div>
     <div v-if="state.searchResults.length" class="search-results">
       <button v-for="customer in state.searchResults" :key="customer.phoneFull || customer.phone" class="result-row" @click="openProfile(customer.phoneFull || customer.phone, 'SEARCH')">
-        <span>{{ customer.nickname || '-' }}</span>
-        <span>{{ maskPhone(customer.phone) }}</span>
-        <span>{{ leadTypeLabel(customer.leadType) }}</span>
-        <span>{{ customer.assignedKeeper || '-' }}</span>
-        <span>{{ formatDate(customer.lastFollowupAt) }}</span>
-        <span>{{ customer.intendedStore || '-' }}</span>
+        <span class="result-identity">
+          <strong class="result-nickname">{{ customer.nickname || '-' }}</strong>
+          <span class="result-phone">{{ maskPhone(customer.phone) }}</span>
+        </span>
+        <span class="result-meta">
+          <span>{{ customer.sourceChannel || '-' }}</span>
+          <span>{{ formatSearchDate(customer.lastFollowupAt) }}</span>
+          <span>{{ customer.intendedStore || '-' }}</span>
+        </span>
       </button>
       <p v-if="state.searchTruncated" class="hint">还有更多结果，建议用手机号精确搜索</p>
     </div>
@@ -98,6 +101,13 @@
       <div class="profile-summary">
         <div>
           <strong>{{ customer.nickname || '-' }}</strong>
+          <button
+            class="secondary profile-copy-nickname"
+            type="button"
+            aria-label="复制客户昵称"
+            title="复制客户昵称"
+            @click="copyCustomerNickname"
+          ><span aria-hidden="true">⧉</span></button>
           <span>{{ maskPhone(customer.phone) }}</span>
           <span>{{ leadTypeLabel(customer.leadType) }}</span>
           <span>{{ customer.customerStage || '-' }}</span>
@@ -234,6 +244,7 @@ import {
   cleanupCustomerProfileStore,
   confirmPreviewedCandidate,
   confirmTableSync,
+  copyCustomerNickname,
   customerProfileState as state,
   enterEditMode,
   generateReplyFromProfile,

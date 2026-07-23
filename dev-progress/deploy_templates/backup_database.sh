@@ -7,6 +7,7 @@ set -euo pipefail
 BACKUP_DIR="${BACKUP_DIR:-/data/private-domain-assistant/backups/mysql}"
 DB_NAME="${DB_NAME:-private_domain_assistant_prod}"
 DB_USER="${DB_USER:-pda_prod}"
+DB_HOST="${DB_HOST:-127.0.0.1}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 OUTPUT="${BACKUP_DIR}/${DB_NAME}-${TIMESTAMP}.sql.gz"
@@ -18,6 +19,7 @@ mysqldump \
   --routines \
   --triggers \
   --default-character-set=utf8mb4 \
+  -h"$DB_HOST" \
   -u"$DB_USER" \
   -p"${DB_PASSWORD:?DB_PASSWORD is required}" \
   "$DB_NAME" | gzip -9 > "$OUTPUT"

@@ -103,8 +103,6 @@ describe('WorkbenchPanel', () => {
     const seen: Array<{ event: string; payload: unknown }> = [];
     eventBus.on('followup:switch-tab', (payload) => seen.push({ event: 'followup:switch-tab', payload }));
     eventBus.on('customer:selected', (payload) => seen.push({ event: 'customer:selected', payload }));
-    eventBus.on('workbench:capture-chat', (payload) => seen.push({ event: 'workbench:capture-chat', payload }));
-    eventBus.on('quick-search:show', (payload) => seen.push({ event: 'quick-search:show', payload }));
 
     const viewAllLinks = [...host.querySelectorAll('.section-inline-head .link-button')] as HTMLButtonElement[];
     viewAllLinks[0].click();
@@ -117,32 +115,29 @@ describe('WorkbenchPanel', () => {
     expect(firstRow).toBeTruthy();
     firstRow?.click();
 
-    const actionButtons = [...host.querySelectorAll('.workbench-action')] as HTMLButtonElement[];
-    expect(actionButtons.map((button) => button.querySelector('strong')?.textContent)).toEqual([
-      '识别聊天',
-      '速搜模板',
-      '批量待办'
-    ]);
-    expect(actionButtons.map((button) => button.textContent)).toEqual([
-      '识识别聊天截图生成回复',
-      '模速搜模板话术和素材',
-      '批批量待办选择客户发送'
-    ]);
-    actionButtons.forEach((button) => button.click());
-
     await flushUi();
 
-    expect(seen).toContainEqual({ event: 'followup:switch-tab', payload: { tab: 'OVERDUE' } });
+    expect(seen).toContainEqual({ event: 'followup:switch-tab', payload: { tab: 'DUE_TODAY' } });
     expect(seen).toContainEqual({ event: 'followup:switch-tab', payload: { tab: 'NEW_LEAD' } });
     expect(seen).toContainEqual({ event: 'followup:switch-tab', payload: { tab: 'APPOINTMENT' } });
-    expect(seen).toContainEqual({ event: 'workbench:capture-chat', payload: {} });
-    expect(seen).toContainEqual({ event: 'quick-search:show', payload: {} });
     expect(seen).toContainEqual({
       event: 'customer:selected',
-      payload: { phone: '18800000001', scene: 'ACTIVE_REPLY', leadType: 'TUAN_GOU', sourceFrom: 'DASHBOARD' }
+      payload: { phone: '18800000002', scene: 'ACTIVE_REPLY', leadType: 'XIAN_SUO', sourceFrom: 'DASHBOARD' }
     });
+    expect(host.querySelector('.workbench-actions')).toBeFalsy();
     expect(host.querySelector('.quick-actions')).toBeFalsy();
 
+    app.unmount();
+  });
+
+  it('checks periodically and reloads when the configured interval has elapsed', async () => {
+    const { app } = await mountPanel();
+    expect(apiMocks.getJson.mock.calls.filter(([path]) => path === '/api/v1/followups/today')).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushUi();
+
+    expect(apiMocks.getJson.mock.calls.filter(([path]) => path === '/api/v1/followups/today')).toHaveLength(2);
     app.unmount();
   });
 
@@ -204,6 +199,19 @@ describe('WorkbenchPanel', () => {
 
     expect(host.textContent).toContain('Ops Notice');
     expect(host.querySelectorAll('.workbench-notice')).toHaveLength(1);
+    app.unmount();
+  });
+
+  it('removes a confirmed followup from the rendered urgent list', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    expect(host.textContent).toContain('Due B');
+    expect(host.textContent).toContain('Overdue A');
+
+    eventBus.emit('followup:completed', { phone: '18800000002', reminderType: 'DUE_TODAY' });
+    await flushUi();
+
+    expect(host.textContent).not.toContain('Due B');
+    expect(host.textContent).toContain('Overdue A');
     app.unmount();
   });
 });

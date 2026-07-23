@@ -139,7 +139,7 @@ export function refreshWorkbenchIfNeeded(): void {
   if (workbenchState.retryOnly) {
     return;
   }
-  if (!workbenchState.loaded || workbenchState.followupDataDirty || Date.now() - workbenchState.lastFetchAt > intervalMs) {
+  if (!workbenchState.loaded || workbenchState.followupDataDirty || Date.now() - workbenchState.lastFetchAt >= intervalMs) {
     void loadWorkbenchFollowups();
   }
 }
@@ -214,6 +214,16 @@ export function markWorkbenchDirty(): void {
   workbenchState.followupDataDirty = true;
 }
 
+export function completeWorkbenchFollowup(phone: string, reminderType?: string | null): void {
+  if (reminderType !== 'DUE_TODAY' && reminderType !== 'OVERDUE') {
+    return;
+  }
+  workbenchState.followups = workbenchState.followups.filter((item) =>
+    (item.phoneFull ?? item.phone) !== phone || item.reminderType !== reminderType
+  );
+  markWorkbenchDirty();
+}
+
 export function openWorkbenchCustomer(phone: string, leadType?: string | null): void {
   eventBus.emit('customer:selected', {
     phone,
@@ -224,7 +234,7 @@ export function openWorkbenchCustomer(phone: string, leadType?: string | null): 
 }
 
 export function openAllFollowups(): void {
-  const tab = urgentFollowups.value.some((item) => item.reminderType === 'OVERDUE') ? 'OVERDUE' : 'DUE_TODAY';
+  const tab = urgentFollowups.value.some((item) => item.reminderType === 'DUE_TODAY') ? 'DUE_TODAY' : 'OVERDUE';
   eventBus.emit('followup:switch-tab', { tab });
 }
 
@@ -290,7 +300,7 @@ function incrementMetric(metric: { total: number; tuanGou: number; xianSuo: numb
 
 function compareFollowupUrgency(left: WorkbenchFollowupItem, right: WorkbenchFollowupItem): number {
   if (left.reminderType !== right.reminderType) {
-    return left.reminderType === 'OVERDUE' ? -1 : 1;
+    return left.reminderType === 'DUE_TODAY' ? -1 : 1;
   }
   const leadTypeDiff = leadTypeRank(left.leadType) - leadTypeRank(right.leadType);
   if (left.reminderType === 'OVERDUE') {

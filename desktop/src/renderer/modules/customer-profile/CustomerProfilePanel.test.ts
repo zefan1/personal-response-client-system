@@ -16,13 +16,18 @@ const mocks = vi.hoisted(() => ({
   loadAlertsByPhone: vi.fn(),
   confirmStageSuggestion: vi.fn(),
   handleCustomerProfileLoaded: vi.fn(),
-  ignoreStageSuggestion: vi.fn()
+  ignoreStageSuggestion: vi.fn(),
+  writeClipboardText: vi.fn()
 }));
 
 vi.mock('../../shared/apiClient', () => ({
   getJson: mocks.getJson,
   postJson: mocks.postJson,
   putJson: mocks.putJson
+}));
+
+vi.mock('../../shared/desktopBridge', () => ({
+  writeClipboardText: mocks.writeClipboardText
 }));
 
 vi.mock('../save-to-table/saveToTableService', () => ({
@@ -151,6 +156,31 @@ describe('CustomerProfilePanel', () => {
     expect(mocks.handleCustomerProfileLoaded).toHaveBeenCalledWith(expect.objectContaining({
       customer: expect.objectContaining({ phone: '18800000001' })
     }));
+    app.unmount();
+  });
+
+  it('renders each search result as a compact two-line customer summary', async () => {
+    const { app, host } = await mountPanel();
+    mocks.getJson.mockResolvedValueOnce({
+      success: true,
+      data: {
+        total: 2,
+        customers: [summary('18800000001', 'Alice'), summary('18800000002', 'Alice Duplicate')]
+      }
+    });
+
+    const input = host.querySelector('.search-row input') as HTMLInputElement;
+    setValue(input, 'Alice');
+    (host.querySelector('.search-row button') as HTMLButtonElement).click();
+    await flushUi();
+
+    const row = host.querySelector('.search-results .result-row') as HTMLButtonElement;
+    expect(row.querySelector('.result-identity')?.textContent).toContain('Alice');
+    expect(row.querySelector('.result-identity')?.textContent).toContain('188****0001');
+    expect(row.querySelector('.result-meta')?.textContent).toContain('Source A');
+    expect(row.querySelector('.result-meta')?.textContent).toContain('07-03 10:00');
+    expect(row.querySelector('.result-meta')?.textContent).toContain('Store A');
+    expect(row.textContent).not.toContain('keeper-a');
     app.unmount();
   });
 
@@ -555,6 +585,30 @@ describe('CustomerProfilePanel', () => {
     expect(refreshButton?.textContent).not.toContain('刷新');
     app.unmount();
   });
+
+  it('shows a compact control that copies the loaded customer nickname', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    mocks.getJson.mockResolvedValue({ success: true, data: view('18800001111', '今日待跟进客户') });
+    mocks.writeClipboardText.mockResolvedValue({ success: true });
+
+    eventBus.emit('customer:selected', {
+      phone: '18800001111',
+      scene: 'ACTIVE_REPLY',
+      leadType: 'XIAN_SUO',
+      sourceFrom: 'FOLLOWUP_LIST'
+    });
+    await flushUi();
+
+    const copyButton = host.querySelector('.profile-copy-nickname') as HTMLButtonElement | null;
+    expect(copyButton).toBeTruthy();
+    expect(copyButton?.getAttribute('aria-label')).toBe('复制客户昵称');
+    copyButton?.click();
+    await flushUi();
+
+    expect(mocks.writeClipboardText).toHaveBeenCalledWith('今日待跟进客户');
+    expect(host.querySelector('.toast')?.textContent).toContain('客户昵称已复制');
+    app.unmount();
+  });
 });
 
 function resetMocks(): void {
@@ -567,6 +621,7 @@ function resetMocks(): void {
   mocks.syncProfileToTable.mockResolvedValue({ status: 'OK', message: 'synced', needRefresh: true });
   mocks.confirmStageSuggestion.mockResolvedValue(true);
   mocks.ignoreStageSuggestion.mockResolvedValue(true);
+  mocks.writeClipboardText.mockResolvedValue({ success: true });
 }
 
 function summary(phone: string, nickname: string): CustomerSummary {
@@ -574,10 +629,11 @@ function summary(phone: string, nickname: string): CustomerSummary {
     phone,
     nickname,
     leadType: 'TUAN_GOU',
+    sourceChannel: 'Source A',
     assignedKeeper: 'keeper-a',
     lastFollowupAt: '2026-07-03T10:00:00',
     intendedStore: 'Store A'
-  };
+  } as CustomerSummary;
 }
 
 function view(phone: string, nickname: string, patch: Partial<CustomerProfileView> & { customer?: Partial<CustomerProfileView['customer']> } = {}): CustomerProfileView {

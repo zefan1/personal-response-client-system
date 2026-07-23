@@ -4,6 +4,7 @@ import type { QuickSearchItem } from './types';
 
 const mocks = vi.hoisted(() => ({
   getJson: vi.fn(),
+  postJson: vi.fn(),
   writeClipboardText: vi.fn(),
   writeClipboardImage: vi.fn(),
   onQuickSearchShow: vi.fn(),
@@ -11,7 +12,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../shared/apiClient', () => ({
-  getJson: mocks.getJson
+  getJson: mocks.getJson,
+  postJson: mocks.postJson
 }));
 
 vi.mock('../../shared/desktopBridge', () => ({
@@ -83,6 +85,7 @@ describe('QuickSearchOverlay', () => {
       configurable: true
     });
     mocks.getJson.mockResolvedValue({ success: true, data: items() });
+    mocks.postJson.mockResolvedValue({ success: true, data: { accepted: true } });
     mocks.writeClipboardText.mockResolvedValue({ success: true });
     mocks.writeClipboardImage.mockResolvedValue({ success: true });
     mocks.onQuickSearchShow.mockReturnValue(() => undefined);
@@ -212,7 +215,84 @@ describe('QuickSearchOverlay', () => {
 
     app.unmount();
   });
+
+  it('shows inline sent or unsent actions after a customer-bound copy', async () => {
+    const { app, host, eventBus } = await mountOverlay();
+    const completed: unknown[] = [];
+    const sent: unknown[] = [];
+    eventBus.on('followup:completed', (payload) => completed.push(payload));
+    eventBus.on('quick-search:sent', (payload) => sent.push(payload));
+
+    eventBus.emit('quick-search:show', customerContext());
+    await flushUi();
+
+    (host.querySelector('.quick-item .primary') as HTMLButtonElement | null)?.click();
+    await flushUi();
+
+    expect(host.textContent).toContain('已复制给');
+    expect(host.textContent).toContain('王女士');
+    expect(host.querySelector('.quick-send-confirm')).toBeTruthy();
+    expect(host.querySelector('.quick-send-decline')).toBeTruthy();
+    expect(mocks.postJson).not.toHaveBeenCalled();
+
+    (host.querySelector('.quick-send-decline') as HTMLButtonElement | null)?.click();
+    await flushUi();
+    expect(host.querySelector('.quick-send-confirm')).toBeFalsy();
+    expect(host.querySelector('.quick-search-overlay')).toBeTruthy();
+    expect(mocks.postJson).not.toHaveBeenCalled();
+
+    (host.querySelector('.quick-item .primary') as HTMLButtonElement | null)?.click();
+    await flushUi();
+    (host.querySelector('.quick-send-confirm') as HTMLButtonElement | null)?.click();
+    await flushUi();
+
+    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/send-confirm', expect.objectContaining({
+      phone: '13800001111',
+      nickname: '王女士',
+      sentText: 'Opening content',
+      completeCurrentFollowup: true
+    }));
+    expect(completed).toEqual([{ phone: '13800001111', reminderType: 'DUE_TODAY' }]);
+    expect(sent).toEqual([{ returnToFollowups: true }]);
+    expect(host.querySelector('.quick-search-overlay')).toBeFalsy();
+    app.unmount();
+  });
+
+  it('treats close as unsent and keeps the template open when recording fails', async () => {
+    const { app, host, eventBus } = await mountOverlay();
+    eventBus.emit('quick-search:show', customerContext());
+    await flushUi();
+    (host.querySelector('.quick-item .primary') as HTMLButtonElement | null)?.click();
+    await flushUi();
+    (host.querySelector('.icon-close-button') as HTMLButtonElement | null)?.click();
+    await flushUi();
+    expect(mocks.postJson).not.toHaveBeenCalled();
+
+    eventBus.emit('quick-search:show', customerContext());
+    mocks.postJson.mockResolvedValueOnce({ success: false, message: 'record failed' });
+    await flushUi();
+    (host.querySelector('.quick-item .primary') as HTMLButtonElement | null)?.click();
+    await flushUi();
+    (host.querySelector('.quick-send-confirm') as HTMLButtonElement | null)?.click();
+    await flushUi();
+
+    expect(host.querySelector('.quick-search-overlay')).toBeTruthy();
+    expect(host.textContent).toContain('跟进记录失败');
+    app.unmount();
+  });
 });
+
+function customerContext() {
+  return {
+    phone: '13800001111',
+    nickname: '王女士',
+    leadType: 'XIAN_SUO',
+    sourceTable: '私域客资管理表',
+    reminderType: 'DUE_TODAY',
+    returnToFollowups: true,
+    customer: { nickname: '王女士' }
+  };
+}
 
 function items(): QuickSearchItem[] {
   return [

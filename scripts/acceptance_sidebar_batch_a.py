@@ -104,12 +104,30 @@ def main() -> int:
         write_report(checks)
         return 1
 
+    today = date.today().isoformat()
+    today_followup_phone = "18800002222"
+    status, payload, raw = request_json("GET", f"/api/v1/customers/{today_followup_phone}", token=token)
+    profile = data_of(payload)
+    customer = profile.get("customer") if isinstance(profile, dict) else None
+    version = customer.get("version") if isinstance(customer, dict) else None
+    if isinstance(version, int):
+        next_followup_at = f"{today}T18:00:00"
+        status, payload, raw = request_json("PUT", f"/api/v1/customers/{today_followup_phone}", {
+            "version": version,
+            "operator": "codex-local-acceptance",
+            "fields": {
+                "nextFollowupAt": next_followup_at,
+            },
+        }, token=token)
+        add(checks, "A0 refresh today followup fixture", status == 200 and data_of(payload) is not None, f"status={status} nextFollowupAt={next_followup_at}")
+    else:
+        add(checks, "A0 refresh today followup fixture", False, f"status={status} unable to read profile version body={raw[:300]}")
+
     appointment_phone = "18800003333"
     status, payload, raw = request_json("GET", f"/api/v1/customers/{appointment_phone}", token=token)
     profile = data_of(payload)
     customer = profile.get("customer") if isinstance(profile, dict) else None
     version = customer.get("version") if isinstance(customer, dict) else None
-    today = date.today().isoformat()
     if isinstance(version, int):
         status, payload, raw = request_json("PUT", f"/api/v1/customers/{appointment_phone}", {
             "version": version,
@@ -133,9 +151,10 @@ def main() -> int:
     follow_data = data_of(payload)
     followups = list_from(follow_data)
     phones = {pick_phone(item) for item in followups}
+    today_followup = next((item for item in followups if pick_phone(item).endswith("2222")), None)
     add(checks, "A1/A4 followup data loads", status == 200 and len(followups) >= 2, f"status={status} count={len(followups)}")
     add(checks, "A2/A4 overdue customer exists", any(phone.endswith("1111") for phone in phones), f"phones={sorted(phones)}")
-    add(checks, "A4 today customer exists", any(phone.endswith("2222") for phone in phones), f"phones={sorted(phones)}")
+    add(checks, "A4 today customer exists", isinstance(today_followup, dict) and today_followup.get("reminderType") == "DUE_TODAY", f"phone={pick_phone(today_followup)} reminderType={today_followup.get('reminderType') if isinstance(today_followup, dict) else None}")
     add(checks, "A4 appointment customer exists", any(phone.endswith("3333") for phone in phones), f"phones={sorted(phones)}")
 
     query = urllib.parse.quote("1111")

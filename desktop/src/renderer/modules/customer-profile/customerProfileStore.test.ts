@@ -16,11 +16,16 @@ const loadAlertsByPhoneMock = vi.fn();
 const confirmStageSuggestionMock = vi.fn();
 const ignoreStageSuggestionMock = vi.fn();
 const handleCustomerProfileLoadedMock = vi.fn();
+const writeClipboardTextMock = vi.fn();
 
 vi.mock('../../shared/apiClient', () => ({
   getJson: getJsonMock,
   postJson: postJsonMock,
   putJson: putJsonMock
+}));
+
+vi.mock('../../shared/desktopBridge', () => ({
+  writeClipboardText: writeClipboardTextMock
 }));
 
 vi.mock('../save-to-table/saveToTableService', () => ({
@@ -167,6 +172,25 @@ describe('customerProfileStore', () => {
       sourceFrom: 'FOLLOWUP_LIST'
     }]);
     expect(JSON.parse(localStorage.getItem('customer_cache:18800001111') ?? '{}').fullProfile.customer.nickname).toBe('Online');
+  });
+
+  it('copies the current customer nickname with clear success and failure feedback', async () => {
+    const { profile } = await freshStore();
+    profile.customerProfileState.profile = view('18800001111', { nickname: '今日待跟进客户' });
+    writeClipboardTextMock.mockResolvedValueOnce({ success: true });
+
+    await profile.copyCustomerNickname();
+
+    expect(writeClipboardTextMock).toHaveBeenCalledWith('今日待跟进客户');
+    expect(profile.customerProfileState.toast).toBe('客户昵称已复制，可到企业微信搜索');
+
+    writeClipboardTextMock.mockResolvedValueOnce({ success: false });
+    await profile.copyCustomerNickname();
+    expect(profile.customerProfileState.toast).toBe('昵称复制失败，请重试');
+
+    profile.customerProfileState.profile = view('18800001111', { nickname: '  ' });
+    await profile.copyCustomerNickname();
+    expect(profile.customerProfileState.toast).toBe('该客户没有可复制的昵称');
   });
 
   it('saves customer tags with the current optimistic version and refreshes the profile', async () => {
@@ -801,6 +825,7 @@ function resetMocks(): void {
   confirmStageSuggestionMock.mockReset();
   ignoreStageSuggestionMock.mockReset();
   handleCustomerProfileLoadedMock.mockReset();
+  writeClipboardTextMock.mockReset();
   getAlertsByPhoneMock.mockReturnValue([]);
   loadAlertsByPhoneMock.mockResolvedValue([]);
   getPendingSaveMock.mockReturnValue(null);
@@ -809,6 +834,7 @@ function resetMocks(): void {
   syncProfileToTableMock.mockResolvedValue({ status: 'OK', message: 'synced', needRefresh: true });
   confirmStageSuggestionMock.mockResolvedValue(true);
   ignoreStageSuggestionMock.mockResolvedValue(true);
+  writeClipboardTextMock.mockResolvedValue({ success: true });
 }
 
 function summary(phone: string): CustomerSummary {

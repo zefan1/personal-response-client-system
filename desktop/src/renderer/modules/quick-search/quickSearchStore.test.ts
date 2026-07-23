@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QuickSearchItem } from './types';
 
 const getJsonMock = vi.fn();
+const postJsonMock = vi.fn();
 const writeClipboardTextMock = vi.fn();
 const writeClipboardImageMock = vi.fn();
 
 vi.mock('../../shared/apiClient', () => ({
-  getJson: getJsonMock
+  getJson: getJsonMock,
+  postJson: postJsonMock
 }));
 
 vi.mock('../../shared/desktopBridge', () => ({
@@ -46,6 +48,7 @@ async function freshStore(): Promise<QuickSearchModule> {
     searchInputDebounceMs: 100
   }));
   getJsonMock.mockReset();
+  postJsonMock.mockReset();
   writeClipboardTextMock.mockReset();
   writeClipboardImageMock.mockReset();
   return await import('./quickSearchStore');
@@ -65,6 +68,7 @@ describe('quickSearchStore', () => {
     vi.useRealTimers();
     localStorage.clear();
     getJsonMock.mockReset();
+    postJsonMock.mockReset();
     writeClipboardTextMock.mockReset();
     writeClipboardImageMock.mockReset();
   });
@@ -137,18 +141,49 @@ describe('quickSearchStore', () => {
     expect(store.quickSearchState.visible).toBe(true);
   });
 
+  it('keeps a customer-bound copy pending until the operator confirms or declines sending', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+    store.showQuickSearch({
+      phone: '13800001111',
+      nickname: '王女士',
+      leadType: 'XIAN_SUO',
+      sourceTable: '私域客资管理表',
+      reminderType: 'DUE_TODAY',
+      returnToFollowups: true,
+      customer: { nickname: '王女士' }
+    });
+
+    await store.copyQuickSearchItem(item({ id: 8, title: '到店提醒', content: '王女士您好' }));
+
+    expect(store.quickSearchState.pendingSend).toMatchObject({
+      itemId: 8,
+      title: '到店提醒',
+      sentText: '王女士您好'
+    });
+    expect(postJsonMock).not.toHaveBeenCalled();
+
+    store.declineQuickSearchSend();
+    expect(store.quickSearchState.pendingSend).toBeNull();
+    expect(store.quickSearchState.visible).toBe(true);
+  });
+
   it('copies templates with both Chinese and legacy English customer variables resolved', async () => {
     const store = await freshStore();
-    const { customerProfileState } = await import('../customer-profile/customerProfileStore');
-    customerProfileState.profile = {
-      phoneFull: '13800001111',
+    store.showQuickSearch({
+      phone: '13800001111',
+      nickname: '王女士',
+      leadType: 'XIAN_SUO',
+      sourceTable: '私域客资管理表',
+      reminderType: 'DUE_TODAY',
+      returnToFollowups: true,
       customer: {
         nickname: '王女士',
         intendedStore: '万江店',
         intentLevel: 'HIGH',
         appointmentItem: '产后修复'
       }
-    } as typeof customerProfileState.profile;
+    });
     writeClipboardTextMock.mockResolvedValue({ success: true });
 
     await store.copyQuickSearchItem(item({
@@ -158,7 +193,35 @@ describe('quickSearchStore', () => {
     }));
 
     expect(writeClipboardTextMock).toHaveBeenCalledWith('王女士 王女士 万江店 HIGH 产后修复 13800001111');
+  });
+
+  it('does not reuse a stale customer profile when quick search opens without explicit context', async () => {
+    const store = await freshStore();
+    const { customerProfileState } = await import('../customer-profile/customerProfileStore');
+    customerProfileState.profile = {
+      phoneFull: '13800001111',
+      customer: { nickname: '旧客户' }
+    } as typeof customerProfileState.profile;
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+
+    store.showQuickSearch();
+    await store.copyQuickSearchItem(item({ id: 9, content: '{{客户昵称}}您好' }));
+
+    expect(writeClipboardTextMock).toHaveBeenCalledWith('{{客户昵称}}您好');
+    expect(store.quickSearchState.pendingSend).toBeNull();
     customerProfileState.profile = null;
+  });
+
+  it('treats an empty event payload as no customer context', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+
+    store.showQuickSearch({} as Parameters<typeof store.showQuickSearch>[0]);
+    await store.copyQuickSearchItem(item({ id: 10, content: '普通模板' }));
+
+    expect(store.quickSearchState.customerContext).toBeNull();
+    expect(store.quickSearchState.pendingSend).toBeNull();
+    expect(writeClipboardTextMock).toHaveBeenCalledWith('普通模板');
   });
 });
 

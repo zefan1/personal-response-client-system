@@ -75,16 +75,23 @@ describe('FollowupListPanel', () => {
     const { app, host } = await mountPanel();
 
     expect(apiMocks.getJson).toHaveBeenCalledWith('/api/v1/followups/today', 10000);
-    expect(host.querySelectorAll('.tab-button')).toHaveLength(4);
+    const tabs = [...host.querySelectorAll('.tab-button')] as HTMLButtonElement[];
+    expect(tabs).toHaveLength(4);
+    expect(tabs.map((tab) => tab.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      '今日待跟进 1',
+      '逾期跟进 1',
+      '今日预约 1',
+      '新客资 1'
+    ]);
+    expect(activeTabText(host)).toContain('今日待跟进');
     expect(activeTabText(host)).toContain('1');
-    expect(host.textContent).toContain('Overdue');
+    expect(host.textContent).toContain('Today');
     expect(host.textContent).toContain('20:08');
     const refreshButton = host.querySelector('.panel-header .icon-refresh-button') as HTMLButtonElement | null;
     expect(refreshButton?.textContent?.trim()).toBe('↻');
     expect(refreshButton?.getAttribute('aria-label')).toBe('刷新今日跟进');
     expect(refreshButton?.textContent).not.toContain('刷新');
 
-    const tabs = [...host.querySelectorAll('.tab-button')] as HTMLButtonElement[];
     tabs[2].click();
     await flushUi();
 
@@ -117,6 +124,27 @@ describe('FollowupListPanel', () => {
     app.unmount();
   });
 
+  it('offers an explicit profile action for each followup customer', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    const selected: unknown[] = [];
+    eventBus.on('customer:selected', (payload) => selected.push(payload));
+
+    const profileButton = host.querySelector('.followup-profile-button') as HTMLButtonElement | null;
+    expect(profileButton).toBeTruthy();
+    expect(profileButton?.getAttribute('aria-label')).toContain('查看 Today 的客户档案');
+    profileButton?.click();
+    await flushUi();
+
+    expect(selected).toContainEqual({
+      phone: '18800000002',
+      scene: 'ACTIVE_REPLY',
+      leadType: 'PENDING',
+      reminderType: 'DUE_TODAY',
+      sourceFrom: 'FOLLOWUP_LIST'
+    });
+    app.unmount();
+  });
+
   it('emits batch template events from the rendered batch bar', async () => {
     const { app, host, eventBus } = await mountPanel();
     const batchEvents: unknown[] = [];
@@ -132,10 +160,48 @@ describe('FollowupListPanel', () => {
 
     const batchButtons = [...host.querySelectorAll('.batch-bar button')] as HTMLButtonElement[];
     expect(batchButtons.length).toBeGreaterThanOrEqual(3);
+    expect(host.querySelector('.batch-selection-count')?.textContent).toContain('已选 1 个');
+    expect(host.querySelector('.batch-secondary-actions')).toBeTruthy();
+    expect(host.querySelector('.batch-primary-action')?.textContent).toContain('批量发模板');
     batchButtons[2].click();
     await flushUi();
 
-    expect(batchEvents).toEqual([{ phones: ['18800000001'], source: 'FOLLOWUP_LIST' }]);
+    expect(batchEvents).toEqual([{ phones: ['18800000002'], source: 'FOLLOWUP_LIST' }]);
+    app.unmount();
+  });
+
+  it('hides the batch bar after switching away from the selected customer category', async () => {
+    const { app, host } = await mountPanel();
+    const tabs = [...host.querySelectorAll('.tab-button')] as HTMLButtonElement[];
+
+    tabs[1].click();
+    await flushUi();
+    const checkbox = host.querySelector('.followup-row input[type="checkbox"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushUi();
+    expect(host.querySelector('.batch-selection-count')?.textContent).toContain('已选 1 个');
+
+    tabs[0].click();
+    await flushUi();
+    expect(host.querySelector('.batch-bar')).toBeNull();
+
+    app.unmount();
+  });
+
+  it('removes a confirmed followup from the current rendered tab', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    expect(host.textContent).toContain('Today');
+
+    eventBus.emit('followup:completed', { phone: '18800000002', reminderType: 'DUE_TODAY' });
+    await flushUi();
+
+    expect(host.textContent).not.toContain('Today');
+    expect(activeTabText(host)).toContain('0');
+
+    eventBus.emit('followup:switch-tab', { tab: 'APPOINTMENT' });
+    await flushUi();
+    expect(host.textContent).toContain('Appointment');
     app.unmount();
   });
 });

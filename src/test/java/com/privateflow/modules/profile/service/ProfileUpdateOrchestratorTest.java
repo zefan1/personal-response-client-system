@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -126,10 +127,56 @@ class ProfileUpdateOrchestratorTest {
     orchestrator.handleEvent(event);
 
     verify(extractionClient).extract(eq(""), eq(messages), eq(customer), eq("keeper-1"));
-    @SuppressWarnings("unchecked")
-    ArgumentCaptor<Map<String, Object>> updates = ArgumentCaptor.forClass(Map.class);
-    verify(profileWriter).write(eq("18800001111"), updates.capture(), eq(1), eq(true));
-    assertThat(updates.getValue()).containsEntry("followupNotes", "");
+    verify(profileWriter, never()).write(eq("18800001111"), any(), eq(1), eq(true));
+  }
+
+  @Test
+  void doesNotUseQuickTemplateFollowupNotesAsCustomerProfileEvidence() {
+    EventDeduplicator deduplicator = mock(EventDeduplicator.class);
+    CustomerQueryService customerQueryService = mock(CustomerQueryService.class);
+    ProfileExtractionClient extractionClient = mock(ProfileExtractionClient.class);
+    ConfidenceRouter confidenceRouter = mock(ConfidenceRouter.class);
+    ProfileWriter profileWriter = mock(ProfileWriter.class);
+    SuggestionQueueManager suggestionQueueManager = mock(SuggestionQueueManager.class);
+    CustomerTagUpdateService customerTagUpdateService = mock(CustomerTagUpdateService.class);
+    ProfileConfigProvider configProvider = mock(ProfileConfigProvider.class);
+    AuditLogRepository auditLogRepository = mock(AuditLogRepository.class);
+    ProfileUpdateOrchestrator orchestrator = new ProfileUpdateOrchestrator(
+        deduplicator,
+        customerQueryService,
+        extractionClient,
+        confidenceRouter,
+        profileWriter,
+        suggestionQueueManager,
+        customerTagUpdateService,
+        configProvider,
+        auditLogRepository);
+    Customer customer = new Customer();
+    customer.setPhone("18800001111");
+    customer.setVersion(1);
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(customer);
+    when(extractionClient.extract(any(), any(), any(), any())).thenReturn(ProfileAnalysisResult.empty());
+    when(confidenceRouter.route(any())).thenReturn(new RoutedProfileUpdates(Map.of(), Map.of()));
+    when(configProvider.get()).thenReturn(new ProfileConfig(
+        List.of(), 8000, 5, 7, "0 0 3 * * *", 20, 5, 500));
+    CustomerMessageSentEvent event = new CustomerMessageSentEvent(
+        "18800001111",
+        "Alice",
+        false,
+        "私域客资管理表",
+        "TUAN_GOU",
+        "发送模板《到店提醒》：王女士明天见",
+        List.of(),
+        "王女士明天见",
+        "OPENING",
+        null,
+        true,
+        "keeper-1");
+
+    orchestrator.handleEvent(event);
+
+    verify(extractionClient).extract(eq(""), eq(List.of()), eq(customer), eq("keeper-1"));
+    verify(profileWriter, never()).write(eq("18800001111"), any(), eq(1), eq(true));
   }
 
   @Test
@@ -168,7 +215,6 @@ class ProfileUpdateOrchestratorTest {
     when(extractionClient.extract(any(), any(), any(), any()))
         .thenReturn(new ProfileAnalysisResult(ProfileUpdates.empty(), List.of(decision)));
     when(confidenceRouter.route(any())).thenReturn(new RoutedProfileUpdates(Map.of(), Map.of()));
-    when(profileWriter.write(eq("18800001111"), any(), eq(1), eq(true))).thenReturn(2);
     when(configProvider.get()).thenReturn(new ProfileConfig(
         List.of(), 8000, 5, 7, "0 0 3 * * *", 20, 5, 500));
     List<CustomerMessageSentEvent.ChatMessage> messages = List.of(
@@ -182,7 +228,8 @@ class ProfileUpdateOrchestratorTest {
         ArgumentCaptor.forClass(AutomaticCustomerTagUpdateRequest.class);
     verify(customerTagUpdateService).applyAutomatic(captor.capture());
     assertThat(captor.getValue().customerId()).isEqualTo(7L);
-    assertThat(captor.getValue().expectedCustomerVersion()).isEqualTo(2);
+    assertThat(captor.getValue().expectedCustomerVersion()).isEqualTo(1);
+    verify(profileWriter, never()).write(eq("18800001111"), any(), eq(1), eq(true));
     assertThat(captor.getValue().effectiveMessageCount()).isEqualTo(1);
     assertThat(captor.getValue().decisions()).containsExactly(decision);
   }

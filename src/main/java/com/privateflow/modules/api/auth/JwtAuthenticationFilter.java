@@ -20,7 +20,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-  private static final Set<String> PUBLIC_POSTS = Set.of("/api/v1/auth/login", "/admin/api/v1/auth/login");
+  private static final Set<String> PUBLIC_POSTS = Set.of(
+      "/api/v1/auth/login",
+      "/admin/api/v1/auth/login",
+      "/api/v1/auth/logout");
   private static final Set<String> ALLOWED_CORS_ORIGINS = Set.of(
       "http://localhost:5173",
       "http://127.0.0.1:5173",

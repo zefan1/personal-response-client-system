@@ -26,6 +26,7 @@ public class DesktopStatusService {
 
   public static final String SKILL_SUBSCRIPTION_EXPIRE_AT = "skill.subscription_expire_at";
   public static final String CLIPBOARD_SCREENSHOT_CONFIRM_PROMPT_S = "desktop.clipboard_screenshot_confirm_prompt_s";
+  public static final String WORKBENCH_REFRESH_INTERVAL_S = "desktop.workbench_refresh_interval_s";
   public static final String LLM_REPLY_GENERATION_ENABLED = "llm.reply_generation.enabled";
   public static final String LLM_API_BASE_URL = "llm.api_base_url";
   public static final String LLM_API_KEY = "llm.api_key";
@@ -33,6 +34,7 @@ public class DesktopStatusService {
   private static final String LLM_REPLY_GENERATION_SCENE = "REPLY_GENERATION";
   private static final int EXPIRING_DAYS = 7;
   private static final int DEFAULT_CLIPBOARD_SCREENSHOT_CONFIRM_PROMPT_S = 10;
+  private static final int DEFAULT_WORKBENCH_REFRESH_INTERVAL_S = 60;
   private static final int LLM_FAILURE_WINDOW_DAYS = 1;
   private static final long LLM_FAILURE_MIN_CALLS = 3;
   private static final double LLM_FAILURE_SUCCESS_RATE_THRESHOLD = 0.5;
@@ -107,7 +109,9 @@ public class DesktopStatusService {
   }
 
   DesktopRuntimeConfigResponse runtimeConfig() {
-    return new DesktopRuntimeConfigResponse(clipboardScreenshotConfirmPromptS());
+    return new DesktopRuntimeConfigResponse(
+        clipboardScreenshotConfirmPromptS(),
+        workbenchRefreshIntervalS());
   }
 
   DesktopLlmStatusResponse llmStatus() {
@@ -233,6 +237,12 @@ public class DesktopStatusService {
         .orElse(DEFAULT_CLIPBOARD_SCREENSHOT_CONFIRM_PROMPT_S);
   }
 
+  private int workbenchRefreshIntervalS() {
+    return configRepository.findValue(WORKBENCH_REFRESH_INTERVAL_S)
+        .map(this::parseWorkbenchRefreshIntervalS)
+        .orElse(DEFAULT_WORKBENCH_REFRESH_INTERVAL_S);
+  }
+
   private boolean booleanConfig(String key, boolean fallback) {
     return configRepository.findValue(key)
         .map(value -> "true".equalsIgnoreCase(value.trim()) || "1".equals(value.trim()))
@@ -254,6 +264,15 @@ public class DesktopStatusService {
       return parsed;
     }
     return DEFAULT_CLIPBOARD_SCREENSHOT_CONFIRM_PROMPT_S;
+  }
+
+  private int parseWorkbenchRefreshIntervalS(String rawValue) {
+    try {
+      int parsed = Integer.parseInt(rawValue == null ? "" : rawValue.trim());
+      return parsed >= 30 && parsed <= 300 ? parsed : DEFAULT_WORKBENCH_REFRESH_INTERVAL_S;
+    } catch (NumberFormatException ex) {
+      return DEFAULT_WORKBENCH_REFRESH_INTERVAL_S;
+    }
   }
 
   private String firstNonBlank(String first, String second) {

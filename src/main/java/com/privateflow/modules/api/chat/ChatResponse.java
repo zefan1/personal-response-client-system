@@ -10,6 +10,17 @@ public record ChatResponse(
     MatchResult match,
     SkillResponse skill,
     String warning,
-    ChatReplySource replySource
+    ChatReplySource replySource,
+    PendingReplyTaskView pendingTask
 ) {
+  public ChatResponse(
+      String phone,
+      String nickname,
+      boolean needsCustomerIdentifier,
+      MatchResult match,
+      SkillResponse skill,
+      String warning,
+      ChatReplySource replySource) {
+    this(phone, nickname, needsCustomerIdentifier, match, skill, warning, replySource, null);
+  }
 }

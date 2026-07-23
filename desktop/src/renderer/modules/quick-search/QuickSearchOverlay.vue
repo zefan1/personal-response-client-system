@@ -10,6 +10,9 @@
           <span aria-hidden="true">×</span>
         </button>
       </header>
+      <p v-if="state.customerContext" class="hint quick-search-customer-context">
+        当前客户：{{ customerLabel(state.customerContext) }} · {{ maskPhone(state.customerContext.phone) }}
+      </p>
       <input
         ref="inputRef"
         class="quick-search-input"
@@ -45,7 +48,20 @@
               <em>{{ contentTypeLabel(item.contentType) }} · {{ leadTypeLabel(item.leadType) }} · {{ item.scene || item.shortcutCode || '-' }}</em>
               <p>{{ item.content }}</p>
             </div>
-            <button class="primary small" type="button" @click="copyQuickSearchItem(item)">复制</button>
+            <div v-if="state.pendingSend?.itemId === item.id" class="quick-send-actions">
+              <span>已复制给：{{ customerLabel(state.customerContext) }}</span>
+              <button class="primary small quick-send-confirm" type="button" :disabled="state.confirming" @click="confirmQuickSearchSent">
+                {{ state.confirming ? '记录中' : '已发送' }}
+              </button>
+              <button class="secondary small quick-send-decline" type="button" :disabled="state.confirming" @click="declineQuickSearchSend">未发送</button>
+            </div>
+            <button
+              v-else
+              class="primary small"
+              type="button"
+              :disabled="Boolean(state.pendingSend) || state.confirming"
+              @click="copyQuickSearchItem(item)"
+            >复制</button>
           </article>
         </section>
       </div>
@@ -61,7 +77,9 @@ import { onQuickSearchHide, onQuickSearchShow } from '../../shared/desktopBridge
 import { eventBus } from '../../shared/eventBus';
 import {
   cleanupQuickSearchStore,
+  confirmQuickSearchSent,
   copyQuickSearchItem,
+  declineQuickSearchSend,
   filteredQuickSearchItems,
   groupedQuickSearchItems,
   handleQuickSearchConfigRefresh,
@@ -78,6 +96,7 @@ import {
   showQuickSearch
 } from './quickSearchStore';
 import type { QuickSearchContentType, QuickSearchFilter } from './types';
+import type { QuickSearchCustomerContext } from './types';
 
 const inputRef = ref<HTMLInputElement | null>(null);
 const filters: Array<{ value: QuickSearchFilter; label: string }> = [
@@ -108,8 +127,8 @@ onMounted(() => {
   disposers.push(eventBus.on('CONFIG_REFRESH', handleQuickSearchConfigRefresh));
   disposers.push(eventBus.on('network:offline', handleQuickSearchOffline));
   disposers.push(eventBus.on('network:online', handleQuickSearchOnline));
-  disposers.push(eventBus.on('quick-search:show', () => {
-    showQuickSearch();
+  disposers.push(eventBus.on<QuickSearchCustomerContext | undefined>('quick-search:show', (context) => {
+    showQuickSearch(context);
     void nextTick(() => inputRef.value?.focus());
   }));
 });
@@ -144,5 +163,17 @@ function leadTypeLabel(value: string): string {
   if (value === 'XIAN_SUO') return '线索';
   if (value === 'GENERAL') return '通用';
   return value || '-';
+}
+
+function customerLabel(context: QuickSearchCustomerContext | null): string {
+  const nickname = context?.nickname?.trim();
+  if (nickname) return nickname;
+  const phone = context?.phone?.trim() ?? '';
+  return phone ? `客户 ${phone.slice(-4)}` : '当前客户';
+}
+
+function maskPhone(phone?: string | null): string {
+  if (!phone) return '手机号未提供';
+  return phone.length >= 7 ? `${phone.slice(0, 3)}****${phone.slice(-4)}` : `****${phone.slice(-4)}`;
 }
 </script>

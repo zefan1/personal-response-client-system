@@ -6,6 +6,7 @@ public record CustomerSummary(
     String phone,
     String phoneFull,
     String nickname,
+    String sourceChannel,
     String leadType,
     String assignedKeeper,
     LocalDateTime lastFollowupAt,

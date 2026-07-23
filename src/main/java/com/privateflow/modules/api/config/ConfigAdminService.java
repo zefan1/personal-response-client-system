@@ -93,7 +93,8 @@ public class ConfigAdminService {
         || key.startsWith("image.") || key.startsWith("match.") || key.startsWith("profile.")
         || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.") || key.startsWith("health.")
         || key.startsWith("desktop.")
-        || key.startsWith("tag.") || key.startsWith("version.") || key.startsWith("notice.") || key.startsWith("audit.")) {
+        || key.startsWith("tag.") || key.startsWith("version.") || key.startsWith("notice.") || key.startsWith("audit.")
+        || key.startsWith("chat.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
           || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")
           || key.endsWith("_chars") || key.endsWith("_rows") || key.endsWith("_seconds") || key.endsWith("_bytes")
@@ -282,6 +283,15 @@ public class ConfigAdminService {
     }
     if ("system.jwt_refresh_token_ttl_s".equals(key) && (value < 3600 || value > 2592000)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.jwt_refresh_token_ttl_s range is 3600-2592000");
+    }
+    if ("desktop.workbench_refresh_interval_s".equals(key) && (value < 30 || value > 300)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "desktop.workbench_refresh_interval_s range is 30-300");
+    }
+    if ("chat.pending_reply_ttl_hours".equals(key) && (value < 1 || value > 72)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.pending_reply_ttl_hours range is 1-72");
+    }
+    if ("chat.pending_reply_generating_timeout_s".equals(key) && (value < 30 || value > 600)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.pending_reply_generating_timeout_s range is 30-600");
     }
     if ("system.audit_log_retention_days".equals(key) && (value < 30 || value > 365)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "system.audit_log_retention_days range is 30-365");

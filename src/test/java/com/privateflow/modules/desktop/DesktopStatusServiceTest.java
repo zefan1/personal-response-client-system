@@ -81,7 +81,9 @@ class DesktopStatusServiceTest {
   @Test
   void returnsConfiguredClipboardScreenshotPromptSecondsWithFallback() {
     when(repository.findValue(DesktopStatusService.CLIPBOARD_SCREENSHOT_CONFIRM_PROMPT_S)).thenReturn(Optional.of("15"));
+    when(repository.findValue(DesktopStatusService.WORKBENCH_REFRESH_INTERVAL_S)).thenReturn(Optional.of("90"));
     assertEquals(15, service.runtimeConfig().clipboardScreenshotConfirmPromptS());
+    assertEquals(90, service.runtimeConfig().workbenchRefreshIntervalS());
 
     when(repository.findValue(DesktopStatusService.CLIPBOARD_SCREENSHOT_CONFIRM_PROMPT_S)).thenReturn(Optional.of("0"));
     assertEquals(0, service.runtimeConfig().clipboardScreenshotConfirmPromptS());
@@ -91,6 +93,12 @@ class DesktopStatusServiceTest {
 
     when(repository.findValue(DesktopStatusService.CLIPBOARD_SCREENSHOT_CONFIRM_PROMPT_S)).thenReturn(Optional.of("abc"));
     assertEquals(10, service.runtimeConfig().clipboardScreenshotConfirmPromptS());
+
+    when(repository.findValue(DesktopStatusService.WORKBENCH_REFRESH_INTERVAL_S)).thenReturn(Optional.of("20"));
+    assertEquals(60, service.runtimeConfig().workbenchRefreshIntervalS());
+
+    when(repository.findValue(DesktopStatusService.WORKBENCH_REFRESH_INTERVAL_S)).thenReturn(Optional.of("301"));
+    assertEquals(60, service.runtimeConfig().workbenchRefreshIntervalS());
   }
 
   @Test

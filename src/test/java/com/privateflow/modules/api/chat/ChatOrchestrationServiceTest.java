@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,7 +30,12 @@ import com.privateflow.modules.llm.LlmFollowupSuggestionService;
 import com.privateflow.modules.llm.LlmSummaryInput;
 import com.privateflow.modules.llm.LlmSummaryService;
 import com.privateflow.modules.match.CustomerMatchService;
+import com.privateflow.modules.match.Confidence;
+import com.privateflow.modules.match.CustomerSummary;
 import com.privateflow.modules.match.MatchRequest;
+import com.privateflow.modules.match.MatchResult;
+import com.privateflow.modules.match.MatchType;
+import com.privateflow.modules.profile.service.FollowupConfirmationService;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillGatewayService;
 import com.privateflow.modules.skill.SkillRequest;
@@ -45,6 +51,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.context.ApplicationEventPublisher;
 
 class ChatOrchestrationServiceTest {
@@ -62,6 +69,9 @@ class ChatOrchestrationServiceTest {
   private CustomerQueryService customerQueryService;
   private CustomerAccessService customerAccessService;
   private ReplyTagSnapshotBuilder replyTagSnapshotBuilder;
+  private FollowupConfirmationService followupConfirmationService;
+  private PendingReplyTaskService pendingReplyTaskService;
+  private Customer accessibleCustomer;
   private ChatOrchestrationService service;
 
   @BeforeEach
@@ -80,6 +90,8 @@ class ChatOrchestrationServiceTest {
     customerQueryService = org.mockito.Mockito.mock(CustomerQueryService.class);
     customerAccessService = org.mockito.Mockito.mock(CustomerAccessService.class);
     replyTagSnapshotBuilder = org.mockito.Mockito.mock(ReplyTagSnapshotBuilder.class);
+    followupConfirmationService = org.mockito.Mockito.mock(FollowupConfirmationService.class);
+    pendingReplyTaskService = org.mockito.Mockito.mock(PendingReplyTaskService.class);
     when(skillConfigProvider.get()).thenReturn(skillConfig(3));
     when(skillGatewayService.generateReplies(any())).thenReturn(new SkillResponse(
         List.of(new Suggestion("skill guidance", "NEXT_STEP", "fixed workflow")),
@@ -89,7 +101,7 @@ class ChatOrchestrationServiceTest {
     when(llmReplyGenerationService.tryGenerate(any(), any())).thenReturn(Optional.empty());
     when(llmFollowupSuggestionService.trySuggest(any())).thenReturn(Optional.empty());
     when(llmSummaryService.trySummarize(any())).thenReturn(Optional.empty());
-    Customer accessibleCustomer = customer("18800001111");
+    accessibleCustomer = customer("18800001111");
     when(customerQueryService.getByPhone("18800001111")).thenReturn(accessibleCustomer);
     when(customerAccessService.canAccess(accessibleCustomer)).thenReturn(true);
     service = new ChatOrchestrationService(
@@ -105,7 +117,9 @@ class ChatOrchestrationServiceTest {
         skillConfigProvider,
         llmReplyGenerationService,
         llmFollowupSuggestionService,
-        llmSummaryService);
+        llmSummaryService,
+        followupConfirmationService,
+        pendingReplyTaskService);
   }
 
   @AfterEach
@@ -189,6 +203,364 @@ class ChatOrchestrationServiceTest {
     verify(customerMatchService, org.mockito.Mockito.times(2)).match(captor.capture());
     assertEquals("Displayed name", captor.getAllValues().get(0).nickname());
     assertEquals("douyin_user_88", captor.getAllValues().get(1).nickname());
+  }
+
+  @Test
+  void recognizeMultipleCreatesWaitingTaskWithoutCallingSkillOrReplyLlm() {
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "同名客户",
+        null,
+        List.of(new com.privateflow.modules.image.Message("client", "我想了解项目")),
+        "12:00"));
+    when(customerMatchService.match(any())).thenReturn(new MatchResult(
+        MatchType.MULTIPLE,
+        List.of(
+            new CustomerSummary("18800001111", "18800001111", "同名客户", "WECHAT", "TUAN_GOU", "keeper-1", null, "门店 A", Confidence.HIGH),
+            new CustomerSummary("18800002222", "18800002222", "同名客户", "WECHAT", "TUAN_GOU", "keeper-1", null, "门店 B", Confidence.HIGH)),
+        2));
+    when(pendingReplyTaskService.createWaitingTask(any())).thenReturn(new PendingReplyTaskView(
+        "task-1",
+        "reply-100-1",
+        PendingReplyTaskStatus.WAITING_CUSTOMER,
+        List.of(),
+        null,
+        null,
+        null,
+        java.time.LocalDateTime.of(2026, 7, 23, 10, 0)));
+
+    ChatResponse response = service.recognize(new ChatRecognizeRequest(
+        Base64.getEncoder().encodeToString("image".getBytes()),
+        null,
+        null,
+        "TUAN_GOU",
+        "customer_sheet",
+        List.of(),
+        "reply-100-1"));
+
+    assertEquals("task-1", response.pendingTask().taskId());
+    assertNull(response.skill());
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(llmReplyGenerationService, never()).tryGenerate(any(), any());
+  }
+
+  @Test
+  void listPendingReplyTasksUsesTheAuthenticatedOwner() {
+    PendingReplyTaskView waiting = pendingTaskView(PendingReplyTaskStatus.WAITING_CUSTOMER, null);
+    when(pendingReplyTaskService.listRecoverable("keeper-1")).thenReturn(List.of(waiting));
+
+    List<PendingReplyTaskView> tasks = service.listPendingReplyTasks();
+
+    assertEquals(List.of(waiting), tasks);
+    verify(pendingReplyTaskService).listRecoverable("keeper-1");
+  }
+
+  @Test
+  void getReadyPendingReplyTaskReturnsTheSavedResponseWithoutGeneratingAgain() {
+    ChatResponse savedResponse = new ChatResponse(
+        "18800001111",
+        "Alice",
+        false,
+        null,
+        new SkillResponse(List.of(new Suggestion("saved reply", "NEXT_STEP", "saved")), null, null, null),
+        null,
+        ChatReplySource.skill());
+    PendingReplyTaskView ready = pendingTaskView(PendingReplyTaskStatus.READY, savedResponse);
+    when(pendingReplyTaskService.getRecoverable("task-1", "keeper-1")).thenReturn(ready);
+
+    PendingReplyTaskView result = service.getPendingReplyTask("task-1");
+
+    assertEquals(savedResponse, result.response());
+    verify(pendingReplyTaskService).getRecoverable("task-1", "keeper-1");
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(llmReplyGenerationService, never()).tryGenerate(any(), any());
+  }
+
+  @Test
+  void cancelPendingReplyTaskUsesTheAuthenticatedOwner() {
+    PendingReplyTaskView cancelled = pendingTaskView(PendingReplyTaskStatus.CANCELLED, null);
+    when(pendingReplyTaskService.cancel("task-1", "keeper-1")).thenReturn(cancelled);
+
+    PendingReplyTaskView result = service.cancelPendingReplyTask("task-1");
+
+    assertEquals(cancelled, result);
+    verify(pendingReplyTaskService).cancel("task-1", "keeper-1");
+  }
+
+  @Test
+  void retryPendingReplyTaskGeneratesFromThePreviouslySelectedCustomerAndOriginalChat() {
+    PendingReplyTask task = claimedTask();
+    when(pendingReplyTaskService.claimRetry("task-1", "keeper-1")).thenReturn(task);
+
+    ChatResponse response = service.retryPendingReplyTask("task-1");
+
+    assertEquals("18800001111", response.phone());
+    org.mockito.ArgumentCaptor<SkillRequest> requestCaptor = org.mockito.ArgumentCaptor.forClass(SkillRequest.class);
+    verify(skillGatewayService).generateReplies(requestCaptor.capture());
+    assertEquals(Scene.CHAT_RECOGNIZE, requestCaptor.getValue().scene());
+    assertEquals("18800001111", requestCaptor.getValue().phone());
+    assertEquals("I want to know more", requestCaptor.getValue().clientMessage());
+    assertEquals("I want to know more", requestCaptor.getValue().chatContext().get(0).get("text"));
+    verify(contextStore).save(eq("keeper-1"), eq("18800001111"), any(RequestContext.class));
+    verify(pendingReplyTaskService).markReady(task, response);
+    InOrder generationOrder = org.mockito.Mockito.inOrder(
+        pendingReplyTaskService,
+        customerQueryService,
+        skillGatewayService);
+    generationOrder.verify(pendingReplyTaskService).beginGeneration("task-1");
+    generationOrder.verify(customerQueryService).getByPhone("18800001111");
+    generationOrder.verify(skillGatewayService).generateReplies(any());
+    generationOrder.verify(pendingReplyTaskService).markReady(task, response);
+    generationOrder.verify(pendingReplyTaskService).endGeneration("task-1");
+  }
+
+  @Test
+  void retryPendingReplyTaskReleasesSelectionWhenTheSelectedCustomerWasDeleted() {
+    PendingReplyTask task = claimedTask();
+    when(pendingReplyTaskService.claimRetry("task-1", "keeper-1")).thenReturn(task);
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(null);
+
+    ApiException exception = assertThrows(
+        ApiException.class,
+        () -> service.retryPendingReplyTask("task-1"));
+
+    assertEquals(ApiErrorCodes.BAD_REQUEST, exception.getErrorCode());
+    InOrder generationOrder = org.mockito.Mockito.inOrder(pendingReplyTaskService, customerQueryService);
+    generationOrder.verify(pendingReplyTaskService).beginGeneration("task-1");
+    generationOrder.verify(customerQueryService).getByPhone("18800001111");
+    generationOrder.verify(pendingReplyTaskService).releaseSelection(task);
+    generationOrder.verify(pendingReplyTaskService).endGeneration("task-1");
+    verify(skillGatewayService, never()).generateReplies(any());
+  }
+
+  @Test
+  void retryPendingReplyTaskMarksFailedWhenGenerationThrows() {
+    PendingReplyTask task = claimedTask();
+    RuntimeException generationFailure = new RuntimeException("skill unavailable");
+    when(pendingReplyTaskService.claimRetry("task-1", "keeper-1")).thenReturn(task);
+    when(skillGatewayService.generateReplies(any())).thenThrow(generationFailure);
+
+    RuntimeException exception = assertThrows(
+        RuntimeException.class,
+        () -> service.retryPendingReplyTask("task-1"));
+
+    org.junit.jupiter.api.Assertions.assertSame(generationFailure, exception);
+    InOrder generationOrder = org.mockito.Mockito.inOrder(pendingReplyTaskService, skillGatewayService);
+    generationOrder.verify(pendingReplyTaskService).beginGeneration("task-1");
+    generationOrder.verify(skillGatewayService).generateReplies(any());
+    generationOrder.verify(pendingReplyTaskService).markFailed(task, ApiErrorCodes.INTERNAL_ERROR);
+    generationOrder.verify(pendingReplyTaskService).endGeneration("task-1");
+    verify(pendingReplyTaskService, never()).markReady(any(), any());
+  }
+
+  @Test
+  void confirmPendingReplyTaskGeneratesFromTheSelectedCustomerAndOriginalChat() {
+    Customer secondCandidate = customer("18800002222");
+    PendingReplyTask task = new PendingReplyTask(
+        1L,
+        "task-1",
+        "reply-100-1",
+        "keeper-1",
+        PendingReplyTaskStatus.GENERATING,
+        "同名客户",
+        null,
+        null,
+        "TUAN_GOU",
+        "customer_sheet",
+        "我想了解项目",
+        List.of(Map.of("role", "client", "text", "我想了解项目", "timestamp", "12:00")),
+        List.of("18800001111", "18800002222"),
+        "18800002222",
+        null,
+        null,
+        null,
+        java.time.LocalDateTime.of(2026, 7, 23, 10, 0),
+        java.time.LocalDateTime.of(2026, 7, 22, 10, 0),
+        java.time.LocalDateTime.of(2026, 7, 22, 10, 0));
+    when(pendingReplyTaskService.claimForGeneration("task-1", "keeper-1", "18800002222"))
+        .thenReturn(task);
+    when(customerQueryService.getByPhone("18800002222")).thenReturn(secondCandidate);
+    when(customerAccessService.canAccess(secondCandidate)).thenReturn(true);
+
+    ChatResponse response = service.confirmPendingReplyTask(
+        "task-1",
+        new PendingReplyTaskSelectRequest("18800002222"));
+
+    assertEquals("18800002222", response.phone());
+    assertEquals("skill guidance", response.skill().suggestions().get(0).text());
+    org.mockito.ArgumentCaptor<SkillRequest> requestCaptor = org.mockito.ArgumentCaptor.forClass(SkillRequest.class);
+    verify(skillGatewayService).generateReplies(requestCaptor.capture());
+    assertEquals(Scene.CHAT_RECOGNIZE, requestCaptor.getValue().scene());
+    assertEquals("18800002222", requestCaptor.getValue().phone());
+    assertEquals("18800002222", requestCaptor.getValue().customer().get("phone"));
+    assertEquals("我想了解项目", requestCaptor.getValue().clientMessage());
+    assertEquals("我想了解项目", requestCaptor.getValue().chatContext().get(0).get("text"));
+    verify(pendingReplyTaskService).markReady(eq(task), eq(response));
+  }
+
+  @Test
+  void confirmPendingReplyTaskReleasesSelectionWhenTheCustomerNoLongerExists() {
+    PendingReplyTask task = claimedTask();
+    when(pendingReplyTaskService.claimForGeneration("task-1", "keeper-1", "18800001111"))
+        .thenReturn(task);
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(null);
+
+    ApiException exception = assertThrows(ApiException.class, () -> service.confirmPendingReplyTask(
+        "task-1",
+        new PendingReplyTaskSelectRequest("18800001111")));
+
+    assertEquals(ApiErrorCodes.BAD_REQUEST, exception.getErrorCode());
+    InOrder generationOrder = org.mockito.Mockito.inOrder(pendingReplyTaskService, customerQueryService);
+    generationOrder.verify(pendingReplyTaskService).beginGeneration("task-1");
+    generationOrder.verify(customerQueryService).getByPhone("18800001111");
+    generationOrder.verify(pendingReplyTaskService).releaseSelection(task);
+    generationOrder.verify(pendingReplyTaskService).endGeneration("task-1");
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(pendingReplyTaskService, never()).markReady(any(), any());
+  }
+
+  @Test
+  void confirmPendingReplyTaskReleasesSelectionWhenTheCustomerIsNoLongerAccessible() {
+    PendingReplyTask task = claimedTask();
+    Customer inaccessibleCustomer = customer("18800001111");
+    when(pendingReplyTaskService.claimForGeneration("task-1", "keeper-1", "18800001111"))
+        .thenReturn(task);
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(inaccessibleCustomer);
+    when(customerAccessService.canAccess(inaccessibleCustomer)).thenReturn(false);
+
+    ApiException exception = assertThrows(ApiException.class, () -> service.confirmPendingReplyTask(
+        "task-1",
+        new PendingReplyTaskSelectRequest("18800001111")));
+
+    assertEquals(ApiErrorCodes.FORBIDDEN, exception.getErrorCode());
+    InOrder generationOrder = org.mockito.Mockito.inOrder(
+        pendingReplyTaskService,
+        customerQueryService,
+        customerAccessService);
+    generationOrder.verify(pendingReplyTaskService).beginGeneration("task-1");
+    generationOrder.verify(customerQueryService).getByPhone("18800001111");
+    generationOrder.verify(customerAccessService).canAccess(inaccessibleCustomer);
+    generationOrder.verify(pendingReplyTaskService).releaseSelection(task);
+    generationOrder.verify(pendingReplyTaskService).endGeneration("task-1");
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(pendingReplyTaskService, never()).markReady(any(), any());
+  }
+
+  @Test
+  void confirmPendingReplyTaskMarksFailedWhenSkillGenerationThrows() {
+    PendingReplyTask task = claimedTask();
+    when(pendingReplyTaskService.claimForGeneration("task-1", "keeper-1", "18800001111"))
+        .thenReturn(task);
+    when(skillGatewayService.generateReplies(any())).thenThrow(new RuntimeException("skill unavailable"));
+
+    RuntimeException exception = assertThrows(RuntimeException.class, () -> service.confirmPendingReplyTask(
+        "task-1",
+        new PendingReplyTaskSelectRequest("18800001111")));
+
+    assertEquals("skill unavailable", exception.getMessage());
+    verify(pendingReplyTaskService).markFailed(task, ApiErrorCodes.INTERNAL_ERROR);
+    verify(pendingReplyTaskService, never()).markReady(any(), any());
+  }
+
+  @Test
+  void confirmPendingReplyTaskPreservesApiExceptionCodeWhenSkillGenerationThrows() {
+    PendingReplyTask task = claimedTask();
+    ApiException upstreamFailure = new ApiException("30-12345", "upstream failed");
+    when(pendingReplyTaskService.claimForGeneration("task-1", "keeper-1", "18800001111"))
+        .thenReturn(task);
+    when(skillGatewayService.generateReplies(any())).thenThrow(upstreamFailure);
+
+    ApiException exception = assertThrows(ApiException.class, () -> service.confirmPendingReplyTask(
+        "task-1",
+        new PendingReplyTaskSelectRequest("18800001111")));
+
+    org.junit.jupiter.api.Assertions.assertSame(upstreamFailure, exception);
+    verify(pendingReplyTaskService).markFailed(task, "30-12345");
+    verify(pendingReplyTaskService, never()).markReady(any(), any());
+  }
+
+  @Test
+  void confirmPendingReplyTaskMarksFailedWhenSavingReadyResultThrows() {
+    PendingReplyTask task = claimedTask();
+    RuntimeException readyFailure = new RuntimeException("ready write failed");
+    when(pendingReplyTaskService.claimForGeneration("task-1", "keeper-1", "18800001111"))
+        .thenReturn(task);
+    org.mockito.Mockito.doThrow(readyFailure).when(pendingReplyTaskService).markReady(eq(task), any());
+
+    RuntimeException exception = assertThrows(RuntimeException.class, () -> service.confirmPendingReplyTask(
+        "task-1",
+        new PendingReplyTaskSelectRequest("18800001111")));
+
+    org.junit.jupiter.api.Assertions.assertSame(readyFailure, exception);
+    InOrder generationOrder = org.mockito.Mockito.inOrder(pendingReplyTaskService);
+    generationOrder.verify(pendingReplyTaskService).beginGeneration("task-1");
+    generationOrder.verify(pendingReplyTaskService).markReady(eq(task), any());
+    generationOrder.verify(pendingReplyTaskService).markFailed(task, ApiErrorCodes.INTERNAL_ERROR);
+    generationOrder.verify(pendingReplyTaskService).endGeneration("task-1");
+  }
+
+  @Test
+  void confirmPendingReplyTaskMarksFailedWhenCustomerLookupThrows() {
+    PendingReplyTask task = claimedTask();
+    RuntimeException lookupFailure = new RuntimeException("customer lookup failed");
+    when(pendingReplyTaskService.claimForGeneration("task-1", "keeper-1", "18800001111"))
+        .thenReturn(task);
+    when(customerQueryService.getByPhone("18800001111")).thenThrow(lookupFailure);
+
+    RuntimeException exception = assertThrows(RuntimeException.class, () -> service.confirmPendingReplyTask(
+        "task-1",
+        new PendingReplyTaskSelectRequest("18800001111")));
+
+    org.junit.jupiter.api.Assertions.assertSame(lookupFailure, exception);
+    InOrder generationOrder = org.mockito.Mockito.inOrder(pendingReplyTaskService, customerQueryService);
+    generationOrder.verify(pendingReplyTaskService).beginGeneration("task-1");
+    generationOrder.verify(customerQueryService).getByPhone("18800001111");
+    generationOrder.verify(pendingReplyTaskService).markFailed(task, ApiErrorCodes.INTERNAL_ERROR);
+    generationOrder.verify(pendingReplyTaskService).endGeneration("task-1");
+    verify(pendingReplyTaskService, never()).releaseSelection(task);
+  }
+
+  @Test
+  void confirmPendingReplyTaskMarksFailedWhenCustomerAccessCheckThrows() {
+    PendingReplyTask task = claimedTask();
+    RuntimeException accessFailure = new RuntimeException("customer access failed");
+    when(pendingReplyTaskService.claimForGeneration("task-1", "keeper-1", "18800001111"))
+        .thenReturn(task);
+    when(customerAccessService.canAccess(accessibleCustomer)).thenThrow(accessFailure);
+
+    RuntimeException exception = assertThrows(RuntimeException.class, () -> service.confirmPendingReplyTask(
+        "task-1",
+        new PendingReplyTaskSelectRequest("18800001111")));
+
+    org.junit.jupiter.api.Assertions.assertSame(accessFailure, exception);
+    InOrder generationOrder = org.mockito.Mockito.inOrder(
+        pendingReplyTaskService,
+        customerQueryService,
+        customerAccessService);
+    generationOrder.verify(pendingReplyTaskService).beginGeneration("task-1");
+    generationOrder.verify(customerQueryService).getByPhone("18800001111");
+    generationOrder.verify(customerAccessService).canAccess(accessibleCustomer);
+    generationOrder.verify(pendingReplyTaskService).markFailed(task, ApiErrorCodes.INTERNAL_ERROR);
+    generationOrder.verify(pendingReplyTaskService).endGeneration("task-1");
+    verify(pendingReplyTaskService, never()).releaseSelection(task);
+  }
+
+  @Test
+  void confirmPendingReplyTaskPreservesOriginalFailureWhenMarkFailedAlsoThrows() {
+    PendingReplyTask task = claimedTask();
+    RuntimeException skillFailure = new RuntimeException("skill unavailable");
+    when(pendingReplyTaskService.claimForGeneration("task-1", "keeper-1", "18800001111"))
+        .thenReturn(task);
+    when(skillGatewayService.generateReplies(any())).thenThrow(skillFailure);
+    org.mockito.Mockito.doThrow(new RuntimeException("failed state write failed"))
+        .when(pendingReplyTaskService)
+        .markFailed(task, ApiErrorCodes.INTERNAL_ERROR);
+
+    RuntimeException exception = assertThrows(RuntimeException.class, () -> service.confirmPendingReplyTask(
+        "task-1",
+        new PendingReplyTaskSelectRequest("18800001111")));
+
+    org.junit.jupiter.api.Assertions.assertSame(skillFailure, exception);
+    verify(pendingReplyTaskService).markFailed(task, ApiErrorCodes.INTERNAL_ERROR);
   }
 
   @Test
@@ -504,7 +876,8 @@ class ChatOrchestrationServiceTest {
         List.of(new ChatMessageDto("client", "客户问到店评估", "12:00")),
         "建议今天预约到店评估",
         "NEXT_STEP",
-        new CustomerMessageSentEvent.FollowupSuggestPayload("2026-07-10T10:00:00", "预约到店"));
+        new CustomerMessageSentEvent.FollowupSuggestPayload("2026-07-10T10:00:00", "预约到店"),
+        true);
 
     Map<String, Object> result = service.sendConfirm(request);
 
@@ -516,7 +889,16 @@ class ChatOrchestrationServiceTest {
     assertEquals("前端已生成摘要", event.conversationSummary());
     assertEquals("NEXT_STEP", event.selectedDirection());
     assertEquals("预约到店", event.followupSuggest().nextFollowupDir());
+    assertEquals(true, event.completeCurrentFollowup());
     assertEquals("keeper-1", event.operator());
+    org.mockito.InOrder persistenceOrder = org.mockito.Mockito.inOrder(followupConfirmationService, eventPublisher);
+    persistenceOrder.verify(followupConfirmationService).record(
+        accessibleCustomer,
+        "前端已生成摘要",
+        "建议今天预约到店评估",
+        new CustomerMessageSentEvent.FollowupSuggestPayload("2026-07-10T10:00:00", "预约到店"),
+        true);
+    persistenceOrder.verify(eventPublisher).publishEvent(event);
     verify(llmFollowupSuggestionService, never()).trySuggest(any());
     verify(llmSummaryService, never()).trySummarize(any());
     verify(auditLogger).log("SEND_CONFIRM", "keeper-1", "CUSTOMER", "18800001111", "message sent");
@@ -636,6 +1018,7 @@ class ChatOrchestrationServiceTest {
 
     assertEquals(true, result.get("accepted"));
     verify(eventPublisher).publishEvent(any(CustomerMessageSentEvent.class));
+    verify(followupConfirmationService, never()).record(any(), any(), any(), any(), anyBoolean());
   }
 
   @Test
@@ -755,6 +1138,42 @@ class ChatOrchestrationServiceTest {
     customer.setNickname("测试客户");
     customer.setAssignedKeeper("keeper-1");
     return customer;
+  }
+
+  private PendingReplyTask claimedTask() {
+    return new PendingReplyTask(
+        1L,
+        "task-1",
+        "reply-100-1",
+        "keeper-1",
+        PendingReplyTaskStatus.GENERATING,
+        "same-name customer",
+        null,
+        null,
+        "TUAN_GOU",
+        "customer_sheet",
+        "I want to know more",
+        List.of(Map.of("role", "client", "text", "I want to know more", "timestamp", "12:00")),
+        List.of("18800001111", "18800002222"),
+        "18800001111",
+        null,
+        null,
+        null,
+        java.time.LocalDateTime.of(2026, 7, 23, 10, 0),
+        java.time.LocalDateTime.of(2026, 7, 22, 10, 0),
+        java.time.LocalDateTime.of(2026, 7, 22, 10, 0));
+  }
+
+  private PendingReplyTaskView pendingTaskView(PendingReplyTaskStatus status, ChatResponse response) {
+    return new PendingReplyTaskView(
+        "task-1",
+        "reply-100-1",
+        status,
+        List.of(),
+        status == PendingReplyTaskStatus.WAITING_CUSTOMER ? null : "18800001111",
+        response,
+        null,
+        java.time.LocalDateTime.of(2026, 7, 23, 10, 0));
   }
 
   private ReplyTagSnapshot replyTag(String value, String displayName) {

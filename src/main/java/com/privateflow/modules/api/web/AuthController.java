@@ -41,6 +41,12 @@ public class AuthController {
     return ApiResponse.ok(authService.refresh(request, AuthContext.current()));
   }
 
+  @PostMapping("/api/v1/auth/logout")
+  public ApiResponse<Void> logout(@RequestBody RefreshRequest request) {
+    authService.logout(request);
+    return ApiResponse.ok(null);
+  }
+
   @GetMapping("/api/v1/auth/config")
   public ApiResponse<Map<String, Object>> config() {
     return ApiResponse.ok(Map.of(

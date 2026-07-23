@@ -1,6 +1,7 @@
 import { reactive } from 'vue';
 import { getJson, postJson, putJson } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
+import { writeClipboardText } from '../../shared/desktopBridge';
 import { eventBus } from '../../shared/eventBus';
 import { getAlertsByPhone, loadAlertsByPhone } from '../abnormal-alert/alertStore';
 import {
@@ -562,6 +563,18 @@ export function handleSendConfirmed(payload: { phone?: string }): void {
   if (payload.phone && currentPhone && payload.phone.endsWith(currentPhone.slice(-4))) {
     void openProfile(currentPhone, 'PROFILE_CARD');
   }
+}
+
+export async function copyCustomerNickname(): Promise<void> {
+  const nickname = customerProfileState.profile?.customer.nickname?.trim() ?? '';
+  if (!nickname) {
+    customerProfileState.toast = '该客户没有可复制的昵称';
+    return;
+  }
+  const result = await writeClipboardText(nickname);
+  customerProfileState.toast = result.success
+    ? '客户昵称已复制，可到企业微信搜索'
+    : '昵称复制失败，请重试';
 }
 
 export function beginTagEdit(categoryId: number): void {

@@ -59,7 +59,16 @@
           </span>
           <span>{{ rowDescription(item) }}</span>
         </button>
-        <span class="keeper">{{ item.assignedKeeper || '-' }}</span>
+        <div class="followup-row-actions">
+          <span v-if="item.assignedKeeper" class="keeper">{{ item.assignedKeeper }}</span>
+          <button
+            class="secondary small followup-profile-button"
+            type="button"
+            :aria-label="`查看 ${item.nickname || `客户 ${item.phone.slice(-4)}`} 的客户档案`"
+            title="查看客户档案"
+            @click="openFollowupCustomer(item)"
+          >档案</button>
+        </div>
       </article>
     </div>
 
@@ -69,10 +78,12 @@
     </div>
 
     <footer v-if="selectedFollowupItems.length" class="batch-bar">
-      <span>已选 {{ selectedFollowupItems.length }} 个</span>
-      <button class="secondary small" @click="selectAllActiveFollowups">全选</button>
-      <button class="secondary small" @click="invertActiveFollowupSelection">反选</button>
-      <button class="primary small" @click="startBatchTemplate">批量发模板</button>
+      <span class="batch-selection-count">已选 {{ selectedFollowupItems.length }} 个</span>
+      <div class="batch-secondary-actions">
+        <button class="secondary small" @click="selectAllActiveFollowups">全选</button>
+        <button class="secondary small" @click="invertActiveFollowupSelection">反选</button>
+      </div>
+      <button class="primary small batch-primary-action" @click="startBatchTemplate">批量发模板</button>
     </footer>
   </section>
 </template>
@@ -82,6 +93,7 @@ import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { eventBus } from '../../shared/eventBus';
 import {
   activeFollowupItems,
+  completeFollowup,
   followupListState as state,
   handleFollowupReminder,
   handleNewLeadAlert,
@@ -98,8 +110,8 @@ import {
 import type { FollowupItem, FollowupReminderPayload, FollowupTab, NewLeadAlertPayload } from './types';
 
 const tabs: Array<{ value: FollowupTab; label: string }> = [
-  { value: 'OVERDUE', label: '逾期跟进' },
   { value: 'DUE_TODAY', label: '今日待跟进' },
+  { value: 'OVERDUE', label: '逾期跟进' },
   { value: 'APPOINTMENT', label: '今日预约' },
   { value: 'NEW_LEAD', label: '新客资' }
 ];
@@ -133,6 +145,9 @@ onMounted(() => {
     if (payload.tab && tabs.some((tab) => tab.value === payload.tab)) {
       setActiveFollowupTab(payload.tab);
     }
+  }));
+  disposers.push(eventBus.on<{ phone: string; reminderType?: FollowupTab | null }>('followup:completed', (payload) => {
+    completeFollowup(payload.phone, payload.reminderType);
   }));
 });
 

@@ -31,7 +31,7 @@ describe('desktop status permissions', () => {
         permissions: ['TAG_MANAGEMENT', 'TAG_MANAGEMENT', ''],
         skillStatus: { status: 'OK', label: '正常' },
         llmStatus: { status: 'OK', label: '正常', replyGenerationEnabled: false },
-        runtimeConfig: { clipboardScreenshotConfirmPromptS: 15 }
+        runtimeConfig: { clipboardScreenshotConfirmPromptS: 15, workbenchRefreshIntervalS: 90 }
       },
       errorCode: null,
       message: null
@@ -51,7 +51,8 @@ describe('desktop status permissions', () => {
     expect(desktopStatusState.permissions).toEqual(['TAG_MANAGEMENT']);
     expect(mocks.saveDesktopConfig).toHaveBeenCalledWith({
       accountPermissions: ['TAG_MANAGEMENT'],
-      clipboardScreenshotConfirmPromptS: 15
+      clipboardScreenshotConfirmPromptS: 15,
+      workbenchRefreshIntervalS: 90
     });
   });
 

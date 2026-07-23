@@ -127,6 +127,10 @@ const apiData: Record<string, unknown> = {
     'llm.summary.max_tokens': '500',
     'llm.summary.system_prompt': '生成会话摘要',
     'desktop.clipboard_screenshot_confirm_prompt_s': '10',
+    'desktop.workbench_refresh_interval_s': '60',
+    'system.jwt_access_token_ttl_s': '7200',
+    'system.jwt_refresh_token_ttl_s': '2592000',
+    'skill.subscription_expire_at': '',
     'table.api_base_url': 'https://table.example.com',
     'table.api_key': '****4321',
     'table.write_timeout_ms': '10000',
@@ -1067,6 +1071,32 @@ describe('AdminConsole product surface', () => {
     expect(dataCells[5].textContent).toContain('启用中');
     expect(dataCells[6].classList.contains('ops-row-actions')).toBe(true);
     expect(dataCells[6].textContent).toContain('重置密码');
+
+    app.unmount();
+  });
+
+  it('loads and saves login, workbench sync, and Skill expiry settings from account management', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '账号与权限').click();
+    await flushSave();
+
+    const panel = [...host.querySelectorAll('.ops-panel')]
+      .find((item) => item.textContent?.includes('登录与桌面设置')) as HTMLElement;
+    expect(panel).toBeTruthy();
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/configs');
+
+    setInputValue(controlByLabel<HTMLInputElement>(panel, '登录凭证有效小时'), '4');
+    setInputValue(controlByLabel<HTMLInputElement>(panel, '免登录天数'), '30');
+    setInputValue(controlByLabel<HTMLInputElement>(panel, '工作台自动同步秒数'), '90');
+    setInputValue(controlByLabel<HTMLInputElement>(panel, 'Skill 到期日期'), '2026-12-31');
+    findButton(panel, '保存设置').click();
+    await flushSave();
+
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/system.jwt_access_token_ttl_s', { value: '14400' });
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/system.jwt_refresh_token_ttl_s', { value: '2592000' });
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/desktop.workbench_refresh_interval_s', { value: '90' });
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/skill.subscription_expire_at', { value: '2026-12-31' });
 
     app.unmount();
   });

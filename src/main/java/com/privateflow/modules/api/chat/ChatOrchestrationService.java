@@ -21,6 +21,7 @@ import com.privateflow.modules.llm.LlmSummaryService;
 import com.privateflow.modules.match.MatchRequest;
 import com.privateflow.modules.match.MatchResult;
 import com.privateflow.modules.match.MatchType;
+import com.privateflow.modules.profile.service.FollowupConfirmationService;
 import com.privateflow.modules.match.CustomerMatchService;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillGatewayService;
@@ -32,6 +33,7 @@ import com.privateflow.modules.skill.config.SkillConfigProvider;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -56,6 +58,8 @@ public class ChatOrchestrationService {
   private final LlmReplyGenerationService llmReplyGenerationService;
   private final LlmFollowupSuggestionService llmFollowupSuggestionService;
   private final LlmSummaryService llmSummaryService;
+  private final FollowupConfirmationService followupConfirmationService;
+  private final PendingReplyTaskService pendingReplyTaskService;
 
   public ChatOrchestrationService(
       ImageRecognitionService imageRecognitionService,
@@ -70,7 +74,9 @@ public class ChatOrchestrationService {
       SkillConfigProvider skillConfigProvider,
       LlmReplyGenerationService llmReplyGenerationService,
       LlmFollowupSuggestionService llmFollowupSuggestionService,
-      LlmSummaryService llmSummaryService) {
+      LlmSummaryService llmSummaryService,
+      FollowupConfirmationService followupConfirmationService,
+      PendingReplyTaskService pendingReplyTaskService) {
     this.imageRecognitionService = imageRecognitionService;
     this.customerMatchService = customerMatchService;
     this.skillGatewayService = skillGatewayService;
@@ -84,6 +90,8 @@ public class ChatOrchestrationService {
     this.llmReplyGenerationService = llmReplyGenerationService;
     this.llmFollowupSuggestionService = llmFollowupSuggestionService;
     this.llmSummaryService = llmSummaryService;
+    this.followupConfirmationService = followupConfirmationService;
+    this.pendingReplyTaskService = pendingReplyTaskService;
   }
 
   public ChatResponse recognize(ChatRecognizeRequest request) {
@@ -101,14 +109,112 @@ public class ChatOrchestrationService {
         && !platformIdentifier.equals(nickname)) {
       match = match(platformIdentifier, phone, request.leadType(), request.sourceTable());
     }
-    Customer customer = firstCustomer(match);
     String clientMessage = buildClientMessage(request, recognized);
     List<Map<String, String>> chatContext = messages(request, recognized);
+    if (match.matchType() == MatchType.MULTIPLE) {
+      PendingReplyTaskView pendingTask = pendingReplyTaskService.createWaitingTask(new PendingReplyTaskDraft(
+          firstNonBlank(request.replySessionId(), "reply-" + UUID.randomUUID()),
+          AuthContext.username(),
+          recognized == null ? null : recognized.nickname(),
+          phone,
+          platformIdentifier,
+          request.leadType(),
+          request.sourceTable(),
+          clientMessage,
+          chatContext,
+          match.customers()));
+      return new ChatResponse(null, nickname, false, match, null, null, null, pendingTask);
+    }
+    Customer customer = firstCustomer(match);
     GeneratedReplies generated = generateSkill(Scene.CHAT_RECOGNIZE, request.leadType(), customer, phone, clientMessage, List.of(), chatContext);
     String responsePhone = customer == null ? phone : customer.getPhone();
     saveContext(responsePhone, generated, 0);
     auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", responsePhone, "chat recognize");
     return new ChatResponse(responsePhone, nickname, match.matchType() == MatchType.NONE, match, generated.skill(), null, generated.source());
+  }
+
+  public ChatResponse confirmPendingReplyTask(String taskId, PendingReplyTaskSelectRequest request) {
+    if (request == null || blank(request.phone())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "phone is required");
+    }
+    PendingReplyTask task = pendingReplyTaskService.claimForGeneration(
+        taskId,
+        AuthContext.username(),
+        request.phone());
+    return generatePendingReplyTask(task);
+  }
+
+  public List<PendingReplyTaskView> listPendingReplyTasks() {
+    return pendingReplyTaskService.listRecoverable(AuthContext.username());
+  }
+
+  public PendingReplyTaskView getPendingReplyTask(String taskId) {
+    return pendingReplyTaskService.getRecoverable(taskId, AuthContext.username());
+  }
+
+  public ChatResponse retryPendingReplyTask(String taskId) {
+    PendingReplyTask task = pendingReplyTaskService.claimRetry(taskId, AuthContext.username());
+    return generatePendingReplyTask(task);
+  }
+
+  public PendingReplyTaskView cancelPendingReplyTask(String taskId) {
+    return pendingReplyTaskService.cancel(taskId, AuthContext.username());
+  }
+
+  private ChatResponse generatePendingReplyTask(PendingReplyTask task) {
+    pendingReplyTaskService.beginGeneration(task.taskId());
+    try {
+      String selectedPhone = task.selectedPhone();
+      Customer customer;
+      try {
+        customer = customerQueryService.getByPhone(selectedPhone);
+      } catch (RuntimeException ex) {
+        markPendingTaskFailed(task, ex);
+        throw ex;
+      }
+      if (customer == null) {
+        pendingReplyTaskService.releaseSelection(task);
+        throw new ApiException(ApiErrorCodes.BAD_REQUEST, "customer not found");
+      }
+      boolean canAccess;
+      try {
+        canAccess = customerAccessService.canAccess(customer);
+      } catch (RuntimeException ex) {
+        markPendingTaskFailed(task, ex);
+        throw ex;
+      }
+      if (!canAccess) {
+        pendingReplyTaskService.releaseSelection(task);
+        throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权操作该客户");
+      }
+      try {
+        GeneratedReplies generated = generateSkill(
+            Scene.CHAT_RECOGNIZE,
+            task.leadType(),
+            customer,
+            customer.getPhone(),
+            task.clientMessage(),
+            List.of(),
+            task.chatContext() == null ? List.of() : task.chatContext());
+        saveContext(customer.getPhone(), generated, 0);
+        ChatResponse response = new ChatResponse(
+            customer.getPhone(),
+            customer.getNickname(),
+            false,
+            null,
+            generated.skill(),
+            null,
+            generated.source());
+        pendingReplyTaskService.markReady(task, response);
+        auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", customer.getPhone(), "pending reply task confirmed");
+        return response;
+      } catch (RuntimeException ex) {
+        markPendingTaskFailed(task, ex);
+        throw ex;
+      }
+    } finally {
+      pendingReplyTaskService.endGeneration(task.taskId());
+    }
   }
 
   public ChatResponse generate(GenerateRequest request) {
@@ -164,7 +270,7 @@ public class ChatOrchestrationService {
     if (request == null || blank(request.phone()) || blank(request.sentText())) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "phone and sentText are required");
     }
-    requireSendConfirmAccess(request);
+    Customer customer = requireSendConfirmAccess(request);
     List<CustomerMessageSentEvent.ChatMessage> rawMessages = sendConfirmMessages(request);
     String conversationSummary = conversationSummary(request, rawMessages);
     CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest = request.followupSuggest() == null
@@ -178,6 +284,14 @@ public class ChatOrchestrationService {
             request.selectedDirection(),
             AuthContext.username())).orElse(null)
         : request.followupSuggest();
+    if (customer != null) {
+      followupConfirmationService.record(
+          customer,
+          conversationSummary,
+          request.sentText(),
+          followupSuggest,
+          request.completeCurrentFollowup());
+    }
     eventPublisher.publishEvent(new CustomerMessageSentEvent(
         request.phone(),
         request.nickname(),
@@ -189,6 +303,7 @@ public class ChatOrchestrationService {
         request.sentText(),
         request.selectedDirection(),
         followupSuggest,
+        request.completeCurrentFollowup(),
         AuthContext.username()));
     auditLogger.log("SEND_CONFIRM", AuthContext.username(), "CUSTOMER", request.phone(), "message sent");
     return Map.of("accepted", true);
@@ -209,13 +324,13 @@ public class ChatOrchestrationService {
         .orElseGet(() -> customerMessageSummary(rawMessages));
   }
 
-  private void requireSendConfirmAccess(SendConfirmRequest request) {
+  private Customer requireSendConfirmAccess(SendConfirmRequest request) {
     Customer customer = customerQueryService.getByPhone(request.phone());
     if (customer != null) {
       if (!customerAccessService.canAccess(customer)) {
         throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权操作该客户");
       }
-      return;
+      return customer;
     }
     if (!request.isNewCustomer()) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "客户不存在");
@@ -223,6 +338,7 @@ public class ChatOrchestrationService {
     if (contextStore.read(AuthContext.username(), request.phone()).isEmpty()) {
       throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权创建该客户记录");
     }
+    return null;
   }
 
   private String customerMessageSummary(List<CustomerMessageSentEvent.ChatMessage> rawMessages) {
@@ -440,6 +556,22 @@ public class ChatOrchestrationService {
 
   private boolean blank(String value) {
     return value == null || value.isBlank();
+  }
+
+  private String pendingTaskErrorCode(RuntimeException ex) {
+    if (ex instanceof ApiException apiException && !blank(apiException.getErrorCode())) {
+      return apiException.getErrorCode();
+    }
+    return ApiErrorCodes.INTERNAL_ERROR;
+  }
+
+  private void markPendingTaskFailed(PendingReplyTask task, RuntimeException originalFailure) {
+    try {
+      pendingReplyTaskService.markFailed(task, pendingTaskErrorCode(originalFailure));
+    } catch (RuntimeException markFailedFailure) {
+      originalFailure.addSuppressed(markFailedFailure);
+      log.warn("Could not mark pending reply task {} as failed", task.taskId(), markFailedFailure);
+    }
   }
 
   private String nvl(String value) {

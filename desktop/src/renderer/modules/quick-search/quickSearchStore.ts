@@ -1,10 +1,10 @@
 import { computed, reactive } from 'vue';
-import { getJson } from '../../shared/apiClient';
+import { getJson, postJson } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
 import { writeClipboardImage, writeClipboardText } from '../../shared/desktopBridge';
-import { customerProfileState } from '../customer-profile/customerProfileStore';
+import { eventBus } from '../../shared/eventBus';
 import { resolveQuickSearchTemplate } from './templateVariables';
-import type { QuickSearchContentType, QuickSearchFilter, QuickSearchItem } from './types';
+import type { QuickSearchContentType, QuickSearchCustomerContext, QuickSearchFilter, QuickSearchItem, QuickSearchPendingSend } from './types';
 
 const CACHE_KEY = 'quick_search_cache';
 const API_TIMEOUT_MS = 5000;
@@ -19,6 +19,9 @@ export const quickSearchState = reactive({
   filter: 'ALL' as QuickSearchFilter,
   items: [] as QuickSearchItem[],
   selectedIndex: 0,
+  customerContext: null as QuickSearchCustomerContext | null,
+  pendingSend: null as QuickSearchPendingSend | null,
+  confirming: false,
   toast: '',
   error: ''
 });
@@ -57,11 +60,14 @@ export async function initializeQuickSearch(): Promise<void> {
   }
 }
 
-export function showQuickSearch(): void {
+export function showQuickSearch(context?: QuickSearchCustomerContext): void {
   quickSearchState.visible = true;
   quickSearchState.query = '';
   quickSearchState.filter = 'ALL';
   quickSearchState.selectedIndex = 0;
+  quickSearchState.customerContext = context?.phone?.trim() ? context : null;
+  quickSearchState.pendingSend = null;
+  quickSearchState.confirming = false;
   quickSearchState.toast = '';
   if (quickSearchState.items.length === 0) {
     readCache();
@@ -73,6 +79,9 @@ export function showQuickSearch(): void {
 
 export function hideQuickSearch(): void {
   quickSearchState.visible = false;
+  quickSearchState.customerContext = null;
+  quickSearchState.pendingSend = null;
+  quickSearchState.confirming = false;
 }
 
 export function scheduleQuickSearchQuery(query: string): void {
@@ -130,6 +139,9 @@ export async function refreshQuickSearchItems(): Promise<void> {
 }
 
 export async function copyQuickSearchItem(item: QuickSearchItem): Promise<void> {
+  if (quickSearchState.pendingSend || quickSearchState.confirming) {
+    return;
+  }
   if (item.contentType === 'IMAGE') {
     if (!item.imageUrl) {
       setToast('图片素材缺少链接');
@@ -141,18 +153,68 @@ export async function copyQuickSearchItem(item: QuickSearchItem): Promise<void> 
       return;
     }
   } else {
-    const customer = customerProfileState.profile?.customer ?? {};
-    const result = await writeClipboardText(resolveQuickSearchTemplate(
+    const context = quickSearchState.customerContext;
+    const sentText = resolveQuickSearchTemplate(
       item.content,
-      customer,
-      String(customerProfileState.profile?.phoneFull || '')
-    ));
+      context?.customer ?? {},
+      context?.phone ?? ''
+    );
+    const result = await writeClipboardText(sentText);
     if (!result.success) {
       setToast('复制失败，请重试');
       return;
     }
+    if (context) {
+      quickSearchState.pendingSend = {
+        itemId: item.id,
+        title: item.title,
+        scene: item.scene ?? item.shortcutCode ?? 'QUICK_SEARCH_TEMPLATE',
+        sentText
+      };
+      setToast('已复制，请发送后确认');
+      return;
+    }
   }
-  setToast(item.contentType === 'IMAGE' ? '图片已复制' : '已复制');
+  setToast(item.contentType === 'IMAGE' ? '图片已复制' : '已复制；未关联客户，本次不记录跟进');
+}
+
+export function declineQuickSearchSend(): void {
+  quickSearchState.pendingSend = null;
+  quickSearchState.toast = '';
+}
+
+export async function confirmQuickSearchSent(): Promise<void> {
+  const context = quickSearchState.customerContext;
+  const pending = quickSearchState.pendingSend;
+  if (!context || !pending || quickSearchState.confirming) {
+    return;
+  }
+  quickSearchState.confirming = true;
+  quickSearchState.error = '';
+  try {
+    const response = await postJson('/api/v1/chat/send-confirm', {
+      phone: context.phone,
+      nickname: context.nickname ?? '',
+      isNewCustomer: false,
+      sourceTable: context.sourceTable ?? '',
+      leadType: context.leadType ?? '',
+      conversationSummary: `发送模板《${pending.title}》：${pending.sentText}`,
+      sentText: pending.sentText,
+      selectedDirection: pending.scene || 'QUICK_SEARCH_TEMPLATE',
+      completeCurrentFollowup: context.reminderType === 'DUE_TODAY' || context.reminderType === 'OVERDUE'
+    });
+    if (!response.success) {
+      throw new Error(response.message ?? response.errorCode ?? 'send confirm failed');
+    }
+    eventBus.emit('reply:send-confirmed', { phone: context.phone });
+    eventBus.emit('followup:completed', { phone: context.phone, reminderType: context.reminderType });
+    eventBus.emit('quick-search:sent', { returnToFollowups: context.returnToFollowups });
+    hideQuickSearch();
+  } catch {
+    quickSearchState.error = '跟进记录失败，请重试';
+  } finally {
+    quickSearchState.confirming = false;
+  }
 }
 
 export function handleQuickSearchConfigRefresh(payload: { configKeys?: string[] }): void {

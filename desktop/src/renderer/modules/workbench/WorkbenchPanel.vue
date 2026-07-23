@@ -10,7 +10,7 @@
         title="刷新"
         @click="loadWorkbenchFollowups(true)"
       >
-        {{ state.loading ? '...' : '↻' }}
+        {{ state.loading ? '…' : '↻' }}
       </button>
     </header>
 
@@ -48,30 +48,6 @@
           <span>{{ card.label }}</span>
           <strong>{{ card.metric.total }}</strong>
           <small>团 {{ card.metric.tuanGou }} · 线 {{ card.metric.xianSuo }}</small>
-        </span>
-      </button>
-    </div>
-
-    <div class="workbench-actions" aria-label="工作台快捷入口">
-      <button class="workbench-action" type="button" @click="startWorkbenchCapture">
-        <span class="workbench-action-icon" aria-hidden="true">识</span>
-        <span>
-          <strong>识别聊天</strong>
-          <small>截图生成回复</small>
-        </span>
-      </button>
-      <button class="workbench-action" type="button" @click="openWorkbenchQuickSearch">
-        <span class="workbench-action-icon" aria-hidden="true">模</span>
-        <span>
-          <strong>速搜模板</strong>
-          <small>话术和素材</small>
-        </span>
-      </button>
-      <button class="workbench-action" type="button" @click="startWorkbenchBatchTemplate">
-        <span class="workbench-action-icon" aria-hidden="true">批</span>
-        <span>
-          <strong>批量待办</strong>
-          <small>选择客户发送</small>
         </span>
       </button>
     </div>
@@ -127,6 +103,7 @@
 import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { eventBus } from '../../shared/eventBus';
 import {
+  completeWorkbenchFollowup,
   handleWorkbenchFollowupReminder,
   handleWorkbenchNewLead,
   handleWorkbenchNotice,
@@ -138,11 +115,8 @@ import {
   openAllFollowups,
   openAllNewLeads,
   openWorkbenchCustomer,
-  openWorkbenchQuickSearch,
   recentNewLeads,
   refreshWorkbenchIfNeeded,
-  startWorkbenchBatchTemplate,
-  startWorkbenchCapture,
   urgentFollowups,
   visibleWorkbenchNotices,
   workbenchMetrics,
@@ -158,6 +132,8 @@ const metricCards = computed<Array<{ key: WorkbenchMetricKey; label: string; ico
 ]);
 
 const disposers: Array<() => void> = [];
+const WORKBENCH_REFRESH_CHECK_MS = 30_000;
+let autoRefreshTimer: number | null = null;
 
 onMounted(() => {
   void loadWorkbenchFollowups();
@@ -165,14 +141,22 @@ onMounted(() => {
   disposers.push(eventBus.on<FollowupReminderPayload>('FOLLOWUP_REMIND', handleWorkbenchFollowupReminder));
   disposers.push(eventBus.on<NewLeadAlertPayload>('NEW_LEAD_ALERT', handleWorkbenchNewLead));
   disposers.push(eventBus.on<WorkbenchNoticePayload>('SYSTEM_NOTICE', handleWorkbenchNotice));
+  disposers.push(eventBus.on<{ phone: string; reminderType?: string | null }>('followup:completed', (payload) => {
+    completeWorkbenchFollowup(payload.phone, payload.reminderType);
+  }));
   disposers.push(eventBus.on('stage:updated', markWorkbenchDirty));
   disposers.push(eventBus.on('workbench:show', refreshWorkbenchIfNeeded));
   window.addEventListener('focus', refreshWorkbenchIfNeeded);
+  autoRefreshTimer = window.setInterval(refreshWorkbenchIfNeeded, WORKBENCH_REFRESH_CHECK_MS);
 });
 
 onBeforeUnmount(() => {
   disposers.splice(0).forEach((dispose) => dispose());
   window.removeEventListener('focus', refreshWorkbenchIfNeeded);
+  if (autoRefreshTimer !== null) {
+    window.clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
 });
 
 function leadTypeLabel(value?: string | null): string {

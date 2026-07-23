@@ -16,3 +16,20 @@ export type QuickSearchItem = {
 };
 
 export type QuickSearchFilter = 'ALL' | 'TUAN_GOU' | 'XIAN_SUO' | 'GENERAL';
+
+export type QuickSearchCustomerContext = {
+  phone: string;
+  nickname?: string | null;
+  leadType?: string | null;
+  sourceTable?: string | null;
+  reminderType?: 'OVERDUE' | 'DUE_TODAY' | 'APPOINTMENT' | 'NEW_LEAD' | null;
+  returnToFollowups: boolean;
+  customer: Record<string, unknown>;
+};
+
+export type QuickSearchPendingSend = {
+  itemId: number;
+  title: string;
+  scene: string;
+  sentText: string;
+};

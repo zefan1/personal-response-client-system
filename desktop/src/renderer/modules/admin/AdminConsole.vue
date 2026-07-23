@@ -1104,6 +1104,34 @@
           </div>
         </article>
 
+        <article v-if="activeSection.key === 'account-permissions'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>登录与桌面设置</h2>
+              <p>控制自动续期、工作台同步和 Skill 到期提醒，保存后会通知已登录桌面端刷新配置。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveLoginDesktopSettings">保存设置</button>
+          </div>
+          <div class="ops-form-grid">
+            <label>
+              <span class="ops-label-title">登录凭证有效小时</span>
+              <input v-model.number="loginDesktopDraft.accessTokenHours" type="number" min="1" max="24" step="1" />
+            </label>
+            <label>
+              <span class="ops-label-title">免登录天数</span>
+              <input v-model.number="loginDesktopDraft.refreshTokenDays" type="number" min="1" max="30" step="1" />
+            </label>
+            <label>
+              <span class="ops-label-title">工作台自动同步秒数</span>
+              <input v-model.number="loginDesktopDraft.workbenchRefreshIntervalS" type="number" min="30" max="300" step="10" />
+            </label>
+            <label>
+              <span class="ops-label-title">Skill 到期日期</span>
+              <input v-model="loginDesktopDraft.skillSubscriptionExpireAt" type="date" />
+            </label>
+          </div>
+        </article>
+
         <article v-if="activeSection.key === 'followup-rules'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
@@ -2503,6 +2531,12 @@ const datasourceRuntimeDraft = reactive({
   manualSyncTimeoutS: 60,
   syncStatusRefreshS: 30
 });
+const loginDesktopDraft = reactive({
+  accessTokenHours: 2,
+  refreshTokenDays: 30,
+  workbenchRefreshIntervalS: 60,
+  skillSubscriptionExpireAt: ''
+});
 
 let healthTimer: number | null = null;
 let analyticsTimer: number | null = null;
@@ -3031,7 +3065,13 @@ async function loadDataContent() {
 async function loadOrgRulesTags() {
   await runWithNotice(async () => {
     if (activeSectionKey.value === 'account-permissions') {
-      applyAccountList(await getJson<unknown>(accountListPath()));
+      const [accountList, configList] = await Promise.all([
+        getJson<unknown>(accountListPath()),
+        getJson<unknown>('/admin/api/v1/configs')
+      ]);
+      applyAccountList(accountList);
+      configs.value = configEntries(configList);
+      hydrateRuntimeDrafts();
       await loadLeaderAccounts();
       return;
     }
@@ -4170,6 +4210,11 @@ function hydrateRuntimeDrafts() {
   datasourceRuntimeDraft.importMaxRows = intConfigValue('datasource.import_max_rows', 5000);
   datasourceRuntimeDraft.manualSyncTimeoutS = intConfigValue('datasource.manual_sync_timeout_s', 60);
   datasourceRuntimeDraft.syncStatusRefreshS = intConfigValue('datasource.sync_status_refresh_s', 30);
+
+  loginDesktopDraft.accessTokenHours = Math.max(1, Math.round(intConfigValue('system.jwt_access_token_ttl_s', 7200) / 3600));
+  loginDesktopDraft.refreshTokenDays = Math.max(1, Math.round(intConfigValue('system.jwt_refresh_token_ttl_s', 2592000) / 86400));
+  loginDesktopDraft.workbenchRefreshIntervalS = intConfigValue('desktop.workbench_refresh_interval_s', 60);
+  loginDesktopDraft.skillSubscriptionExpireAt = configValue('skill.subscription_expire_at').slice(0, 10);
 }
 
 async function saveSkillRuntimeSettings() {
@@ -4286,6 +4331,15 @@ async function saveDatasourceRuntimeSettings() {
     ['datasource.manual_sync_timeout_s', datasourceRuntimeDraft.manualSyncTimeoutS],
     ['datasource.sync_status_refresh_s', datasourceRuntimeDraft.syncStatusRefreshS]
   ], '数据同步策略已保存');
+}
+
+async function saveLoginDesktopSettings() {
+  await saveConfigGroup([
+    ['system.jwt_access_token_ttl_s', Math.round(loginDesktopDraft.accessTokenHours * 3600)],
+    ['system.jwt_refresh_token_ttl_s', Math.round(loginDesktopDraft.refreshTokenDays * 86400)],
+    ['desktop.workbench_refresh_interval_s', Math.round(loginDesktopDraft.workbenchRefreshIntervalS)],
+    ['skill.subscription_expire_at', loginDesktopDraft.skillSubscriptionExpireAt]
+  ], '登录与桌面设置已保存');
 }
 
 async function saveConfigGroup(entries: Array<[string, string | number]>, success: string) {

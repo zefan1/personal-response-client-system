@@ -70,7 +70,7 @@
             <strong>{{ displayAccountName }}</strong>
           </div>
         </div>
-        <span :class="['skill-status', skillStatusClass]">{{ skillStatusCompactLabel }}</span>
+        <span v-if="skillStatusCompactLabel" :class="['skill-status', skillStatusClass]">{{ skillStatusCompactLabel }}</span>
       </div>
       <nav class="desktop-nav" aria-label="桌面工作台导航">
         <button
@@ -121,6 +121,16 @@
           <p>{{ activeDesktopNav.description }}</p>
         </div>
         <div class="desktop-mode-tools">
+          <button
+            v-if="activeDesktopPanel === 'customer' && profileReturnContext"
+            class="pin-window-button profile-return-button"
+            type="button"
+            aria-label="返回待办"
+            title="返回待办"
+            @click="returnFromCustomerProfile"
+          >
+            <span aria-hidden="true">←</span>
+          </button>
           <AlertBell />
           <button
             v-if="isElectronRuntime"
@@ -185,6 +195,7 @@ import ClipboardCaptureConfirmAgent from './modules/chat-recognition/ClipboardCa
 import BatchTemplateOverlay from './modules/batch-template/BatchTemplateOverlay.vue';
 import CopyBackfillAgent from './modules/copy-backfill/CopyBackfillAgent.vue';
 import CustomerProfilePanel from './modules/customer-profile/CustomerProfilePanel.vue';
+import { customerProfileState } from './modules/customer-profile/customerProfileStore';
 import FollowupListPanel from './modules/followup-list/FollowupListPanel.vue';
 import HelpModeAgent from './modules/help-mode/HelpModeAgent.vue';
 import NewLeadToastAgent from './modules/new-lead-toast/NewLeadToastAgent.vue';
@@ -226,6 +237,17 @@ type LoginPayload = {
 
 type DesktopPanelKey = 'workbench' | 'customer' | 'reply';
 type RouteMode = 'admin' | 'desktop' | 'admin-dev';
+type FollowupTab = 'OVERDUE' | 'DUE_TODAY' | 'APPOINTMENT' | 'NEW_LEAD';
+type ProfileReturnContext = {
+  panel: DesktopPanelKey;
+  taskQueueOpen: boolean;
+  followupTab?: FollowupTab;
+  reminderType?: FollowupTab;
+};
+type CustomerSelectedNavigationPayload = {
+  sourceFrom?: string;
+  reminderType?: FollowupTab;
+};
 type AccountRole = 'ADMIN' | 'LEADER' | 'KEEPER' | '';
 
 type DesktopNavItem = {
@@ -250,6 +272,7 @@ const AdminDevConsole = devConsoleEnabled
 const currentMode = ref<RouteMode>(modeFromHash());
 const activeDesktopPanel = ref<DesktopPanelKey>('workbench');
 const taskQueueOpen = ref(false);
+const profileReturnContext = ref<ProfileReturnContext | null>(null);
 const alwaysOnTop = ref(false);
 const loginLoading = ref(false);
 const loginError = ref('');
@@ -286,7 +309,7 @@ const skillStatusCompactLabel = computed(() => {
   if (status === 'OK' && expireAt) return `有效至 ${expireAt}`;
   if (status === 'EXPIRING') return expireAt ? `即将到期 ${expireAt}` : '即将到期';
   if (status === 'EXPIRED') return '已到期';
-  return '未配置';
+  return '';
 });
 const eventDisposers: Array<() => void> = [];
 let refreshPromise: Promise<void> | null = null;
@@ -309,8 +332,25 @@ onMounted(() => {
   eventDisposers.push(eventBus.on('followup:switch-tab', () => {
     taskQueueOpen.value = true;
   }));
-  eventDisposers.push(eventBus.on('customer:selected', () => selectDesktopPanel('customer')));
+  eventDisposers.push(eventBus.on<CustomerSelectedNavigationPayload>('customer:selected', (payload) => {
+    if (activeDesktopPanel.value !== 'customer'
+      && (payload?.sourceFrom === 'FOLLOWUP_LIST' || payload?.sourceFrom === 'DASHBOARD')) {
+      profileReturnContext.value = {
+        panel: activeDesktopPanel.value,
+        taskQueueOpen: taskQueueOpen.value,
+        followupTab: payload.reminderType,
+        reminderType: payload.reminderType
+      };
+    }
+    taskQueueOpen.value = false;
+    selectDesktopPanel('customer');
+  }));
   eventDisposers.push(eventBus.on('candidate:preview', () => selectDesktopPanel('customer')));
+  eventDisposers.push(eventBus.on<{ returnToFollowups?: boolean }>('quick-search:sent', (payload) => {
+    if (payload.returnToFollowups && profileReturnContext.value) {
+      returnFromCustomerProfile();
+    }
+  }));
   const focusReplyAssistant = () => selectDesktopPanel('reply');
   eventDisposers.push(eventBus.on('recognize:result', focusReplyAssistant));
   eventDisposers.push(eventBus.on('recognize:image-failed', focusReplyAssistant));
@@ -326,7 +366,7 @@ onMounted(() => {
   }));
   eventDisposers.push(eventBus.on<{ configKey?: string; configKeys?: string[] }>('CONFIG_REFRESH', (payload) => {
     const keys = [payload?.configKey, ...(payload?.configKeys ?? [])].filter(Boolean) as string[];
-    if (!keys.length || keys.some((key) => key === 'desktop.clipboard_screenshot_confirm_prompt_s' || key.startsWith('desktop.'))) {
+    if (!keys.length || keys.some((key) => key === 'skill.subscription_expire_at' || key.startsWith('desktop.'))) {
       void refreshDesktopStatus();
     }
   }));
@@ -608,18 +648,42 @@ async function togglePinWindow() {
 }
 
 function openQuickSearch() {
-  eventBus.emit('quick-search:show', {});
+  const profile = customerProfileState.profile;
+  const phone = String(profile?.phoneFull || profile?.customer.phoneFull || profile?.customer.phone || '');
+  const context = activeDesktopPanel.value === 'customer' && phone
+    ? {
+        phone,
+        nickname: profile?.customer.nickname,
+        leadType: profile?.customer.leadType,
+        sourceTable: profile?.customer.sourceTable,
+        reminderType: profileReturnContext.value?.reminderType ?? null,
+        returnToFollowups: Boolean(profileReturnContext.value?.taskQueueOpen),
+        customer: { ...profile?.customer }
+      }
+    : undefined;
+  eventBus.emit('quick-search:show', context);
 }
 
-function openTaskQueue(tab?: 'OVERDUE' | 'DUE_TODAY' | 'APPOINTMENT' | 'NEW_LEAD') {
+function openTaskQueue(tab: 'OVERDUE' | 'DUE_TODAY' | 'APPOINTMENT' | 'NEW_LEAD' = 'DUE_TODAY') {
   taskQueueOpen.value = true;
-  if (tab) {
-    void nextTick(() => eventBus.emit('followup:switch-tab', { tab }));
-  }
+  void nextTick(() => eventBus.emit('followup:switch-tab', { tab }));
 }
 
 function closeTaskQueue() {
   taskQueueOpen.value = false;
+}
+
+function returnFromCustomerProfile(): void {
+  const context = profileReturnContext.value;
+  if (!context) {
+    return;
+  }
+  profileReturnContext.value = null;
+  selectDesktopPanel(context.panel);
+  taskQueueOpen.value = context.taskQueueOpen;
+  if (context.taskQueueOpen && context.followupTab) {
+    void nextTick(() => eventBus.emit('followup:switch-tab', { tab: context.followupTab }));
+  }
 }
 
 async function openAdmin() {

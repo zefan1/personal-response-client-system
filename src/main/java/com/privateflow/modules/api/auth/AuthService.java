@@ -76,19 +76,26 @@ public class AuthService {
     if (blank(username)) {
       throw new ApiException(ApiErrorCodes.AUTH_FAILED, "refresh username is required");
     }
-    String stored = refreshTokenStore.read(username)
-        .orElseThrow(() -> new ApiException(ApiErrorCodes.AUTH_FAILED, "登录已过期，请重新登录"));
-    if (!stored.equals(request.refreshToken())) {
-      throw new ApiException(ApiErrorCodes.AUTH_FAILED, "登录状态无效，请重新登录");
-    }
     Account account = accountRepository.findByPhone(username)
         .orElseThrow(() -> new ApiException(ApiErrorCodes.AUTH_FAILED, "登录状态无效，请重新登录"));
     if (!account.enabled()) {
       throw new ApiException(ApiErrorCodes.ACCOUNT_DISABLED, "账号已停用，请联系管理员");
     }
+    String nextRefreshToken = refreshTokenStore.rotate(
+            username,
+            request.refreshToken(),
+            Duration.ofSeconds(configProvider.get().jwtRefreshTokenTtlS()))
+        .orElseThrow(() -> new ApiException(ApiErrorCodes.AUTH_FAILED, "登录已过期，请重新登录"));
     AuthUser freshUser = authUser(account, permissions(account));
     String accessToken = jwtService.issue(freshUser);
-    return new LoginResponse(accessToken, request.refreshToken(), configProvider.get().jwtAccessTokenTtlS(), freshUser);
+    return new LoginResponse(accessToken, nextRefreshToken, configProvider.get().jwtAccessTokenTtlS(), freshUser);
+  }
+
+  public void logout(RefreshRequest request) {
+    if (request == null || blank(request.username()) || blank(request.refreshToken())) {
+      return;
+    }
+    refreshTokenStore.revoke(request.username().trim(), request.refreshToken());
   }
 
   private ApiException authFailure(String ip) {

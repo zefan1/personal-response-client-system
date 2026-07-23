@@ -38,7 +38,9 @@ class TableWriteOrchestratorTest {
     doThrow(new IllegalStateException("table down")).when(existingCustomerUpdater).update(customer, event);
     when(existingCustomerUpdater.followupFields(event)).thenReturn(java.util.Map.of(
         "followupNotes", "建议今天预约到店评估",
-        "nextFollowupDir", "NEXT_STEP"));
+        "lastFollowupAt", "2026-07-21T13:00:00",
+        "nextFollowupAt", "",
+        "nextFollowupDir", ""));
 
     orchestrator.onCustomerMessageSent(event);
 
@@ -52,7 +54,9 @@ class TableWriteOrchestratorTest {
     PendingWritePayload payload = payloadCaptor.getValue();
     assertThat(payload.sourceTable()).isEqualTo("私域客资管理表");
     assertThat(payload.sourceRowId()).isEqualTo("row-1111");
-    assertThat(payload.fields()).containsEntry("nextFollowupDir", "NEXT_STEP");
+    assertThat(payload.fields()).containsEntry("followupNotes", "建议今天预约到店评估");
+    assertThat(payload.fields()).containsEntry("nextFollowupAt", "");
+    assertThat(payload.fields()).containsEntry("nextFollowupDir", "");
   }
 
   private CustomerMessageSentEvent sentEvent() {
@@ -67,6 +71,7 @@ class TableWriteOrchestratorTest {
         "建议今天预约到店评估",
         "NEXT_STEP",
         null,
+        true,
         "keeper-1");
   }
 }

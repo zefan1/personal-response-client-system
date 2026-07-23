@@ -8,6 +8,16 @@ public record ChatRecognizeRequest(
     String customerIdentifier,
     String leadType,
     String sourceTable,
-    List<ChatMessageDto> rawMessages
+    List<ChatMessageDto> rawMessages,
+    String replySessionId
 ) {
+  public ChatRecognizeRequest(
+      String imageBase64,
+      String textMessage,
+      String customerIdentifier,
+      String leadType,
+      String sourceTable,
+      List<ChatMessageDto> rawMessages) {
+    this(imageBase64, textMessage, customerIdentifier, leadType, sourceTable, rawMessages, null);
+  }
 }

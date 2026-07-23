@@ -79,7 +79,7 @@ public class FollowupTodayService {
 
   private FollowupItem classify(Customer customer) {
     LocalDate today = LocalDate.now();
-    if (customer.getNextFollowupAt() != null && customer.getNextFollowupAt().isBefore(LocalDateTime.now())) {
+    if (customer.getNextFollowupAt() != null && customer.getNextFollowupAt().toLocalDate().isBefore(today)) {
       return toItem(customer, ReminderType.OVERDUE, overdueHours(customer), AlertLevel.HIGH, null, null);
     }
     if (customer.getNextFollowupAt() != null && customer.getNextFollowupAt().toLocalDate().equals(today)) {
@@ -136,7 +136,7 @@ public class FollowupTodayService {
   }
 
   private int weight(ReminderType type) {
-    return type == ReminderType.OVERDUE ? 0 : type == ReminderType.NEW_LEAD ? 1 : type == ReminderType.APPOINTMENT ? 2 : 3;
+    return type == ReminderType.DUE_TODAY ? 0 : type == ReminderType.OVERDUE ? 1 : type == ReminderType.APPOINTMENT ? 2 : 3;
   }
 
   private int leadWeight(String leadType) {

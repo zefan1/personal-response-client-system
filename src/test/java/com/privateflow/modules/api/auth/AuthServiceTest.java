@@ -126,7 +126,8 @@ class AuthServiceTest {
     AuthUser staleUser = new AuthUser("leader", "Leader", Role.LEADER, null, 2L);
     AuthUser expectedUser = new AuthUser(
         "leader", "Leader", Role.LEADER, null, 3L, Set.of(PermissionCodes.TAG_MANAGEMENT));
-    when(refreshTokenStore.read("leader")).thenReturn(Optional.of("refresh-token"));
+    when(refreshTokenStore.rotate(eq("leader"), eq("refresh-token"), any(Duration.class)))
+        .thenReturn(Optional.of("rotated-refresh-token"));
     when(accountRepository.findByPhone("leader")).thenReturn(Optional.of(account));
     when(permissionRepository.findEnabledByAccountId(7L)).thenReturn(Set.of(PermissionCodes.TAG_MANAGEMENT));
     when(jwtService.issue(expectedUser)).thenReturn("new-access-token");
@@ -134,6 +135,7 @@ class AuthServiceTest {
     LoginResponse response = authService.refresh(new RefreshRequest("refresh-token"), staleUser);
 
     assertThat(response.accessToken()).isEqualTo("new-access-token");
+    assertThat(response.refreshToken()).isEqualTo("rotated-refresh-token");
     assertThat(response.account()).isEqualTo(expectedUser);
   }
 
@@ -142,7 +144,8 @@ class AuthServiceTest {
     Account account = new Account(7L, "leader", "{plain}leader123", "Leader", Role.LEADER, null, true, 3L);
     AuthUser expectedUser = new AuthUser(
         "leader", "Leader", Role.LEADER, null, 3L, Set.of(PermissionCodes.TAG_MANAGEMENT));
-    when(refreshTokenStore.read("leader")).thenReturn(Optional.of("refresh-token"));
+    when(refreshTokenStore.rotate(eq("leader"), eq("refresh-token"), any(Duration.class)))
+        .thenReturn(Optional.of("rotated-refresh-token"));
     when(accountRepository.findByPhone("leader")).thenReturn(Optional.of(account));
     when(permissionRepository.findEnabledByAccountId(7L)).thenReturn(Set.of(PermissionCodes.TAG_MANAGEMENT));
     when(jwtService.issue(expectedUser)).thenReturn("new-access-token");
@@ -150,6 +153,7 @@ class AuthServiceTest {
     LoginResponse response = authService.refresh(new RefreshRequest("refresh-token", "leader"), null);
 
     assertThat(response.accessToken()).isEqualTo("new-access-token");
+    assertThat(response.refreshToken()).isEqualTo("rotated-refresh-token");
     assertThat(response.account()).isEqualTo(expectedUser);
   }
 
@@ -178,6 +182,13 @@ class AuthServiceTest {
 
     verify(rateLimiter).recordFailure("127.0.0.1");
     verify(jwtService, never()).issue(any());
+  }
+
+  @Test
+  void logoutRevokesOnlyThePresentedRefreshSession() {
+    authService.logout(new RefreshRequest("desktop-refresh", "admin"));
+
+    verify(refreshTokenStore).revoke("admin", "desktop-refresh");
   }
 
   @Test

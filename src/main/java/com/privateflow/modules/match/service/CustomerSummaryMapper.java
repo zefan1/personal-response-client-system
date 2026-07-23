@@ -14,6 +14,7 @@ public class CustomerSummaryMapper {
         PhoneUtils.mask(customer.getPhone()),
         customer.getPhone(),
         customer.getNickname(),
+        customer.getSourceChannel(),
         customer.getLeadType(),
         customer.getAssignedKeeper(),
         customer.getLastFollowupAt(),
