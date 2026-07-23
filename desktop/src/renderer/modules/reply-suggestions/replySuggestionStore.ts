@@ -400,6 +400,13 @@ export function selectReply(suggestion: ReplySuggestion): void {
     reason: suggestion.reason,
     phone: session?.currentPhone ?? '',
     displayPhone: maskPhone(session?.currentPhone ?? ''),
+    taskId: session?.pendingTaskId || undefined,
+    replySessionId: session?.sessionId || undefined,
+    replySource: session?.replySource?.source === 'LLM'
+      || session?.replySource?.source === 'SKILL'
+      || session?.replySource?.source === 'FALLBACK'
+      ? session.replySource.source
+      : undefined,
     isFallback: suggestion.direction === FALLBACK_DIRECTION || Boolean(session?.isFallbackMode)
   };
   eventBus.emit('reply:selected', payload);

@@ -2031,6 +2031,33 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
+  it('does not render incomplete supervisor metric payloads as misleading cards', async () => {
+    apiMocks.getJson.mockImplementation(async (path: string) => {
+      const basePath = path.split('?')[0];
+      const data = basePath === '/admin/api/v1/supervision/metrics'
+        ? {
+          metrics: {
+            AI_USAGE_RATE: metricPayload({ numerator: null }),
+            AI_COVERAGE: metricPayload({ denominator: '' }),
+            PROCESSING_EFFICIENCY: metricPayload({ rate: '0.5' }),
+            EMPLOYEE_CONVERSION: metricPayload({ numerator: '2' }),
+            AI_ASSOCIATED_CONVERSION: metricPayload({ denominator: false })
+          }
+        }
+        : apiData[path] ?? apiData[basePath] ?? { items: [] };
+      return { success: true, data, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '主管监督记录').click();
+    await flushSave();
+
+    expect(mainText(host)).toContain('暂无监督指标数据');
+    expect(host.querySelectorAll('.ops-supervision-metric')).toHaveLength(0);
+    expect(mainText(host)).not.toContain('NaN');
+    app.unmount();
+  });
+
   it('reloads current governance settings and reports partial-save risk when one update fails', async () => {
     const { app, host } = await mountConsole();
     findSubnavButton(host, '数据保留与任务设置').click();
@@ -2230,3 +2257,15 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 });
+
+function metricPayload(patch: Record<string, unknown>): Record<string, unknown> {
+  return {
+    numerator: 2,
+    denominator: 4,
+    rate: 0.5,
+    numeratorLabel: '已复制客户',
+    denominatorLabel: '已生成客户',
+    conversionTargetConfigured: true,
+    ...patch
+  };
+}

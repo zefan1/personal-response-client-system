@@ -2169,6 +2169,24 @@ type SectionKey =
   | 'system-health';
 type NoticeKind = 'info' | 'error';
 type AnyRecord = Record<string, any>;
+type SupervisionMetricKey =
+  | 'AI_USAGE_RATE'
+  | 'AI_COVERAGE'
+  | 'PROCESSING_EFFICIENCY'
+  | 'EMPLOYEE_CONVERSION'
+  | 'AI_ASSOCIATED_CONVERSION';
+type SupervisionMetric = {
+  numerator: number;
+  denominator: number;
+  rate: number;
+  numeratorLabel: string;
+  denominatorLabel: string;
+  conversionTargetConfigured: boolean;
+};
+type SupervisionMetricCard = SupervisionMetric & {
+  key: SupervisionMetricKey;
+  label: string;
+};
 type FormOptionValue = string | number | boolean;
 type FormKind =
   | 'skill'
@@ -2236,7 +2254,7 @@ const SUPERVISION_METRIC_DEFINITIONS = [
   { key: 'PROCESSING_EFFICIENCY', label: '处理效率' },
   { key: 'EMPLOYEE_CONVERSION', label: '员工转化率' },
   { key: 'AI_ASSOCIATED_CONVERSION', label: 'AI 关联转化率' }
-];
+] as const satisfies ReadonlyArray<{ key: SupervisionMetricKey; label: string }>;
 
 const SUPERVISION_EVENT_LABELS: Record<string, string> = {
   TASK_CREATED: '创建任务',
@@ -2711,7 +2729,7 @@ const loginDesktopDraft = reactive({
   workbenchRefreshIntervalS: 60,
   skillSubscriptionExpireAt: ''
 });
-const supervisionMetrics = ref<Record<string, AnyRecord>>({});
+const supervisionMetrics = ref<Partial<Record<SupervisionMetricKey, SupervisionMetric>>>({});
 const supervisionEvents = ref<AnyRecord[]>([]);
 const supervisionMetadata = reactive({
   operators: [] as string[],
@@ -2822,9 +2840,11 @@ const activeMetrics = computed(() => {
   };
   return metricsBySection[activeSectionKey.value] ?? [];
 });
-const supervisionMetricCards = computed(() => SUPERVISION_METRIC_DEFINITIONS
-  .map((definition) => ({ key: definition.key, label: definition.label, ...supervisionMetrics.value[definition.key] }))
-  .filter((metric) => metric.numerator !== undefined && metric.denominator !== undefined));
+const supervisionMetricCards = computed<SupervisionMetricCard[]>(() => SUPERVISION_METRIC_DEFINITIONS
+  .flatMap((definition) => {
+    const metric = supervisionMetrics.value[definition.key];
+    return metric ? [{ key: definition.key, label: definition.label, ...metric }] : [];
+  }));
 const supervisionEventTotalPages = computed(() => Math.max(1, Math.ceil(
   supervisionEventPage.total / supervisionEventPage.pageSize)));
 const filteredRules = computed(() => rules.value.filter((rule) => {
@@ -3407,12 +3427,49 @@ async function loadSupervisionDashboard() {
       getJson<unknown>(supervisionEventsPath())
     ]);
     applySupervisionMetadata(recordFromResponse(metadataPayload));
-    const metrics = recordFromResponse(metricsPayload).metrics;
-    supervisionMetrics.value = metrics && typeof metrics === 'object' && !Array.isArray(metrics)
-      ? metrics as Record<string, AnyRecord>
-      : {};
+    supervisionMetrics.value = parseSupervisionMetrics(recordFromResponse(metricsPayload).metrics);
     applySupervisionEvents(recordFromResponse(eventsPayload));
   }, '主管监督记录已刷新');
+}
+
+function parseSupervisionMetrics(value: unknown): Partial<Record<SupervisionMetricKey, SupervisionMetric>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const rawMetrics = value as Record<string, unknown>;
+  const parsed: Partial<Record<SupervisionMetricKey, SupervisionMetric>> = {};
+  for (const definition of SUPERVISION_METRIC_DEFINITIONS) {
+    const metric = parseSupervisionMetric(rawMetrics[definition.key]);
+    if (metric) {
+      parsed[definition.key] = metric;
+    }
+  }
+  return parsed;
+}
+
+function parseSupervisionMetric(value: unknown): SupervisionMetric | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const metric = value as Record<string, unknown>;
+  const numerator = metric.numerator;
+  const denominator = metric.denominator;
+  const rate = metric.rate;
+  if (typeof numerator !== 'number' || !Number.isFinite(numerator) || numerator < 0
+      || typeof denominator !== 'number' || !Number.isFinite(denominator) || denominator < 0
+      || typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0 || rate > 1
+      || typeof metric.numeratorLabel !== 'string' || typeof metric.denominatorLabel !== 'string'
+      || typeof metric.conversionTargetConfigured !== 'boolean') {
+    return null;
+  }
+  return {
+    numerator,
+    denominator,
+    rate,
+    numeratorLabel: metric.numeratorLabel,
+    denominatorLabel: metric.denominatorLabel,
+    conversionTargetConfigured: metric.conversionTargetConfigured
+  };
 }
 
 async function applySupervisionFilters() {

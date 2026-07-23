@@ -102,14 +102,15 @@ describe('ReplySuggestionPanel', () => {
     copyButton?.click();
     await flushUi();
 
-    expect(selected).toEqual([{
+    expect(selected).toEqual([expect.objectContaining({
       text: 'Ask for budget',
       direction: 'NEXT_STEP',
       reason: 'reason',
       phone: '18800001111',
       displayPhone: '****1111',
+      replySource: 'SKILL',
       isFallback: false
-    }]);
+    })]);
 
     const actionButtons = [...host.querySelectorAll('.reply-actions button')] as HTMLButtonElement[];
     actionButtons.at(-1)?.click();

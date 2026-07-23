@@ -109,6 +109,42 @@ public final class SupervisionEventCommand {
         occurredAt);
   }
 
+  static SupervisionEventCommand workflow(
+      String eventId,
+      SupervisionEventType eventType,
+      String operatorUsername,
+      String customerPhone,
+      String channelCode,
+      String leadSource,
+      String assignedKeeper,
+      String scene,
+      String taskId,
+      String replySessionId,
+      String replySource,
+      String dedupeKey,
+      String generatedReplySnapshot,
+      Map<String, Object> metadata,
+      LocalDateTime occurredAt) {
+    return new SupervisionEventCommand(
+        eventId,
+        eventType,
+        operatorUsername,
+        customerPhone,
+        channelCode,
+        null,
+        leadSource,
+        assignedKeeper,
+        scene,
+        taskId,
+        replySessionId,
+        replySource,
+        dedupeKey,
+        generatedReplySnapshot,
+        null,
+        metadata,
+        occurredAt);
+  }
+
   public String eventId() {
     return eventId;
   }

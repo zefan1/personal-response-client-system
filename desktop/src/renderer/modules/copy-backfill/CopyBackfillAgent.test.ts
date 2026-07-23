@@ -55,7 +55,7 @@ describe('CopyBackfillAgent', () => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
   });
 
-  it('copies selected replies, posts send-confirm, and shows success feedback from the event-bus listener', async () => {
+  it('copies selected replies, posts AI usage, and does not emit sent confirmation', async () => {
     const { app, host, eventBus } = await mountAgent();
     const confirmed: unknown[] = [];
     eventBus.on('reply:send-confirmed', (payload) => confirmed.push(payload));
@@ -66,15 +66,15 @@ describe('CopyBackfillAgent', () => {
     await flushUi();
 
     expect(mocks.writeClipboardText).toHaveBeenCalledWith('Use this reply');
-    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/send-confirm', {
+    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/ai-usage', {
       phone: '18800001111',
-      conversationSummary: '',
-      isNewCustomer: false,
-      sentText: 'Use this reply',
-      selectedDirection: 'NEXT_STEP'
+      taskId: 'task-1',
+      replySessionId: 'reply-session-1',
+      replySource: 'SKILL',
+      copiedText: 'Use this reply'
     }, undefined, expect.any(AbortSignal));
-    expect(confirmed).toEqual([{ phone: '18800001111' }]);
-    expect(host.textContent).toContain('已复制并记录发送');
+    expect(mocks.postJson.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/send-confirm');
+    expect(confirmed).toEqual([]);
     app.unmount();
   });
 
@@ -119,9 +119,12 @@ function reply(patch: Partial<ReplySelectedPayload>): ReplySelectedPayload {
     direction: 'NEXT_STEP',
     reason: 'reason',
     phone: '18800001111',
+    taskId: 'task-1',
+    replySessionId: 'reply-session-1',
+    replySource: 'SKILL',
     isFallback: false,
     ...patch
-  };
+  } as ReplySelectedPayload;
 }
 
 function suggestion(suggestionId: number, fieldName: string): ProfileSuggestion {

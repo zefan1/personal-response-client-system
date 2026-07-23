@@ -14,18 +14,25 @@ import com.privateflow.modules.api.Role;
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.api.chat.AiUsageRequest;
+import com.privateflow.modules.api.chat.ChatReplySource;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.infra.CustomerRepository;
 import com.privateflow.modules.customer.service.CustomerAccessService;
+import com.privateflow.modules.skill.SkillResponse;
+import com.privateflow.modules.skill.Suggestion;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DuplicateKeyException;
 
 class SupervisionEventServiceTest {
 
@@ -207,6 +214,121 @@ class SupervisionEventServiceTest {
         ArgumentCaptor.forClass(SupervisionEventCommand.class);
     verify(eventRepository).insert(captor.capture());
     assertThat(captor.getValue().occurredAt()).isEqualTo(LocalDateTime.of(2026, 8, 1, 0, 30));
+  }
+
+  @Test
+  void recordsPendingEntryWithTheCustomerAndBusinessDateDedupeKey() {
+    Customer customer = customer();
+    AuthContext.set(new AuthUser("keeper-auth", "\u7ba1\u5bb6", Role.KEEPER, null));
+
+    service.recordPendingEntered(customer, "task-1");
+
+    ArgumentCaptor<SupervisionEventCommand> captor =
+        ArgumentCaptor.forClass(SupervisionEventCommand.class);
+    verify(eventRepository).insert(captor.capture());
+    SupervisionEventCommand event = captor.getValue();
+    assertThat(event.eventType()).isEqualTo(SupervisionEventType.PENDING_ENTERED);
+    assertThat(event.customerPhone()).isEqualTo("18800001111");
+    assertThat(event.taskId()).isEqualTo("task-1");
+    assertThat(event.dedupeKey()).isEqualTo("PENDING:18800001111:2026-07-23");
+    assertThat(event.metadata()).containsEntry("customerId", 7L)
+        .containsEntry("leadType", "MOM_CARE")
+        .containsEntry("customerStage", "\u5f85\u8ddf\u8fdb");
+  }
+
+  @Test
+  void treatsAnExistingDailyPendingEntryAsIdempotent() {
+    Customer customer = customer();
+    AuthContext.set(new AuthUser("keeper-auth", "\u7ba1\u5bb6", Role.KEEPER, null));
+    org.mockito.Mockito.doThrow(new DuplicateKeyException("duplicate pending entry"))
+        .when(eventRepository)
+        .insert(org.mockito.ArgumentMatchers.any(SupervisionEventCommand.class));
+
+    service.recordPendingEntered(customer, "task-1");
+
+    verify(eventRepository).insert(org.mockito.ArgumentMatchers.any(SupervisionEventCommand.class));
+  }
+
+  @Test
+  void usesOneBusinessTimestampForPendingDedupeAndOccurredAtAcrossMidnight() {
+    AtomicInteger calls = new AtomicInteger();
+    Clock crossingMidnight = new Clock() {
+      @Override
+      public ZoneId getZone() {
+        return ZoneOffset.UTC;
+      }
+
+      @Override
+      public Clock withZone(ZoneId zone) {
+        return this;
+      }
+
+      @Override
+      public Instant instant() {
+        return calls.getAndIncrement() == 0
+            ? Instant.parse("2026-07-31T15:59:59Z")
+            : Instant.parse("2026-07-31T16:00:00Z");
+      }
+    };
+    SupervisionEventService boundaryService = new SupervisionEventService(
+        customerRepository,
+        customerAccessService,
+        eventRepository,
+        crossingMidnight);
+    AuthContext.set(new AuthUser("keeper-auth", "\u7ba1\u5bb6", Role.KEEPER, null));
+
+    boundaryService.recordPendingEntered(customer(), "task-1");
+
+    ArgumentCaptor<SupervisionEventCommand> captor =
+        ArgumentCaptor.forClass(SupervisionEventCommand.class);
+    verify(eventRepository).insert(captor.capture());
+    assertThat(captor.getValue().dedupeKey()).isEqualTo("PENDING:18800001111:2026-07-31");
+    assertThat(captor.getValue().occurredAt()).isEqualTo(LocalDateTime.of(2026, 7, 31, 23, 59, 59));
+  }
+
+  @Test
+  void recordsRecognitionFailureWithThePublicCodeAndWithoutExceptionDetails() {
+    AuthContext.set(new AuthUser("keeper-auth", "\u7ba1\u5bb6", Role.KEEPER, null));
+
+    service.recordRecognitionFailed("MOM_CARE", "wecom_leads", "reply-1", "30-10001");
+
+    ArgumentCaptor<SupervisionEventCommand> captor =
+        ArgumentCaptor.forClass(SupervisionEventCommand.class);
+    verify(eventRepository).insert(captor.capture());
+    SupervisionEventCommand event = captor.getValue();
+    assertThat(event.eventType()).isEqualTo(SupervisionEventType.RECOGNITION_FAILED);
+    assertThat(event.customerPhone()).isNull();
+    assertThat(event.leadSource()).isEqualTo("wecom_leads");
+    assertThat(event.replySessionId()).isEqualTo("reply-1");
+    assertThat(event.metadata()).containsExactlyInAnyOrderEntriesOf(Map.of(
+        "leadType", "MOM_CARE",
+        "errorCode", "30-10001"));
+    assertThat(event.metadata()).doesNotContainKeys("message", "stackTrace", "exception");
+  }
+
+  @Test
+  void recordsGeneratedReplySnapshotFromTheFinalSuggestions() {
+    Customer customer = customer();
+    AuthContext.set(new AuthUser("keeper-auth", "\u7ba1\u5bb6", Role.KEEPER, null));
+
+    service.recordGeneratedReply(
+        customer,
+        "CHAT_RECOGNIZE",
+        "task-1",
+        "reply-1",
+        ChatReplySource.llm(),
+        new SkillResponse(List.of(
+            new Suggestion("\u7b2c\u4e00\u6761\u56de\u590d", "NEXT_STEP", ""),
+            new Suggestion("\u7b2c\u4e8c\u6761\u56de\u590d", "NEXT_STEP", "")), null, null, null));
+
+    ArgumentCaptor<SupervisionEventCommand> captor =
+        ArgumentCaptor.forClass(SupervisionEventCommand.class);
+    verify(eventRepository).insert(captor.capture());
+    SupervisionEventCommand event = captor.getValue();
+    assertThat(event.eventType()).isEqualTo(SupervisionEventType.REPLY_GENERATED);
+    assertThat(event.replySource()).isEqualTo("LLM");
+    assertThat(event.generatedReplySnapshot()).isEqualTo("\u7b2c\u4e00\u6761\u56de\u590d\n\u7b2c\u4e8c\u6761\u56de\u590d");
+    assertThat(event.copiedReplySnapshot()).isNull();
   }
 
   private AiUsageRequest request(String copiedText) {

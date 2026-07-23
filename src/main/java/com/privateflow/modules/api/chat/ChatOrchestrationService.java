@@ -30,6 +30,7 @@ import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.ReplyTagSnapshot;
 import com.privateflow.modules.skill.Suggestion;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
+import com.privateflow.modules.supervision.SupervisionEventService;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +61,7 @@ public class ChatOrchestrationService {
   private final LlmSummaryService llmSummaryService;
   private final FollowupConfirmationService followupConfirmationService;
   private final PendingReplyTaskService pendingReplyTaskService;
+  private final SupervisionEventService supervisionEventService;
 
   public ChatOrchestrationService(
       ImageRecognitionService imageRecognitionService,
@@ -76,7 +78,8 @@ public class ChatOrchestrationService {
       LlmFollowupSuggestionService llmFollowupSuggestionService,
       LlmSummaryService llmSummaryService,
       FollowupConfirmationService followupConfirmationService,
-      PendingReplyTaskService pendingReplyTaskService) {
+      PendingReplyTaskService pendingReplyTaskService,
+      SupervisionEventService supervisionEventService) {
     this.imageRecognitionService = imageRecognitionService;
     this.customerMatchService = customerMatchService;
     this.skillGatewayService = skillGatewayService;
@@ -92,13 +95,24 @@ public class ChatOrchestrationService {
     this.llmSummaryService = llmSummaryService;
     this.followupConfirmationService = followupConfirmationService;
     this.pendingReplyTaskService = pendingReplyTaskService;
+    this.supervisionEventService = supervisionEventService;
   }
 
   public ChatResponse recognize(ChatRecognizeRequest request) {
     if (request == null || (blank(request.imageBase64()) && blank(request.textMessage()))) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "please provide screenshot or chat text");
     }
-    RecognitionResult recognized = recognizeImage(request.imageBase64());
+    RecognitionResult recognized;
+    try {
+      recognized = recognizeImage(request.imageBase64());
+    } catch (ApiException ex) {
+      recordSupervision(() -> supervisionEventService.recordRecognitionFailed(
+          request.leadType(),
+          request.sourceTable(),
+          request.replySessionId(),
+          ex.getErrorCode()), "recognition failure");
+      throw ex;
+    }
     String nickname = firstNonBlank(request.customerIdentifier(), recognized == null ? null : recognized.nickname());
     String phone = recognized == null ? null : recognized.phone();
     MatchResult match = match(nickname, phone, request.leadType(), request.sourceTable());
@@ -126,9 +140,21 @@ public class ChatOrchestrationService {
       return new ChatResponse(null, nickname, false, match, null, null, null, pendingTask);
     }
     Customer customer = firstCustomer(match);
+    if (customer != null) {
+      recordSupervision(
+          () -> supervisionEventService.recordPendingEntered(customer, null),
+          "pending entered");
+    }
     GeneratedReplies generated = generateSkill(Scene.CHAT_RECOGNIZE, request.leadType(), customer, phone, clientMessage, List.of(), chatContext);
     String responsePhone = customer == null ? phone : customer.getPhone();
     saveContext(responsePhone, generated, 0);
+    recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+        customer,
+        Scene.CHAT_RECOGNIZE.name(),
+        null,
+        request.replySessionId(),
+        generated.source(),
+        generated.skill()), "reply generated");
     auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", responsePhone, "chat recognize");
     return new ChatResponse(responsePhone, nickname, match.matchType() == MatchType.NONE, match, generated.skill(), null, generated.source());
   }
@@ -141,7 +167,7 @@ public class ChatOrchestrationService {
         taskId,
         AuthContext.username(),
         request.phone());
-    return generatePendingReplyTask(task);
+    return generatePendingReplyTask(task, true);
   }
 
   public List<PendingReplyTaskView> listPendingReplyTasks() {
@@ -154,14 +180,14 @@ public class ChatOrchestrationService {
 
   public ChatResponse retryPendingReplyTask(String taskId) {
     PendingReplyTask task = pendingReplyTaskService.claimRetry(taskId, AuthContext.username());
-    return generatePendingReplyTask(task);
+    return generatePendingReplyTask(task, false);
   }
 
   public PendingReplyTaskView cancelPendingReplyTask(String taskId) {
     return pendingReplyTaskService.cancel(taskId, AuthContext.username());
   }
 
-  private ChatResponse generatePendingReplyTask(PendingReplyTask task) {
+  private ChatResponse generatePendingReplyTask(PendingReplyTask task, boolean customerSelectedNow) {
     pendingReplyTaskService.beginGeneration(task.taskId());
     try {
       String selectedPhone = task.selectedPhone();
@@ -187,6 +213,15 @@ public class ChatOrchestrationService {
         pendingReplyTaskService.releaseSelection(task);
         throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权操作该客户");
       }
+      if (customerSelectedNow) {
+        recordSupervision(
+            () -> supervisionEventService.recordPendingEntered(customer, task.taskId()),
+            "pending entered");
+        recordSupervision(() -> supervisionEventService.recordCustomerSelected(
+            customer,
+            task.taskId(),
+            task.replySessionId()), "customer selected");
+      }
       try {
         GeneratedReplies generated = generateSkill(
             Scene.CHAT_RECOGNIZE,
@@ -206,6 +241,13 @@ public class ChatOrchestrationService {
             null,
             generated.source());
         pendingReplyTaskService.markReady(task, response);
+        recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+            customer,
+            Scene.CHAT_RECOGNIZE.name(),
+            task.taskId(),
+            task.replySessionId(),
+            generated.source(),
+            generated.skill()), "reply generated");
         auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", customer.getPhone(), "pending reply task confirmed");
         return response;
       } catch (RuntimeException ex) {
@@ -229,6 +271,13 @@ public class ChatOrchestrationService {
     String clientMessage = blank(request.clientMessage()) ? customer.getFollowupNotes() : request.clientMessage();
     GeneratedReplies generated = generateSkill(scene, customer.getLeadType(), customer, customer.getPhone(), clientMessage, List.of(), List.of());
     saveContext(customer.getPhone(), generated, 0);
+    recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+        customer,
+        scene.name(),
+        null,
+        null,
+        generated.source(),
+        generated.skill()), "reply generated");
     return new ChatResponse(customer.getPhone(), customer.getNickname(), false, null, generated.skill(), null, generated.source());
   }
 
@@ -262,6 +311,13 @@ public class ChatOrchestrationService {
     GeneratedReplies generated = generateReplies(next);
     int count = context.regenerateCount() + 1;
     contextStore.save(AuthContext.username(), request.phone(), new RequestContext(generated.request(), generated.skill(), count));
+    recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+        latest,
+        Scene.REGENERATE.name(),
+        null,
+        null,
+        generated.source(),
+        generated.skill()), "reply generated");
     String warning = regenerateWarning(count);
     return new ChatResponse(request.phone(), null, false, null, generated.skill(), warning, generated.source());
   }
@@ -571,6 +627,17 @@ public class ChatOrchestrationService {
     } catch (RuntimeException markFailedFailure) {
       originalFailure.addSuppressed(markFailedFailure);
       log.warn("Could not mark pending reply task {} as failed", task.taskId(), markFailedFailure);
+    }
+  }
+
+  private void recordSupervision(Runnable record, String event) {
+    if (supervisionEventService == null) {
+      return;
+    }
+    try {
+      record.run();
+    } catch (RuntimeException ex) {
+      log.warn("Supervision event recording skipped, event={}", event);
     }
   }
 

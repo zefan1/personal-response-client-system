@@ -105,14 +105,17 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.abnormalAlert).toMatchObject({ alertId: 'alert-a' });
 
     replies.selectReply(replies.replySuggestionState.suggestions[0]);
-    expect(selected).toEqual([{
+    expect(selected).toEqual([expect.objectContaining({
       text: 'Use this',
       direction: 'NEXT_STEP',
       reason: 'reason',
       phone: '18800001111',
       displayPhone: '****1111',
+      replySource: 'SKILL',
       isFallback: false
-    }]);
+    })]);
+    expect((selected[0] as Record<string, unknown>).replySessionId).toEqual(expect.any(String));
+    expect((selected[0] as Record<string, unknown>).taskId).toBeUndefined();
   });
 
   it('keeps multiple customer reply sessions and lets the user switch back to older replies', async () => {
@@ -397,6 +400,25 @@ describe('replySuggestionStore', () => {
     });
     expect(replies.replySuggestionState.suggestions.map((item) => item.text)).toEqual(['Saved server reply']);
     expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it('carries pending task, session, and source metadata when a saved reply is copied', async () => {
+    const { replies, eventBus } = await freshStore();
+    const selected: unknown[] = [];
+    eventBus.on('reply:selected', (payload) => selected.push(payload));
+    replies.syncPendingReplyTaskIntoSession(pendingTask('READY', {
+      response: response('18800001111', [suggestion('Saved server reply')]),
+      selectedPhone: '18800001111'
+    }));
+
+    replies.selectReply(replies.replySuggestionState.suggestions[0]);
+
+    expect(selected).toEqual([expect.objectContaining({
+      phone: '18800001111',
+      taskId: 'task-1',
+      replySessionId: 'reply-session-1',
+      replySource: 'SKILL'
+    })]);
   });
 
   it('shows a saved fallback reply without automatically regenerating it', async () => {

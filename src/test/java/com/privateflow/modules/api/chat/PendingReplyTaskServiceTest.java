@@ -17,6 +17,7 @@ import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.match.Confidence;
 import com.privateflow.modules.match.CustomerSummary;
 import com.privateflow.modules.match.service.CustomerSummaryMapper;
+import com.privateflow.modules.supervision.SupervisionEventService;
 import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.Suggestion;
 import java.time.LocalDateTime;
@@ -47,6 +48,8 @@ class PendingReplyTaskServiceTest {
   private CustomerAccessService customerAccessService;
   @Mock
   private CustomerSummaryMapper customerSummaryMapper;
+  @Mock
+  private SupervisionEventService supervisionEventService;
 
   private PendingReplyTaskService service;
 
@@ -61,7 +64,7 @@ class PendingReplyTaskServiceTest {
         .filter(constructor -> constructor.isAnnotationPresent(Autowired.class))
         .findFirst()
         .orElseThrow()
-        .getParameterCount()).isEqualTo(6);
+        .getParameterCount()).isEqualTo(7);
   }
 
   @BeforeEach
@@ -71,7 +74,66 @@ class PendingReplyTaskServiceTest {
         config,
         customerQueryService,
         customerAccessService,
-        customerSummaryMapper);
+        customerSummaryMapper,
+        supervisionEventService);
+  }
+
+  @Test
+  void createWaitingTaskRecordsSupervisionTaskCreatedAfterPersistence() {
+    PendingReplyTask created = task(
+        "task-1",
+        PendingReplyTaskStatus.WAITING_CUSTOMER,
+        List.of("18800001111", "18800002222"),
+        null);
+    PendingReplyTaskDraft draft = new PendingReplyTaskDraft(
+        "reply-session-1",
+        USERNAME,
+        "same-name customer",
+        null,
+        null,
+        "TUAN_GOU",
+        "customer_sheet",
+        "I want to know more",
+        List.of(),
+        List.of());
+    when(config.pendingReplyTtlHours()).thenReturn(24);
+    when(repository.create(draft, 24)).thenReturn(created);
+
+    service.createWaitingTask(draft);
+
+    InOrder order = org.mockito.Mockito.inOrder(repository, supervisionEventService);
+    order.verify(repository).create(draft, 24);
+    order.verify(supervisionEventService).recordTaskCreated(created);
+  }
+
+  @Test
+  void createWaitingTaskDoesNotBlockTheEmployeeWhenSupervisionRecordingFails() {
+    PendingReplyTask created = task(
+        "task-1",
+        PendingReplyTaskStatus.WAITING_CUSTOMER,
+        List.of("18800001111"),
+        null);
+    PendingReplyTaskDraft draft = new PendingReplyTaskDraft(
+        "reply-session-1",
+        USERNAME,
+        "same-name customer",
+        null,
+        null,
+        "TUAN_GOU",
+        "customer_sheet",
+        "I want to know more",
+        List.of(),
+        List.of());
+    when(config.pendingReplyTtlHours()).thenReturn(24);
+    when(repository.create(draft, 24)).thenReturn(created);
+    org.mockito.Mockito.doThrow(new RuntimeException("supervision unavailable"))
+        .when(supervisionEventService)
+        .recordTaskCreated(created);
+
+    PendingReplyTaskView view = service.createWaitingTask(draft);
+
+    assertThat(view.taskId()).isEqualTo("task-1");
+    verify(supervisionEventService).recordTaskCreated(created);
   }
 
   @Test

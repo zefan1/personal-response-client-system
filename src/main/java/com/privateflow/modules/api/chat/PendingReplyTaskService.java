@@ -8,22 +8,28 @@ import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.match.Confidence;
 import com.privateflow.modules.match.CustomerSummary;
 import com.privateflow.modules.match.service.CustomerSummaryMapper;
+import com.privateflow.modules.supervision.SupervisionEventService;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
 public class PendingReplyTaskService {
 
+  private static final Logger log = LoggerFactory.getLogger(PendingReplyTaskService.class);
+
   private final PendingReplyTaskRepository repository;
   private final ChatTaskConfig config;
   private final CustomerQueryService customerQueryService;
   private final CustomerAccessService customerAccessService;
   private final CustomerSummaryMapper customerSummaryMapper;
+  private final SupervisionEventService supervisionEventService;
   private final ReplyTaskClock taskClock;
   private final Set<String> activeGenerationTaskIds = ConcurrentHashMap.newKeySet();
 
@@ -39,7 +45,42 @@ public class PendingReplyTaskService {
         customerQueryService,
         customerAccessService,
         customerSummaryMapper,
+        null,
         new ReplyTaskClock());
+  }
+
+  public PendingReplyTaskService(
+      PendingReplyTaskRepository repository,
+      ChatTaskConfig config,
+      CustomerQueryService customerQueryService,
+      CustomerAccessService customerAccessService,
+      CustomerSummaryMapper customerSummaryMapper,
+      SupervisionEventService supervisionEventService) {
+    this(
+        repository,
+        config,
+        customerQueryService,
+        customerAccessService,
+        customerSummaryMapper,
+        supervisionEventService,
+        new ReplyTaskClock());
+  }
+
+  public PendingReplyTaskService(
+      PendingReplyTaskRepository repository,
+      ChatTaskConfig config,
+      CustomerQueryService customerQueryService,
+      CustomerAccessService customerAccessService,
+      CustomerSummaryMapper customerSummaryMapper,
+      ReplyTaskClock taskClock) {
+    this(
+        repository,
+        config,
+        customerQueryService,
+        customerAccessService,
+        customerSummaryMapper,
+        null,
+        taskClock);
   }
 
   @Autowired
@@ -49,22 +90,31 @@ public class PendingReplyTaskService {
       CustomerQueryService customerQueryService,
       CustomerAccessService customerAccessService,
       CustomerSummaryMapper customerSummaryMapper,
+      SupervisionEventService supervisionEventService,
       ReplyTaskClock taskClock) {
     this.repository = repository;
     this.config = config;
     this.customerQueryService = customerQueryService;
     this.customerAccessService = customerAccessService;
     this.customerSummaryMapper = customerSummaryMapper;
+    this.supervisionEventService = supervisionEventService;
     this.taskClock = taskClock;
   }
 
   // Used by direct repository tests that only recover a persisted READY result.
   public PendingReplyTaskService(PendingReplyTaskRepository repository, ChatTaskConfig config) {
-    this(repository, config, null, null, null, new ReplyTaskClock());
+    this(repository, config, null, null, null, null, new ReplyTaskClock());
   }
 
   public PendingReplyTaskView createWaitingTask(PendingReplyTaskDraft draft) {
     PendingReplyTask task = repository.create(draft, config.pendingReplyTtlHours());
+    if (supervisionEventService != null) {
+      try {
+        supervisionEventService.recordTaskCreated(task);
+      } catch (RuntimeException ex) {
+        log.warn("Supervision event recording skipped, event=task created");
+      }
+    }
     return new PendingReplyTaskView(
         task.taskId(),
         task.replySessionId(),

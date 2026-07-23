@@ -45,7 +45,7 @@ describe('copyBackfillStore', () => {
     expect(store.copyBackfillState.toast).toBeTruthy();
   });
 
-  it('copies selected reply text, sends confirmation, and refreshes the active profile', async () => {
+  it('copies selected reply text, records AI usage, and never confirms that it was sent', async () => {
     const store = await freshStore();
     const { eventBus } = await import('../../shared/eventBus');
     const confirmed: unknown[] = [];
@@ -53,22 +53,27 @@ describe('copyBackfillStore', () => {
     writeClipboardTextMock.mockResolvedValue({ success: true });
     postJsonMock.mockResolvedValue({ success: true, data: {} });
 
-    await store.handleReplySelected(reply({ text: 'hello', direction: 'NEXT_STEP', isFallback: true }));
+    await store.handleReplySelected(reply({
+      text: 'hello',
+      direction: 'NEXT_STEP',
+      isFallback: true,
+      replySource: 'FALLBACK'
+    }));
     await vi.runAllTimersAsync();
 
     expect(writeClipboardTextMock).toHaveBeenCalledWith('hello');
-    expect(store.copyBackfillState.toast).toBe('已复制并记录发送，档案正在刷新');
-    expect(confirmed).toEqual([{ phone: '18800001111' }]);
-    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/send-confirm', {
+    expect(confirmed).toEqual([]);
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/ai-usage', {
       phone: '18800001111',
-      conversationSummary: '',
-      isNewCustomer: false,
-      sentText: 'hello',
-      selectedDirection: 'SYSTEM_FALLBACK'
+      taskId: 'task-1',
+      replySessionId: 'reply-session-1',
+      replySource: 'FALLBACK',
+      copiedText: 'hello'
     }, undefined, expect.any(AbortSignal));
+    expect(postJsonMock.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/send-confirm');
   });
 
-  it('does not send confirmation when clipboard write fails or phone is missing', async () => {
+  it('does not record AI usage when clipboard write fails or phone is missing', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValueOnce({ success: false, error: 'denied' });
 
@@ -85,7 +90,7 @@ describe('copyBackfillStore', () => {
     expect(store.copyBackfillState.toast).toBe('已复制到剪贴板，请粘贴到微信发送');
   });
 
-  it('keeps copied text usable when send-confirm fails and surfaces the degraded state', async () => {
+  it('keeps copied text usable when AI usage recording fails and surfaces the degraded state', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
     postJsonMock.mockResolvedValue({ success: false, errorCode: 'BAD_REQUEST', message: 'phone and sentText are required' });
@@ -94,10 +99,10 @@ describe('copyBackfillStore', () => {
     await vi.runAllTimersAsync();
 
     expect(writeClipboardTextMock).toHaveBeenCalledWith('hello');
-    expect(store.copyBackfillState.toast).toBe('已复制，但发送记录失败，请稍后刷新档案确认');
+    expect(store.copyBackfillState.toast).toBe('已复制，但 AI 使用记录未同步，不影响正常跟进');
   });
 
-  it('uses the full phone for send-confirm even when a masked display phone is present', async () => {
+  it('uses the full phone for AI usage even when a masked display phone is present', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
     postJsonMock.mockResolvedValue({ success: true, data: {} });
@@ -105,12 +110,12 @@ describe('copyBackfillStore', () => {
     await store.handleReplySelected(reply({ phone: '18800001111', displayPhone: '****1111' }));
     await vi.runAllTimersAsync();
 
-    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/send-confirm', expect.objectContaining({
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/ai-usage', expect.objectContaining({
       phone: '18800001111'
     }), undefined, expect.any(AbortSignal));
   });
 
-  it('aborts the previous pending send-confirm when a newer reply is selected', async () => {
+  it('reports every copied AI reply independently without cancelling earlier usage records', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
     const signals: AbortSignal[] = [];
@@ -121,9 +126,14 @@ describe('copyBackfillStore', () => {
 
     await store.handleReplySelected(reply({ text: 'first' }));
     await store.handleReplySelected(reply({ text: 'second' }));
+    store.cleanupCopyBackfillStore();
 
+    expect(postJsonMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/v1/chat/ai-usage',
+      '/api/v1/chat/ai-usage'
+    ]);
     expect(signals).toHaveLength(2);
-    expect(signals[0].aborted).toBe(true);
+    expect(signals[0].aborted).toBe(false);
     expect(signals[1].aborted).toBe(false);
   });
 
@@ -201,9 +211,12 @@ function reply(patch: Partial<ReplySelectedPayload>): ReplySelectedPayload {
     direction: 'NEXT_STEP',
     reason: 'reason',
     phone: '18800001111',
+    taskId: 'task-1',
+    replySessionId: 'reply-session-1',
+    replySource: 'SKILL',
     isFallback: false,
     ...patch
-  };
+  } as ReplySelectedPayload;
 }
 
 function suggestion(suggestionId: number, patch: Partial<ProfileSuggestion> = {}): ProfileSuggestion {

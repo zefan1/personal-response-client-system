@@ -1,7 +1,6 @@
 import { reactive } from 'vue';
 import { postJson } from '../../shared/apiClient';
 import { writeClipboardText as writeBridgeClipboardText } from '../../shared/desktopBridge';
-import { eventBus } from '../../shared/eventBus';
 import type { ProfileSuggestion, ReplySelectedPayload, SuggestionShowPayload } from './types';
 
 export const copyBackfillState = reactive({
@@ -12,15 +11,12 @@ export const copyBackfillState = reactive({
   toast: ''
 });
 
-let pendingSendConfirm: AbortController | null = null;
-
 export async function handleReplySelected(payload: ReplySelectedPayload): Promise<void> {
   if (!payload.text.trim()) {
     copyBackfillState.toast = '复制失败，请重试';
     return;
   }
 
-  abortPendingSendConfirm();
   const clipboardWritten = await writeClipboardText(payload.text);
   if (!clipboardWritten) {
     copyBackfillState.toast = '复制失败，请重试';
@@ -28,17 +24,12 @@ export async function handleReplySelected(payload: ReplySelectedPayload): Promis
   }
   copyBackfillState.toast = '已复制到剪贴板，请粘贴到微信发送';
 
-  if (!payload.phone) {
+  if (!payload.phone || !payload.replySource) {
     return;
   }
 
   const controller = new AbortController();
-  pendingSendConfirm = controller;
-  void sendConfirm(payload, controller).finally(() => {
-    if (pendingSendConfirm === controller) {
-      pendingSendConfirm = null;
-    }
-  });
+  void recordAiUsage(payload, controller);
 }
 
 export function handleSuggestionShow(payload: SuggestionShowPayload): void {
@@ -95,7 +86,6 @@ export async function resolveToastSuggestion(action: 'CONFIRM' | 'REJECT', sugge
 }
 
 export function cleanupCopyBackfillStore(): void {
-  abortPendingSendConfirm();
   copyBackfillState.suggestionToastVisible = false;
   copyBackfillState.suggestionToastCollapsed = false;
   copyBackfillState.suggestionToastPhone = '';
@@ -108,30 +98,21 @@ async function writeClipboardText(text: string): Promise<boolean> {
   return result.success;
 }
 
-async function sendConfirm(payload: ReplySelectedPayload, controller: AbortController): Promise<void> {
+async function recordAiUsage(payload: ReplySelectedPayload, controller: AbortController): Promise<void> {
   try {
-    const response = await postJson('/api/v1/chat/send-confirm', {
+    const response = await postJson('/api/v1/chat/ai-usage', {
       phone: payload.phone,
-      conversationSummary: '',
-      isNewCustomer: false,
-      sentText: payload.text,
-      selectedDirection: payload.isFallback ? 'SYSTEM_FALLBACK' : payload.direction
+      taskId: payload.taskId ?? null,
+      replySessionId: payload.replySessionId ?? null,
+      replySource: payload.replySource,
+      copiedText: payload.text
     }, undefined, controller.signal);
     if (!response.success) {
-      throw new Error(response.message ?? response.errorCode ?? 'send confirm failed');
+      throw new Error(response.message ?? response.errorCode ?? 'AI usage record failed');
     }
-    copyBackfillState.toast = '已复制并记录发送，档案正在刷新';
-    eventBus.emit('reply:send-confirmed', { phone: payload.phone });
   } catch {
     if (!controller.signal.aborted) {
-      copyBackfillState.toast = '已复制，但发送记录失败，请稍后刷新档案确认';
+      copyBackfillState.toast = '已复制，但 AI 使用记录未同步，不影响正常跟进';
     }
-  }
-}
-
-function abortPendingSendConfirm(): void {
-  if (pendingSendConfirm) {
-    pendingSendConfirm.abort();
-    pendingSendConfirm = null;
   }
 }
