@@ -23,6 +23,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -67,6 +68,18 @@ class TemporaryRecognitionImageStoreTest {
     jdbcTemplate = new JdbcTemplate(dataSource);
     jdbcTemplate.execute("DROP TABLE IF EXISTS pending_reply_tasks");
     jdbcTemplate.execute("CREATE TABLE pending_reply_tasks (id BIGINT PRIMARY KEY, image_base64 CLOB, ocr_payload CLOB)");
+  }
+
+  @Test
+  void SpringInjectsTheStoreDependenciesIntoTheComponent() {
+    try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+      context.registerBean(SystemConfigRepository.class, () -> configRepository);
+      context.registerBean(ImageConfigProvider.class, () -> imageConfigProvider);
+      context.register(TemporaryRecognitionImageStore.class);
+      context.refresh();
+
+      assertThat(context.getBean(TemporaryRecognitionImageStore.class)).isNotNull();
+    }
   }
 
   @Test

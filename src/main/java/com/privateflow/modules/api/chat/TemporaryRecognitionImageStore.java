@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -41,6 +42,7 @@ public class TemporaryRecognitionImageStore {
   private final Map<String, Path> activePaths = new ConcurrentHashMap<>();
   private final Object capacityLock = new Object();
 
+  @Autowired
   public TemporaryRecognitionImageStore(
       SystemConfigRepository configRepository,
       ImageConfigProvider imageConfigProvider) {
