@@ -23,13 +23,12 @@ class WecomSmartSheetFieldCatalogTest {
   @Test
   void loadsOfficialVisibleFieldShapeAndRejectsFormulaWrites() throws Exception {
     ScriptedClient api = client("""
-        {"errcode":0,"total":6,"fields":[
-          {"field_id":"f-text","field_title":"Name","field_type":"FIELD_TYPE_TEXT"},
-          {"field_id":"f-phone","field_title":"Phone","field_type":"FIELD_TYPE_PHONE_NUMBER"},
-          {"field_id":"f-date","field_title":"Follow up","field_type":"FIELD_TYPE_DATE_TIME","property_date_time":{"format":"yyyy-mm-dd hh:mm"}},
-          {"field_id":"f-tier","field_title":"Tier","field_type":"FIELD_TYPE_SINGLE_SELECT","property_single_select":{"options":[{"id":"opt1","text":"\u8ddf\u8fdb\u4e2d","style":1}]}},
-          {"field_id":"f-tags","field_title":"Tags","field_type":"FIELD_TYPE_SELECT","property_select":{"options":[{"id":"opt2","text":"\u91cd\u70b9","style":1}]}},
-          {"field_id":"f-formula","field_title":"Score","field_type":"FIELD_TYPE_FORMULA"}
+        {"errcode":0,"total":5,"fields":[
+          {"field_id":"fName","field_title":"\u5907\u6ce8\u79f0\u547c","field_type":"FIELD_TYPE_TEXT"},
+          {"field_id":"fPhone","field_title":"\u8054\u7cfb\u65b9\u5f0f","field_type":"FIELD_TYPE_PHONE_NUMBER"},
+          {"field_id":"fNext","field_title":"\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4","field_type":"FIELD_TYPE_DATE_TIME","property_date_time":{"format":"yyyy-mm-dd hh:mm"}},
+          {"field_id":"fStage","field_title":"\u5ba2\u6237\u9636\u6bb5","field_type":"FIELD_TYPE_SINGLE_SELECT","property_single_select":{"options":[{"id":"opt1","text":"\u8ddf\u8fdb\u4e2d","style":1}]}},
+          {"field_id":"fFormula","field_title":"\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09","field_type":"FIELD_TYPE_FORMULA"}
         ]}""");
     WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC());
 
@@ -42,16 +41,23 @@ class WecomSmartSheetFieldCatalogTest {
       assertThat(body.path("offset").asInt()).isZero();
       assertThat(body.path("limit").asInt()).isEqualTo(1000);
     });
-    assertThat(fields.get("Name").fieldId()).isEqualTo("f-text");
-    assertThat(fields.get("Phone").writable()).isTrue();
-    assertThat(fields.get("Follow up").dateTimeIncludesTime()).isTrue();
+    assertThat(fields.get("\u5907\u6ce8\u79f0\u547c").fieldId()).isEqualTo("fName");
+    assertThat(fields.get("\u5907\u6ce8\u79f0\u547c").type()).isEqualTo("FIELD_TYPE_TEXT");
+    assertThat(fields.get("\u8054\u7cfb\u65b9\u5f0f").fieldId()).isEqualTo("fPhone");
+    assertThat(fields.get("\u8054\u7cfb\u65b9\u5f0f").type()).isEqualTo("FIELD_TYPE_PHONE_NUMBER");
+    assertThat(fields.get("\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4").fieldId()).isEqualTo("fNext");
+    assertThat(fields.get("\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4").type()).isEqualTo("FIELD_TYPE_DATE_TIME");
+    assertThat(fields.get("\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4").dateTimeIncludesTime()).isTrue();
     assertThat(api.lastResponse.at("/fields/3/property_single_select/options/0/style").isIntegralNumber()).isTrue();
     assertThat(api.lastResponse.at("/fields/3/property_single_select/options/0/style").intValue()).isEqualTo(1);
-    assertThat(fields.get("Tier").optionId(" \u8ddf\u8fdb\u4e2d ")).contains("opt1");
-    assertThat(fields.get("Tags").optionId("\u91cd\u70b9")).contains("opt2");
-    assertThat(fields.get("Score").writable()).isFalse();
-    assertThatThrownBy(() -> catalog.requireWritable("Score", Duration.ofSeconds(1)))
-        .hasMessageContaining("Score");
+    assertThat(fields.get("\u5ba2\u6237\u9636\u6bb5").fieldId()).isEqualTo("fStage");
+    assertThat(fields.get("\u5ba2\u6237\u9636\u6bb5").type()).isEqualTo("FIELD_TYPE_SINGLE_SELECT");
+    assertThat(fields.get("\u5ba2\u6237\u9636\u6bb5").optionId(" \u8ddf\u8fdb\u4e2d ")).contains("opt1");
+    assertThat(fields.get("\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09").fieldId()).isEqualTo("fFormula");
+    assertThat(fields.get("\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09").type()).isEqualTo("FIELD_TYPE_FORMULA");
+    assertThat(fields.get("\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09").writable()).isFalse();
+    assertThatThrownBy(() -> catalog.requireWritable("\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09", Duration.ofSeconds(1)))
+        .hasMessageContaining("\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09");
   }
 
   @Test
