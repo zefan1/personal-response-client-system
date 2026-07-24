@@ -17,7 +17,15 @@ import java.time.ZoneId;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
@@ -191,10 +199,361 @@ class WecomSmartSheetRecordClientTest {
     assertThat(row.values()).containsEntry("Formula", "\"formula result\"").doesNotContainKey("Outside view");
   }
 
+  @Test
+  void addsOneRecordWithFieldIdsAndReturnsRecordId() throws Exception {
+    ScriptedApi api = api(emptyRecords()).responds("add_records", """
+        {"errcode":0,"records":[{"record_id":"r-created"}]}""");
+    Map<String, Object> fields = new LinkedHashMap<>();
+    fields.put("Phone", "13800000001");
+    fields.put("Name", "Customer name");
+    fields.put("Tier", null);
+
+    String rowId = client(api).createRow("Customers", fields, TIMEOUT);
+
+    assertThat(rowId).isEqualTo("r-created");
+    JsonNode lookupBody = operationBodies(api, "get_records").get(0);
+    assertThat(lookupBody.path("key_type").asText()).isEqualTo("CELL_VALUE_KEY_TYPE_FIELD_ID");
+    assertThat(lookupBody.path("field_ids")).hasSize(1);
+    assertThat(lookupBody.path("field_ids").get(0).asText()).isEqualTo("f-phone");
+    JsonNode addBody = onlyBody(api, "add_records");
+    assertThat(addBody.path("docid").asText()).isEqualTo("doc-1");
+    assertThat(addBody.path("sheet_id").asText()).isEqualTo("sheet-1");
+    assertThat(addBody.path("key_type").asText()).isEqualTo("CELL_VALUE_KEY_TYPE_FIELD_ID");
+    assertThat(addBody.path("records")).hasSize(1);
+    JsonNode values = addBody.path("records").get(0).path("values");
+    assertThat(values.has("f-phone")).isTrue();
+    assertThat(values.path("f-phone").asText()).isEqualTo("13800000001");
+    assertThat(values.has("f-name")).isTrue();
+    assertThat(values.has("f-tier")).isFalse();
+    assertThat(values.has("Phone")).isFalse();
+  }
+
+  @Test
+  void returnsExistingIdInsteadOfCreatingDuplicatePhone() throws Exception {
+    ScriptedApi api = api("""
+        {"errcode":0,"has_more":false,"records":[
+          {"record_id":"r-existing","values":{"f-phone":"13800000001"}}
+        ]}""");
+
+    String rowId = client(api).createRow("Customers", Map.of("Phone", "13800000001"), TIMEOUT);
+
+    assertThat(rowId).isEqualTo("r-existing");
+    assertThat(operationBodies(api, "add_records")).isEmpty();
+  }
+
+  @Test
+  void rejectsAmbiguousExactPhoneMatchesWithoutExposingCustomerData() throws Exception {
+    String phone = "13800000002";
+    ScriptedApi api = api("""
+        {"errcode":0,"has_more":false,"records":[
+          {"record_id":"r-private-one","values":{"f-phone":"13800000002"}},
+          {"record_id":"r-private-two","values":{"f-phone":"13800000002"}}
+        ]}""");
+
+    assertSafeFailure(() -> client(api).createRow("Customers", Map.of("Phone", phone), TIMEOUT),
+        phone, "r-private-one", "r-private-two");
+    assertThat(operationBodies(api, "add_records")).isEmpty();
+  }
+
+  @TestFactory
+  Stream<DynamicTest> rejectsMissingOrBlankUniquePhoneBeforeHttp() {
+    return Stream.of(
+        DynamicTest.dynamicTest("missing unique field", () -> assertCreateRejectedBeforeHttp(Map.of("Name", "private-name"))),
+        DynamicTest.dynamicTest("blank unique field", () -> assertCreateRejectedBeforeHttp(Map.of("Phone", "   "))),
+        DynamicTest.dynamicTest("null fields", () -> assertCreateRejectedBeforeHttp(null)));
+  }
+
+  @TestFactory
+  Stream<DynamicTest> rejectsProtectedUnknownAndInvalidCreateFieldsBeforeAdd() {
+    return Stream.of(
+        new InvalidField("formula", "Formula", "private-formula"),
+        new InvalidField("system", "Created by", "private-system"),
+        new InvalidField("hidden", "Hidden field", "private-hidden"),
+        new InvalidField("unknown", "Unknown field", "private-unknown"),
+        new InvalidField("invalid option", "Tier", "private-option"))
+        .map(fixture -> DynamicTest.dynamicTest(fixture.name(), () -> {
+          ScriptedApi api = api();
+          Map<String, Object> fields = new LinkedHashMap<>();
+          fields.put("Phone", "13800000003");
+          fields.put(fixture.title(), fixture.value());
+
+          assertSafeFailure(() -> client(api).createRow("Customers", fields, TIMEOUT),
+              "13800000003", fixture.value());
+          assertThat(operationBodies(api, "add_records")).isEmpty();
+          assertThat(operationBodies(api, "get_records")).isEmpty();
+        }));
+  }
+
+  @Test
+  void duplicateLookupReadsLaterPagesAndUsesExactDecodedValueOnly() throws Exception {
+    ScriptedApi api = api("""
+        {"errcode":0,"has_more":true,"next":1,"total":2,"records":[
+          {"record_id":"r-formatted","values":{"f-phone":"138 0000 0004","f-name":"ignored"}}
+        ]}""", """
+        {"errcode":0,"has_more":false,"total":2,"records":[
+          {"record_id":"r-exact","values":{"f-phone":"13800000004"}}
+        ]}""");
+
+    String rowId = client(api).createRow("Customers", Map.of("Phone", "13800000004"), TIMEOUT);
+
+    assertThat(rowId).isEqualTo("r-exact");
+    assertThat(recordOffsets(api)).containsExactly(0L, 1L);
+    assertThat(recordBodies(api)).allSatisfy(body -> {
+      assertThat(body.path("field_ids")).hasSize(1);
+      assertThat(body.path("field_ids").get(0).asText()).isEqualTo("f-phone");
+    });
+    assertThat(operationBodies(api, "add_records")).isEmpty();
+  }
+
+  @Test
+  void duplicateLookupRejectsNonAdvancingPageMaximumAndDuplicateRecordIds() throws Exception {
+    ScriptedApi stalled = api("""
+        {"errcode":0,"has_more":true,"next":0,"records":[]}""");
+    assertSafeFailure(() -> client(stalled).createRow("Customers", Map.of("Phone", "13800000005"), TIMEOUT),
+        "13800000005");
+
+    List<String> capped = new ArrayList<>();
+    for (int page = 0; page < 100; page++) {
+      capped.add("{\"errcode\":0,\"has_more\":true,\"next\":" + (page + 1) + ",\"records\":[]}");
+    }
+    ScriptedApi maximum = api(capped.toArray(String[]::new));
+    assertSafeFailure(() -> client(maximum).createRow("Customers", Map.of("Phone", "13800000006"), TIMEOUT),
+        "13800000006");
+
+    ScriptedApi duplicate = api(
+        "{\"errcode\":0,\"has_more\":true,\"next\":1,\"records\":[{\"record_id\":\"r-private-duplicate\",\"values\":{\"f-phone\":\"other\"}}]}",
+        "{\"errcode\":0,\"has_more\":false,\"records\":[{\"record_id\":\"r-private-duplicate\",\"values\":{\"f-phone\":\"13800000007\"}}]}");
+    assertSafeFailure(() -> client(duplicate).createRow("Customers", Map.of("Phone", "13800000007"), TIMEOUT),
+        "13800000007", "r-private-duplicate");
+    assertThat(operationBodies(stalled, "add_records")).isEmpty();
+    assertThat(operationBodies(maximum, "add_records")).isEmpty();
+    assertThat(operationBodies(duplicate, "add_records")).isEmpty();
+  }
+
+  @Test
+  void duplicateLookupRejectsChangingExceededAndTruncatedTotals() throws Exception {
+    List<ScriptedApi> invalid = List.of(
+        api(
+            "{\"errcode\":0,\"has_more\":true,\"next\":1,\"total\":1,\"records\":[]}",
+            "{\"errcode\":0,\"has_more\":false,\"total\":2,\"records\":[]}"),
+        api("{\"errcode\":0,\"has_more\":false,\"total\":0,\"records\":[{\"record_id\":\"r-private\",\"values\":{\"f-phone\":\"other\"}}]}"),
+        api("{\"errcode\":0,\"has_more\":false,\"total\":2,\"records\":[{\"record_id\":\"r-private\",\"values\":{\"f-phone\":\"other\"}}]}"));
+
+    for (ScriptedApi api : invalid) {
+      assertSafeFailure(() -> client(api).createRow("Customers", Map.of("Phone", "13800000012"), TIMEOUT),
+          "13800000012", "r-private");
+      assertThat(operationBodies(api, "add_records")).isEmpty();
+    }
+  }
+
+  @Test
+  void serializesConcurrentCreatesForTheSamePhoneAndAddsExactlyOnce() throws Exception {
+    ConcurrentCreateApi api = new ConcurrentCreateApi();
+    WecomSmartSheetRecordClient client = client(api);
+    AtomicReference<String> firstResult = new AtomicReference<>();
+    AtomicReference<String> secondResult = new AtomicReference<>();
+    AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+    AtomicReference<Throwable> secondFailure = new AtomicReference<>();
+    Thread first = createThread("create-first", client, firstResult, firstFailure);
+    Thread second = createThread("create-second", client, secondResult, secondFailure);
+
+    try {
+      first.start();
+      assertThat(api.addStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      second.start();
+      assertThat(awaitingCreateLock(second)).isTrue();
+      api.releaseAdd.countDown();
+      first.join(2_000);
+      second.join(2_000);
+
+      assertThat(first.isAlive()).isFalse();
+      assertThat(second.isAlive()).isFalse();
+      assertThat(firstFailure.get()).isNull();
+      assertThat(secondFailure.get()).isNull();
+      assertThat(firstResult.get()).isEqualTo("r-created");
+      assertThat(secondResult.get()).isEqualTo("r-created");
+      assertThat(api.addCalls.get()).isEqualTo(1);
+      assertThat(operationBodies(api, "get_records")).hasSize(2);
+    } finally {
+      api.releaseAdd.countDown();
+      first.interrupt();
+      second.interrupt();
+      first.join(2_000);
+      second.join(2_000);
+    }
+  }
+
+  @Test
+  void keepsThreeNormalizedPhoneContendersOnOneLockAfterFirstFailure() throws Exception {
+    ThreeContenderApi api = new ThreeContenderApi();
+    WecomSmartSheetRecordClient client = client(api);
+    AtomicReference<String> firstResult = new AtomicReference<>();
+    AtomicReference<String> secondResult = new AtomicReference<>();
+    AtomicReference<String> thirdResult = new AtomicReference<>();
+    AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+    AtomicReference<Throwable> secondFailure = new AtomicReference<>();
+    AtomicReference<Throwable> thirdFailure = new AtomicReference<>();
+    Thread first = createThread("create-normalized-first", client, "138-0000-0013", firstResult, firstFailure);
+    Thread second = createThread("create-normalized-second", client, "13800000013", secondResult, secondFailure);
+    Thread third = createThread("create-normalized-third", client, "13800000013", thirdResult, thirdFailure);
+
+    try {
+      first.start();
+      assertThat(api.firstAddStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      second.start();
+      assertThat(awaitingCreateLock(second)).isTrue();
+      api.releaseFirstAdd.countDown();
+      first.join(2_000);
+      assertThat(first.isAlive()).isFalse();
+      assertThat(api.secondLookupStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      third.start();
+      assertThat(awaitingCreateLock(third)).isTrue();
+      api.releaseSecondLookup.countDown();
+      second.join(2_000);
+      third.join(2_000);
+
+      assertThat(second.isAlive()).isFalse();
+      assertThat(third.isAlive()).isFalse();
+      assertThat(firstResult.get()).isNull();
+      assertThat(firstFailure.get()).isInstanceOf(WecomSmartSheetException.class);
+      assertThat(secondFailure.get()).isNull();
+      assertThat(thirdFailure.get()).isNull();
+      assertThat(secondResult.get()).isEqualTo("r-created");
+      assertThat(thirdResult.get()).isEqualTo("r-created");
+      assertThat(api.addCalls.get()).isEqualTo(2);
+      assertThat(api.recordCalls.get()).isEqualTo(3);
+    } finally {
+      api.releaseFirstAdd.countDown();
+      api.releaseSecondLookup.countDown();
+      first.interrupt();
+      second.interrupt();
+      third.interrupt();
+      first.join(2_000);
+      second.join(2_000);
+      third.join(2_000);
+    }
+  }
+
+  @Test
+  void rejectsMalformedAddConfirmationWithoutLeakingRequestOrResponseData() throws Exception {
+    String phone = "13800000008";
+    String name = "private-name-value";
+    String responseValue = "private-add-response";
+    ScriptedApi api = api(emptyRecords()).responds("add_records", """
+        {"errcode":0,"raw":"private-add-response","records":[
+          {"record_id":"r-private-one"},{"record_id":"r-private-two"}
+        ]}""");
+
+    assertSafeFailure(() -> client(api).createRow("Customers", Map.of("Phone", phone, "Name", name), TIMEOUT),
+        phone, name, responseValue, "r-private-one", "r-private-two");
+  }
+
+  @TestFactory
+  Stream<DynamicTest> rejectsMissingBlankAndNontextualAddedRecordIds() {
+    return Stream.of(
+        "{\"errcode\":0,\"records\":[]}",
+        "{\"errcode\":0,\"records\":[{\"record_id\":\"   \"}]}",
+        "{\"errcode\":0,\"records\":[{\"record_id\":123}]}"
+    ).map(response -> DynamicTest.dynamicTest("rejects invalid add confirmation", () -> {
+      ScriptedApi api = api(emptyRecords()).responds("add_records", response);
+
+      assertSafeFailure(() -> client(api).createRow("Customers", Map.of("Phone", "13800000014"), TIMEOUT),
+          "13800000014", response);
+    }));
+  }
+
+  @Test
+  void updatesOneRecordByIdAndPreservesExplicitEmptyString() throws Exception {
+    ScriptedApi api = api().responds("update_records", """
+        {"errcode":0,"records":[{"record_id":"r-existing"}]}""");
+
+    client(api).updateRow("Customers", "r-existing", Map.of("Name", "", "Phone", "13800000009"), TIMEOUT);
+
+    JsonNode updateBody = onlyBody(api, "update_records");
+    assertThat(updateBody.path("docid").asText()).isEqualTo("doc-1");
+    assertThat(updateBody.path("sheet_id").asText()).isEqualTo("sheet-1");
+    assertThat(updateBody.path("key_type").asText()).isEqualTo("CELL_VALUE_KEY_TYPE_FIELD_ID");
+    assertThat(updateBody.path("records")).hasSize(1);
+    assertThat(updateBody.path("records").get(0).path("record_id").asText()).isEqualTo("r-existing");
+    JsonNode values = updateBody.path("records").get(0).path("values");
+    assertThat(values.has("f-name")).isTrue();
+    assertThat(values.path("f-name").get(0).path("text").asText()).isEmpty();
+    assertThat(values.path("f-phone").asText()).isEqualTo("13800000009");
+  }
+
+  @TestFactory
+  Stream<DynamicTest> rejectsBlankRecordIdAndEmptyUpdateFieldsBeforeHttp() {
+    Map<String, Object> allNull = new LinkedHashMap<>();
+    allNull.put("Name", null);
+    return Stream.of(
+        DynamicTest.dynamicTest("null record id", () -> assertUpdateRejectedBeforeHttp(null, Map.of("Name", "value"))),
+        DynamicTest.dynamicTest("blank record id", () -> assertUpdateRejectedBeforeHttp("   ", Map.of("Name", "value"))),
+        DynamicTest.dynamicTest("null fields", () -> assertUpdateRejectedBeforeHttp("r-existing", null)),
+        DynamicTest.dynamicTest("empty fields", () -> assertUpdateRejectedBeforeHttp("r-existing", Map.of())),
+        DynamicTest.dynamicTest("all null fields", () -> assertUpdateRejectedBeforeHttp("r-existing", allNull)));
+  }
+
+  @TestFactory
+  Stream<DynamicTest> rejectsProtectedUnknownAndInvalidUpdateFieldsBeforeUpdate() {
+    return Stream.of(
+        new InvalidField("formula", "Formula", "private-formula"),
+        new InvalidField("system", "Created by", "private-system"),
+        new InvalidField("hidden", "Hidden field", "private-hidden"),
+        new InvalidField("unknown", "Unknown field", "private-unknown"),
+        new InvalidField("invalid option", "Tier", "private-option"))
+        .map(fixture -> DynamicTest.dynamicTest(fixture.name(), () -> {
+          ScriptedApi api = api();
+
+          assertSafeFailure(() -> client(api).updateRow(
+              "Customers", "r-private-update", Map.of(fixture.title(), fixture.value()), TIMEOUT),
+              "r-private-update", fixture.value());
+          assertThat(operationBodies(api, "update_records")).isEmpty();
+        }));
+  }
+
+  @Test
+  void rejectsWrongWriteTargetBeforeHttp() throws Exception {
+    ScriptedApi createApi = api();
+    assertThatThrownBy(() -> client(createApi).createRow(
+        "Other", Map.of("Phone", "13800000010"), TIMEOUT)).isInstanceOf(IllegalArgumentException.class);
+    assertThat(createApi.bodies).isEmpty();
+
+    ScriptedApi updateApi = api();
+    assertThatThrownBy(() -> client(updateApi).updateRow(
+        "Other", "r-private", Map.of("Name", "private"), TIMEOUT)).isInstanceOf(IllegalArgumentException.class);
+    assertThat(updateApi.bodies).isEmpty();
+  }
+
+  @Test
+  void rejectsMismatchedUpdateConfirmationWithoutLeakingRequestOrResponseData() throws Exception {
+    String recordId = "r-private-request";
+    String value = "private-update-value";
+    String responseValue = "private-update-response";
+    ScriptedApi api = api().responds("update_records", """
+        {"errcode":0,"raw":"private-update-response","records":[{"record_id":"r-private-other"}]}""");
+
+    assertSafeFailure(() -> client(api).updateRow("Customers", recordId, Map.of("Name", value), TIMEOUT),
+        recordId, value, responseValue, "r-private-other");
+  }
+
   private static void assertNoApiForInvalid(
       SheetSource source, LocalDateTime modifiedAfter, int limit, Duration timeout) throws Exception {
     ScriptedApi api = api();
     assertThatThrownBy(() -> client(api).fetchIncrementalRows(source, modifiedAfter, limit, timeout))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThat(api.bodies).isEmpty();
+  }
+
+  private static void assertCreateRejectedBeforeHttp(Map<String, Object> fields) throws Exception {
+    ScriptedApi api = api();
+    assertThatThrownBy(() -> client(api).createRow("Customers", fields, TIMEOUT))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThat(api.bodies).isEmpty();
+  }
+
+  private static void assertUpdateRejectedBeforeHttp(String recordId, Map<String, Object> fields) throws Exception {
+    ScriptedApi api = api();
+    assertThatThrownBy(() -> client(api).updateRow("Customers", recordId, fields, TIMEOUT))
         .isInstanceOf(IllegalArgumentException.class);
     assertThat(api.bodies).isEmpty();
   }
@@ -210,7 +569,7 @@ class WecomSmartSheetRecordClientTest {
     });
   }
 
-  private static WecomSmartSheetRecordClient client(ScriptedApi api) {
+  private static WecomSmartSheetRecordClient client(WecomSmartSheetApiClient api) {
     WecomSmartSheetConfig config = config();
     return new WecomSmartSheetRecordClient(config, api, new WecomSmartSheetFieldCatalog(api, config),
         new WecomSmartSheetValueCodec(config));
@@ -220,12 +579,19 @@ class WecomSmartSheetRecordClientTest {
     return new ScriptedApi(fields(), records(recordResponses));
   }
 
+  private static String emptyRecords() {
+    return "{\"errcode\":0,\"has_more\":false,\"records\":[]}";
+  }
+
   private static String fields() {
     return """
-        {"errcode":0,"total":3,"fields":[
+        {"errcode":0,"total":5,"fields":[
           {"field_id":"f-phone","field_title":"Phone","field_type":"FIELD_TYPE_PHONE_NUMBER"},
           {"field_id":"f-name","field_title":"Name","field_type":"FIELD_TYPE_TEXT"},
-          {"field_id":"f-formula","field_title":"Formula","field_type":"FIELD_TYPE_FORMULA"}
+          {"field_id":"f-formula","field_title":"Formula","field_type":"FIELD_TYPE_FORMULA"},
+          {"field_id":"f-created-by","field_title":"Created by","field_type":"FIELD_TYPE_CREATED_USER"},
+          {"field_id":"f-tier","field_title":"Tier","field_type":"FIELD_TYPE_SINGLE_SELECT",
+           "property_single_select":{"options":[{"id":"o-gold","text":"Gold"}]}}
         ]}""";
   }
 
@@ -234,7 +600,16 @@ class WecomSmartSheetRecordClientTest {
   }
 
   private static List<JsonNode> recordBodies(ScriptedApi api) {
-    return api.bodies.stream().filter(call -> call.operation.equals("get_records")).map(call -> call.body).toList();
+    return operationBodies(api, "get_records");
+  }
+
+  private static List<JsonNode> operationBodies(ScriptedApi api, String operation) {
+    return api.bodies.stream().filter(call -> call.operation.equals(operation)).map(call -> call.body).toList();
+  }
+
+  private static JsonNode onlyBody(ScriptedApi api, String operation) {
+    assertThat(operationBodies(api, operation)).hasSize(1);
+    return operationBodies(api, operation).get(0);
   }
 
   private static List<Long> recordOffsets(ScriptedApi api) {
@@ -247,7 +622,46 @@ class WecomSmartSheetRecordClientTest {
 
   private static WecomSmartSheetConfig config() {
     return new WecomSmartSheetConfig("http://127.0.0.1", "corp", "secret", "doc-1", "sheet-1", "view-1",
-        "Customers", "Customer ID", ZoneId.of("Asia/Shanghai"));
+        "Customers", "Phone", ZoneId.of("Asia/Shanghai"));
+  }
+
+  private static Thread createThread(
+      String name,
+      WecomSmartSheetRecordClient client,
+      AtomicReference<String> result,
+      AtomicReference<Throwable> failure) {
+    return createThread(name, client, "13800000011", result, failure);
+  }
+
+  private static Thread createThread(
+      String name,
+      WecomSmartSheetRecordClient client,
+      String phone,
+      AtomicReference<String> result,
+      AtomicReference<Throwable> failure) {
+    return new Thread(() -> {
+      try {
+        result.set(client.createRow("Customers", Map.of("Phone", phone), TIMEOUT));
+      } catch (Throwable ex) {
+        failure.set(ex);
+      }
+    }, name);
+  }
+
+  private static boolean awaitingCreateLock(Thread thread) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+    while (System.nanoTime() < deadline) {
+      if (thread.getState() == Thread.State.BLOCKED) {
+        for (StackTraceElement frame : thread.getStackTrace()) {
+          if (frame.getClassName().equals(WecomSmartSheetRecordClient.class.getName())
+              && frame.getMethodName().equals("createRow")) {
+            return true;
+          }
+        }
+      }
+      Thread.onSpinWait();
+    }
+    return false;
   }
 
   @FunctionalInterface
@@ -255,9 +669,13 @@ class WecomSmartSheetRecordClientTest {
     void run() throws Exception;
   }
 
+  private record InvalidField(String name, String title, String value) {}
+
   private static final class ScriptedApi extends WecomSmartSheetApiClient {
     private final Deque<JsonNode> fieldResponses = new ArrayDeque<>();
     private final Deque<JsonNode> recordResponses = new ArrayDeque<>();
+    private final Deque<JsonNode> addResponses = new ArrayDeque<>();
+    private final Deque<JsonNode> updateResponses = new ArrayDeque<>();
     private final List<Call> bodies = new ArrayList<>();
 
     private ScriptedApi(String fields, String... records) throws Exception {
@@ -268,6 +686,18 @@ class WecomSmartSheetRecordClientTest {
       }
     }
 
+    private ScriptedApi responds(String operation, String... responses) throws Exception {
+      Deque<JsonNode> target = switch (operation) {
+        case "add_records" -> addResponses;
+        case "update_records" -> updateResponses;
+        default -> throw new IllegalArgumentException("unsupported scripted operation");
+      };
+      for (String response : responses) {
+        target.add(JSON.readTree(response));
+      }
+      return this;
+    }
+
     @Override public JsonNode post(String operation, Object body, Duration timeout) {
       bodies.add(new Call(operation, JSON.valueToTree(body)));
       if (operation.equals("get_fields")) {
@@ -276,8 +706,138 @@ class WecomSmartSheetRecordClientTest {
       if (operation.equals("get_records")) {
         return recordResponses.removeFirst();
       }
+      if (operation.equals("add_records")) {
+        return addResponses.removeFirst();
+      }
+      if (operation.equals("update_records")) {
+        return updateResponses.removeFirst();
+      }
       throw new AssertionError("unexpected operation");
     }
+  }
+
+  private static final class ConcurrentCreateApi extends WecomSmartSheetApiClient {
+    private final JsonNode fieldResponse;
+    private final JsonNode emptyResponse;
+    private final JsonNode existingResponse;
+    private final JsonNode addResponse;
+    private final List<Call> bodies = new CopyOnWriteArrayList<>();
+    private final CountDownLatch addStarted = new CountDownLatch(1);
+    private final CountDownLatch releaseAdd = new CountDownLatch(1);
+    private final AtomicInteger addCalls = new AtomicInteger();
+    private final AtomicBoolean addCompleted = new AtomicBoolean();
+
+    private ConcurrentCreateApi() throws Exception {
+      super(JSON, config(), null);
+      fieldResponse = JSON.readTree(fields());
+      emptyResponse = JSON.readTree(emptyRecords());
+      existingResponse = JSON.readTree("""
+          {"errcode":0,"has_more":false,"records":[
+            {"record_id":"r-created","values":{"f-phone":"13800000011"}}
+          ]}""");
+      addResponse = JSON.readTree("""
+          {"errcode":0,"records":[{"record_id":"r-created"}]}""");
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      bodies.add(new Call(operation, JSON.valueToTree(body)));
+      return switch (operation) {
+        case "get_fields" -> fieldResponse;
+        case "get_records" -> addCompleted.get() ? existingResponse : emptyResponse;
+        case "add_records" -> add();
+        default -> throw new AssertionError("unexpected operation");
+      };
+    }
+
+    private JsonNode add() {
+      addCalls.incrementAndGet();
+      addStarted.countDown();
+      try {
+        if (!releaseAdd.await(2, TimeUnit.SECONDS)) {
+          throw new AssertionError("timed out waiting to release add");
+        }
+      } catch (InterruptedException ex) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError("add interrupted");
+      }
+      addCompleted.set(true);
+      return addResponse;
+    }
+  }
+
+  private static final class ThreeContenderApi extends WecomSmartSheetApiClient {
+    private final JsonNode fieldResponse;
+    private final JsonNode emptyResponse;
+    private final JsonNode existingResponse;
+    private final JsonNode addResponse;
+    private final CountDownLatch firstAddStarted = new CountDownLatch(1);
+    private final CountDownLatch releaseFirstAdd = new CountDownLatch(1);
+    private final CountDownLatch secondLookupStarted = new CountDownLatch(1);
+    private final CountDownLatch releaseSecondLookup = new CountDownLatch(1);
+    private final AtomicInteger recordCalls = new AtomicInteger();
+    private final AtomicInteger addCalls = new AtomicInteger();
+    private final AtomicBoolean created = new AtomicBoolean();
+
+    private ThreeContenderApi() throws Exception {
+      super(JSON, config(), null);
+      fieldResponse = JSON.readTree(fields());
+      emptyResponse = JSON.readTree(emptyRecords());
+      existingResponse = JSON.readTree("""
+          {"errcode":0,"has_more":false,"records":[
+            {"record_id":"r-created","values":{"f-phone":"13800000013"}}
+          ]}""");
+      addResponse = JSON.readTree("""
+          {"errcode":0,"records":[{"record_id":"r-created"}]}""");
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      return switch (operation) {
+        case "get_fields" -> fieldResponse;
+        case "get_records" -> records();
+        case "add_records" -> add();
+        default -> throw new AssertionError("unexpected operation");
+      };
+    }
+
+    private JsonNode records() {
+      int call = recordCalls.incrementAndGet();
+      if (call == 1) {
+        return emptyResponse;
+      }
+      if (created.get()) {
+        return existingResponse;
+      }
+      if (call == 2) {
+        secondLookupStarted.countDown();
+      }
+      await(releaseSecondLookup, "lookup release");
+      return emptyResponse;
+    }
+
+    private JsonNode add() {
+      if (addCalls.incrementAndGet() == 1) {
+        firstAddStarted.countDown();
+        await(releaseFirstAdd, "first add release");
+        throw new WecomSmartSheetException("add_records", "safe first failure", null);
+      }
+      created.set(true);
+      return addResponse;
+    }
+
+    private static void await(CountDownLatch latch, String description) {
+      try {
+        if (!latch.await(2, TimeUnit.SECONDS)) {
+          throw new AssertionError("timed out waiting for " + description);
+        }
+      } catch (InterruptedException ex) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError(description + " interrupted");
+      }
+    }
+  }
+
+  private static List<JsonNode> operationBodies(ConcurrentCreateApi api, String operation) {
+    return api.bodies.stream().filter(call -> call.operation.equals(operation)).map(call -> call.body).toList();
   }
 
   private record Call(String operation, JsonNode body) {}

@@ -15,20 +15,25 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 
 @Component
 public class WecomSmartSheetRecordClient {
 
-  private static final String OPERATION = "get_records";
+  private static final String GET_OPERATION = "get_records";
+  private static final String ADD_OPERATION = "add_records";
+  private static final String UPDATE_OPERATION = "update_records";
   private static final int PAGE_SIZE = 1000;
   private static final int MAX_PAGES = 100;
   private static final String FIELD_TITLE_KEY_TYPE = "CELL_VALUE_KEY_TYPE_FIELD_TITLE";
+  private static final String FIELD_ID_KEY_TYPE = "CELL_VALUE_KEY_TYPE_FIELD_ID";
 
   private final WecomSmartSheetConfig config;
   private final WecomSmartSheetApiClient apiClient;
   private final WecomSmartSheetFieldCatalog fieldCatalog;
   private final WecomSmartSheetValueCodec valueCodec;
+  private final ConcurrentHashMap<String, CreateLock> createLocks = new ConcurrentHashMap<>();
 
   public WecomSmartSheetRecordClient(
       WecomSmartSheetConfig config,
@@ -53,7 +58,7 @@ public class WecomSmartSheetRecordClient {
     long offset = 0;
 
     for (int pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
-      JsonNode response = apiClient.post(OPERATION, request(offset), timeout);
+      JsonNode response = apiClient.post(GET_OPERATION, request(offset), timeout);
       Page page = page(response);
       expectedTotal = expectedTotal(expectedTotal, page.total());
       loadedCount = add(loadedCount, page.records().size());
@@ -80,6 +85,54 @@ public class WecomSmartSheetRecordClient {
     throw invalid("pagination exceeded maximum pages");
   }
 
+  public String createRow(String sourceTable, Map<String, Object> fields, Duration timeout) {
+    validateWrite(sourceTable, fields, timeout);
+    String uniqueTitle = config.uniqueFieldTitle();
+    Object uniqueValue = fields.get(uniqueTitle);
+    if (!(uniqueValue instanceof String exactValue) || exactValue.isBlank()) {
+      throw new IllegalArgumentException("A nonblank value is required for unique field: " + uniqueTitle);
+    }
+    Map<String, JsonNode> encoded = encodeFields(fields, timeout);
+    WecomSmartSheetField uniqueField = fieldCatalog.requireWritable(uniqueTitle, timeout);
+    String lockKey = normalizedLockKey(exactValue);
+    CreateLock lock = acquireCreateLock(lockKey);
+    try {
+      synchronized (lock) {
+        Match match = exactMatch(uniqueField, exactValue, timeout);
+        if (match.count() > 1) {
+          throw invalid(GET_OPERATION, "multiple exact unique-field matches were found");
+        }
+        if (match.count() == 1) {
+          return match.recordId();
+        }
+        return add(encoded, timeout);
+      }
+    } finally {
+      releaseCreateLock(lockKey, lock);
+    }
+  }
+
+  public void updateRow(
+      String sourceTable, String sourceRowId, Map<String, Object> fields, Duration timeout) {
+    validateWrite(sourceTable, fields, timeout);
+    String recordId = sourceRowId == null ? "" : sourceRowId.trim();
+    if (recordId.isEmpty()) {
+      throw new IllegalArgumentException("Record identifier is required");
+    }
+    if (fields.values().stream().allMatch(Objects::isNull)) {
+      throw new IllegalArgumentException("At least one non-null field is required");
+    }
+    Map<String, JsonNode> encoded = encodeFields(fields, timeout);
+    if (encoded.isEmpty()) {
+      throw new IllegalArgumentException("At least one non-null field is required");
+    }
+    Map<String, Object> record = new LinkedHashMap<>();
+    record.put("record_id", recordId);
+    record.put("values", encoded);
+    JsonNode response = apiClient.post(UPDATE_OPERATION, writeRequest(record), timeout);
+    confirmUpdated(response, recordId);
+  }
+
   private Map<String, Object> request(long offset) {
     Map<String, Object> request = new LinkedHashMap<>();
     request.put("docid", config.documentId());
@@ -89,6 +142,174 @@ public class WecomSmartSheetRecordClient {
     request.put("offset", offset);
     request.put("limit", PAGE_SIZE);
     return request;
+  }
+
+  private Match exactMatch(WecomSmartSheetField uniqueField, String exactValue, Duration timeout) {
+    Set<String> recordIds = new HashSet<>();
+    Long expectedTotal = null;
+    long loadedCount = 0;
+    long offset = 0;
+    int matchCount = 0;
+    String matchedRecordId = null;
+
+    for (int pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
+      JsonNode response = apiClient.post(GET_OPERATION, lookupRequest(uniqueField.fieldId(), offset), timeout);
+      Page page = page(response);
+      expectedTotal = expectedTotal(expectedTotal, page.total());
+      loadedCount = add(loadedCount, page.records().size());
+      if (expectedTotal != null && loadedCount > expectedTotal) {
+        throw invalid("total metadata was inconsistent");
+      }
+      for (JsonNode record : page.records()) {
+        LookupRecord candidate = lookupRecord(record, uniqueField, recordIds);
+        if (exactValue.equals(candidate.uniqueValue())) {
+          if (matchCount == 0) {
+            matchedRecordId = candidate.recordId();
+          }
+          matchCount = Math.min(2, matchCount + 1);
+        }
+      }
+      if (!page.hasMore()) {
+        if (expectedTotal != null && loadedCount != expectedTotal) {
+          throw invalid("total metadata was inconsistent");
+        }
+        return new Match(matchCount, matchedRecordId);
+      }
+      if (pageNumber == MAX_PAGES - 1) {
+        throw invalid("pagination exceeded maximum pages");
+      }
+      offset = nextOffset(page.next(), offset);
+    }
+    throw invalid("pagination exceeded maximum pages");
+  }
+
+  private Map<String, Object> lookupRequest(String uniqueFieldId, long offset) {
+    Map<String, Object> request = new LinkedHashMap<>();
+    request.put("docid", config.documentId());
+    request.put("sheet_id", config.sheetId());
+    request.put("view_id", config.viewId());
+    request.put("key_type", FIELD_ID_KEY_TYPE);
+    request.put("field_ids", List.of(uniqueFieldId));
+    request.put("offset", offset);
+    request.put("limit", PAGE_SIZE);
+    return request;
+  }
+
+  private LookupRecord lookupRecord(
+      JsonNode record, WecomSmartSheetField uniqueField, Set<String> recordIds) {
+    if (record == null || !record.isObject()) {
+      throw invalid("record metadata was invalid");
+    }
+    String recordId = requiredText(record.get("record_id"), "record identifier");
+    if (!recordIds.add(recordId)) {
+      throw invalid("duplicate record identifier");
+    }
+    JsonNode values = record.get("values");
+    if (values == null || !values.isObject()) {
+      throw invalid("record values metadata was invalid");
+    }
+    JsonNode value = values.get(uniqueField.fieldId());
+    if (value == null) {
+      return new LookupRecord(recordId, null);
+    }
+    try {
+      return new LookupRecord(recordId, valueCodec.decode(uniqueField, value));
+    } catch (RuntimeException ex) {
+      throw invalid("unique field value could not be decoded");
+    }
+  }
+
+  private Map<String, JsonNode> encodeFields(Map<String, Object> fields, Duration timeout) {
+    Map<String, JsonNode> encoded = new LinkedHashMap<>();
+    for (Map.Entry<String, Object> entry : fields.entrySet()) {
+      if (entry.getValue() == null) {
+        continue;
+      }
+      WecomSmartSheetField field = fieldCatalog.requireWritable(entry.getKey(), timeout);
+      encoded.put(field.fieldId(), valueCodec.encode(field, entry.getValue()));
+    }
+    return encoded;
+  }
+
+  private String add(Map<String, JsonNode> encoded, Duration timeout) {
+    JsonNode response = apiClient.post(ADD_OPERATION, writeRequest(Map.of("values", encoded)), timeout);
+    if (response == null || !response.isObject()) {
+      throw invalid(ADD_OPERATION, "response confirmation was invalid");
+    }
+    JsonNode records = response.get("records");
+    if (records == null || !records.isArray() || records.size() != 1) {
+      throw invalid(ADD_OPERATION, "response confirmation was invalid");
+    }
+    JsonNode record = records.get(0);
+    if (record == null || !record.isObject()) {
+      throw invalid(ADD_OPERATION, "response confirmation was invalid");
+    }
+    JsonNode recordId = record.get("record_id");
+    if (recordId == null || !recordId.isTextual() || recordId.textValue().trim().isEmpty()) {
+      throw invalid(ADD_OPERATION, "response confirmation was invalid");
+    }
+    return recordId.textValue().trim();
+  }
+
+  private Map<String, Object> writeRequest(Map<String, ?> record) {
+    Map<String, Object> request = new LinkedHashMap<>();
+    request.put("docid", config.documentId());
+    request.put("sheet_id", config.sheetId());
+    request.put("key_type", FIELD_ID_KEY_TYPE);
+    request.put("records", List.of(record));
+    return request;
+  }
+
+  private static void confirmUpdated(JsonNode response, String expectedRecordId) {
+    if (response == null || !response.isObject()) {
+      throw invalid(UPDATE_OPERATION, "response confirmation was invalid");
+    }
+    JsonNode records = response.get("records");
+    if (records == null || !records.isArray()) {
+      throw invalid(UPDATE_OPERATION, "response confirmation was invalid");
+    }
+    for (JsonNode record : records) {
+      JsonNode recordId = record == null || !record.isObject() ? null : record.get("record_id");
+      if (recordId != null && recordId.isTextual() && expectedRecordId.equals(recordId.textValue())) {
+        return;
+      }
+    }
+    throw invalid(UPDATE_OPERATION, "response confirmation was invalid");
+  }
+
+  private static String normalizedLockKey(String value) {
+    StringBuilder normalized = new StringBuilder();
+    for (int index = 0; index < value.length(); index++) {
+      char character = value.charAt(index);
+      if (!Character.isWhitespace(character) && character != '-' && character != '(' && character != ')') {
+        normalized.append(character);
+      }
+    }
+    return normalized.toString();
+  }
+
+  private CreateLock acquireCreateLock(String lockKey) {
+    return createLocks.compute(lockKey, (ignored, current) -> {
+      CreateLock lock = current == null || current.retired ? new CreateLock() : current;
+      lock.participants++;
+      return lock;
+    });
+  }
+
+  private void releaseCreateLock(String lockKey, CreateLock expected) {
+    createLocks.compute(lockKey, (ignored, current) -> {
+      if (current != expected || current.participants <= 0) {
+        throw new IllegalStateException("Create lock state was invalid");
+      }
+      current.participants--;
+      if (current.participants == 0) {
+        current.retired = true;
+      }
+      return current;
+    });
+    if (expected.retired) {
+      createLocks.remove(lockKey, expected);
+    }
   }
 
   private TimestampedRow row(
@@ -223,11 +444,31 @@ public class WecomSmartSheetRecordClient {
     }
   }
 
+  private void validateWrite(String sourceTable, Map<String, Object> fields, Duration timeout) {
+    if (fields == null || timeout == null || timeout.isZero() || timeout.isNegative()) {
+      throw new IllegalArgumentException("Fields and a positive timeout are required");
+    }
+    config.requireTarget(config.documentId(), sourceTable);
+  }
+
   private static WecomSmartSheetException invalid(String reason) {
-    return new WecomSmartSheetException(OPERATION, reason, null);
+    return invalid(GET_OPERATION, reason);
+  }
+
+  private static WecomSmartSheetException invalid(String operation, String reason) {
+    return new WecomSmartSheetException(operation, reason, null);
   }
 
   private record Page(JsonNode records, boolean hasMore, JsonNode next, Long total) {}
+
+  private record LookupRecord(String recordId, String uniqueValue) {}
+
+  private record Match(int count, String recordId) {}
+
+  private static final class CreateLock {
+    private int participants;
+    private volatile boolean retired;
+  }
 
   private record TimestampedRow(String recordId, LocalDateTime updatedAt, SheetRow row) {}
 }
