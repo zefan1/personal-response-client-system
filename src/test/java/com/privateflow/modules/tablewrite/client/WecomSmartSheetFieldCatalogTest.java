@@ -109,6 +109,28 @@ class WecomSmartSheetFieldCatalogTest {
   }
 
   @Test
+  void loaderReturnsPublishedSnapshotWithoutAwaitingItsOwnCompletedFuture() throws Exception {
+    LoaderBoundaryTicker ticker = new LoaderBoundaryTicker();
+    ScriptedClient api = client(
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Loaded\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC(), ticker);
+    AtomicReference<Map<String, WecomSmartSheetField>> result = new AtomicReference<>();
+    AtomicReference<RuntimeException> failure = new AtomicReference<>();
+
+    try {
+      result.set(catalog.visibleFields(Duration.ofMillis(100)));
+    } catch (RuntimeException ex) {
+      failure.set(ex);
+    }
+
+    assertThat(failure.get()).isNull();
+    assertThat(result.get()).containsOnlyKeys("Loaded");
+    assertThat(ticker.reads()).isEqualTo(3);
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsOnlyKeys("Loaded");
+    assertThat(api.bodies).hasSize(1);
+  }
+
+  @Test
   void requiresPositiveTimeoutBeforeLoadingCatalog() throws Exception {
     for (Duration timeout : new Duration[] {null, Duration.ZERO, Duration.ofNanos(-1)}) {
       ScriptedClient api = client(
@@ -428,6 +450,39 @@ class WecomSmartSheetFieldCatalogTest {
   }
 
   @Test
+  void exceptionalFollowerCompletionAtDeadlinePrefersSafeTimeout() throws Exception {
+    PausingDeadlineTicker ticker = new PausingDeadlineTicker();
+    WecomRequestDeadline deadline = WecomRequestDeadline.start(
+        Duration.ofMillis(100), "get_fields", ticker);
+    CompletableFuture<String> pending = new CompletableFuture<>();
+    AtomicReference<RuntimeException> failure = new AtomicReference<>();
+    Thread follower = new Thread(() -> {
+      try {
+        WecomSmartSheetFieldCatalog.await(pending, deadline);
+      } catch (RuntimeException ex) {
+        failure.set(ex);
+      }
+    }, "catalog-exception-deadline-follower");
+    try {
+      follower.start();
+      assertThat(ticker.beforeWaitPaused.await(2, TimeUnit.SECONDS)).isTrue();
+      ticker.advance(Duration.ofMillis(100));
+      pending.completeExceptionally(new IllegalStateException("raw-exceptional-future"));
+      ticker.releaseWait.countDown();
+      follower.join(2_000);
+
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(failure.get()).isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("timeout expired")
+          .hasMessageNotContaining("raw-exceptional-future");
+    } finally {
+      ticker.releaseWait.countDown();
+      follower.interrupt();
+      follower.join(2_000);
+    }
+  }
+
+  @Test
   void preservesAlreadySanitizedApiFailures() {
     WecomSmartSheetException expected = new WecomSmartSheetException("get_fields", 40058, "remote API returned an error");
     WecomSmartSheetApiClient api = new WecomSmartSheetApiClient(JSON, config(), null) {
@@ -721,6 +776,23 @@ class WecomSmartSheetFieldCatalogTest {
         }
       }
       return captured;
+    }
+  }
+
+  private static final class LoaderBoundaryTicker implements LongSupplier {
+    private final AtomicInteger reads = new AtomicInteger();
+
+    int reads() {
+      return reads.get();
+    }
+
+    @Override
+    public long getAsLong() {
+      return switch (reads.incrementAndGet()) {
+        case 1, 2 -> 0L;
+        case 3 -> Duration.ofMillis(99).toNanos();
+        default -> Duration.ofMillis(100).toNanos();
+      };
     }
   }
 

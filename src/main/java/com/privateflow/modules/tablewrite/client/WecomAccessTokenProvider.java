@@ -76,6 +76,7 @@ public class WecomAccessTokenProvider {
     boolean locked = false;
     try {
       locked = tryRefreshLock(deadline);
+      deadline.remaining();
       current = cachedToken.get();
       if (isUsable(current)) {
         return current.value();

@@ -83,10 +83,12 @@ public class WecomSmartSheetFieldCatalog {
           snapshot = loaded;
           detach(active);
           active.result.complete(loaded);
+          return loaded.fields();
         } catch (RuntimeException ex) {
           RuntimeException failure = loadFailure(ex);
           detach(active);
           active.result.completeExceptionally(failure);
+          throw failure;
         }
       }
       return await(active.result, deadline).fields();
@@ -273,6 +275,7 @@ public class WecomSmartSheetFieldCatalog {
       Thread.currentThread().interrupt();
       throw new WecomSmartSheetException(LOAD_OPERATION, "catalog load wait was interrupted", null);
     } catch (ExecutionException ex) {
+      deadline.remaining();
       throw completedFailure(ex.getCause());
     }
     deadline.remaining();

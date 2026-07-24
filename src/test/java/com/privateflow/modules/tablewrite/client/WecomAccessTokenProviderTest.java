@@ -33,6 +33,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.stream.Stream;
@@ -354,6 +355,49 @@ class WecomAccessTokenProviderTest {
   }
 
   @Test
+  void followerThatAcquiresRefreshLockAtItsDeadlineDoesNotReturnLoadersToken() throws Exception {
+    BlockingHttpClient http = new BlockingHttpClient();
+    BoundaryLockTicker ticker = new BoundaryLockTicker();
+    WecomAccessTokenProvider provider = new WecomAccessTokenProvider(
+        new ObjectMapper(), configured("http://127.0.0.1", "corp id", "app-secret-value"),
+        http, new MutableClock(), ticker);
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Future<String> loader = executor.submit(() -> provider.get(Duration.ofSeconds(10)));
+    AtomicReference<String> followerResult = new AtomicReference<>();
+    AtomicReference<RuntimeException> followerFailure = new AtomicReference<>();
+    Thread follower = new Thread(() -> {
+      try {
+        followerResult.set(provider.get(Duration.ofSeconds(5)));
+      } catch (RuntimeException ex) {
+        followerFailure.set(ex);
+      }
+    }, "token-deadline-lock-follower");
+    try {
+      assertThat(http.started.await(2, TimeUnit.SECONDS)).isTrue();
+      ticker.watch(follower);
+      follower.start();
+      assertThat(ticker.beforeFollowerLock.await(2, TimeUnit.SECONDS)).isTrue();
+
+      ticker.advance(Duration.ofSeconds(5));
+      http.release.countDown();
+      assertThat(loader.get(2, TimeUnit.SECONDS)).isEqualTo("token-one");
+      follower.join(2_000);
+
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(followerResult.get()).isNull();
+      assertThat(followerFailure.get()).isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("timeout expired");
+      assertThat(provider.get(Duration.ofSeconds(1))).isEqualTo("token-one");
+      assertThat(http.requests).hasSize(1);
+    } finally {
+      http.release.countDown();
+      follower.interrupt();
+      follower.join(2_000);
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
   void interruptedSendRestoresInterruptStatusWithoutLeakingCauseText() {
     WecomAccessTokenProvider provider = new WecomAccessTokenProvider(
         new ObjectMapper(), configured("http://127.0.0.1", "corp id", "app-secret-value"),
@@ -589,6 +633,29 @@ class WecomAccessTokenProviderTest {
         beforeFollowerWait.countDown();
       }
       return System.nanoTime();
+    }
+  }
+
+  private static final class BoundaryLockTicker implements LongSupplier {
+    private final AtomicLong nanos = new AtomicLong();
+    private final AtomicReference<Thread> watched = new AtomicReference<>();
+    private final AtomicInteger watchedReads = new AtomicInteger();
+    private final CountDownLatch beforeFollowerLock = new CountDownLatch(1);
+
+    void watch(Thread thread) {
+      watched.set(thread);
+    }
+
+    void advance(Duration duration) {
+      nanos.addAndGet(duration.toNanos());
+    }
+
+    @Override
+    public long getAsLong() {
+      if (Thread.currentThread() == watched.get() && watchedReads.incrementAndGet() == 2) {
+        beforeFollowerLock.countDown();
+      }
+      return nanos.get();
     }
   }
 
