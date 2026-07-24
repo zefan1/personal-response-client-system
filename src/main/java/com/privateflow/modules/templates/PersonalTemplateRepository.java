@@ -139,6 +139,92 @@ public class PersonalTemplateRepository {
         .stream().findFirst();
   }
 
+  public Optional<TemplatePromotionCandidate> findCandidateForUpdate(long candidateId) {
+    return jdbcTemplate.query(candidateSelect() + " WHERE candidate.id = ? FOR UPDATE", this::candidate, candidateId)
+        .stream().findFirst();
+  }
+
+  public List<TemplatePromotionCandidate> findCandidates(TemplatePromotionCandidateStatus status) {
+    if (status == null) {
+      return jdbcTemplate.query(candidateSelect() + " ORDER BY candidate.created_at DESC, candidate.id DESC", this::candidate);
+    }
+    return jdbcTemplate.query(candidateSelect() + " WHERE candidate.status = ? ORDER BY candidate.created_at DESC, candidate.id DESC",
+        this::candidate,
+        status.name());
+  }
+
+  public void insertPublication(long candidateId, long quickSearchItemId, String publishedBy) {
+    jdbcTemplate.update("""
+        INSERT INTO team_template_publications (
+          candidate_id, quick_search_item_id, published_by, published_at
+        ) VALUES (?, ?, ?, ?)
+        """, candidateId, quickSearchItemId, publishedBy, Timestamp.valueOf(LocalDateTime.now()));
+  }
+
+  public void markPublished(long candidateId, String decidedBy) {
+    jdbcTemplate.update("""
+        UPDATE template_promotion_candidates
+        SET status = 'PUBLISHED', decided_by = ?, decided_at = ?
+        WHERE id = ? AND status = 'CANDIDATE'
+        """, decidedBy, Timestamp.valueOf(LocalDateTime.now()), candidateId);
+  }
+
+  public void markNotPublished(long candidateId, String decidedBy) {
+    jdbcTemplate.update("""
+        UPDATE template_promotion_candidates
+        SET status = 'NOT_PUBLISHED', decided_by = ?, decided_at = ?
+        WHERE id = ? AND status = 'CANDIDATE'
+        """, decidedBy, Timestamp.valueOf(LocalDateTime.now()), candidateId);
+  }
+
+  public List<TeamTemplate> findPublishedTeamTemplates() {
+    return jdbcTemplate.query("""
+        SELECT publication.quick_search_item_id,
+               candidate.id AS candidate_id,
+               item.title,
+               item.content,
+               item.shortcut_code,
+               candidate.metadata_json,
+               publication.published_at
+        FROM team_template_publications publication
+        JOIN quick_search_items item ON item.id = publication.quick_search_item_id
+        JOIN template_promotion_candidates candidate ON candidate.id = publication.candidate_id
+        WHERE item.content_type = 'TEMPLATE' AND item.is_enabled = 1
+        ORDER BY item.sort_order ASC, item.shortcut_code ASC, publication.id ASC
+        """, (rs, rowNum) -> new TeamTemplate(
+        rs.getLong("quick_search_item_id"),
+        rs.getLong("candidate_id"),
+        rs.getString("title"),
+        rs.getString("content"),
+        rs.getString("shortcut_code"),
+        metadataFromJson(rs.getString("metadata_json")),
+        rs.getTimestamp("published_at").toLocalDateTime()));
+  }
+
+  public boolean incrementPersonalUsage(long templateId, String ownerUsername) {
+    return jdbcTemplate.update("""
+        UPDATE personal_templates
+        SET usage_count = usage_count + 1, updated_at = ?
+        WHERE id = ? AND owner_username = ?
+        """, Timestamp.valueOf(LocalDateTime.now()), templateId, ownerUsername) == 1;
+  }
+
+  public boolean incrementTeamUsage(long quickSearchItemId) {
+    return jdbcTemplate.update("""
+        UPDATE personal_templates
+        SET usage_count = usage_count + 1, updated_at = ?
+        WHERE id = (
+          SELECT candidate.personal_template_id
+          FROM template_promotion_candidates candidate
+          JOIN team_template_publications publication ON publication.candidate_id = candidate.id
+          JOIN quick_search_items item ON item.id = publication.quick_search_item_id
+          WHERE publication.quick_search_item_id = ?
+            AND item.content_type = 'TEMPLATE'
+            AND item.is_enabled = 1
+        )
+        """, Timestamp.valueOf(LocalDateTime.now()), quickSearchItemId) == 1;
+  }
+
   private String candidateSelect() {
     return """
         SELECT candidate.id, candidate.personal_template_id, candidate.owner_username,

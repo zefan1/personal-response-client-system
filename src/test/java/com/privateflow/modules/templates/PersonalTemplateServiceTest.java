@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,8 +55,46 @@ class PersonalTemplateServiceTest {
         .hasMessageContaining("labels");
   }
 
+  @Test
+  void recordsPersonalTemplateCopyForTheOwnerWithoutAnySendConfirmation() {
+    PersonalTemplateRepository repository = mock(PersonalTemplateRepository.class);
+    when(repository.incrementPersonalUsage(41L, "keeper-a")).thenReturn(true);
+    AuthContext.set(new AuthUser("keeper-a", "Keeper A", Role.KEEPER, null));
+
+    assertThat(new PersonalTemplateService(repository).recordPersonalTemplateUse(41L))
+        .containsEntry("recorded", true)
+        .containsEntry("source", "PERSONAL");
+
+    verify(repository).incrementPersonalUsage(41L, "keeper-a");
+    verify(repository, never()).findCandidateForUpdate(41L);
+  }
+
+  @Test
+  void returnsOnlyPublishedTeamTemplatesAndRecordsTeamCopySeparately() {
+    PersonalTemplateRepository repository = mock(PersonalTemplateRepository.class);
+    when(repository.findPublishedTeamTemplates()).thenReturn(List.of(teamTemplate()));
+    when(repository.incrementTeamUsage(77L)).thenReturn(true);
+    AuthContext.set(new AuthUser("keeper-a", "Keeper A", Role.KEEPER, null));
+    PersonalTemplateService service = new PersonalTemplateService(repository);
+
+    assertThat(service.listTeamTemplates()).extracting(TeamTemplate::title).containsExactly("Team opening");
+    assertThat(service.recordTeamTemplateUse(77L)).containsEntry("source", "TEAM");
+    verify(repository).incrementTeamUsage(77L);
+  }
+
   private PersonalTemplate template(long id, TemplateMetadata metadata) {
     LocalDateTime now = LocalDateTime.of(2026, 7, 24, 13, 0);
     return new PersonalTemplate(id, "Opening", "Edited body", metadata, "reply-session-1", 0, now, now);
+  }
+
+  private TeamTemplate teamTemplate() {
+    return new TeamTemplate(
+        77L,
+        42L,
+        "Team opening",
+        "Edited body",
+        "TM42",
+        new TemplateMetadata("wecom", "new-lead", "LEAD", List.of("warm")),
+        LocalDateTime.of(2026, 7, 24, 13, 0));
   }
 }

@@ -84,6 +84,26 @@ public class QuickSearchAdminService {
     return Map.of("id", id);
   }
 
+  public long createTeamTemplate(QuickSearchItemRequest request) {
+    validateTeamTemplate(request);
+    long id = repository.create(new QuickSearchItemRequest(
+        ContentType.TEMPLATE,
+        request.leadType(),
+        request.title().trim(),
+        request.shortcutCode().trim(),
+        request.content().trim(),
+        null,
+        request.sortOrder(),
+        request.enabled(),
+        null), AuthContext.username());
+    repository.find(id).ifPresent(item -> audit("TEAM_TEMPLATE_PUBLISH", item, quickSearchDetail(item)));
+    return id;
+  }
+
+  public void broadcastTeamTemplateRefresh() {
+    publishRefresh();
+  }
+
   public QuickSearchAdminItem update(long id, QuickSearchItemRequest request) {
     QuickSearchAdminItem existing = repository.find(id)
         .orElseThrow(() -> new ApiException(ApiErrorCodes.INTERNAL_ERROR, "速搜内容不存在"));
@@ -180,6 +200,27 @@ public class QuickSearchAdminService {
       if (repository.shortcutExists(request.shortcutCode(), id)) {
         throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "快线码已存在");
       }
+    }
+  }
+
+  private void validateTeamTemplate(QuickSearchItemRequest request) {
+    if (request == null || request.contentType() != ContentType.TEMPLATE) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "team template is required");
+    }
+    if (request.title() == null || request.title().isBlank() || request.title().trim().length() > 120) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "team template title is invalid");
+    }
+    if (request.content() == null || request.content().isBlank() || request.content().trim().length() > 4000) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "team template content is invalid");
+    }
+    if (request.shortcutCode() == null || !request.shortcutCode().trim().matches("[A-Za-z0-9]{2,20}")) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "shortcut code must be 2-20 letters or digits");
+    }
+    if (repository.shortcutExists(request.shortcutCode().trim(), null)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "shortcut code already exists");
+    }
+    if (request.leadType() != null && request.leadType().trim().length() > 32) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "lead type exceeds 32 characters");
     }
   }
 

@@ -58,6 +58,26 @@ class TemplateControllerTest {
     verify(service).listMine();
   }
 
+  @Test
+  void employeeCanReadPublishedTeamTemplatesAndRecordCopyWithoutSendConfirmation() throws Exception {
+    when(service.listTeamTemplates()).thenReturn(List.of(teamTemplate()));
+    when(service.recordPersonalTemplateUse(41L)).thenReturn(java.util.Map.of("recorded", true, "source", "PERSONAL"));
+    when(service.recordTeamTemplateUse(77L)).thenReturn(java.util.Map.of("recorded", true, "source", "TEAM"));
+
+    mockMvc.perform(get("/api/v1/templates/team"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].quickSearchItemId").value(77))
+        .andExpect(jsonPath("$.data[0].title").value("Team opening"));
+    mockMvc.perform(post("/api/v1/templates/personal/41/use"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.source").value("PERSONAL"));
+    mockMvc.perform(post("/api/v1/templates/team/77/use"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.source").value("TEAM"));
+    verify(service).recordPersonalTemplateUse(41L);
+    verify(service).recordTeamTemplateUse(77L);
+  }
+
   private PersonalTemplate template() {
     LocalDateTime now = LocalDateTime.of(2026, 7, 24, 13, 0);
     return new PersonalTemplate(
@@ -69,5 +89,16 @@ class TemplateControllerTest {
         0,
         now,
         now);
+  }
+
+  private TeamTemplate teamTemplate() {
+    return new TeamTemplate(
+        77L,
+        42L,
+        "Team opening",
+        "Edited body",
+        "TM42",
+        new TemplateMetadata("wecom", "new-lead", "LEAD", List.of("warm")),
+        LocalDateTime.of(2026, 7, 24, 13, 0));
   }
 }

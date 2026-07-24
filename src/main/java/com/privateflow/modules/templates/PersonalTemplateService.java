@@ -7,6 +7,7 @@ import com.privateflow.modules.api.auth.AuthUser;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -47,6 +48,27 @@ public class PersonalTemplateService {
 
   public List<PersonalTemplate> listMine() {
     return repository.findMine(requireAuthenticatedUser().username());
+  }
+
+  public List<TeamTemplate> listTeamTemplates() {
+    requireAuthenticatedUser();
+    return repository.findPublishedTeamTemplates();
+  }
+
+  public Map<String, Object> recordPersonalTemplateUse(long templateId) {
+    AuthUser user = requireAuthenticatedUser();
+    if (!repository.incrementPersonalUsage(templateId, user.username())) {
+      throw new ApiException(ApiErrorCodes.FORBIDDEN, "personal template is unavailable");
+    }
+    return Map.of("recorded", true, "source", "PERSONAL");
+  }
+
+  public Map<String, Object> recordTeamTemplateUse(long quickSearchItemId) {
+    requireAuthenticatedUser();
+    if (!repository.incrementTeamUsage(quickSearchItemId)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "team template is unavailable");
+    }
+    return Map.of("recorded", true, "source", "TEAM");
   }
 
   private AuthUser requireAuthenticatedUser() {
