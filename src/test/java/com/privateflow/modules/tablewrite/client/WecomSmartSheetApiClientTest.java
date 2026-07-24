@@ -320,6 +320,21 @@ class WecomSmartSheetApiClientTest {
   }
 
   @Test
+  void successfulResponseAtDeadlineIsRejected() {
+    MutableTicker ticker = new MutableTicker();
+    DeadlineHttpClient http = new DeadlineHttpClient(ticker, Duration.ofSeconds(1),
+        "{\"errcode\":0,\"fields\":[]}");
+    WecomSmartSheetApiClient client = new WecomSmartSheetApiClient(
+        new ObjectMapper(), configured("http://127.0.0.1"), tokens("token-one"), http, ticker);
+
+    assertThatThrownBy(() -> client.post("get_fields", Map.of(), Duration.ofSeconds(1)))
+        .isInstanceOf(WecomSmartSheetException.class)
+        .hasMessageContaining("timeout expired");
+
+    assertThat(http.requests).hasSize(1);
+  }
+
+  @Test
   void sanitizesInvalidUriIOExceptionAndInterruptedTransportFailures() {
     assertTransportFailure(new WecomSmartSheetApiClient(new ObjectMapper(), configured(
         "http://bad host/CorpID-sentinel/app-secret-value/raw-response-secret"), tokens("token-one"),

@@ -81,6 +81,7 @@ public class WecomAccessTokenProvider {
         return current.value();
       }
       Token refreshed = requestToken(deadline);
+      deadline.remaining();
       cachedToken.set(refreshed);
       return refreshed.value();
     } finally {

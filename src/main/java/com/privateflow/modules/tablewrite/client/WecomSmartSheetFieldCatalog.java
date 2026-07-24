@@ -10,7 +10,6 @@ import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -79,22 +78,34 @@ public class WecomSmartSheetFieldCatalog {
       if (loader) {
         try {
           Map<String, WecomSmartSheetField> fields = load(deadline);
+          deadline.remaining();
           Snapshot loaded = new Snapshot(Map.copyOf(fields), clock.instant());
           snapshot = loaded;
+          detach(active);
           active.result.complete(loaded);
         } catch (RuntimeException ex) {
-          active.result.completeExceptionally(loadFailure(ex));
+          RuntimeException failure = loadFailure(ex);
+          detach(active);
+          active.result.completeExceptionally(failure);
         }
       }
       return await(active.result, deadline).fields();
     } finally {
-      synchronized (this) {
-        active.participants--;
-        if (active.participants == 0 && inFlight == active) {
-          inFlight = null;
-        }
-      }
+      releaseParticipant(active);
     }
+  }
+
+  private synchronized void detach(InFlight active) {
+    if (inFlight == active) {
+      inFlight = null;
+    }
+  }
+
+  private synchronized void releaseParticipant(InFlight active) {
+    if (active.participants <= 0) {
+      throw new IllegalStateException("WeCom visible field catalog coordination was invalid");
+    }
+    active.participants--;
   }
 
   public WecomSmartSheetField requireWritable(String title, Duration timeout) {
@@ -252,12 +263,10 @@ public class WecomSmartSheetFieldCatalog {
     return failure instanceof WecomSmartSheetException ? failure : loadFailure();
   }
 
-  private static Snapshot await(CompletableFuture<Snapshot> result, WecomRequestDeadline deadline) {
-    if (result.isDone()) {
-      return completed(result);
-    }
+  static <T> T await(CompletableFuture<T> result, WecomRequestDeadline deadline) {
+    T completed;
     try {
-      return result.get(deadline.remaining().toNanos(), TimeUnit.NANOSECONDS);
+      completed = result.get(deadline.remaining().toNanos(), TimeUnit.NANOSECONDS);
     } catch (TimeoutException ex) {
       throw new WecomSmartSheetException(LOAD_OPERATION, "catalog load wait timed out", null);
     } catch (InterruptedException ex) {
@@ -266,18 +275,8 @@ public class WecomSmartSheetFieldCatalog {
     } catch (ExecutionException ex) {
       throw completedFailure(ex.getCause());
     }
-  }
-
-  private static Snapshot completed(CompletableFuture<Snapshot> result) {
-    try {
-      Snapshot snapshot = result.getNow(null);
-      if (snapshot == null) {
-        throw loadFailure();
-      }
-      return snapshot;
-    } catch (CompletionException ex) {
-      throw completedFailure(ex.getCause());
-    }
+    deadline.remaining();
+    return completed;
   }
 
   private static RuntimeException completedFailure(Throwable cause) {

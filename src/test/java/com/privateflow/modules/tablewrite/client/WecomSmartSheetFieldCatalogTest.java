@@ -14,9 +14,11 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import org.junit.jupiter.api.Test;
@@ -87,6 +89,23 @@ class WecomSmartSheetFieldCatalogTest {
         .containsKeys("One", "Two");
 
     assertThat(api.timeouts).containsExactly(Duration.ofSeconds(1), Duration.ofMillis(900));
+  }
+
+  @Test
+  void finalPageAtDeadlineIsNotCachedAndNextBudgetLoadsAgain() throws Exception {
+    MutableTicker ticker = new MutableTicker();
+    DeadlineScriptedClient api = new DeadlineScriptedClient(ticker,
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Expired\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f2\",\"field_title\":\"Recovered\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC(), ticker);
+
+    assertThatThrownBy(() -> catalog.visibleFields(Duration.ofMillis(100)))
+        .isInstanceOf(WecomSmartSheetException.class)
+        .hasMessageContaining("timeout expired");
+    assertThat(api.timeouts).containsExactly(Duration.ofMillis(100));
+
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsOnlyKeys("Recovered");
+    assertThat(api.timeouts).containsExactly(Duration.ofMillis(100), Duration.ofSeconds(1));
   }
 
   @Test
@@ -188,6 +207,67 @@ class WecomSmartSheetFieldCatalogTest {
       api.releaseFirst.countDown();
       leader.join(2_000);
     }
+  }
+
+  @Test
+  void failedLoadIsDetachedBeforeOldFollowerExitsSoNewCallCanRetry() throws Exception {
+    BlockingThenRetryClient api = new BlockingThenRetryClient("""
+        {"errcode":0,"total":1,"fields":[{"field_id":"f2","field_title":"Recovered","field_type":"FIELD_TYPE_TEXT"}]}""");
+    PausingFollowerTicker ticker = new PausingFollowerTicker();
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC(), ticker);
+    AtomicReference<RuntimeException> loaderFailure = new AtomicReference<>();
+    Thread loader = catalogThread("catalog-failed-loader", catalog, loaderFailure);
+    AtomicReference<RuntimeException> oldFollowerFailure = new AtomicReference<>();
+    Thread oldFollower = catalogThread("catalog-old-follower", catalog, oldFollowerFailure);
+    try {
+      loader.start();
+      assertThat(api.firstStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      ticker.watch(oldFollower);
+      oldFollower.start();
+      assertThat(ticker.followerPaused.await(2, TimeUnit.SECONDS)).isTrue();
+
+      api.releaseFirst.countDown();
+      loader.join(2_000);
+      assertThat(loader.isAlive()).isFalse();
+      assertThat(loaderFailure.get()).isNotNull();
+
+      AtomicReference<Map<String, WecomSmartSheetField>> retryResult = new AtomicReference<>();
+      AtomicReference<RuntimeException> retryFailure = new AtomicReference<>();
+      try {
+        retryResult.set(catalog.visibleFields(Duration.ofSeconds(5)));
+      } catch (RuntimeException ex) {
+        retryFailure.set(ex);
+      }
+
+      assertThat(retryFailure.get()).isNull();
+      assertThat(retryResult.get()).containsOnlyKeys("Recovered");
+      assertThat(api.calls.get()).isEqualTo(2);
+
+      ticker.releaseFollower.countDown();
+      oldFollower.join(2_000);
+      assertThat(oldFollower.isAlive()).isFalse();
+      assertThat(oldFollowerFailure.get()).isSameAs(loaderFailure.get());
+    } finally {
+      api.releaseFirst.countDown();
+      ticker.releaseFollower.countDown();
+      loader.interrupt();
+      oldFollower.interrupt();
+      loader.join(2_000);
+      oldFollower.join(2_000);
+    }
+  }
+
+  private static Thread catalogThread(
+      String name,
+      WecomSmartSheetFieldCatalog catalog,
+      AtomicReference<RuntimeException> failure) {
+    return new Thread(() -> {
+      try {
+        catalog.visibleFields(Duration.ofSeconds(5));
+      } catch (RuntimeException ex) {
+        failure.set(ex);
+      }
+    }, name);
   }
 
   private static Thread failureThread(
@@ -297,6 +377,53 @@ class WecomSmartSheetFieldCatalogTest {
       loader.interrupt();
       follower.join(2_000);
       loader.join(2_000);
+    }
+  }
+
+  @Test
+  void completedFollowerResultDoesNotBypassItsExpiredDeadline() {
+    MutableTicker ticker = new MutableTicker();
+    WecomRequestDeadline deadline = WecomRequestDeadline.start(
+        Duration.ofMillis(100), "get_fields", ticker);
+    CompletableFuture<String> completed = CompletableFuture.completedFuture("loaded");
+    ticker.advance(Duration.ofMillis(100));
+
+    assertThatThrownBy(() -> WecomSmartSheetFieldCatalog.await(completed, deadline))
+        .isInstanceOf(WecomSmartSheetException.class)
+        .hasMessageContaining("timeout expired");
+  }
+
+  @Test
+  void followerCompletionAtDeadlineIsRejectedAfterWaitReturns() throws Exception {
+    PausingDeadlineTicker ticker = new PausingDeadlineTicker();
+    WecomRequestDeadline deadline = WecomRequestDeadline.start(
+        Duration.ofMillis(100), "get_fields", ticker);
+    CompletableFuture<String> pending = new CompletableFuture<>();
+    AtomicReference<String> result = new AtomicReference<>();
+    AtomicReference<RuntimeException> failure = new AtomicReference<>();
+    Thread follower = new Thread(() -> {
+      try {
+        result.set(WecomSmartSheetFieldCatalog.await(pending, deadline));
+      } catch (RuntimeException ex) {
+        failure.set(ex);
+      }
+    }, "catalog-deadline-follower");
+    try {
+      follower.start();
+      assertThat(ticker.beforeWaitPaused.await(2, TimeUnit.SECONDS)).isTrue();
+      ticker.advance(Duration.ofMillis(100));
+      pending.complete("loaded");
+      ticker.releaseWait.countDown();
+      follower.join(2_000);
+
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(result.get()).isNull();
+      assertThat(failure.get()).isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("timeout expired");
+    } finally {
+      ticker.releaseWait.countDown();
+      follower.interrupt();
+      follower.join(2_000);
     }
   }
 
@@ -541,6 +668,59 @@ class WecomSmartSheetFieldCatalogTest {
         beforeFollowerWait.countDown();
       }
       return System.nanoTime();
+    }
+  }
+
+  private static final class PausingFollowerTicker implements LongSupplier {
+    private final AtomicReference<Thread> watched = new AtomicReference<>();
+    private final AtomicInteger watchedReads = new AtomicInteger();
+    private final CountDownLatch followerPaused = new CountDownLatch(1);
+    private final CountDownLatch releaseFollower = new CountDownLatch(1);
+
+    void watch(Thread thread) {
+      watched.set(thread);
+    }
+
+    @Override
+    public long getAsLong() {
+      if (Thread.currentThread() == watched.get() && watchedReads.incrementAndGet() == 2) {
+        followerPaused.countDown();
+        try {
+          if (!releaseFollower.await(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("test follower was not released");
+          }
+        } catch (InterruptedException ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      return System.nanoTime();
+    }
+  }
+
+  private static final class PausingDeadlineTicker implements LongSupplier {
+    private final AtomicLong nanos = new AtomicLong();
+    private final AtomicInteger reads = new AtomicInteger();
+    private final CountDownLatch beforeWaitPaused = new CountDownLatch(1);
+    private final CountDownLatch releaseWait = new CountDownLatch(1);
+
+    void advance(Duration duration) {
+      nanos.addAndGet(duration.toNanos());
+    }
+
+    @Override
+    public long getAsLong() {
+      long captured = nanos.get();
+      if (reads.incrementAndGet() == 2) {
+        beforeWaitPaused.countDown();
+        try {
+          if (!releaseWait.await(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("test deadline wait was not released");
+          }
+        } catch (InterruptedException ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      return captured;
     }
   }
 

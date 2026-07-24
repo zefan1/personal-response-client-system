@@ -90,6 +90,7 @@ public class WecomSmartSheetApiClient {
       String token = token(operation, deadline.remaining());
       Response response = send(operation, path, token, json, deadline.remaining());
       if (response.errcode() == 0) {
+        deadline.remaining();
         return response.root();
       }
       if (isTokenError(response.errcode()) && attempt == 0) {

@@ -266,6 +266,23 @@ class WecomAccessTokenProviderTest {
   }
 
   @Test
+  void tokenReturnedAtDeadlineIsNotCachedAndNextBudgetRequestsAgain() {
+    MutableTicker ticker = new MutableTicker();
+    ExhaustingOnceHttpClient http = new ExhaustingOnceHttpClient(ticker);
+    WecomAccessTokenProvider provider = new WecomAccessTokenProvider(
+        new ObjectMapper(), configured("http://127.0.0.1", "corp id", "app-secret-value"),
+        http, new MutableClock(), ticker);
+
+    assertThatThrownBy(() -> provider.get(Duration.ofSeconds(1)))
+        .isInstanceOf(WecomSmartSheetException.class)
+        .hasMessageContaining("timeout expired");
+    assertThat(http.requests).hasSize(1);
+
+    assertThat(provider.get(Duration.ofSeconds(1))).isEqualTo("token-one");
+    assertThat(http.requests).hasSize(2);
+  }
+
+  @Test
   void refreshFollowerTimesOutWithoutStartingAnotherRequestAndLoaderStillCaches() throws Exception {
     BlockingHttpClient http = new BlockingHttpClient();
     WecomAccessTokenProvider provider = new WecomAccessTokenProvider(
@@ -523,6 +540,37 @@ class WecomAccessTokenProviderTest {
       @SuppressWarnings("unchecked")
       HttpResponse<T> response = (HttpResponse<T>) new FixedResponse(200, success("token-one", 600));
       return response;
+    }
+  }
+
+  private static final class ExhaustingOnceHttpClient extends RecordingHttpClient {
+    private final MutableTicker ticker;
+    private final AtomicInteger calls = new AtomicInteger();
+
+    private ExhaustingOnceHttpClient(MutableTicker ticker) {
+      this.ticker = ticker;
+    }
+
+    @Override public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler)
+        throws IOException, InterruptedException {
+      HttpResponse<T> response = super.send(request, handler);
+      if (calls.getAndIncrement() == 0) {
+        ticker.advance(Duration.ofSeconds(1));
+      }
+      return response;
+    }
+  }
+
+  private static final class MutableTicker implements LongSupplier {
+    private long nanos;
+
+    void advance(Duration duration) {
+      nanos += duration.toNanos();
+    }
+
+    @Override
+    public long getAsLong() {
+      return nanos;
     }
   }
 
