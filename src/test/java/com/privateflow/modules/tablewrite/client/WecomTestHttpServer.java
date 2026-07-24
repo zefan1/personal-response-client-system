@@ -3,7 +3,6 @@ package com.privateflow.modules.tablewrite.client;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
@@ -27,7 +26,7 @@ final class WecomTestHttpServer implements AutoCloseable {
   }
 
   static WecomTestHttpServer start() throws IOException {
-    HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     WecomTestHttpServer testServer = new WecomTestHttpServer(server);
     server.start();
     return testServer;
