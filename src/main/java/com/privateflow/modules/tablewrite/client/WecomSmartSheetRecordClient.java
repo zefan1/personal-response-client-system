@@ -103,9 +103,15 @@ public class WecomSmartSheetRecordClient {
           throw invalid(GET_OPERATION, "multiple exact unique-field matches were found");
         }
         if (match.count() == 1) {
+          lock.confirmedRecordId = match.recordId();
           return match.recordId();
         }
-        return add(encoded, timeout);
+        if (lock.confirmedRecordId != null) {
+          return lock.confirmedRecordId;
+        }
+        String createdRecordId = add(encoded, timeout);
+        lock.confirmedRecordId = createdRecordId;
+        return createdRecordId;
       }
     } finally {
       releaseCreateLock(lockKey, lock);
@@ -468,6 +474,7 @@ public class WecomSmartSheetRecordClient {
   private static final class CreateLock {
     private int participants;
     private volatile boolean retired;
+    private String confirmedRecordId;
   }
 
   private record TimestampedRow(String recordId, LocalDateTime updatedAt, SheetRow row) {}

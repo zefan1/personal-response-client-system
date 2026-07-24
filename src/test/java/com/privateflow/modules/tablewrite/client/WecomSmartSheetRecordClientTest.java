@@ -435,6 +435,54 @@ class WecomSmartSheetRecordClientTest {
   }
 
   @Test
+  void reusesConfirmedIdWhenOverlappingNormalizedPhonesRemainInvisibleToLookup() throws Exception {
+    VisibilityLagApi api = new VisibilityLagApi();
+    WecomSmartSheetRecordClient client = client(api);
+    AtomicReference<String> firstResult = new AtomicReference<>();
+    AtomicReference<String> secondResult = new AtomicReference<>();
+    AtomicReference<String> thirdResult = new AtomicReference<>();
+    AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+    AtomicReference<Throwable> secondFailure = new AtomicReference<>();
+    AtomicReference<Throwable> thirdFailure = new AtomicReference<>();
+    Thread first = createThread("create-lag-first", client, "138-0000-0015", firstResult, firstFailure);
+    Thread second = createThread("create-lag-second", client, "13800000015", secondResult, secondFailure);
+    Thread third = createThread("create-lag-third", client, "(138) 0000 0015", thirdResult, thirdFailure);
+
+    try {
+      first.start();
+      assertThat(api.firstAddStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      second.start();
+      third.start();
+      assertThat(awaitingCreateLock(second)).isTrue();
+      assertThat(awaitingCreateLock(third)).isTrue();
+      api.releaseFirstAdd.countDown();
+      first.join(2_000);
+      second.join(2_000);
+      third.join(2_000);
+
+      assertThat(first.isAlive()).isFalse();
+      assertThat(second.isAlive()).isFalse();
+      assertThat(third.isAlive()).isFalse();
+      assertThat(firstFailure.get()).isNull();
+      assertThat(secondFailure.get()).isNull();
+      assertThat(thirdFailure.get()).isNull();
+      assertThat(firstResult.get()).isEqualTo("r-created");
+      assertThat(secondResult.get()).isEqualTo("r-created");
+      assertThat(thirdResult.get()).isEqualTo("r-created");
+      assertThat(api.recordCalls.get()).isEqualTo(3);
+      assertThat(api.addCalls.get()).isEqualTo(1);
+    } finally {
+      api.releaseFirstAdd.countDown();
+      first.interrupt();
+      second.interrupt();
+      third.interrupt();
+      first.join(2_000);
+      second.join(2_000);
+      third.join(2_000);
+    }
+  }
+
+  @Test
   void rejectsMalformedAddConfirmationWithoutLeakingRequestOrResponseData() throws Exception {
     String phone = "13800000008";
     String name = "private-name-value";
@@ -832,6 +880,58 @@ class WecomSmartSheetRecordClientTest {
       } catch (InterruptedException ex) {
         Thread.currentThread().interrupt();
         throw new AssertionError(description + " interrupted");
+      }
+    }
+  }
+
+  private static final class VisibilityLagApi extends WecomSmartSheetApiClient {
+    private final JsonNode fieldResponse;
+    private final JsonNode emptyResponse;
+    private final CountDownLatch firstAddStarted = new CountDownLatch(1);
+    private final CountDownLatch releaseFirstAdd = new CountDownLatch(1);
+    private final AtomicInteger recordCalls = new AtomicInteger();
+    private final AtomicInteger addCalls = new AtomicInteger();
+
+    private VisibilityLagApi() throws Exception {
+      super(JSON, config(), null);
+      fieldResponse = JSON.readTree(fields());
+      emptyResponse = JSON.readTree(emptyRecords());
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      return switch (operation) {
+        case "get_fields" -> fieldResponse;
+        case "get_records" -> records();
+        case "add_records" -> add();
+        default -> throw new AssertionError("unexpected operation");
+      };
+    }
+
+    private JsonNode records() {
+      recordCalls.incrementAndGet();
+      return emptyResponse;
+    }
+
+    private JsonNode add() {
+      int call = addCalls.incrementAndGet();
+      if (call == 1) {
+        firstAddStarted.countDown();
+        await(releaseFirstAdd);
+      }
+      var response = JSON.createObjectNode().put("errcode", 0);
+      response.putArray("records").addObject()
+          .put("record_id", call == 1 ? "r-created" : "r-duplicate-" + call);
+      return response;
+    }
+
+    private static void await(CountDownLatch latch) {
+      try {
+        if (!latch.await(2, TimeUnit.SECONDS)) {
+          throw new AssertionError("timed out waiting to release first add");
+        }
+      } catch (InterruptedException ex) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError("first add interrupted");
       }
     }
   }
