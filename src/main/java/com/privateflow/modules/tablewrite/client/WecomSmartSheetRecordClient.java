@@ -4,12 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.privateflow.modules.customer.sync.SheetRow;
 import com.privateflow.modules.customer.sync.SheetSource;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +20,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -28,6 +31,8 @@ public class WecomSmartSheetRecordClient {
   private static final String UPDATE_OPERATION = "update_records";
   private static final int PAGE_SIZE = 1000;
   private static final int MAX_PAGES = 100;
+  private static final Duration RECENT_SUCCESS_TTL = Duration.ofMinutes(5);
+  private static final int RECENT_SUCCESS_LIMIT = 1024;
   private static final String FIELD_TITLE_KEY_TYPE = "CELL_VALUE_KEY_TYPE_FIELD_TITLE";
   private static final String FIELD_ID_KEY_TYPE = "CELL_VALUE_KEY_TYPE_FIELD_ID";
 
@@ -35,17 +40,40 @@ public class WecomSmartSheetRecordClient {
   private final WecomSmartSheetApiClient apiClient;
   private final WecomSmartSheetFieldCatalog fieldCatalog;
   private final WecomSmartSheetValueCodec valueCodec;
+  private final Clock clock;
+  private final Duration recentSuccessTtl;
+  private final int recentSuccessLimit;
   private final ConcurrentHashMap<String, CreateLock> createLocks = new ConcurrentHashMap<>();
+  private final LinkedHashMap<String, RecentSuccess> recentSuccesses = new LinkedHashMap<>(16, 0.75f, true);
 
+  @Autowired
   public WecomSmartSheetRecordClient(
       WecomSmartSheetConfig config,
       WecomSmartSheetApiClient apiClient,
       WecomSmartSheetFieldCatalog fieldCatalog,
       WecomSmartSheetValueCodec valueCodec) {
+    this(config, apiClient, fieldCatalog, valueCodec, Clock.systemUTC(), RECENT_SUCCESS_TTL, RECENT_SUCCESS_LIMIT);
+  }
+
+  WecomSmartSheetRecordClient(
+      WecomSmartSheetConfig config,
+      WecomSmartSheetApiClient apiClient,
+      WecomSmartSheetFieldCatalog fieldCatalog,
+      WecomSmartSheetValueCodec valueCodec,
+      Clock clock,
+      Duration recentSuccessTtl,
+      int recentSuccessLimit) {
     this.config = Objects.requireNonNull(config, "config is required");
     this.apiClient = Objects.requireNonNull(apiClient, "apiClient is required");
     this.fieldCatalog = Objects.requireNonNull(fieldCatalog, "fieldCatalog is required");
     this.valueCodec = Objects.requireNonNull(valueCodec, "valueCodec is required");
+    this.clock = Objects.requireNonNull(clock, "clock is required");
+    if (recentSuccessTtl == null || recentSuccessTtl.isZero() || recentSuccessTtl.isNegative()
+        || recentSuccessLimit <= 0) {
+      throw new IllegalArgumentException("Recent success cache settings must be positive");
+    }
+    this.recentSuccessTtl = recentSuccessTtl;
+    this.recentSuccessLimit = recentSuccessLimit;
   }
 
   public List<SheetRow> fetchIncrementalRows(
@@ -109,13 +137,20 @@ public class WecomSmartSheetRecordClient {
       }
       if (match.count() == 1) {
         lock.confirmedRecordId = match.recordId();
+        rememberRecentSuccess(lockKey, match.recordId());
         return match.recordId();
       }
       if (lock.confirmedRecordId != null) {
         return lock.confirmedRecordId;
       }
+      String recentRecordId = recentSuccess(lockKey);
+      if (recentRecordId != null) {
+        lock.confirmedRecordId = recentRecordId;
+        return recentRecordId;
+      }
       String createdRecordId = add(encoded, remaining(deadline, ADD_OPERATION));
       lock.confirmedRecordId = createdRecordId;
+      rememberRecentSuccess(lockKey, createdRecordId);
       return createdRecordId;
     } finally {
       try {
@@ -373,6 +408,31 @@ public class WecomSmartSheetRecordClient {
     }
   }
 
+  private String recentSuccess(String lockKey) {
+    synchronized (recentSuccesses) {
+      removeExpiredRecentSuccesses(clock.instant());
+      RecentSuccess success = recentSuccesses.get(lockKey);
+      return success == null ? null : success.recordId();
+    }
+  }
+
+  private void rememberRecentSuccess(String lockKey, String recordId) {
+    synchronized (recentSuccesses) {
+      Instant now = clock.instant();
+      removeExpiredRecentSuccesses(now);
+      recentSuccesses.put(lockKey, new RecentSuccess(recordId, now.plus(recentSuccessTtl)));
+      while (recentSuccesses.size() > recentSuccessLimit) {
+        Iterator<String> oldest = recentSuccesses.keySet().iterator();
+        oldest.next();
+        oldest.remove();
+      }
+    }
+  }
+
+  private void removeExpiredRecentSuccesses(Instant now) {
+    recentSuccesses.entrySet().removeIf(entry -> !now.isBefore(entry.getValue().expiresAt()));
+  }
+
   private TimestampedRow row(
       JsonNode record,
       Map<String, WecomSmartSheetField> fields,
@@ -525,6 +585,8 @@ public class WecomSmartSheetRecordClient {
   private record LookupRecord(String recordId, String uniqueValue) {}
 
   private record Match(int count, String recordId) {}
+
+  private record RecentSuccess(String recordId, Instant expiresAt) {}
 
   private static final class CreateLock {
     private final ReentrantLock coordination = new ReentrantLock();

@@ -10,6 +10,7 @@ import com.privateflow.modules.customer.sync.SheetSource;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -492,6 +493,74 @@ class WecomSmartSheetRecordClientTest {
   }
 
   @Test
+  void reusesRecentConfirmedIdAcrossSequentialVisibilityLag() throws Exception {
+    SequentialLagApi api = new SequentialLagApi();
+    WecomSmartSheetRecordClient client = client(api);
+
+    String first = client.createRow("Customers", Map.of("Phone", "138-0000-0017"), TIMEOUT);
+    String second = client.createRow("Customers", Map.of("Phone", "13800000017"), TIMEOUT);
+
+    assertThat(first).isEqualTo("r-created");
+    assertThat(second).isEqualTo("r-created");
+    assertThat(api.recordCalls.get()).isEqualTo(2);
+    assertThat(api.addCalls.get()).isEqualTo(1);
+  }
+
+  @Test
+  void expiresRecentConfirmedIdAtConfiguredTtl() throws Exception {
+    Duration ttl = Duration.ofMinutes(5);
+    MutableClock clock = new MutableClock(Instant.parse("2026-07-24T00:00:00Z"));
+    SequentialLagApi api = new SequentialLagApi();
+    WecomSmartSheetRecordClient client = client(api, clock, ttl, 2);
+
+    assertThat(client.createRow("Customers", Map.of("Phone", "138-0000-0018"), TIMEOUT))
+        .isEqualTo("r-created");
+    clock.advance(ttl.minusNanos(1));
+    assertThat(client.createRow("Customers", Map.of("Phone", "13800000018"), TIMEOUT))
+        .isEqualTo("r-created");
+    clock.advance(Duration.ofNanos(1));
+    assertThat(client.createRow("Customers", Map.of("Phone", "13800000018"), TIMEOUT))
+        .isEqualTo("r-duplicate-2");
+    assertThat(api.recordCalls.get()).isEqualTo(3);
+    assertThat(api.addCalls.get()).isEqualTo(2);
+  }
+
+  @Test
+  void evictsLeastRecentlyUsedConfirmedIdAtConfiguredCapacity() throws Exception {
+    MutableClock clock = new MutableClock(Instant.parse("2026-07-24T00:00:00Z"));
+    SequentialLagApi api = new SequentialLagApi();
+    WecomSmartSheetRecordClient client = client(api, clock, Duration.ofMinutes(5), 2);
+
+    assertThat(client.createRow("Customers", Map.of("Phone", "13800000021"), TIMEOUT))
+        .isEqualTo("r-created");
+    assertThat(client.createRow("Customers", Map.of("Phone", "13800000022"), TIMEOUT))
+        .isEqualTo("r-duplicate-2");
+    assertThat(client.createRow("Customers", Map.of("Phone", "138-0000-0021"), TIMEOUT))
+        .isEqualTo("r-created");
+    assertThat(client.createRow("Customers", Map.of("Phone", "13800000023"), TIMEOUT))
+        .isEqualTo("r-duplicate-3");
+    assertThat(client.createRow("Customers", Map.of("Phone", "138-0000-0022"), TIMEOUT))
+        .isEqualTo("r-duplicate-4");
+    assertThat(api.recordCalls.get()).isEqualTo(5);
+    assertThat(api.addCalls.get()).isEqualTo(4);
+  }
+
+  @Test
+  void retainsExactRemoteMatchForSequentialVisibilityLag() throws Exception {
+    ScriptedApi api = api(
+        "{\"errcode\":0,\"has_more\":false,\"records\":[{\"record_id\":\"r-existing\",\"values\":{\"f-phone\":\"138-0000-0024\"}}]}",
+        emptyRecords());
+    WecomSmartSheetRecordClient client = client(api);
+
+    assertThat(client.createRow("Customers", Map.of("Phone", "138-0000-0024"), TIMEOUT))
+        .isEqualTo("r-existing");
+    assertThat(client.createRow("Customers", Map.of("Phone", "13800000024"), TIMEOUT))
+        .isEqualTo("r-existing");
+    assertThat(operationBodies(api, "get_records")).hasSize(2);
+    assertThat(operationBodies(api, "add_records")).isEmpty();
+  }
+
+  @Test
   void registersNormalizedParticipantBeforeEncodingCanPause() throws Exception {
     VisibilityLagApi api = new VisibilityLagApi();
     WecomSmartSheetRecordClient client = client(api);
@@ -821,6 +890,13 @@ class WecomSmartSheetRecordClientTest {
     WecomSmartSheetConfig config = config();
     return new WecomSmartSheetRecordClient(config, api, new WecomSmartSheetFieldCatalog(api, config),
         new WecomSmartSheetValueCodec(config));
+  }
+
+  private static WecomSmartSheetRecordClient client(
+      WecomSmartSheetApiClient api, Clock clock, Duration recentSuccessTtl, int recentSuccessLimit) {
+    WecomSmartSheetConfig config = config();
+    return new WecomSmartSheetRecordClient(config, api, new WecomSmartSheetFieldCatalog(api, config),
+        new WecomSmartSheetValueCodec(config), clock, recentSuccessTtl, recentSuccessLimit);
   }
 
   private static ScriptedApi api(String... recordResponses) throws Exception {
@@ -1167,6 +1243,65 @@ class WecomSmartSheetRecordClientTest {
         Thread.currentThread().interrupt();
         throw new AssertionError("first add interrupted");
       }
+    }
+  }
+
+  private static final class SequentialLagApi extends WecomSmartSheetApiClient {
+    private final JsonNode fieldResponse;
+    private final JsonNode emptyResponse;
+    private final AtomicInteger recordCalls = new AtomicInteger();
+    private final AtomicInteger addCalls = new AtomicInteger();
+
+    private SequentialLagApi() throws Exception {
+      super(JSON, config(), null);
+      fieldResponse = JSON.readTree(fields());
+      emptyResponse = JSON.readTree(emptyRecords());
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      return switch (operation) {
+        case "get_fields" -> fieldResponse;
+        case "get_records" -> records();
+        case "add_records" -> add();
+        default -> throw new AssertionError("unexpected operation");
+      };
+    }
+
+    private JsonNode records() {
+      recordCalls.incrementAndGet();
+      return emptyResponse;
+    }
+
+    private JsonNode add() {
+      int call = addCalls.incrementAndGet();
+      var response = JSON.createObjectNode().put("errcode", 0);
+      response.putArray("records").addObject()
+          .put("record_id", call == 1 ? "r-created" : "r-duplicate-" + call);
+      return response;
+    }
+  }
+
+  private static final class MutableClock extends Clock {
+    private Instant instant;
+
+    private MutableClock(Instant instant) {
+      this.instant = instant;
+    }
+
+    private void advance(Duration duration) {
+      instant = instant.plus(duration);
+    }
+
+    @Override public ZoneId getZone() {
+      return ZoneId.of("UTC");
+    }
+
+    @Override public Clock withZone(ZoneId zone) {
+      return this;
+    }
+
+    @Override public Instant instant() {
+      return instant;
     }
   }
 
