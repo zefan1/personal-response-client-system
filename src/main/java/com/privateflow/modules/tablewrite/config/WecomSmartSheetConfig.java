@@ -3,6 +3,7 @@ package com.privateflow.modules.tablewrite.config;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -19,6 +20,7 @@ public final class WecomSmartSheetConfig {
   private final String uniqueFieldTitle;
   private final ZoneId zoneId;
 
+  @Autowired
   public WecomSmartSheetConfig(
       @Value("${WECOM_API_BASE_URL:https://qyapi.weixin.qq.com}") String apiBaseUrl,
       @Value("${WECOM_CORP_ID:}") String corpId,
