@@ -196,7 +196,7 @@
         :open="replyTaskDrawerOpen"
         :tasks="replyTaskItems"
         :active-session-id="replySuggestionState.activeSessionId"
-        @archive="archiveReplyTasks"
+        @clear="clearReplyTasks"
         @cancel="cancelReplyTask"
         @close="replyTaskDrawerOpen = false"
         @select="openReplyTask"
@@ -229,7 +229,7 @@ import ReplyTaskDrawer from './modules/reply-suggestions/ReplyTaskDrawer.vue';
 import ReplyTaskSidebar from './modules/reply-suggestions/ReplyTaskSidebar.vue';
 import {
   activateSession,
-  archiveQueuedReplySessions,
+  clearReplyTaskQueue,
   replySuggestionState,
   restoreArchivedReplySession
 } from './modules/reply-suggestions/replySuggestionStore';
@@ -744,8 +744,10 @@ function openReplyTask(sessionId: string): void {
   selectDesktopPanel('reply');
 }
 
-function archiveReplyTasks(): void {
-  archiveQueuedReplySessions();
+function clearReplyTasks(): void {
+  clearReplyTaskQueue().forEach(({ jobId, sessionId }) => {
+    void cancelRecognitionJob(jobId, sessionId);
+  });
 }
 
 function cancelReplyTask(jobId: string, sessionId: string): void {

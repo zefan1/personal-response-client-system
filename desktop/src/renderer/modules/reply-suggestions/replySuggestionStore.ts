@@ -623,6 +623,23 @@ export function archiveQueuedReplySessions(): ArchivedReplySession[] {
   return archivedSessions;
 }
 
+export function clearReplyTaskQueue(): Array<{ jobId: string; sessionId: string }> {
+  const jobsToCancel = replySuggestionState.sessions
+    .filter((session) => Boolean(session.recognitionJobId)
+      && (session.recognitionJobStatus === 'QUEUED' || session.recognitionJobStatus === 'RECOGNIZING'))
+    .map((session) => ({ jobId: session.recognitionJobId, sessionId: session.sessionId }));
+
+  [...replySuggestionState.sessions, ...replySuggestionState.archivedSessions].forEach((session) => {
+    rememberDismissedSession(session.sessionId);
+    stopFallbackRetry(session.sessionId);
+  });
+  replySuggestionState.sessions = [];
+  replySuggestionState.archivedSessions = [];
+  replySuggestionState.activeSessionId = '';
+  syncActiveSessionToState();
+  return jobsToCancel;
+}
+
 function isArchivableSession(session: ReplySession): boolean {
   return session.status === 'COPIED'
     || session.status === 'FAILED'

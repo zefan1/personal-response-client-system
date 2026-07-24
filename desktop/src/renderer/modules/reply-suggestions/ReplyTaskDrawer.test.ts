@@ -14,7 +14,7 @@ type TaskItem = {
 async function mountDrawer(tasks: TaskItem[]) {
   const selected: string[] = [];
   const cancelled: Array<{ jobId: string; sessionId: string }> = [];
-  const archived = { value: 0 };
+  const cleared = { value: 0 };
   const closed = { value: 0 };
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -25,13 +25,13 @@ async function mountDrawer(tasks: TaskItem[]) {
       activeSessionId: 'reply-2',
       onSelect: (sessionId: string) => selected.push(sessionId),
       onClose: () => { closed.value += 1; },
-      onArchive: () => { archived.value += 1; },
+      onClear: () => { cleared.value += 1; },
       onCancel: (jobId: string, sessionId: string) => cancelled.push({ jobId, sessionId })
     })
   });
   app.mount(host);
   await nextTick();
-  return { app, host, selected, closed, archived, cancelled };
+  return { app, host, selected, closed, cleared, cancelled };
 }
 
 describe('ReplyTaskDrawer', () => {
@@ -58,8 +58,8 @@ describe('ReplyTaskDrawer', () => {
     app.unmount();
   });
 
-  it('archives queued tasks and cancels an active recognition job', async () => {
-    const { app, host, archived, cancelled } = await mountDrawer([
+  it('emits clear and cancels an active recognition job', async () => {
+    const { app, host, cleared, cancelled } = await mountDrawer([
       { sessionId: 'reply-1', nickname: 'Alice', status: 'QUEUED', jobId: 'job-1', updatedAt: 1_700_000_000_000 }
     ]);
 
@@ -67,7 +67,7 @@ describe('ReplyTaskDrawer', () => {
     (host.querySelector('[data-testid="cancel-reply-task-job-1"]') as HTMLButtonElement).click();
     await nextTick();
 
-    expect(archived.value).toBe(1);
+    expect(cleared.value).toBe(1);
     expect(cancelled).toEqual([{ jobId: 'job-1', sessionId: 'reply-1' }]);
     app.unmount();
   });

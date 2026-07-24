@@ -1,3 +1,4 @@
+import { nextTick } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AbnormalAlertPayload, ChatResponse, ProfileSuggestion, ReplySuggestion } from './types';
 
@@ -284,6 +285,47 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.activeSessionId).toBe('session-a');
     expect(replies.replySuggestionState.suggestions).toEqual([suggestion('First reply')]);
     expect(replies.replySuggestionState.archivedSessions).toEqual([]);
+  });
+
+  it('clears every local reply task and returns in-flight recognition jobs for cancellation', async () => {
+    const { replies } = await freshStore();
+    replies.hydrateReplySuggestionStore();
+    replies.showRecognizeResult({
+      sessionId: 'session-archived',
+      response: response('18800001111', [suggestion('Archived reply')])
+    });
+    replies.selectReply(replies.replySuggestionState.suggestions[0]);
+    replies.showRecognizeResult({
+      sessionId: 'session-ready',
+      response: response('18800002222', [suggestion('Ready reply')])
+    });
+    replies.archiveQueuedReplySessions();
+    replies.startRecognizeLoading({ sessionId: 'session-running', source: 'BUTTON_CLICK' });
+    replies.syncRecognitionJobIntoSession({
+      sessionId: 'session-running',
+      jobId: 'job-running',
+      status: 'RECOGNIZING'
+    });
+
+    expect(replies.clearReplyTaskQueue()).toEqual([
+      { jobId: 'job-running', sessionId: 'session-running' }
+    ]);
+    await nextTick();
+
+    expect(replies.replySuggestionState.sessions).toEqual([]);
+    expect(replies.replySuggestionState.archivedSessions).toEqual([]);
+    expect(replies.replySuggestionState.activeSessionId).toBe('');
+    expect(JSON.parse(localStorage.getItem('reply-suggestion-sessions-v1:anonymous') ?? '{}')).toEqual({
+      sessions: [],
+      archivedSessions: [],
+      activeSessionId: ''
+    });
+
+    replies.showRecognizeResult({
+      sessionId: 'session-ready',
+      response: response('18800002222', [suggestion('Delayed reply')])
+    });
+    expect(replies.replySuggestionState.sessions).toEqual([]);
   });
 
   it('persists archived replies across a store cleanup and restores the original reply after hydration', async () => {

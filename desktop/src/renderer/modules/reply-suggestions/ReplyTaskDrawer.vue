@@ -12,7 +12,7 @@
             class="reply-task-drawer-archive"
             type="button"
             data-testid="archive-reply-tasks"
-            @click="emit('archive')"
+            @click="emit('clear')"
           >
             清空队列
           </button>
@@ -79,7 +79,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: [];
   select: [sessionId: string];
-  archive: [];
+  clear: [];
   cancel: [jobId: string, sessionId: string];
 }>();
 
