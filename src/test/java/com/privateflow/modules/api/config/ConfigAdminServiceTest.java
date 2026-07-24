@@ -70,7 +70,7 @@ class ConfigAdminServiceTest {
     insertConfig("chat.unfinished_task_cap", "20");
     insertConfig("chat.recent_task_display_cap", "30");
     insertConfig("chat.recognition_concurrency", "4");
-    insertConfig("chat.recognition_temp_root", "uploads/temporary-recognition");
+    insertConfig("chat.recognition_temp_root", "active");
     insertConfig("chat.recognition_temp_ttl_seconds", "600");
     insertConfig("chat.recognition_temp_max_total_bytes", "104857600");
     secretCipher = new SecretCipher("test-secret-key");
@@ -240,10 +240,25 @@ class ConfigAdminServiceTest {
     assertValidRange("chat.recognition_temp_ttl_seconds", 60, 600);
     assertValidRange("chat.recognition_temp_max_total_bytes", 10485760, 524288000);
 
-    service.update("chat.recognition_temp_root", Map.of("value", "uploads/temporary-recognition-v2"));
+    service.update("chat.recognition_temp_root", Map.of("value", "active-v2"));
     assertThatThrownBy(() -> service.update("chat.recognition_temp_root", Map.of("value", "/")))
         .isInstanceOf(ApiException.class)
-        .hasMessageContaining("chat.recognition_temp_root must be a non-root storage path");
+        .hasMessageContaining("chat.recognition_temp_root must be a controlled relative directory");
+  }
+
+  @Test
+  void recognitionTemporaryDirectoryMustBeAControlledRelativeSubdirectory() {
+    service.update("chat.recognition_temp_root", Map.of("value", "active-jobs"));
+
+    assertThatThrownBy(() -> service.update(
+        "chat.recognition_temp_root", Map.of("value", "../../outside")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("controlled relative directory");
+    assertThatThrownBy(() -> service.update(
+        "chat.recognition_temp_root",
+        Map.of("value", java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "outside").toString())))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("controlled relative directory");
   }
 
   @Test

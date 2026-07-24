@@ -27,13 +27,18 @@ public class TemporaryRecognitionImageStore {
   static final String TTL_CONFIG_KEY = "chat.recognition_temp_ttl_seconds";
   static final String MAX_TOTAL_BYTES_CONFIG_KEY = "chat.recognition_temp_max_total_bytes";
 
-  private static final String DEFAULT_ROOT = "uploads/temporary-recognition";
+  private static final String DEFAULT_ROOT = "active";
   private static final int DEFAULT_TTL_SECONDS = 600;
   private static final long DEFAULT_MAX_TOTAL_BYTES = 100L * 1024 * 1024;
+  private static final long HARD_MAX_IMAGE_BYTES = 5L * 1024 * 1024;
+  private static final Path DEFAULT_APPLICATION_TEMP_ROOT = Path.of("uploads", "temporary-recognition")
+      .toAbsolutePath()
+      .normalize();
 
   private final SystemConfigRepository configRepository;
   private final ImageConfigProvider imageConfigProvider;
   private final Clock clock;
+  private final Path applicationTempRoot;
   private final Map<String, Path> activePaths = new ConcurrentHashMap<>();
   private final Object capacityLock = new Object();
 
@@ -47,17 +52,31 @@ public class TemporaryRecognitionImageStore {
       SystemConfigRepository configRepository,
       ImageConfigProvider imageConfigProvider,
       Clock clock) {
+    this(configRepository, imageConfigProvider, clock, DEFAULT_APPLICATION_TEMP_ROOT);
+  }
+
+  TemporaryRecognitionImageStore(
+      SystemConfigRepository configRepository,
+      ImageConfigProvider imageConfigProvider,
+      Clock clock,
+      Path applicationTempRoot) {
     this.configRepository = configRepository;
     this.imageConfigProvider = imageConfigProvider;
     this.clock = clock;
+    this.applicationTempRoot = applicationTempRoot.toAbsolutePath().normalize();
   }
 
   public String put(byte[] jpegBytes) {
     if (jpegBytes == null || jpegBytes.length == 0) {
       throw new IllegalArgumentException("recognition image is required");
     }
-    if (jpegBytes.length > imageConfigProvider.get().maxSizeBytes()) {
-      throw new IllegalArgumentException("recognition image exceeds image limit");
+    long configuredImageLimit = imageConfigProvider.get().maxSizeBytes();
+    long effectiveImageLimit = Math.min(configuredImageLimit, HARD_MAX_IMAGE_BYTES);
+    if (jpegBytes.length > effectiveImageLimit) {
+      String message = configuredImageLimit >= HARD_MAX_IMAGE_BYTES
+          ? "recognition image exceeds 5MB hard limit"
+          : "recognition image exceeds configured image limit";
+      throw new IllegalArgumentException(message);
     }
 
     Path root = root();
@@ -169,11 +188,39 @@ public class TemporaryRecognitionImageStore {
     String configured = configRepository.findValue(ROOT_CONFIG_KEY)
         .filter(value -> !value.isBlank())
         .orElse(DEFAULT_ROOT);
-    Path root = Path.of(configured).toAbsolutePath().normalize();
-    if (root.getRoot() != null && root.equals(root.getRoot())) {
-      throw new IllegalStateException("temporary recognition image root must not be filesystem root");
+    String candidate = configured.trim();
+    if (candidate.isBlank() || candidate.startsWith("/") || candidate.startsWith("\\")
+        || isWindowsDrivePath(candidate) || hasTraversalSegment(candidate)) {
+      throw new IllegalArgumentException(
+          "temporary recognition image directory must be a controlled relative directory");
     }
-    return root;
+    try {
+      Path relative = Path.of(candidate);
+      if (relative.isAbsolute()) {
+        throw new IllegalArgumentException(
+            "temporary recognition image directory must be a controlled relative directory");
+      }
+      Path root = applicationTempRoot.resolve(relative).normalize();
+      if (!root.startsWith(applicationTempRoot)) {
+        throw new IllegalArgumentException(
+            "temporary recognition image directory must be a controlled relative directory");
+      }
+      return root;
+    } catch (java.nio.file.InvalidPathException ex) {
+      throw new IllegalArgumentException(
+          "temporary recognition image directory must be a controlled relative directory", ex);
+    }
+  }
+
+  private boolean isWindowsDrivePath(String value) {
+    return value.length() >= 2
+        && Character.isLetter(value.charAt(0))
+        && value.charAt(1) == ':';
+  }
+
+  private boolean hasTraversalSegment(String value) {
+    return Stream.of(value.replace('\\', '/').split("/"))
+        .anyMatch(".."::equals);
   }
 
   private Path pathFor(Path root, String token) {

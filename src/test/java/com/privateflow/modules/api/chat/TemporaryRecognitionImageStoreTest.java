@@ -14,9 +14,12 @@ import java.nio.file.attribute.FileTime;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,28 +33,34 @@ class TemporaryRecognitionImageStoreTest {
   @TempDir
   Path temporaryDirectory;
 
+  @TempDir
+  Path externalDirectory;
+
   private final Map<String, String> configValues = new HashMap<>();
+  private SystemConfigRepository configRepository;
+  private ImageConfigProvider imageConfigProvider;
   private TemporaryRecognitionImageStore store;
   private JdbcTemplate jdbcTemplate;
 
   @BeforeEach
   void setUp() {
-    configValues.put("chat.recognition_temp_root", temporaryDirectory.toString());
+    configValues.put("chat.recognition_temp_root", "active");
     configValues.put("chat.recognition_temp_ttl_seconds", "600");
     configValues.put("chat.recognition_temp_max_total_bytes", "100");
 
-    SystemConfigRepository configRepository = mock(SystemConfigRepository.class);
+    configRepository = mock(SystemConfigRepository.class);
     when(configRepository.findValue(org.mockito.ArgumentMatchers.anyString())).thenAnswer(invocation ->
         Optional.ofNullable(configValues.get(invocation.getArgument(0))));
 
-    ImageConfigProvider imageConfigProvider = mock(ImageConfigProvider.class);
+    imageConfigProvider = mock(ImageConfigProvider.class);
     when(imageConfigProvider.get()).thenReturn(new ImageConfig(
         "", "", 5000, 20, 1920, 85, "", "", 3));
 
     store = new TemporaryRecognitionImageStore(
         configRepository,
         imageConfigProvider,
-        Clock.fixed(NOW, ZoneOffset.UTC));
+        Clock.fixed(NOW, ZoneOffset.UTC),
+        temporaryDirectory);
 
     DriverManagerDataSource dataSource = new DriverManagerDataSource(
         "jdbc:h2:mem:temporary_recognition_store;MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
@@ -77,7 +86,7 @@ class TemporaryRecognitionImageStoreTest {
   void removesExpiredFilesAfterTenMinutes() throws Exception {
     String token = store.put("expired image".getBytes(java.nio.charset.StandardCharsets.UTF_8));
     Files.setLastModifiedTime(
-        temporaryDirectory.resolve(token + ".jpg"),
+        storedImagePath(token),
         FileTime.from(NOW));
 
     store.cleanupExpired(NOW.plusSeconds(600));
@@ -104,7 +113,7 @@ class TemporaryRecognitionImageStoreTest {
     configValues.put("chat.recognition_temp_max_total_bytes", "4");
     String expiredToken = store.put(new byte[] {1, 2, 3});
     Files.setLastModifiedTime(
-        temporaryDirectory.resolve(expiredToken + ".jpg"),
+        storedImagePath(expiredToken),
         FileTime.from(NOW.minusSeconds(600)));
 
     String freshToken = store.put(new byte[] {4, 5});
@@ -118,5 +127,62 @@ class TemporaryRecognitionImageStoreTest {
     assertThatThrownBy(() -> store.read("../outside"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("invalid recognition image token");
+  }
+
+  @Test
+  void rejectsAnAbsoluteTemporaryDirectoryOutsideTheApplicationRoot() {
+    configValues.put("chat.recognition_temp_root", externalDirectory.toString());
+
+    assertThatThrownBy(() -> store.put(new byte[] {1}))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("relative directory");
+  }
+
+  @Test
+  void rejectsTraversalOutsideTheApplicationTemporaryRoot() throws Exception {
+    String traversal = "../../recognition-escape-" + UUID.randomUUID();
+    Path escapedRoot = Path.of(traversal).toAbsolutePath().normalize();
+    configValues.put("chat.recognition_temp_root", traversal);
+
+    try {
+      assertThatThrownBy(() -> store.put(new byte[] {1}))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("relative directory");
+    } finally {
+      deleteTree(escapedRoot);
+    }
+  }
+
+  @Test
+  void enforcesFiveMegabyteHardLimitWhenImageConfigurationAllowsMore() {
+    int hardLimit = 5 * 1024 * 1024;
+    configValues.put("chat.recognition_temp_max_total_bytes", String.valueOf(hardLimit + 2));
+    ImageConfigProvider permissiveImageConfig = mock(ImageConfigProvider.class);
+    when(permissiveImageConfig.get()).thenReturn(new ImageConfig(
+        "", "", 5000, hardLimit * 4, 1920, 85, "", "", 3));
+    TemporaryRecognitionImageStore permissiveStore = new TemporaryRecognitionImageStore(
+        configRepository,
+        permissiveImageConfig,
+        Clock.fixed(NOW, ZoneOffset.UTC),
+        temporaryDirectory);
+
+    assertThatThrownBy(() -> permissiveStore.put(new byte[hardLimit + 1]))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("5MB hard limit");
+  }
+
+  private void deleteTree(Path root) throws Exception {
+    if (!Files.exists(root)) {
+      return;
+    }
+    try (Stream<Path> paths = Files.walk(root)) {
+      for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+        Files.deleteIfExists(path);
+      }
+    }
+  }
+
+  private Path storedImagePath(String token) {
+    return temporaryDirectory.resolve("active").resolve(token + ".jpg");
   }
 }

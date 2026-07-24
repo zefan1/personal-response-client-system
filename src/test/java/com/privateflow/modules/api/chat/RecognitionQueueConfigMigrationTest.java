@@ -14,7 +14,7 @@ class RecognitionQueueConfigMigrationTest {
     String sql = migrationSql();
 
     assertThat(sql).contains(
-        "('chat.recognition_temp_root', 'uploads/temporary-recognition'",
+        "('chat.recognition_temp_root', 'active'",
         "('chat.recognition_temp_ttl_seconds', '600'",
         "('chat.recognition_temp_max_total_bytes', '104857600'",
         "on duplicate key update description = values(description)");

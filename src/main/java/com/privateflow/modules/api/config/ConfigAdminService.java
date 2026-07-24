@@ -144,7 +144,7 @@ public class ConfigAdminService {
         validateStorageRoot(key, value);
       }
       if ("chat.recognition_temp_root".equals(key)) {
-        validateStorageRoot(key, value);
+        validateRecognitionTemporaryDirectory(key, value);
       }
       if (key.endsWith(".storage.public_base_url")) {
         validatePublicBaseUrl(key, value);
@@ -426,6 +426,35 @@ public class ConfigAdminService {
     } catch (Exception ex) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, key + " must be JSON array");
     }
+  }
+
+  private void validateRecognitionTemporaryDirectory(String key, String value) {
+    String trimmed = value == null ? "" : value.trim();
+    if (trimmed.isBlank() || trimmed.startsWith("/") || trimmed.startsWith("\\")
+        || isWindowsDrivePath(trimmed) || hasTraversalSegment(trimmed)) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID,
+          key + " must be a controlled relative directory");
+    }
+    try {
+      if (java.nio.file.Path.of(trimmed).isAbsolute()) {
+        throw new ApiException(ApiErrorCodes.CONFIG_INVALID,
+            key + " must be a controlled relative directory");
+      }
+    } catch (java.nio.file.InvalidPathException ex) {
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID,
+          key + " must be a controlled relative directory");
+    }
+  }
+
+  private boolean isWindowsDrivePath(String value) {
+    return value.length() >= 2
+        && Character.isLetter(value.charAt(0))
+        && value.charAt(1) == ':';
+  }
+
+  private boolean hasTraversalSegment(String value) {
+    return java.util.Arrays.stream(value.replace('\\', '/').split("/"))
+        .anyMatch(".."::equals);
   }
 
   private void validateConversionTargetStages(String key, String value) {
