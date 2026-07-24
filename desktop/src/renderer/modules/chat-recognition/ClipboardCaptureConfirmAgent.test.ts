@@ -71,10 +71,7 @@ describe('ClipboardCaptureConfirmAgent', () => {
     vi.setSystemTime(new Date('2026-07-03T12:00:00Z'));
     postJsonMock.mockResolvedValue({
       success: true,
-      data: {
-        match: { matchType: 'EXACT' },
-        skill: { suggestions: [{ text: 'ok', direction: 'NEXT_STEP' }] }
-      }
+      data: recognitionJob('job-clipboard')
     });
   });
 
@@ -97,12 +94,11 @@ describe('ClipboardCaptureConfirmAgent', () => {
     (host.querySelector('.clipboard-confirm-actions .primary') as HTMLButtonElement | null)?.click();
     await waitForPostJson();
 
-    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/recognize', {
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/recognition-jobs', {
       imageBase64: 'clipboard-image',
       textMessage: undefined,
       customerIdentifier: undefined,
-      replySessionId: expect.stringMatching(/^reply-/),
-      source: 'CLIPBOARD_SCREENSHOT'
+      replySessionId: expect.stringMatching(/^reply-/)
     }, 0);
     expect(recognition.recognitionState.pendingClipboardImage).toBeNull();
     app.unmount();
@@ -144,3 +140,14 @@ describe('ClipboardCaptureConfirmAgent', () => {
     app.unmount();
   });
 });
+
+function recognitionJob(jobId: string) {
+  return {
+    jobId,
+    status: 'READY' as const,
+    response: {
+      match: { matchType: 'EXACT' as const },
+      skill: { suggestions: [{ text: 'ok', direction: 'NEXT_STEP', reason: '' }] }
+    }
+  };
+}
