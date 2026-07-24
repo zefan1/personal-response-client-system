@@ -1,0 +1,807 @@
+package com.privateflow.modules.tablewrite.client;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
+import org.junit.jupiter.api.Test;
+
+class WecomSmartSheetFieldCatalogTest {
+
+  private static final ObjectMapper JSON = new ObjectMapper();
+
+  @Test
+  void loadsOfficialVisibleFieldShapeAndRejectsFormulaWrites() throws Exception {
+    ScriptedClient api = client("""
+        {"errcode":0,"total":5,"fields":[
+          {"field_id":"fName","field_title":"\u5907\u6ce8\u79f0\u547c","field_type":"FIELD_TYPE_TEXT"},
+          {"field_id":"fPhone","field_title":"\u8054\u7cfb\u65b9\u5f0f","field_type":"FIELD_TYPE_PHONE_NUMBER"},
+          {"field_id":"fNext","field_title":"\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4","field_type":"FIELD_TYPE_DATE_TIME","property_date_time":{"format":"yyyy-mm-dd hh:mm"}},
+          {"field_id":"fStage","field_title":"\u5ba2\u6237\u9636\u6bb5","field_type":"FIELD_TYPE_SINGLE_SELECT","property_single_select":{"options":[{"id":"opt1","text":"\u8ddf\u8fdb\u4e2d","style":1}]}},
+          {"field_id":"fFormula","field_title":"\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09","field_type":"FIELD_TYPE_FORMULA"}
+        ]}""");
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC());
+
+    Map<String, WecomSmartSheetField> fields = catalog.visibleFields(Duration.ofSeconds(1));
+
+    assertThat(api.bodies).singleElement().satisfies(body -> {
+      assertThat(body.path("docid").asText()).isEqualTo("doc-1");
+      assertThat(body.path("sheet_id").asText()).isEqualTo("sheet-1");
+      assertThat(body.path("view_id").asText()).isEqualTo("vView");
+      assertThat(body.path("offset").asInt()).isZero();
+      assertThat(body.path("limit").asInt()).isEqualTo(1000);
+    });
+    assertThat(fields.get("\u5907\u6ce8\u79f0\u547c").fieldId()).isEqualTo("fName");
+    assertThat(fields.get("\u5907\u6ce8\u79f0\u547c").type()).isEqualTo("FIELD_TYPE_TEXT");
+    assertThat(fields.get("\u8054\u7cfb\u65b9\u5f0f").fieldId()).isEqualTo("fPhone");
+    assertThat(fields.get("\u8054\u7cfb\u65b9\u5f0f").type()).isEqualTo("FIELD_TYPE_PHONE_NUMBER");
+    assertThat(fields.get("\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4").fieldId()).isEqualTo("fNext");
+    assertThat(fields.get("\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4").type()).isEqualTo("FIELD_TYPE_DATE_TIME");
+    assertThat(fields.get("\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4").dateTimeIncludesTime()).isTrue();
+    assertThat(fields.get("\u5ba2\u6237\u9636\u6bb5").fieldId()).isEqualTo("fStage");
+    assertThat(fields.get("\u5ba2\u6237\u9636\u6bb5").type()).isEqualTo("FIELD_TYPE_SINGLE_SELECT");
+    assertThat(fields.get("\u5ba2\u6237\u9636\u6bb5").optionId(" \u8ddf\u8fdb\u4e2d ")).contains("opt1");
+    assertThat(fields.get("\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09").fieldId()).isEqualTo("fFormula");
+    assertThat(fields.get("\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09").type()).isEqualTo("FIELD_TYPE_FORMULA");
+    assertThat(fields.get("\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09").writable()).isFalse();
+    assertThatThrownBy(() -> catalog.requireWritable("\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09", Duration.ofSeconds(1)))
+        .hasMessageContaining("\u662f\u5426\u52a0\u5fae\uff08\u516c\u5f0f\uff09");
+  }
+
+  @Test
+  void paginatesWithLoadedCountAndReturnsImmutableMergedFields() throws Exception {
+    ScriptedClient api = client(
+        "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"One\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f2\",\"field_title\":\"Two\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+
+    Map<String, WecomSmartSheetField> fields = catalog(api, Clock.systemUTC()).visibleFields(Duration.ofSeconds(1));
+
+    assertThat(fields).containsKeys("One", "Two");
+    assertThat(api.bodies).extracting(body -> body.path("offset").asInt()).containsExactly(0, 1);
+    assertThatThrownBy(() -> fields.put("Three", fields.get("One"))).isInstanceOf(UnsupportedOperationException.class);
+  }
+
+  @Test
+  void decreasesOneDeadlineAcrossAllCatalogPages() throws Exception {
+    MutableTicker ticker = new MutableTicker();
+    DeadlineScriptedClient api = new DeadlineScriptedClient(ticker,
+        "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"One\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f2\",\"field_title\":\"Two\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+
+    assertThat(catalog(api, Clock.systemUTC(), ticker).visibleFields(Duration.ofSeconds(1)))
+        .containsKeys("One", "Two");
+
+    assertThat(api.timeouts).containsExactly(Duration.ofSeconds(1), Duration.ofMillis(900));
+  }
+
+  @Test
+  void finalPageAtDeadlineIsNotCachedAndNextBudgetLoadsAgain() throws Exception {
+    MutableTicker ticker = new MutableTicker();
+    DeadlineScriptedClient api = new DeadlineScriptedClient(ticker,
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Expired\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f2\",\"field_title\":\"Recovered\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC(), ticker);
+
+    assertThatThrownBy(() -> catalog.visibleFields(Duration.ofMillis(100)))
+        .isInstanceOf(WecomSmartSheetException.class)
+        .hasMessageContaining("timeout expired");
+    assertThat(api.timeouts).containsExactly(Duration.ofMillis(100));
+
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsOnlyKeys("Recovered");
+    assertThat(api.timeouts).containsExactly(Duration.ofMillis(100), Duration.ofSeconds(1));
+  }
+
+  @Test
+  void loaderReturnsPublishedSnapshotWithoutAwaitingItsOwnCompletedFuture() throws Exception {
+    LoaderBoundaryTicker ticker = new LoaderBoundaryTicker();
+    ScriptedClient api = client(
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Loaded\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC(), ticker);
+    AtomicReference<Map<String, WecomSmartSheetField>> result = new AtomicReference<>();
+    AtomicReference<RuntimeException> failure = new AtomicReference<>();
+
+    try {
+      result.set(catalog.visibleFields(Duration.ofMillis(100)));
+    } catch (RuntimeException ex) {
+      failure.set(ex);
+    }
+
+    assertThat(failure.get()).isNull();
+    assertThat(result.get()).containsOnlyKeys("Loaded");
+    assertThat(ticker.reads()).isEqualTo(3);
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsOnlyKeys("Loaded");
+    assertThat(api.bodies).hasSize(1);
+  }
+
+  @Test
+  void requiresPositiveTimeoutBeforeLoadingCatalog() throws Exception {
+    for (Duration timeout : new Duration[] {null, Duration.ZERO, Duration.ofNanos(-1)}) {
+      ScriptedClient api = client(
+          "{\"errcode\":0,\"total\":0,\"fields\":[]}");
+
+      assertThatThrownBy(() -> catalog(api, Clock.systemUTC()).visibleFields(timeout))
+          .isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("timeout must be positive");
+      assertThat(api.bodies).isEmpty();
+    }
+  }
+
+  @Test
+  void cachesForFiveMinutesThenRefreshes() throws Exception {
+    MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+    ScriptedClient api = client(
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"First\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f2\",\"field_title\":\"Second\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+    WecomSmartSheetFieldCatalog catalog = catalog(api, clock);
+
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("First");
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("First");
+    clock.advance(Duration.ofMinutes(5));
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Second");
+    assertThat(api.bodies).hasSize(2);
+  }
+
+  @Test
+  void startsTheCacheLifetimeAfterTheSuccessfulLoadCompletes() throws Exception {
+    MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+    ScriptedClient api = client(
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"First\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f2\",\"field_title\":\"Second\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+    api.advanceClockBeforeFirstResponse(clock, Duration.ofMinutes(4));
+    WecomSmartSheetFieldCatalog catalog = catalog(api, clock);
+
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("First");
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("First");
+    assertThat(api.bodies).hasSize(1);
+    clock.advance(Duration.ofMinutes(4).plusSeconds(59));
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("First");
+    assertThat(api.bodies).hasSize(1);
+    clock.advance(Duration.ofSeconds(1));
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Second");
+    assertThat(api.bodies).hasSize(2);
+  }
+
+  @Test
+  void parsesMultiSelectOptionsAsImmutableAndRejectsDuplicateIds() throws Exception {
+    WecomSmartSheetFieldCatalog catalog = catalog(client("""
+        {"errcode":0,"total":1,"fields":[{"field_id":"fTags","field_title":"Tags","field_type":"FIELD_TYPE_SELECT","property_select":{"options":[{"id":"o1","text":"A","style":1},{"id":"o2","text":"B","style":1}]}}]}"""), Clock.systemUTC());
+    WecomSmartSheetField tags = catalog.visibleFields(Duration.ofSeconds(1)).get("Tags");
+    assertThat(tags.optionId("A")).contains("o1");
+    assertThatThrownBy(() -> tags.optionIdsByText().put("C", "o3")).isInstanceOf(UnsupportedOperationException.class);
+
+    assertThatThrownBy(() -> catalog(client("""
+        {"errcode":0,"total":1,"fields":[{"field_id":"fTags","field_title":"Tags","field_type":"FIELD_TYPE_SELECT","property_select":{"options":[{"id":"o1","text":"A","style":1},{"id":"o1","text":"B","style":1}]}}]}"""), Clock.systemUTC()).visibleFields(Duration.ofSeconds(1)))
+        .hasMessageNotContaining("o1");
+  }
+
+  @Test
+  void rejectsDuplicateFieldIdsAcrossPages() throws Exception {
+    WecomSmartSheetFieldCatalog catalog = catalog(client(
+        "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"One\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Two\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}"), Clock.systemUTC());
+    assertThatThrownBy(() -> catalog.visibleFields(Duration.ofSeconds(1))).hasMessageNotContaining("f1");
+  }
+
+  @Test
+  void sharesOneExpiredRefreshFailureThenAllowsRetry() throws Exception {
+    BlockingThenRetryClient api = new BlockingThenRetryClient("""
+        {"errcode":0,"total":1,"fields":[{"field_id":"f2","field_title":"Recovered","field_type":"FIELD_TYPE_TEXT"}]}""");
+    SignalingTicker ticker = new SignalingTicker();
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC(), ticker);
+    AtomicReference<RuntimeException> leaderFailure = new AtomicReference<>();
+    AtomicReference<RuntimeException> followerFailure = new AtomicReference<>();
+    Thread leader = failureThread("catalog-refresh-leader", catalog, leaderFailure);
+    try {
+      leader.start();
+      assertThat(api.firstStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      Thread follower = failureThread("catalog-refresh-follower", catalog, followerFailure);
+      ticker.watch(follower);
+      follower.start();
+      assertThat(ticker.beforeFollowerWait.await(2, TimeUnit.SECONDS)).isTrue();
+      api.releaseFirst.countDown();
+      leader.join(2_000);
+      follower.join(2_000);
+      assertThat(leader.isAlive()).isFalse();
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(followerFailure.get()).isSameAs(leaderFailure.get());
+      assertThat(leaderFailure.get().getMessage()).doesNotContain("raw-refresh-pii");
+      assertThat(api.calls.get()).isEqualTo(1);
+      assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Recovered");
+      assertThat(api.calls.get()).isEqualTo(2);
+    } finally {
+      api.releaseFirst.countDown();
+      leader.join(2_000);
+    }
+  }
+
+  @Test
+  void failedLoadIsDetachedBeforeOldFollowerExitsSoNewCallCanRetry() throws Exception {
+    BlockingThenRetryClient api = new BlockingThenRetryClient("""
+        {"errcode":0,"total":1,"fields":[{"field_id":"f2","field_title":"Recovered","field_type":"FIELD_TYPE_TEXT"}]}""");
+    PausingFollowerTicker ticker = new PausingFollowerTicker();
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC(), ticker);
+    AtomicReference<RuntimeException> loaderFailure = new AtomicReference<>();
+    Thread loader = catalogThread("catalog-failed-loader", catalog, loaderFailure);
+    AtomicReference<RuntimeException> oldFollowerFailure = new AtomicReference<>();
+    Thread oldFollower = catalogThread("catalog-old-follower", catalog, oldFollowerFailure);
+    try {
+      loader.start();
+      assertThat(api.firstStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      ticker.watch(oldFollower);
+      oldFollower.start();
+      assertThat(ticker.followerPaused.await(2, TimeUnit.SECONDS)).isTrue();
+
+      api.releaseFirst.countDown();
+      loader.join(2_000);
+      assertThat(loader.isAlive()).isFalse();
+      assertThat(loaderFailure.get()).isNotNull();
+
+      AtomicReference<Map<String, WecomSmartSheetField>> retryResult = new AtomicReference<>();
+      AtomicReference<RuntimeException> retryFailure = new AtomicReference<>();
+      try {
+        retryResult.set(catalog.visibleFields(Duration.ofSeconds(5)));
+      } catch (RuntimeException ex) {
+        retryFailure.set(ex);
+      }
+
+      assertThat(retryFailure.get()).isNull();
+      assertThat(retryResult.get()).containsOnlyKeys("Recovered");
+      assertThat(api.calls.get()).isEqualTo(2);
+
+      ticker.releaseFollower.countDown();
+      oldFollower.join(2_000);
+      assertThat(oldFollower.isAlive()).isFalse();
+      assertThat(oldFollowerFailure.get()).isSameAs(loaderFailure.get());
+    } finally {
+      api.releaseFirst.countDown();
+      ticker.releaseFollower.countDown();
+      loader.interrupt();
+      oldFollower.interrupt();
+      loader.join(2_000);
+      oldFollower.join(2_000);
+    }
+  }
+
+  private static Thread catalogThread(
+      String name,
+      WecomSmartSheetFieldCatalog catalog,
+      AtomicReference<RuntimeException> failure) {
+    return new Thread(() -> {
+      try {
+        catalog.visibleFields(Duration.ofSeconds(5));
+      } catch (RuntimeException ex) {
+        failure.set(ex);
+      }
+    }, name);
+  }
+
+  private static Thread failureThread(
+      String name,
+      WecomSmartSheetFieldCatalog catalog,
+      AtomicReference<RuntimeException> failure) {
+    return new Thread(() -> {
+      try {
+        catalog.visibleFields(Duration.ofSeconds(1));
+        throw new AssertionError("expected refresh failure");
+      } catch (RuntimeException ex) {
+        failure.set(ex);
+      }
+    }, name);
+  }
+
+  @Test
+  void followerTimesOutWithoutCancellingLoaderAndSuccessfulCacheRemainsUsable() throws Exception {
+    BlockingSuccessClient api = new BlockingSuccessClient();
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC());
+    AtomicReference<Map<String, WecomSmartSheetField>> loaderResult = new AtomicReference<>();
+    AtomicReference<RuntimeException> loaderFailure = new AtomicReference<>();
+    Thread loader = new Thread(() -> {
+      try {
+        loaderResult.set(catalog.visibleFields(Duration.ofSeconds(5)));
+      } catch (RuntimeException ex) {
+        loaderFailure.set(ex);
+      }
+    }, "catalog-timeout-loader");
+    AtomicReference<RuntimeException> followerFailure = new AtomicReference<>();
+    Thread follower = new Thread(() -> {
+      try {
+        catalog.visibleFields(Duration.ofMillis(250));
+      } catch (RuntimeException ex) {
+        followerFailure.set(ex);
+      }
+    }, "catalog-timeout-follower");
+    try {
+      loader.start();
+      assertThat(api.started.await(2, TimeUnit.SECONDS)).isTrue();
+      follower.start();
+      follower.join(2_000);
+
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(followerFailure.get()).isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("timed out");
+      assertThat(api.calls.get()).isEqualTo(1);
+
+      api.release.countDown();
+      loader.join(2_000);
+      assertThat(loader.isAlive()).isFalse();
+      assertThat(loaderFailure.get()).isNull();
+      assertThat(loaderResult.get()).containsKey("Loaded");
+      assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Loaded");
+      assertThat(api.calls.get()).isEqualTo(1);
+    } finally {
+      api.release.countDown();
+      follower.interrupt();
+      loader.interrupt();
+      follower.join(2_000);
+      loader.join(2_000);
+    }
+  }
+
+  @Test
+  void interruptedFollowerRestoresFlagWithoutCancellingLoaderAndCacheRemainsUsable() throws Exception {
+    BlockingSuccessClient api = new BlockingSuccessClient();
+    SignalingTicker ticker = new SignalingTicker();
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC(), ticker);
+    AtomicReference<Map<String, WecomSmartSheetField>> loaderResult = new AtomicReference<>();
+    Thread loader = new Thread(() -> loaderResult.set(catalog.visibleFields(Duration.ofSeconds(5))),
+        "catalog-interrupt-loader");
+    AtomicReference<RuntimeException> followerFailure = new AtomicReference<>();
+    AtomicReference<Boolean> followerInterrupted = new AtomicReference<>(false);
+    Thread follower = new Thread(() -> {
+      try {
+        catalog.visibleFields(Duration.ofSeconds(5));
+      } catch (RuntimeException ex) {
+        followerFailure.set(ex);
+        followerInterrupted.set(Thread.currentThread().isInterrupted());
+      }
+    }, "catalog-interrupt-follower");
+    try {
+      loader.start();
+      assertThat(api.started.await(2, TimeUnit.SECONDS)).isTrue();
+      ticker.watch(follower);
+      follower.start();
+      assertThat(ticker.beforeFollowerWait.await(2, TimeUnit.SECONDS)).isTrue();
+
+      follower.interrupt();
+      follower.join(2_000);
+
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(followerFailure.get()).isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("interrupted");
+      assertThat(followerInterrupted.get()).isTrue();
+      assertThat(api.calls.get()).isEqualTo(1);
+
+      api.release.countDown();
+      loader.join(2_000);
+      assertThat(loaderResult.get()).containsKey("Loaded");
+      assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Loaded");
+      assertThat(api.calls.get()).isEqualTo(1);
+    } finally {
+      api.release.countDown();
+      follower.interrupt();
+      loader.interrupt();
+      follower.join(2_000);
+      loader.join(2_000);
+    }
+  }
+
+  @Test
+  void completedFollowerResultDoesNotBypassItsExpiredDeadline() {
+    MutableTicker ticker = new MutableTicker();
+    WecomRequestDeadline deadline = WecomRequestDeadline.start(
+        Duration.ofMillis(100), "get_fields", ticker);
+    CompletableFuture<String> completed = CompletableFuture.completedFuture("loaded");
+    ticker.advance(Duration.ofMillis(100));
+
+    assertThatThrownBy(() -> WecomSmartSheetFieldCatalog.await(completed, deadline))
+        .isInstanceOf(WecomSmartSheetException.class)
+        .hasMessageContaining("timeout expired");
+  }
+
+  @Test
+  void followerCompletionAtDeadlineIsRejectedAfterWaitReturns() throws Exception {
+    PausingDeadlineTicker ticker = new PausingDeadlineTicker();
+    WecomRequestDeadline deadline = WecomRequestDeadline.start(
+        Duration.ofMillis(100), "get_fields", ticker);
+    CompletableFuture<String> pending = new CompletableFuture<>();
+    AtomicReference<String> result = new AtomicReference<>();
+    AtomicReference<RuntimeException> failure = new AtomicReference<>();
+    Thread follower = new Thread(() -> {
+      try {
+        result.set(WecomSmartSheetFieldCatalog.await(pending, deadline));
+      } catch (RuntimeException ex) {
+        failure.set(ex);
+      }
+    }, "catalog-deadline-follower");
+    try {
+      follower.start();
+      assertThat(ticker.beforeWaitPaused.await(2, TimeUnit.SECONDS)).isTrue();
+      ticker.advance(Duration.ofMillis(100));
+      pending.complete("loaded");
+      ticker.releaseWait.countDown();
+      follower.join(2_000);
+
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(result.get()).isNull();
+      assertThat(failure.get()).isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("timeout expired");
+    } finally {
+      ticker.releaseWait.countDown();
+      follower.interrupt();
+      follower.join(2_000);
+    }
+  }
+
+  @Test
+  void exceptionalFollowerCompletionAtDeadlinePrefersSafeTimeout() throws Exception {
+    PausingDeadlineTicker ticker = new PausingDeadlineTicker();
+    WecomRequestDeadline deadline = WecomRequestDeadline.start(
+        Duration.ofMillis(100), "get_fields", ticker);
+    CompletableFuture<String> pending = new CompletableFuture<>();
+    AtomicReference<RuntimeException> failure = new AtomicReference<>();
+    Thread follower = new Thread(() -> {
+      try {
+        WecomSmartSheetFieldCatalog.await(pending, deadline);
+      } catch (RuntimeException ex) {
+        failure.set(ex);
+      }
+    }, "catalog-exception-deadline-follower");
+    try {
+      follower.start();
+      assertThat(ticker.beforeWaitPaused.await(2, TimeUnit.SECONDS)).isTrue();
+      ticker.advance(Duration.ofMillis(100));
+      pending.completeExceptionally(new IllegalStateException("raw-exceptional-future"));
+      ticker.releaseWait.countDown();
+      follower.join(2_000);
+
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(failure.get()).isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("timeout expired")
+          .hasMessageNotContaining("raw-exceptional-future");
+    } finally {
+      ticker.releaseWait.countDown();
+      follower.interrupt();
+      follower.join(2_000);
+    }
+  }
+
+  @Test
+  void preservesAlreadySanitizedApiFailures() {
+    WecomSmartSheetException expected = new WecomSmartSheetException("get_fields", 40058, "remote API returned an error");
+    WecomSmartSheetApiClient api = new WecomSmartSheetApiClient(JSON, config(), null) {
+      @Override public JsonNode post(String operation, Object body, Duration timeout) {
+        throw expected;
+      }
+    };
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC());
+
+    assertThatThrownBy(() -> catalog.visibleFields(Duration.ofSeconds(1))).isSameAs(expected);
+  }
+
+  @Test
+  void preservesSafeMissingConfigurationDiagnosisBeforeProviderLoad() {
+    WecomSmartSheetConfig missing = new WecomSmartSheetConfig("http://127.0.0.1", "", "", "", "", "", "", "",
+        ZoneId.of("Asia/Shanghai"));
+    WecomSmartSheetApiClient api = new WecomSmartSheetApiClient(JSON, config(), null) {
+      @Override public JsonNode post(String operation, Object body, Duration timeout) {
+        throw new IllegalStateException("raw-provider-response");
+      }
+    };
+    WecomSmartSheetFieldCatalog catalog = new WecomSmartSheetFieldCatalog(api, missing, Clock.systemUTC());
+
+    assertThatThrownBy(() -> catalog.visibleFields(Duration.ofSeconds(1))).satisfies(error -> {
+      assertThat(error.getMessage()).contains("WECOM_CORP_ID", "WECOM_APP_SECRET", "WECOM_SMARTSHEET_DOC_ID",
+          "WECOM_SMARTSHEET_SHEET_ID", "WECOM_SMARTSHEET_VIEW_ID", "WECOM_SMARTSHEET_SOURCE_TABLE",
+          "WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE").doesNotContain("raw-provider-response");
+    });
+  }
+
+  @Test
+  void neverServesAnExpiredSnapshotAfterRefreshFailureAndLaterReplacesIt() throws Exception {
+    MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+    SnapshotRecoveryClient api = new SnapshotRecoveryClient(
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f-old\",\"field_title\":\"Old\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f-new\",\"field_title\":\"New\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+    WecomSmartSheetFieldCatalog catalog = catalog(api, clock);
+
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsOnlyKeys("Old");
+    clock.advance(Duration.ofMinutes(5));
+    assertThatThrownBy(() -> catalog.visibleFields(Duration.ofSeconds(1))).hasMessageNotContaining("Old");
+    assertThat(api.calls.get()).isEqualTo(2);
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsOnlyKeys("New");
+    assertThat(api.calls.get()).isEqualTo(3);
+  }
+
+  @Test
+  void rejectsInvalidAndStalledCatalogPagesWithoutResponseContents() throws Exception {
+    List<String> invalidResponses = List.of(
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Same\",\"field_type\":\"FIELD_TYPE_TEXT\"},{\"field_id\":\"f2\",\"field_title\":\"Same\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Pick\",\"field_type\":\"FIELD_TYPE_SELECT\",\"property_select\":{\"options\":[{\"id\":\"o1\",\"text\":\"A\",\"style\":\"x\"},{\"id\":\"o2\",\"text\":\"A\",\"style\":\"y\"}]}}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\" \",\"field_title\":\"Bad\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":\"one\",\"fields\":[]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":{}}");
+    for (String response : invalidResponses) {
+      assertThatThrownBy(() -> catalog(client(response), Clock.systemUTC()).visibleFields(Duration.ofSeconds(1)))
+          .hasMessageNotContaining(response).hasMessageNotContaining("errcode");
+    }
+    assertThatThrownBy(() -> catalog(client("{\"errcode\":0,\"total\":1,\"fields\":[]}"), Clock.systemUTC())
+        .visibleFields(Duration.ofSeconds(1))).hasMessageNotContaining("fields");
+  }
+
+  @Test
+  void distinguishesUnknownAndReadOnlyTitlesWithoutExposingJson() throws Exception {
+    WecomSmartSheetFieldCatalog catalog = catalog(client("""
+        {"errcode":0,"total":1,"fields":[{"field_id":"f1","field_title":"Formula title","field_type":"FIELD_TYPE_FORMULA"}]}"""), Clock.systemUTC());
+
+    assertThatThrownBy(() -> catalog.requireWritable("Not present", Duration.ofSeconds(1)))
+        .hasMessageContaining("Not present").hasMessageNotContaining("errcode");
+    assertThatThrownBy(() -> catalog.requireWritable("Formula title", Duration.ofSeconds(1)))
+        .hasMessageContaining("Formula title").hasMessageNotContaining("errcode");
+  }
+
+  private static WecomSmartSheetFieldCatalog catalog(WecomSmartSheetApiClient api, Clock clock) {
+    return new WecomSmartSheetFieldCatalog(api, config(), clock);
+  }
+
+  private static WecomSmartSheetFieldCatalog catalog(
+      WecomSmartSheetApiClient api,
+      Clock clock,
+      LongSupplier ticker) {
+    return new WecomSmartSheetFieldCatalog(api, config(), clock, ticker);
+  }
+
+  private static WecomSmartSheetConfig config() {
+    return new WecomSmartSheetConfig("http://127.0.0.1", "corp", "secret", "doc-1", "sheet-1", "vView",
+        "Customers", "Customer ID", ZoneId.of("Asia/Shanghai"));
+  }
+
+  private static ScriptedClient client(String... responses) throws Exception {
+    return new ScriptedClient(responses);
+  }
+
+  private static final class ScriptedClient extends WecomSmartSheetApiClient {
+    private final ArrayDeque<JsonNode> responses = new ArrayDeque<>();
+    private final List<JsonNode> bodies = new ArrayList<>();
+    private Runnable beforeFirstResponse = () -> {};
+
+    private ScriptedClient(String... source) throws Exception {
+      super(JSON, config(), null);
+      for (String value : source) {
+        responses.add(JSON.readTree(value));
+      }
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      bodies.add(JSON.valueToTree(body));
+      if (bodies.size() == 1) {
+        beforeFirstResponse.run();
+      }
+      return responses.removeFirst();
+    }
+
+    void advanceClockBeforeFirstResponse(MutableClock clock, Duration duration) {
+      beforeFirstResponse = () -> clock.advance(duration);
+    }
+  }
+
+  private static final class BlockingThenRetryClient extends WecomSmartSheetApiClient {
+    private final JsonNode retryResponse;
+    private final AtomicInteger calls = new AtomicInteger();
+    private final CountDownLatch firstStarted = new CountDownLatch(1);
+    private final CountDownLatch releaseFirst = new CountDownLatch(1);
+
+    private BlockingThenRetryClient(String retryResponse) throws Exception {
+      super(JSON, config(), null);
+      this.retryResponse = JSON.readTree(retryResponse);
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      if (calls.incrementAndGet() == 1) {
+        firstStarted.countDown();
+        try {
+          if (!releaseFirst.await(2, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("raw-refresh-pii");
+          }
+        } catch (InterruptedException ex) {
+          Thread.currentThread().interrupt();
+        }
+        throw new IllegalStateException("raw-refresh-pii");
+      }
+      return retryResponse;
+    }
+  }
+
+  private static final class SnapshotRecoveryClient extends WecomSmartSheetApiClient {
+    private final JsonNode oldResponse;
+    private final JsonNode newResponse;
+    private final AtomicInteger calls = new AtomicInteger();
+
+    private SnapshotRecoveryClient(String oldResponse, String newResponse) throws Exception {
+      super(JSON, config(), null);
+      this.oldResponse = JSON.readTree(oldResponse);
+      this.newResponse = JSON.readTree(newResponse);
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      return switch (calls.incrementAndGet()) {
+        case 1 -> oldResponse;
+        case 2 -> throw new IllegalStateException("raw-refresh-failure");
+        default -> newResponse;
+      };
+    }
+  }
+
+  private static final class DeadlineScriptedClient extends WecomSmartSheetApiClient {
+    private final ArrayDeque<JsonNode> responses = new ArrayDeque<>();
+    private final List<Duration> timeouts = new ArrayList<>();
+    private final MutableTicker ticker;
+
+    private DeadlineScriptedClient(MutableTicker ticker, String... source) throws Exception {
+      super(JSON, config(), null);
+      this.ticker = ticker;
+      for (String value : source) {
+        responses.add(JSON.readTree(value));
+      }
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      timeouts.add(timeout);
+      ticker.advance(Duration.ofMillis(100));
+      return responses.removeFirst();
+    }
+  }
+
+  private static final class BlockingSuccessClient extends WecomSmartSheetApiClient {
+    private final AtomicInteger calls = new AtomicInteger();
+    private final CountDownLatch started = new CountDownLatch(1);
+    private final CountDownLatch release = new CountDownLatch(1);
+
+    private BlockingSuccessClient() {
+      super(JSON, config(), null);
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      calls.incrementAndGet();
+      started.countDown();
+      try {
+        if (!release.await(5, TimeUnit.SECONDS)) {
+          throw new IllegalStateException("raw-loader-timeout");
+        }
+        return JSON.readTree(
+            "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Loaded\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+      } catch (InterruptedException ex) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("raw-loader-interrupted");
+      } catch (java.io.IOException ex) {
+        throw new IllegalStateException("test response was invalid", ex);
+      }
+    }
+  }
+
+  private static final class MutableTicker implements LongSupplier {
+    private long nanos;
+
+    void advance(Duration duration) {
+      nanos += duration.toNanos();
+    }
+
+    @Override
+    public long getAsLong() {
+      return nanos;
+    }
+  }
+
+  private static final class SignalingTicker implements LongSupplier {
+    private final AtomicReference<Thread> watched = new AtomicReference<>();
+    private final AtomicInteger watchedReads = new AtomicInteger();
+    private final CountDownLatch beforeFollowerWait = new CountDownLatch(1);
+
+    void watch(Thread thread) {
+      watched.set(thread);
+    }
+
+    @Override
+    public long getAsLong() {
+      if (Thread.currentThread() == watched.get() && watchedReads.incrementAndGet() == 2) {
+        beforeFollowerWait.countDown();
+      }
+      return System.nanoTime();
+    }
+  }
+
+  private static final class PausingFollowerTicker implements LongSupplier {
+    private final AtomicReference<Thread> watched = new AtomicReference<>();
+    private final AtomicInteger watchedReads = new AtomicInteger();
+    private final CountDownLatch followerPaused = new CountDownLatch(1);
+    private final CountDownLatch releaseFollower = new CountDownLatch(1);
+
+    void watch(Thread thread) {
+      watched.set(thread);
+    }
+
+    @Override
+    public long getAsLong() {
+      if (Thread.currentThread() == watched.get() && watchedReads.incrementAndGet() == 2) {
+        followerPaused.countDown();
+        try {
+          if (!releaseFollower.await(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("test follower was not released");
+          }
+        } catch (InterruptedException ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      return System.nanoTime();
+    }
+  }
+
+  private static final class PausingDeadlineTicker implements LongSupplier {
+    private final AtomicLong nanos = new AtomicLong();
+    private final AtomicInteger reads = new AtomicInteger();
+    private final CountDownLatch beforeWaitPaused = new CountDownLatch(1);
+    private final CountDownLatch releaseWait = new CountDownLatch(1);
+
+    void advance(Duration duration) {
+      nanos.addAndGet(duration.toNanos());
+    }
+
+    @Override
+    public long getAsLong() {
+      long captured = nanos.get();
+      if (reads.incrementAndGet() == 2) {
+        beforeWaitPaused.countDown();
+        try {
+          if (!releaseWait.await(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("test deadline wait was not released");
+          }
+        } catch (InterruptedException ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      return captured;
+    }
+  }
+
+  private static final class LoaderBoundaryTicker implements LongSupplier {
+    private final AtomicInteger reads = new AtomicInteger();
+
+    int reads() {
+      return reads.get();
+    }
+
+    @Override
+    public long getAsLong() {
+      return switch (reads.incrementAndGet()) {
+        case 1, 2 -> 0L;
+        case 3 -> Duration.ofMillis(99).toNanos();
+        default -> Duration.ofMillis(100).toNanos();
+      };
+    }
+  }
+
+  private static final class MutableClock extends Clock {
+    private Instant instant;
+    private MutableClock(Instant instant) { this.instant = instant; }
+    void advance(Duration duration) { instant = instant.plus(duration); }
+    @Override public ZoneId getZone() { return ZoneId.of("UTC"); }
+    @Override public Clock withZone(ZoneId zone) { return this; }
+    @Override public Instant instant() { return instant; }
+  }
+}
