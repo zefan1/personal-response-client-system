@@ -67,6 +67,9 @@ public class WecomSmartSheetRecordClient {
         }
       }
       if (!page.hasMore()) {
+        if (expectedTotal != null && loadedCount != expectedTotal) {
+          throw invalid("total metadata was inconsistent");
+        }
         return limitedSorted(included, limit);
       }
       if (pageNumber == MAX_PAGES - 1) {
@@ -131,9 +134,7 @@ public class WecomSmartSheetRecordClient {
     }
     JsonNode hasMore = response.get("has_more");
     boolean more;
-    if (hasMore == null) {
-      more = false;
-    } else if (hasMore.isBoolean()) {
+    if (hasMore != null && hasMore.isBoolean()) {
       more = hasMore.booleanValue();
     } else {
       throw invalid("pagination metadata was invalid");

@@ -125,6 +125,16 @@ class WecomSmartSheetRecordClientTest {
   }
 
   @Test
+  void rejectsRecordsPageMissingHasMoreWithoutExposingValues() throws Exception {
+    String pii = "pii-missing-has-more-13900000000";
+
+    assertSafeFailure(() -> client(api(records("""
+        {"errcode":0,"records":[
+          {"record_id":"rec-1","update_time":1784822401000,"values":{"Phone":"pii-missing-has-more-13900000000"}}
+        ]}"""))).fetchIncrementalRows(SOURCE, MODIFIED_AFTER, 1, TIMEOUT), pii);
+  }
+
+  @Test
   void rejectsPageCapsAndUnstableOrExceededTotals() throws Exception {
     List<String> capped = new ArrayList<>();
     for (int page = 0; page < 101; page++) {
@@ -139,6 +149,9 @@ class WecomSmartSheetRecordClientTest {
     assertSafeFailure(() -> client(api(records(
         "{\"errcode\":0,\"has_more\":false,\"total\":0,\"records\":[{\"record_id\":\"rec-1\",\"update_time\":1784822401000,\"values\":{\"Phone\":\"pii-total\"}}]}")))
         .fetchIncrementalRows(SOURCE, MODIFIED_AFTER, 1, TIMEOUT), "pii-total");
+    assertSafeFailure(() -> client(api(records(
+        "{\"errcode\":0,\"has_more\":false,\"total\":2,\"records\":[{\"record_id\":\"rec-1\",\"update_time\":1784822401000,\"values\":{\"Phone\":\"pii-terminal-total-13900000000\"}}]}")))
+        .fetchIncrementalRows(SOURCE, MODIFIED_AFTER, 1, TIMEOUT), "pii-terminal-total-13900000000");
   }
 
   @TestFactory
