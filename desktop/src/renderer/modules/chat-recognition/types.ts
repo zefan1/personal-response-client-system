@@ -28,6 +28,26 @@ export type ChatRecognizeResponse = {
   pendingTask?: PendingReplyTask | null;
 };
 
+export type RecognitionJobStatus =
+  | 'QUEUED'
+  | 'RECOGNIZING'
+  | 'READY'
+  | 'WAITING_CUSTOMER'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'EXPIRED';
+
+export type RecognitionJobResponse = {
+  jobId: string;
+  replySessionId?: string | null;
+  status: RecognitionJobStatus;
+  errorCode?: string | null;
+  response?: ChatRecognizeResponse | null;
+  pendingTask?: PendingReplyTask | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
 export type RecognizeEventPayload = {
   source: RecognizeSource;
   response: ChatRecognizeResponse;

@@ -99,124 +99,6 @@
       </div>
     </section>
 
-    <section v-if="state.sessions.length || state.archivedSessions.length" class="reply-task-queue" aria-label="待处理队列">
-      <div class="section-inline-head compact">
-        <div>
-          <h3>待处理队列</h3>
-          <p class="hint-text">{{ queueSummary }}</p>
-        </div>
-        <div class="reply-queue-controls">
-          <button
-            v-if="queuedSessions.length"
-            class="secondary small reply-queue-clear"
-            type="button"
-            @click="archiveQueuedSessions"
-          >
-            清空
-          </button>
-          <button
-            class="secondary small reply-archive-toggle"
-            type="button"
-            :aria-expanded="archivePanelOpen"
-            @click="archivePanelOpen = !archivePanelOpen"
-          >
-            已暂存 {{ state.archivedSessions.length }}
-          </button>
-        </div>
-      </div>
-
-      <div v-if="lastArchivedSessionIds.length" class="reply-archive-undo">
-        <span>已暂存 {{ lastArchivedSessionIds.length }} 个队列任务</span>
-        <button class="secondary small" type="button" @click="undoArchive">撤销</button>
-      </div>
-
-      <section v-if="archivePanelOpen" class="reply-archive-panel" aria-label="已暂存回复">
-        <input
-          v-model="archiveSearch"
-          class="reply-archive-search"
-          inputmode="search"
-          placeholder="搜索昵称或手机号后四位"
-        />
-        <div v-if="filteredArchivedSessions.length" class="reply-archive-list">
-          <article v-for="session in filteredArchivedSessions" :key="session.sessionId" class="reply-archive-row">
-            <div class="reply-archive-copy">
-              <strong>{{ sessionLabel(session) }}</strong>
-              <div class="reply-archive-meta">
-                <time :datetime="archiveIsoTime(session)">{{ archiveTimeText(session) }}</time>
-                <span>{{ queueRowText(session) }}</span>
-              </div>
-            </div>
-            <button class="secondary small reply-archive-restore" type="button" @click="restoreArchivedSession(session.sessionId)">
-              恢复
-            </button>
-          </article>
-        </div>
-        <p v-else class="reply-queue-empty">没有匹配的暂存回复。</p>
-      </section>
-
-      <div v-if="queuedSessions.length" class="reply-task-list">
-        <article
-          v-for="session in queuedSessions"
-          :key="session.sessionId"
-          class="reply-task-row"
-          :class="sessionStatusClass(session)"
-          @click="activateSession(session.sessionId)"
-        >
-          <div class="reply-task-copy">
-            <strong>{{ sessionLabel(session) }}</strong>
-            <div class="reply-task-meta">
-              <time class="reply-task-time" :datetime="sessionIsoTime(session)">{{ sessionTimeText(session) }}</time>
-              <span class="reply-task-message">{{ queueRowText(session) }}</span>
-            </div>
-          </div>
-          <span class="reply-task-badge">{{ sessionStatusLabel(session.status) }}</span>
-          <span v-if="session.replySource" class="reply-source-pill compact" :class="replySourceClass(session.replySource.source)" :title="session.replySource.detail || replySourceLabel(session.replySource.source)">
-            {{ replySourceLabel(session.replySource.source, session.replySource.label) }}
-          </span>
-          <div class="reply-task-actions" @click.stop>
-            <button v-if="canCopySession(session)" class="primary small" type="button" @click="copySessionReply(session)">
-              复制
-            </button>
-            <button v-if="session.status === 'LOADING'" class="secondary small" type="button" @click="openTextChannel(session.sessionId)">
-              文字
-            </button>
-            <button v-if="session.status === 'FAILED'" class="secondary small" type="button" @click="retryRecognize(session.sessionId)">
-              重试
-            </button>
-            <button v-if="session.status === 'FAILED'" class="secondary small" type="button" @click="openTextChannel(session.sessionId)">
-              文字
-            </button>
-            <button
-              class="icon-close-button"
-              type="button"
-              :aria-label="`移除${sessionLabel(session)}`"
-              :title="`移除${sessionLabel(session)}`"
-              @click="requestRemoveSession(session.sessionId)"
-            >
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
-          <div v-if="pendingRemovalSessionId === session.sessionId" class="reply-task-remove-confirm" @click.stop>
-            <span>移除这条任务？</span>
-            <button class="secondary small" type="button" @click="cancelRemoveSession">取消</button>
-            <button class="secondary small danger" type="button" @click="confirmRemoveSession(session.sessionId)">移除</button>
-          </div>
-          <div v-if="session.status === 'MULTIPLE' && session.candidates.length" class="reply-candidate-actions" @click.stop>
-            <button
-              v-for="candidate in session.candidates"
-              :key="`${session.sessionId}-${candidate.phone}`"
-              class="secondary small"
-              type="button"
-              @click="selectCandidateForSession(session.sessionId, candidate)"
-            >
-              查看档案 · {{ candidateLabel(candidate) }}
-            </button>
-          </div>
-        </article>
-      </div>
-      <p v-else class="reply-queue-empty">当前任务已在上方展示，暂无其他待处理任务。</p>
-    </section>
-
     <section class="reply-detail-panel" aria-label="当前任务详情">
       <p v-if="state.abnormalAlert" class="alert-banner">
         {{ state.abnormalAlert.message || '当前客户存在异常提醒，请谨慎回复' }}
@@ -351,6 +233,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { resumeRecognitionJobPolling } from '../chat-recognition/recognitionStore';
 import { eventBus } from '../../shared/eventBus';
 import {
   closeTextMode,
@@ -369,7 +252,6 @@ import type { SuggestionShowPayload } from '../copy-backfill/types';
 import {
   activateSession,
   activeReplySession,
-  archiveQueuedReplySessions,
   cleanupReplySuggestionStore,
   closeReplySession,
   handleAbnormalAlert,
@@ -382,7 +264,6 @@ import {
   regenerateReplies,
   replySuggestionState as state,
   requestLeaderHelp,
-  restoreArchivedReplySession,
   selectCandidateForSession,
   selectReply,
   showRecognizeResult,
@@ -392,13 +273,14 @@ import {
   stopForFailure,
   stopForImageFailure,
   stopForTimeout,
+  syncRecognitionJobIntoSession,
   updateRecognizeProgress
 } from './replySuggestionStore';
 import type {
   AbnormalAlertPayload,
-  ArchivedReplySession,
   CustomerSelectedPayload,
   ProfileSuggestionsPayload,
+  RecognitionJobUpdate,
   RecognizeFailurePayload,
   RecognizeProgressPayload,
   RecognizeResultPayload,
@@ -419,29 +301,9 @@ const copySuggestionItems = computed(() => copyBackfillState.suggestionToastSugg
 const pendingCopySuggestionCount = computed(() => copySuggestionItems.value.filter((item) => !item.resolved).length);
 const activeSession = computed(() => activeReplySession.value);
 const pendingRemovalSessionId = ref('');
-const archivePanelOpen = ref(false);
-const archiveSearch = ref('');
-const lastArchivedSessionIds = ref<string[]>([]);
-const queuedSessions = computed(() => state.sessions.filter((session) => session.sessionId !== state.activeSessionId));
-const filteredArchivedSessions = computed(() => {
-  const query = archiveSearch.value.trim().toLowerCase();
-  if (!query) return state.archivedSessions;
-  const phoneSuffix = query.replace(/\D/g, '');
-  return state.archivedSessions.filter((session) => {
-    const nicknameMatches = session.currentNickname.toLowerCase().includes(query);
-    const phoneMatches = Boolean(phoneSuffix) && session.currentPhone.endsWith(phoneSuffix);
-    return nicknameMatches || phoneMatches;
-  });
-});
 const primarySuggestion = computed(() => state.suggestions[0] ?? null);
 const secondarySuggestions = computed(() => state.suggestions.slice(1));
-const queueSummary = computed(() => {
-  const loadingCount = queuedSessions.value.filter((session) => session.status === 'LOADING').length;
-  const readyCount = queuedSessions.value.filter((session) => session.status === 'READY' || session.status === 'FALLBACK').length;
-  const failedCount = queuedSessions.value.filter((session) => session.status === 'FAILED').length;
-  return `${queuedSessions.value.length} 个其他任务 · ${readyCount} 个可复制 · ${loadingCount} 个处理中 · ${failedCount} 个失败`;
-});
-const activeTaskText = computed(() => activeSession.value ? queueRowText(activeSession.value) : '等待识别聊天');
+const activeTaskText = computed(() => activeSession.value ? activeTaskSummary(activeSession.value) : '等待识别聊天');
 const copySuggestionSummary = computed(() => {
   const firstPending = copySuggestionItems.value.find((item) => !item.resolved) ?? copySuggestionItems.value[0];
   if (!firstPending) {
@@ -456,7 +318,17 @@ const disposers: Array<() => void> = [];
 
 onMounted(() => {
   hydrateReplySuggestionStore();
+  state.sessions
+    .filter((session) => session.recognitionJobId
+      && (session.recognitionJobStatus === 'QUEUED' || session.recognitionJobStatus === 'RECOGNIZING'))
+    .forEach((session) => resumeRecognitionJobPolling(
+      session.recognitionJobId,
+      session.sessionId,
+      session.source === 'CLIPBOARD_SCREENSHOT' || session.source === 'CLIPBOARD_TEXT'
+        ? session.source
+        : 'BUTTON_CLICK'));
   disposers.push(eventBus.on('recognize:start', startRecognizeLoading));
+  disposers.push(eventBus.on<RecognitionJobUpdate>('recognize:job', syncRecognitionJobIntoSession));
   disposers.push(eventBus.on<RecognizeProgressPayload>('recognize:progress', updateRecognizeProgress));
   disposers.push(eventBus.on<RecognizeResultPayload>('recognize:result', showRecognizeResult));
   disposers.push(eventBus.on('recognize:multiple', pauseForMultipleMatch));
@@ -545,31 +417,18 @@ function cancelRemoveSession(): void {
 }
 
 function confirmRemoveSession(sessionId: string): void {
+  const session = state.sessions.find((item) => item.sessionId === sessionId);
+  if (session?.recognitionJobId
+    && (session.recognitionJobStatus === 'QUEUED' || session.recognitionJobStatus === 'RECOGNIZING')) {
+    eventBus.emit('recognition-job:cancel', {
+      jobId: session.recognitionJobId,
+      sessionId: session.sessionId
+    });
+  }
   closeReplySession(sessionId);
   if (pendingRemovalSessionId.value === sessionId) {
     pendingRemovalSessionId.value = '';
   }
-}
-
-function archiveQueuedSessions(): void {
-  const archivedSessions = archiveQueuedReplySessions();
-  lastArchivedSessionIds.value = archivedSessions.map((session) => session.sessionId);
-}
-
-function restoreArchivedSession(sessionId: string): void {
-  if (!restoreArchivedReplySession(sessionId)) return;
-  lastArchivedSessionIds.value = lastArchivedSessionIds.value.filter((id) => id !== sessionId);
-  archivePanelOpen.value = false;
-  archiveSearch.value = '';
-}
-
-function undoArchive(): void {
-  const activeSessionId = state.activeSessionId;
-  lastArchivedSessionIds.value.forEach((sessionId) => restoreArchivedReplySession(sessionId));
-  if (activeSessionId) {
-    activateSession(activeSessionId);
-  }
-  lastArchivedSessionIds.value = [];
 }
 
 function copySessionReply(session: ReplySession): void {
@@ -644,21 +503,24 @@ function sessionStatusLabel(status: ReplySessionStatus): string {
   return status;
 }
 
-function queueRowText(session: ReplySession): string {
+function activeTaskSummary(session: ReplySession): string {
   if (session.status === 'FAILED') {
     return session.failureReason || session.currentStageText || '识别失败';
   }
   if (session.status === 'READY') {
-    return session.suggestions[0]?.text || '回复已生成，可直接复制';
+    return '回复已生成，可直接复制';
   }
   if (session.status === 'COPIED') {
-    return session.suggestions[0]?.text || '已复制回复';
+    return '已复制回复';
   }
   if (session.status === 'FALLBACK') {
-    return session.fallbackBannerText || session.suggestions[0]?.text || '已生成降级回复';
+    return session.fallbackBannerText || '已生成降级回复';
   }
   if (session.status === 'MULTIPLE') {
     return session.candidates.length ? '匹配到多个客户，请选择一个继续' : '匹配到多个客户，请到客户档案选择';
+  }
+  if (session.status === 'CANCELLED') {
+    return '任务已取消';
   }
   return session.currentStageText || '正在处理';
 }
@@ -685,14 +547,6 @@ function relativeTimeText(timestamp: number): string {
 
 function sessionIsoTime(session: ReplySession): string {
   return new Date(session.updatedAt || session.createdAt).toISOString();
-}
-
-function archiveIsoTime(session: ArchivedReplySession): string {
-  return new Date(session.archivedAt).toISOString();
-}
-
-function archiveTimeText(session: ArchivedReplySession): string {
-  return `暂存于 ${relativeTimeText(session.archivedAt)}`;
 }
 
 function sessionStatusClass(session: ReplySession): string {

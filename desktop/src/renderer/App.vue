@@ -107,6 +107,12 @@
           <strong class="action-label">批量</strong>
         </button>
       </nav>
+      <ReplyTaskSidebar
+        :tasks="compactReplyTasks"
+        :active-session-id="replySuggestionState.activeSessionId"
+        @select="openReplyTask"
+        @open-all="replyTaskDrawerOpen = true"
+      />
       <div class="desktop-sidebar-actions">
         <button v-if="canOpenAdmin" class="secondary small" type="button" title="在浏览器打开管理后台" @click="openAdmin">后台</button>
         <button class="secondary small" type="button" @click="logout">退出</button>
@@ -180,6 +186,15 @@
           <FollowupListPanel />
         </aside>
       </div>
+      <ReplyTaskDrawer
+        :open="replyTaskDrawerOpen"
+        :tasks="replyTaskItems"
+        :active-session-id="replySuggestionState.activeSessionId"
+        @archive="archiveReplyTasks"
+        @cancel="cancelReplyTask"
+        @close="replyTaskDrawerOpen = false"
+        @select="openReplyTask"
+      />
     </section>
   </main>
 </template>
@@ -202,6 +217,14 @@ import NewLeadToastAgent from './modules/new-lead-toast/NewLeadToastAgent.vue';
 import OfflineStatusBar from './modules/offline/OfflineStatusBar.vue';
 import QuickSearchOverlay from './modules/quick-search/QuickSearchOverlay.vue';
 import ReplySuggestionPanel from './modules/reply-suggestions/ReplySuggestionPanel.vue';
+import ReplyTaskDrawer from './modules/reply-suggestions/ReplyTaskDrawer.vue';
+import ReplyTaskSidebar from './modules/reply-suggestions/ReplyTaskSidebar.vue';
+import {
+  activateSession,
+  archiveQueuedReplySessions,
+  replySuggestionState,
+  restoreArchivedReplySession
+} from './modules/reply-suggestions/replySuggestionStore';
 import {
   initializePendingReplyTaskOpenListener,
   pendingReplyTaskCount,
@@ -216,7 +239,7 @@ import { loadDesktopConfig, saveDesktopConfig } from './shared/config';
 import { eventBus } from './shared/eventBus';
 import { cleanupStageSuggestionHandler, initializeStageSuggestionHandler } from './modules/stage-suggestion/stageSuggestionHandler';
 import WorkbenchPanel from './modules/workbench/WorkbenchPanel.vue';
-import { recognitionState, triggerRecognize } from './modules/chat-recognition/recognitionStore';
+import { cancelRecognitionJob, recognitionState, triggerRecognize } from './modules/chat-recognition/recognitionStore';
 
 type LoginPayload = {
   accessToken: string;
@@ -272,6 +295,7 @@ const AdminDevConsole = devConsoleEnabled
 const currentMode = ref<RouteMode>(modeFromHash());
 const activeDesktopPanel = ref<DesktopPanelKey>('workbench');
 const taskQueueOpen = ref(false);
+const replyTaskDrawerOpen = ref(false);
 const profileReturnContext = ref<ProfileReturnContext | null>(null);
 const alwaysOnTop = ref(false);
 const loginLoading = ref(false);
@@ -291,6 +315,27 @@ const session = reactive({
   permissions: normalizePermissions(config.accountPermissions)
 });
 const activeDesktopNav = computed(() => desktopNavItems.find((item) => item.key === activeDesktopPanel.value) ?? desktopNavItems[0]);
+const replyTaskItems = computed(() => [
+  ...replySuggestionState.sessions.map((session) => ({
+    sessionId: session.sessionId,
+    nickname: session.currentNickname,
+    status: visibleReplyTaskStatus(session),
+    jobId: session.recognitionJobId,
+    updatedAt: session.updatedAt || session.createdAt,
+    archived: false
+  })),
+  ...replySuggestionState.archivedSessions.map((session) => ({
+    sessionId: session.sessionId,
+    nickname: session.currentNickname,
+    status: visibleReplyTaskStatus(session),
+    jobId: session.recognitionJobId,
+    updatedAt: session.archivedAt || session.updatedAt || session.createdAt,
+    archived: true
+  }))
+].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 30));
+const compactReplyTasks = computed(() => replyTaskItems.value
+  .filter((task) => !task.archived)
+  .slice(0, 5));
 const displayAccountName = computed(() => desktopStatusState.accountName || session.accountName || '当前账号');
 const effectiveRole = computed<AccountRole>(() => normalizeRole(desktopStatusState.role) || session.role);
 const effectivePermissions = computed(() => desktopStatusState.loaded
@@ -360,6 +405,9 @@ onMounted(() => {
   eventDisposers.push(eventBus.on('suggestion:show', () => selectDesktopPanel('reply')));
   eventDisposers.push(eventBus.on('desktop:recognize-request', () => {
     void recognizeFromAnywhere();
+  }));
+  eventDisposers.push(eventBus.on<{ jobId: string; sessionId: string }>('recognition-job:cancel', (payload) => {
+    cancelReplyTask(payload.jobId, payload.sessionId);
   }));
   eventDisposers.push(eventBus.on<{ message?: string }>('auth:expired', (payload) => {
     void handleAuthExpired(payload?.message);
@@ -671,6 +719,41 @@ function openTaskQueue(tab: 'OVERDUE' | 'DUE_TODAY' | 'APPOINTMENT' | 'NEW_LEAD'
 
 function closeTaskQueue() {
   taskQueueOpen.value = false;
+}
+
+function openReplyTask(sessionId: string): void {
+  const activeSession = replySuggestionState.sessions.find((session) => session.sessionId === sessionId);
+  if (activeSession) {
+    activateSession(activeSession.sessionId);
+  } else if (!restoreArchivedReplySession(sessionId)) {
+    return;
+  }
+  replyTaskDrawerOpen.value = false;
+  selectDesktopPanel('reply');
+}
+
+function archiveReplyTasks(): void {
+  archiveQueuedReplySessions();
+}
+
+function cancelReplyTask(jobId: string, sessionId: string): void {
+  void cancelRecognitionJob(jobId, sessionId);
+}
+
+function visibleReplyTaskStatus(session: {
+  status: string;
+  recognitionJobStatus?: string | null;
+}): string {
+  if (session.recognitionJobStatus === 'QUEUED' || session.recognitionJobStatus === 'RECOGNIZING') {
+    return session.recognitionJobStatus;
+  }
+  if (session.recognitionJobStatus === 'WAITING_CUSTOMER') {
+    return 'MULTIPLE';
+  }
+  if (session.recognitionJobStatus === 'EXPIRED') {
+    return 'EXPIRED';
+  }
+  return session.status;
 }
 
 function returnFromCustomerProfile(): void {

@@ -11,6 +11,7 @@ import type {
   PendingReplyTask,
   ProfileSuggestion,
   ProfileSuggestionsPayload,
+  RecognitionJobUpdate,
   RecognizeFailurePayload,
   RecognizeProgressPayload,
   RecognizeProgressStage,
@@ -555,9 +556,56 @@ export function closeReplySession(sessionId: string): void {
   }
 }
 
+export function syncRecognitionJobIntoSession(update: RecognitionJobUpdate): void {
+  const session = replySuggestionState.sessions.find((item) => item.sessionId === update.sessionId);
+  if (!session) return;
+  session.recognitionJobId = update.jobId;
+  session.recognitionJobStatus = update.status;
+  session.updatedAt = Date.now();
+  if (update.status === 'QUEUED' || update.status === 'RECOGNIZING') {
+    session.status = 'LOADING';
+    session.loadingMode = 'FULL';
+    session.progressStage = 'WAITING_MODEL';
+    session.currentStageText = update.status === 'QUEUED' ? '正在排队识图' : '正在识图并生成回复';
+    session.failureReason = '';
+  } else if (update.status === 'WAITING_CUSTOMER') {
+    session.status = 'LOADING';
+    session.loadingMode = 'NONE';
+    session.progressStage = 'DONE';
+    session.currentStageText = '正在确认客户';
+  } else if (update.status === 'READY') {
+    session.status = 'LOADING';
+    session.loadingMode = 'NONE';
+    session.progressStage = 'GENERATING';
+    session.currentStageText = '正在同步回复结果';
+  } else if (update.status === 'CANCELLED') {
+    stopFallbackRetry(session.sessionId);
+    session.status = 'CANCELLED';
+    session.loadingMode = 'NONE';
+    session.progressStage = 'DONE';
+    session.currentStageText = '任务已取消';
+    session.failureReason = '';
+    session.suggestions = [];
+  } else {
+    stopFallbackRetry(session.sessionId);
+    session.status = 'FAILED';
+    session.loadingMode = 'NONE';
+    session.progressStage = 'FAILED';
+    session.currentStageText = update.status === 'EXPIRED' ? '任务已过期，请重新识别' : '识图任务处理失败';
+    session.failureReason = session.currentStageText;
+    session.suggestions = [];
+  }
+  if (session.sessionId === replySuggestionState.activeSessionId) {
+    if (session.status !== 'LOADING') {
+      clearSkeletonTimer();
+    }
+    syncActiveSessionToState();
+  }
+}
+
 export function archiveQueuedReplySessions(): ArchivedReplySession[] {
-  const queuedSessions = replySuggestionState.sessions.filter(
-    (session) => session.sessionId !== replySuggestionState.activeSessionId
+  const queuedSessions = replySuggestionState.sessions.filter((session) =>
+    session.sessionId !== replySuggestionState.activeSessionId && isArchivableSession(session)
   );
   if (queuedSessions.length === 0) return [];
 
@@ -573,6 +621,12 @@ export function archiveQueuedReplySessions(): ArchivedReplySession[] {
   replySuggestionState.archivedSessions.unshift(...archivedSessions);
   syncActiveSessionToState();
   return archivedSessions;
+}
+
+function isArchivableSession(session: ReplySession): boolean {
+  return session.status === 'COPIED'
+    || session.status === 'FAILED'
+    || session.status === 'CANCELLED';
 }
 
 export function restoreArchivedReplySession(sessionId: string): boolean {
@@ -698,7 +752,9 @@ function recoverSession(session: ReplySession): ReplySession {
   const recovered = {
     ...session,
     pendingTaskId: session.pendingTaskId ?? '',
-    pendingTaskStatus: session.pendingTaskStatus ?? null
+    pendingTaskStatus: session.pendingTaskStatus ?? null,
+    recognitionJobId: session.recognitionJobId ?? '',
+    recognitionJobStatus: session.recognitionJobStatus ?? null
   };
   if (session.status === 'FALLBACK'
     && session.currentScene === 'CHAT_RECOGNIZE'
@@ -710,7 +766,10 @@ function recoverSession(session: ReplySession): ReplySession {
       showRegenerateButton: true
     };
   }
-  if (session.status !== 'LOADING') return recovered;
+  if (session.status !== 'LOADING' || (recovered.recognitionJobId
+    && (recovered.recognitionJobStatus === 'QUEUED' || recovered.recognitionJobStatus === 'RECOGNIZING'))) {
+    return recovered;
+  }
   return {
     ...recovered,
     status: 'FAILED',
@@ -926,6 +985,8 @@ function createSession(sessionId: string, loadingMode: LoadingMode, source?: str
     status: loadingMode === 'NONE' ? 'READY' : 'LOADING',
     pendingTaskId: '',
     pendingTaskStatus: null,
+    recognitionJobId: '',
+    recognitionJobStatus: null,
     source,
     createdAt: now,
     updatedAt: now,

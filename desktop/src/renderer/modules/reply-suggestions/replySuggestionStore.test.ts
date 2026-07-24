@@ -158,6 +158,36 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.suggestions.map((item) => item.text)).toEqual(['Second customer']);
   });
 
+  it('tracks a screenshot job on its original reply session through cancellation', async () => {
+    const { replies } = await freshStore();
+    replies.startRecognizeLoading({ sessionId: 'session-a', source: 'BUTTON_CLICK' });
+
+    replies.syncRecognitionJobIntoSession({
+      sessionId: 'session-a',
+      jobId: 'job-1',
+      status: 'QUEUED'
+    });
+
+    expect(replies.replySuggestionState.sessions[0]).toMatchObject({
+      sessionId: 'session-a',
+      recognitionJobId: 'job-1',
+      recognitionJobStatus: 'QUEUED',
+      status: 'LOADING'
+    });
+
+    replies.syncRecognitionJobIntoSession({
+      sessionId: 'session-a',
+      jobId: 'job-1',
+      status: 'CANCELLED'
+    });
+
+    expect(replies.replySuggestionState.sessions[0]).toMatchObject({
+      recognitionJobStatus: 'CANCELLED',
+      status: 'CANCELLED',
+      currentStageText: '任务已取消'
+    });
+  });
+
   it('updates the matching queue task when recognition fails by session id', async () => {
     const { replies } = await freshStore();
 
@@ -217,7 +247,7 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.activeSessionId).toBe('session-reusable');
   });
 
-  it('archives queued replies without changing the active reply and restores the original reply', async () => {
+  it('archives only copied terminal replies without changing the active reply', async () => {
     const { replies } = await freshStore();
     replies.showRecognizeResult({
       sessionId: 'session-a',
@@ -228,6 +258,12 @@ describe('replySuggestionStore', () => {
       response: response('18800002222', [suggestion('Second reply')])
     });
 
+    expect(replies.archiveQueuedReplySessions()).toEqual([]);
+    expect(replies.replySuggestionState.sessions).toHaveLength(2);
+
+    replies.activateSession('session-a');
+    replies.selectReply(replies.replySuggestionState.suggestions[0]);
+    replies.activateSession('session-b');
     const archived = replies.archiveQueuedReplySessions();
 
     expect(replies.replySuggestionState.activeSessionId).toBe('session-b');
@@ -261,6 +297,9 @@ describe('replySuggestionStore', () => {
       sessionId: 'session-b',
       response: response('18800002222', [suggestion('Second reply')])
     });
+    replies.activateSession('session-a');
+    replies.selectReply(replies.replySuggestionState.suggestions[0]);
+    replies.activateSession('session-b');
     replies.archiveQueuedReplySessions();
     replies.cleanupReplySuggestionStore();
 

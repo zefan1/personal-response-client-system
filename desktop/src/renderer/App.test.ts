@@ -69,6 +69,8 @@ vi.mock('./modules/chat-recognition/ChatRecognitionPanel.vue', () => ({ default:
 vi.mock('./modules/followup-list/FollowupListPanel.vue', () => ({ default: { template: '<section class="followup-panel">跟进列表内容</section>' } }));
 vi.mock('./modules/customer-profile/CustomerProfilePanel.vue', () => ({ default: { template: '<section class="customer-panel">客户档案内容</section>' } }));
 vi.mock('./modules/reply-suggestions/ReplySuggestionPanel.vue', () => ({ default: { template: '<section class="reply-panel">回复助手内容</section>' } }));
+vi.mock('./modules/reply-suggestions/ReplyTaskSidebar.vue', () => ({ default: { template: '<section class="reply-task-sidebar">回复任务</section>' } }));
+vi.mock('./modules/reply-suggestions/ReplyTaskDrawer.vue', () => ({ default: { template: '<section class="reply-task-drawer">回复任务列表</section>' } }));
 vi.mock('./modules/abnormal-alert/AlertBell.vue', () => ({ default: { template: '<div class="alert-bell-wrap"></div>' } }));
 vi.mock('./modules/batch-template/BatchTemplateOverlay.vue', () => ({ default: { template: '<div class="batch-template-overlay"></div>' } }));
 vi.mock('./modules/copy-backfill/CopyBackfillAgent.vue', () => ({ default: { template: '<div class="copy-backfill-agent"></div>' } }));
@@ -83,6 +85,7 @@ vi.mock('./shared/desktopBridge', () => ({
   toggleAlwaysOnTop: vi.fn(async () => ({ success: true, alwaysOnTop: true }))
 }));
 vi.mock('./modules/chat-recognition/recognitionStore', () => ({
+  cancelRecognitionJob: vi.fn(async () => undefined),
   recognitionState: { isRecognizePending: false },
   triggerRecognize: vi.fn(async () => undefined)
 }));
@@ -215,6 +218,22 @@ describe('App route shell', () => {
     expect(host.querySelector('.global-recognize-button')).toBeFalsy();
     expect(host.textContent).toContain('有效至 2026-08-01');
 
+    app.unmount();
+  });
+
+  it('places the compact reply task area between batch actions and the admin entry', async () => {
+    installDesktopBridge();
+    const { app, host } = await mountAppWithToken('#/desktop');
+    const batchButton = host.querySelectorAll('.sidebar-quick-button').item(2) as HTMLElement | null;
+    const replyTasks = host.querySelector('.reply-task-sidebar') as HTMLElement;
+    const adminButton = host.querySelector('.desktop-sidebar-actions button') as HTMLElement | null;
+
+    expect(batchButton).toBeTruthy();
+    expect(replyTasks).toBeTruthy();
+    expect(adminButton).toBeTruthy();
+    if (!batchButton || !replyTasks || !adminButton) throw new Error('desktop sidebar controls are missing');
+    expect(batchButton.compareDocumentPosition(replyTasks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(replyTasks.compareDocumentPosition(adminButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     app.unmount();
   });
 

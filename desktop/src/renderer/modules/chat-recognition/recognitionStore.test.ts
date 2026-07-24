@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatRecognizeResponse } from './types';
 
 const postJsonMock = vi.fn();
+const getJsonMock = vi.fn();
 const notifyReplyTaskMock = vi.fn();
 
 vi.mock('../../shared/apiClient', () => ({
+  getJson: getJsonMock,
   postJson: postJsonMock
 }));
 
@@ -35,6 +38,7 @@ async function freshStore(): Promise<{
   pending: PendingModule;
 }> {
   vi.resetModules();
+  getJsonMock.mockReset();
   postJsonMock.mockReset();
   notifyReplyTaskMock.mockReset();
   notifyReplyTaskMock.mockResolvedValue({ success: true });
@@ -56,6 +60,7 @@ describe('recognitionStore', () => {
   afterEach(() => {
     vi.useRealTimers();
     postJsonMock.mockReset();
+    getJsonMock.mockReset();
     notifyReplyTaskMock.mockReset();
     vi.restoreAllMocks();
     localStorage.clear();
@@ -105,6 +110,87 @@ describe('recognitionStore', () => {
     }, 0);
   });
 
+  it('submits a screenshot job, polls it, and emits the completed reply for the same session', async () => {
+    const { recognition, eventBus } = await freshStore();
+    const events: Array<{ type: string; payload: unknown }> = [];
+    eventBus.on('recognize:start', (payload) => events.push({ type: 'start', payload }));
+    eventBus.on('recognize:job', (payload) => events.push({ type: 'job', payload }));
+    eventBus.on('recognize:result', (payload) => events.push({ type: 'result', payload }));
+    postJsonMock.mockResolvedValue({
+      success: true,
+      data: recognitionJob('job-1', 'QUEUED')
+    });
+    getJsonMock.mockResolvedValue({
+      success: true,
+      data: recognitionJob('job-1', 'READY', response('EXACT'))
+    });
+
+    await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'base64' });
+
+    const sessionId = (events.find((event) => event.type === 'start')?.payload as { sessionId: string }).sessionId;
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/recognition-jobs', {
+      imageBase64: 'base64',
+      textMessage: undefined,
+      customerIdentifier: undefined,
+      replySessionId: sessionId
+    }, 0);
+    expect(events.find((event) => event.type === 'job')?.payload).toMatchObject({
+      sessionId,
+      jobId: 'job-1',
+      status: 'QUEUED'
+    });
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(getJsonMock).toHaveBeenCalledWith('/api/v1/chat/recognition-jobs/job-1', 5000);
+    expect(events.find((event) => event.type === 'result')?.payload).toMatchObject({
+      sessionId,
+      source: 'BUTTON_CLICK',
+      response: response('EXACT')
+    });
+  });
+
+  it('cancels a queued screenshot job through the job endpoint', async () => {
+    const { recognition, eventBus } = await freshStore();
+    const events: Array<{ type: string; payload: unknown }> = [];
+    eventBus.on('recognize:start', (payload) => events.push({ type: 'start', payload }));
+    eventBus.on('recognize:job', (payload) => events.push({ type: 'job', payload }));
+    postJsonMock
+      .mockResolvedValueOnce({ success: true, data: recognitionJob('job-1', 'QUEUED') })
+      .mockResolvedValueOnce({ success: true, data: recognitionJob('job-1', 'CANCELLED') });
+
+    await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'base64' });
+    const sessionId = (events.find((event) => event.type === 'start')?.payload as { sessionId: string }).sessionId;
+
+    await recognition.cancelRecognitionJob('job-1', sessionId);
+
+    expect(postJsonMock).toHaveBeenLastCalledWith('/api/v1/chat/recognition-jobs/job-1/cancel', {}, 5000);
+    expect(events.at(-1)?.payload).toMatchObject({
+      sessionId,
+      jobId: 'job-1',
+      status: 'CANCELLED'
+    });
+  });
+
+  it('resumes polling a persisted active screenshot job', async () => {
+    const { recognition, eventBus } = await freshStore();
+    const results: unknown[] = [];
+    eventBus.on('recognize:result', (payload) => results.push(payload));
+    getJsonMock.mockResolvedValue({
+      success: true,
+      data: recognitionJob('job-restored', 'READY', response('EXACT'))
+    });
+
+    recognition.resumeRecognitionJobPolling('job-restored', 'reply-restored', 'BUTTON_CLICK');
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(getJsonMock).toHaveBeenCalledWith('/api/v1/chat/recognition-jobs/job-restored', 5000);
+    expect(results).toEqual([expect.objectContaining({
+      sessionId: 'reply-restored',
+      response: response('EXACT')
+    })]);
+  });
+
   it('emits multiple-match candidates instead of a direct result', async () => {
     vi.mocked(document.hasFocus).mockReturnValue(false);
     const { recognition, eventBus, pending } = await freshStore();
@@ -113,7 +199,7 @@ describe('recognitionStore', () => {
     eventBus.on('recognize:multiple', (payload) => events.push({ type: 'recognize:multiple', payload }));
     postJsonMock.mockResolvedValue({
       success: true,
-      data: {
+      data: recognitionJob('job-1', 'WAITING_CUSTOMER', {
         ...response('MULTIPLE'),
         pendingTask: {
           taskId: 'task-1',
@@ -125,7 +211,7 @@ describe('recognitionStore', () => {
           errorCode: null,
           expiresAt: '2026-07-04T12:00:00'
         }
-      }
+      })
     });
 
     await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'base64' });
@@ -155,7 +241,10 @@ describe('recognitionStore', () => {
     eventBus.on('recognize:progress', (payload) => events.push({ type: 'recognize:progress', payload }));
     eventBus.on('recognize:multiple', (payload) => events.push({ type: 'recognize:multiple', payload }));
     eventBus.on('recognize:failed', (payload) => events.push({ type: 'recognize:failed', payload }));
-    postJsonMock.mockResolvedValue({ success: true, data: response('MULTIPLE') });
+    postJsonMock.mockResolvedValue({
+      success: true,
+      data: recognitionJob('job-1', 'WAITING_CUSTOMER', response('MULTIPLE'))
+    });
 
     await recognition.triggerRecognize('BUTTON_CLICK', { imageBase64: 'base64' });
 
@@ -224,7 +313,10 @@ describe('recognitionStore', () => {
 
   it('keeps clipboard screenshots pending until the user confirms recognition', async () => {
     const { recognition } = await freshStore();
-    postJsonMock.mockResolvedValue({ success: true, data: response('EXACT') });
+    postJsonMock.mockResolvedValue({
+      success: true,
+      data: recognitionJob('job-1', 'READY', response('EXACT'))
+    });
 
     recognition.recognitionState.isRecognizePending = true;
     await recognition.recognizeClipboardImage({ imageBase64: 'busy', md5: 'a', width: 300, height: 300 });
@@ -232,11 +324,10 @@ describe('recognitionStore', () => {
     expect(recognition.recognitionState.pendingClipboardImage?.imageBase64).toBe('busy');
 
     await recognition.recognizePendingClipboardImage();
-    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/recognize', {
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/recognition-jobs', {
       imageBase64: 'busy',
       textMessage: undefined,
       customerIdentifier: undefined,
-      source: 'CLIPBOARD_SCREENSHOT',
       replySessionId: expect.any(String)
     }, 0);
     expect(recognition.recognitionState.pendingClipboardImage).toBeNull();
@@ -332,7 +423,7 @@ describe('recognitionStore', () => {
   });
 });
 
-function response(matchType: 'EXACT' | 'MULTIPLE') {
+function response(matchType: 'EXACT' | 'MULTIPLE'): ChatRecognizeResponse {
   return {
     phone: '18800001111',
     nickname: 'Alice',
@@ -342,5 +433,22 @@ function response(matchType: 'EXACT' | 'MULTIPLE') {
     skill: {
       suggestions: [{ text: 'hello', direction: 'NEXT_STEP', reason: 'reason' }]
     }
+  };
+}
+
+function recognitionJob(
+  jobId: string,
+  status: 'QUEUED' | 'RECOGNIZING' | 'READY' | 'WAITING_CUSTOMER' | 'FAILED' | 'CANCELLED' | 'EXPIRED',
+  completedResponse?: ReturnType<typeof response>
+) {
+  return {
+    jobId,
+    replySessionId: 'server-session',
+    status,
+    errorCode: null,
+    response: completedResponse ?? null,
+    pendingTask: completedResponse?.pendingTask ?? null,
+    createdAt: '2026-07-03T12:00:00Z',
+    updatedAt: '2026-07-03T12:00:00Z'
   };
 }
