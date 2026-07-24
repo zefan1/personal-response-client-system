@@ -288,6 +288,31 @@ describe('ReplySuggestionPanel', () => {
     app.unmount();
   });
 
+  it('opens the personal template editor from an AI reply without copying or sending it', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    const openings: unknown[] = [];
+    eventBus.on('template-editor:show', (payload) => openings.push(payload));
+    eventBus.emit('recognize:start', { sessionId: 'session-template', source: 'BUTTON_CLICK' });
+    eventBus.emit('recognize:result', {
+      sessionId: 'session-template',
+      response: response('18800001111', [suggestion('AI response to edit')])
+    });
+    await flushUi();
+
+    const saveButton = host.querySelector('[data-testid="save-reply-template"]') as HTMLButtonElement | null;
+    expect(saveButton).toBeTruthy();
+    saveButton?.click();
+    await flushUi();
+
+    expect(openings).toEqual([expect.objectContaining({
+      body: 'AI response to edit',
+      originalAiReply: 'AI response to edit',
+      sourceReplySessionId: 'session-template'
+    })]);
+    expect(mocks.postJson).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
   it('keeps the full reply workflow without embedding the task list', async () => {
     const { app, host, eventBus } = await mountPanel();
 

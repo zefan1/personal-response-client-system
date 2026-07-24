@@ -1504,6 +1504,7 @@ textarea {
 .reply-primary-actions {
   align-items: center;
   justify-content: flex-start;
+  flex-wrap: wrap;
   border-top: 1px solid #dbeafe;
   margin-top: 10px;
   padding-top: 10px;
@@ -3535,6 +3536,108 @@ textarea {
 
 .ops-filter-bar.three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.reply-card-head-actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.reply-card-head-actions button,
+.reply-primary-actions button {
+  white-space: nowrap;
+}
+
+.template-candidate-grid {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+.template-candidate-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.template-candidate-card .ops-card-head strong {
+  flex: 0 0 auto;
+  color: #245b91;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.template-candidate-metadata {
+  margin: 0;
+  color: #667085;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.template-candidate-copy {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.template-candidate-copy label,
+.template-candidate-publish-form label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: #475467;
+  font-size: 12px;
+}
+
+.template-candidate-copy textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 86px;
+  padding: 8px;
+  overflow: auto;
+  color: #344054;
+  line-height: 1.45;
+  resize: vertical;
+  background: #f8fafc;
+  border: 1px solid #d8e1eb;
+  border-radius: 4px;
+}
+
+.template-candidate-publish-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e5eaf0;
+}
+
+.template-candidate-publish-form input:not([type='checkbox']) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 8px;
+  color: #1d2939;
+  background: #ffffff;
+  border: 1px solid #cfd9e4;
+  border-radius: 4px;
+}
+
+.template-candidate-enabled {
+  display: flex !important;
+  align-items: center;
+  align-self: end;
+  min-height: 34px;
+  gap: 7px !important;
+}
+
+@media (max-width: 640px) {
+  .template-candidate-grid,
+  .template-candidate-copy,
+  .template-candidate-publish-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 .ops-filter-bar.supervision {

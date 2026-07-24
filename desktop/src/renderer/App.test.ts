@@ -78,6 +78,8 @@ vi.mock('./modules/help-mode/HelpModeAgent.vue', () => ({ default: { template: '
 vi.mock('./modules/new-lead-toast/NewLeadToastAgent.vue', () => ({ default: { template: '<div class="new-lead-toast-agent"></div>' } }));
 vi.mock('./modules/offline/OfflineStatusBar.vue', () => ({ default: { template: '<div class="offline-status-bar"></div>' } }));
 vi.mock('./modules/quick-search/QuickSearchOverlay.vue', () => ({ default: { template: '<div class="quick-search-overlay"></div>' } }));
+vi.mock('./modules/templates/TemplateLibraryOverlay.vue', () => ({ default: { template: '<div class="template-library-overlay"></div>' } }));
+vi.mock('./modules/templates/PersonalTemplateEditor.vue', () => ({ default: { template: '<div class="personal-template-editor"></div>' } }));
 vi.mock('./shared/desktopBridge', () => ({
   captureScreenshot: vi.fn(async () => ({ success: true, imageBase64: 'capture-image' })),
   openAdminConsole: vi.fn(async () => ({ success: true })),
@@ -224,7 +226,8 @@ describe('App route shell', () => {
   it('places the compact reply task area between batch actions and the admin entry', async () => {
     installDesktopBridge();
     const { app, host } = await mountAppWithToken('#/desktop');
-    const batchButton = host.querySelectorAll('.sidebar-quick-button').item(2) as HTMLElement | null;
+    const batchButton = [...host.querySelectorAll('.sidebar-quick-button')]
+      .find((button) => button.textContent?.includes('批量')) as HTMLElement | undefined;
     const replyTasks = host.querySelector('.reply-task-sidebar') as HTMLElement;
     const adminButton = host.querySelector('.desktop-sidebar-actions button') as HTMLElement | null;
 
@@ -235,6 +238,20 @@ describe('App route shell', () => {
     expect(batchButton.compareDocumentPosition(replyTasks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(replyTasks.compareDocumentPosition(adminButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     app.unmount();
+  });
+
+  it('opens the personal template library from the sidebar instead of the legacy quick-search flow', async () => {
+    installDesktopBridge();
+    const { eventBus } = await import('./shared/eventBus');
+    const openings: unknown[] = [];
+    eventBus.on('template-library:show', (payload) => openings.push(payload));
+    const { app, host } = await mountAppWithToken('#/desktop');
+
+    (host.querySelectorAll('.sidebar-quick-button').item(1) as HTMLButtonElement).click();
+    await flushUi();
+
+    app.unmount();
+    expect(openings).toEqual([{ tab: 'PERSONAL' }]);
   });
 
   it('hides the Skill status chip when no subscription expiry is configured', async () => {
@@ -549,8 +566,10 @@ describe('App route shell', () => {
     ]);
     const openedTabs: unknown[] = [];
     const quickSearchEvents: unknown[] = [];
+    const templateLibraryEvents: unknown[] = [];
     eventBus.on('followup:switch-tab', (payload) => openedTabs.push(payload));
     eventBus.on('quick-search:show', (payload) => quickSearchEvents.push(payload));
+    eventBus.on('template-library:show', (payload) => templateLibraryEvents.push(payload));
     installDesktopBridge();
     const { app, host } = await mountAppWithToken('#/desktop');
     const navButtons = [...host.querySelectorAll('.desktop-nav-button')] as HTMLButtonElement[];
@@ -565,6 +584,7 @@ describe('App route shell', () => {
     expect([...host.querySelectorAll('.sidebar-quick-actions .action-label')].map((item) => item.textContent)).toEqual([
       '识别',
       '模板',
+      '快捷',
       '批量'
     ]);
     const recognizeButton = actionButtons[0];
@@ -579,14 +599,14 @@ describe('App route shell', () => {
     await flushUi();
     expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('工作台');
 
-    actionButtons[2].click();
+    actionButtons[3].click();
     await flushUi();
     expect((host.querySelector('.task-queue-backdrop') as HTMLElement | null)?.style.display).not.toBe('none');
     expect(host.querySelector('.task-queue-drawer .followup-panel')).toBeTruthy();
     expect(openedTabs.at(-1)).toEqual({ tab: 'DUE_TODAY' });
 
     (host.querySelector('.task-queue-drawer .icon-close-button') as HTMLButtonElement | null)?.click();
-    actionButtons[2].click();
+    actionButtons[3].click();
     await flushUi();
     expect(openedTabs).toEqual([{ tab: 'DUE_TODAY' }, { tab: 'DUE_TODAY' }]);
 
@@ -612,7 +632,7 @@ describe('App route shell', () => {
       }
     };
 
-    actionButtons[1].click();
+    actionButtons[2].click();
     await flushUi();
     expect(quickSearchEvents.at(-1)).toMatchObject({
       phone: '18800002222',
@@ -636,9 +656,11 @@ describe('App route shell', () => {
     expect((host.querySelector('.task-queue-backdrop') as HTMLElement | null)?.style.display).not.toBe('none');
     expect(openedTabs.at(-1)).toEqual({ tab: 'DUE_TODAY' });
 
+    const quickSearchEventCount = quickSearchEvents.length;
     actionButtons[1].click();
     await flushUi();
-    expect(quickSearchEvents.at(-1)).toEqual(undefined);
+    expect(templateLibraryEvents.at(-1)).toEqual({ tab: 'PERSONAL' });
+    expect(quickSearchEvents).toHaveLength(quickSearchEventCount);
 
     (host.querySelector('.task-queue-drawer .icon-close-button') as HTMLButtonElement | null)?.click();
 

@@ -221,6 +221,28 @@ const apiData: Record<string, unknown> = {
     size: 20,
     totalPages: 2
   },
+  '/admin/api/v1/template-promotion-candidates': [
+    {
+      id: 42,
+      ownerUsername: 'keeper-a',
+      originalAiReply: 'Original AI reply',
+      editedTitle: 'Edited opening',
+      editedBody: 'Employee adjusted body',
+      metadata: { channelCode: 'wecom', scene: 'new-lead', leadType: 'LEAD', labels: ['warm'] },
+      personalTemplateUsageCount: 3,
+      createdAt: '2026-07-24T13:00:00'
+    },
+    {
+      id: 43,
+      ownerUsername: 'keeper-b',
+      originalAiReply: 'Second original reply',
+      editedTitle: 'Second opening',
+      editedBody: 'Second body',
+      metadata: { labels: [] },
+      personalTemplateUsageCount: 0,
+      createdAt: '2026-07-24T13:01:00'
+    }
+  ],
   '/admin/api/v1/accounts': {
     list: [
       { id: 30, displayName: '管理员', phone: '18800000000', role: 'ADMIN', isEnabled: true, permissions: ['TAG_MANAGEMENT'], lastLoginAt: '2026-07-03T09:00:00Z' },
@@ -524,7 +546,7 @@ function findSubnavButton(host: HTMLElement, text: string): HTMLButtonElement {
   const buttons = [...host.querySelectorAll('.ops-admin-subnav-button')] as HTMLButtonElement[];
   const button = buttons.find((item) => item.textContent?.includes(text));
   if (!button && buttons.length >= 6) {
-    return buttons[5];
+    return buttons.find((item) => item.textContent?.includes('跟进规则')) ?? buttons[5];
   }
   expect(button).toBeTruthy();
   return button as HTMLButtonElement;
@@ -600,6 +622,7 @@ describe('AdminConsole product surface', () => {
       '配置中心',
       '客户数据对接',
       '速搜内容管理',
+      '可推广模板',
       '账号与权限',
       '跟进规则引擎配置',
       '客户标签与分层',
@@ -2000,6 +2023,33 @@ describe('AdminConsole product surface', () => {
     expect(apiMocks.getJson.mock.calls.length).toBeGreaterThan(0);
     expect(apiMocks.getJson.mock.calls.every((call) => String(call[0]).startsWith('/admin/api/v1/tags/'))).toBe(true);
 
+    app.unmount();
+  });
+
+  it('lets an administrator review template candidates and publish or decline them', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '可推广模板').click();
+    await flushUi();
+    await flushUi();
+
+    expect(mainText(host)).toContain('keeper-a');
+    expect([...host.querySelectorAll('.template-candidate-copy textarea')].map((item) => (item as HTMLTextAreaElement).value))
+      .toContain('Original AI reply');
+    expect([...host.querySelectorAll('.template-candidate-copy textarea')].map((item) => (item as HTMLTextAreaElement).value))
+      .toContain('Employee adjusted body');
+    expect(mainText(host)).toContain('已用 3 次');
+    const title = host.querySelector('[data-testid="candidate-title-42"]') as HTMLInputElement;
+    setInputValue(title, 'Published team opening');
+    (host.querySelector('[data-testid="candidate-publish-42"]') as HTMLButtonElement).click();
+    await flushUi();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/template-promotion-candidates/42/publish', expect.objectContaining({
+      title: 'Published team opening'
+    }));
+
+    (host.querySelector('[data-testid="candidate-not-publish-43"]') as HTMLButtonElement).click();
+    await flushUi();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/template-promotion-candidates/43/not-publish', {});
     app.unmount();
   });
 

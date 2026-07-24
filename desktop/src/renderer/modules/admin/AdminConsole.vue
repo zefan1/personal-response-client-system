@@ -1043,6 +1043,55 @@
             </div>
           </div>
         </article>
+
+        <article v-if="activeSection.key === 'template-promotion-candidates'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>可推广模板</h2>
+              <p>查看员工保存时留下的原始 AI 文本与调整稿，确认后发布到全员模板库。</p>
+            </div>
+            <button class="secondary small" type="button" :disabled="loading" @click="refreshTemplatePromotionCandidates">刷新候选</button>
+          </div>
+          <div class="ops-card-grid template-candidate-grid">
+            <article v-for="candidate in templatePromotionCandidates" :key="candidate.id" class="ops-content-card template-candidate-card">
+              <div class="ops-card-head">
+                <div>
+                  <h3>{{ candidate.editedTitle }}</h3>
+                  <span>{{ candidate.ownerUsername || '-' }} · {{ formatDate(candidate.createdAt) }}</span>
+                </div>
+                <strong>已用 {{ candidate.personalTemplateUsageCount || 0 }} 次</strong>
+              </div>
+              <p class="template-candidate-metadata">{{ candidateMetadataSummary(candidate) }}</p>
+              <div class="template-candidate-copy">
+                <label>原始 AI 回复<textarea :value="candidate.originalAiReply" readonly rows="3"></textarea></label>
+                <label>员工调整稿<textarea :value="candidate.editedBody" readonly rows="3"></textarea></label>
+              </div>
+              <div class="ops-form-grid template-candidate-publish-form">
+                <label>
+                  团队标题
+                  <input :data-testid="`candidate-title-${candidate.id}`" v-model="candidatePublishDraft(candidate).title" maxlength="120" />
+                </label>
+                <label>
+                  快捷码
+                  <input v-model="candidatePublishDraft(candidate).shortcutCode" maxlength="20" />
+                </label>
+                <label>
+                  线索类型
+                  <input v-model="candidatePublishDraft(candidate).leadType" maxlength="32" />
+                </label>
+                <label class="ops-checkline template-candidate-enabled">
+                  <input v-model="candidatePublishDraft(candidate).enabled" type="checkbox" />
+                  发布后立即可用
+                </label>
+              </div>
+              <div class="ops-row-actions">
+                <button :data-testid="`candidate-publish-${candidate.id}`" class="primary small" type="button" :disabled="loading" @click="publishTemplateCandidate(candidate)">发布到团队模板库</button>
+                <button :data-testid="`candidate-not-publish-${candidate.id}`" class="secondary small" type="button" :disabled="loading" @click="markTemplateCandidateNotPublished(candidate)">暂不发布</button>
+              </div>
+            </article>
+          </div>
+          <p v-if="!templatePromotionCandidates.length" class="ops-empty">当前没有待查阅的模板候选。</p>
+        </article>
       </section>
 
       <section v-else-if="activeSection.groupKey === 'org-rules-tags'" class="ops-admin-layout">
@@ -2157,6 +2206,7 @@ type SectionKey =
   | 'configuration-center'
   | 'data-integration'
   | 'quick-search-content'
+  | 'template-promotion-candidates'
   | 'account-permissions'
   | 'followup-rules'
   | 'customer-tags'
@@ -2275,6 +2325,7 @@ const sections: AdminSection[] = [
   { key: 'configuration-center', groupKey: 'config-center', group: '运营 B', module: 'B', title: '配置中心', subtitle: 'AI、LLM、识图、Prompt', description: '集中管理 Skill 环境、LLM 思考环境、识图环境、Prompt 模板、企业红线和降级回复。', primaryAction: '新增 Skill 环境' },
   { key: 'data-integration', groupKey: 'data-content', group: '运营 C', module: 'C', title: '客户数据对接', subtitle: '数据源、字段映射、同步、导入', description: '管理企微表格数据源、字段映射版本、同步状态和 CSV 导入。', primaryAction: '添加数据源' },
   { key: 'quick-search-content', groupKey: 'data-content', group: '运营 D', module: 'D', title: '速搜内容管理', subtitle: '模板、知识、图片、小程序', description: '维护桌面端速搜可用的话术、知识片段、门店定位、图片素材和小程序引导。', primaryAction: '新增内容' },
+  { key: 'template-promotion-candidates', groupKey: 'data-content', group: '运营 D1', module: 'D1', title: '可推广模板', subtitle: '员工候选、团队发布', description: '查阅员工保存的调整稿和使用情况，决定是否发布为全员可用模板。', primaryAction: '刷新候选' },
   { key: 'account-permissions', groupKey: 'org-rules-tags', group: '运营 E', module: 'E', title: '账号与权限', subtitle: '账号、角色、组长关系', description: '管理 ADMIN、LEADER、KEEPER 的账号权限和直属组长关系。', primaryAction: '新增账号' },
   { key: 'followup-rules', groupKey: 'org-rules-tags', group: '运营 F', module: 'F', title: '跟进规则引擎配置', subtitle: '条件、动作、启停', description: '配置跟进提醒、标签建议和通知组长的业务规则。', primaryAction: '新增规则' },
   { key: 'customer-tags', groupKey: 'org-rules-tags', group: '运营 G', module: 'G', title: '客户标签与分层', subtitle: '标签分类、标签值、合并', description: '维护 AI 和运营共用的客户标签分类、标签值和历史合并关系。', primaryAction: '新增分类' },
@@ -2535,6 +2586,8 @@ const importLogs = ref<AnyRecord[]>([]);
 const customerSearchItems = ref<AnyRecord[]>([]);
 const selectedAdminCustomer = ref<AnyRecord | null>(null);
 const quickSearchItems = ref<AnyRecord[]>([]);
+const templatePromotionCandidates = ref<AnyRecord[]>([]);
+const candidatePublishDrafts = reactive<Record<string, { title: string; shortcutCode: string; leadType: string; enabled: boolean }>>({});
 const accounts = ref<AnyRecord[]>([]);
 const leaderAccounts = ref<AnyRecord[]>([]);
 const analyticsAccounts = ref<AnyRecord[]>([]);
@@ -2786,6 +2839,11 @@ const activeMetrics = computed(() => {
       { label: '速搜内容', value: quickSearchPageInfo.total, help: '推送到桌面端快线模板' },
       { label: '当前页', value: quickSearchItems.value.length, help: '支持按标题、快线码、正文筛选' },
       { label: '已选中', value: quickSearchSelectedIds.value.length, help: '可批量启用、停用或删除' }
+    ],
+    'template-promotion-candidates': [
+      { label: '待查阅', value: templatePromotionCandidates.value.length, help: '员工保存后自动进入主管候选列表' },
+      { label: '已有使用', value: templatePromotionCandidates.value.filter((item) => Number(item.personalTemplateUsageCount || 0) > 0).length, help: '可优先复核已被重复使用的内容' },
+      { label: '团队发布', value: '手动确认', help: '员工端不会看到审核结果' }
     ],
     'account-permissions': [
       { label: '账号', value: accountPageInfo.total, help: 'ADMIN/LEADER/KEEPER' },
@@ -3222,6 +3280,7 @@ function startPrimaryAction() {
   if (activeSectionKey.value === 'configuration-center') openForm('skillEnv');
   if (activeSectionKey.value === 'data-integration') openForm('datasource');
   if (activeSectionKey.value === 'quick-search-content') openForm('quickSearch');
+  if (activeSectionKey.value === 'template-promotion-candidates') void refreshTemplatePromotionCandidates();
   if (activeSectionKey.value === 'account-permissions') openForm('account');
   if (activeSectionKey.value === 'followup-rules') openForm('rule');
   if (activeSectionKey.value === 'customer-tags') openForm(tagView.value === 'categories' ? 'tagCategory' : 'tagValue');
@@ -3282,13 +3341,14 @@ async function loadLlmAnalytics() {
 
 async function loadDataContent() {
   await runWithNotice(async () => {
-    const [dsList, fieldList, syncList, importList, customerList, quickList] = await Promise.all([
+    const [dsList, fieldList, syncList, importList, customerList, quickList, candidateList] = await Promise.all([
       getJson<unknown>('/admin/api/v1/datasources'),
       getJson<unknown>('/admin/api/v1/customer-fields'),
       getJson<unknown>('/admin/api/v1/datasources/sync-status'),
       getJson<unknown>('/admin/api/v1/datasources/import-logs'),
       requestPostJson<unknown>('/admin/api/v1/customers/search', customerSearchRequest()),
-      getJson<unknown>(quickSearchListPath())
+      getJson<unknown>(quickSearchListPath()),
+      getJson<unknown>(withQuery('/admin/api/v1/template-promotion-candidates', { status: 'CANDIDATE' }))
     ]);
     void refreshTagCategoryOptionsCache();
     datasources.value = listFromResponse(dsList);
@@ -3297,6 +3357,7 @@ async function loadDataContent() {
     importLogs.value = listFromResponse(importList);
     applyCustomerSearchList(customerList);
     applyQuickSearchList(quickList);
+    applyTemplatePromotionCandidates(candidateList);
     if (!selectedDatasource.value && datasources.value.length) {
       selectDatasource(datasources.value[0]);
     }
@@ -3909,6 +3970,76 @@ function applyQuickSearchList(response: ApiResponse<unknown>) {
   quickSearchPageInfo.page = Number(data.page ?? quickSearchPageInfo.page ?? 1);
   quickSearchPageInfo.size = Number(data.size ?? data.pageSize ?? quickSearchPageInfo.size ?? 20);
   quickSearchPageInfo.totalPages = Number(data.totalPages ?? (Math.ceil(quickSearchPageInfo.total / Math.max(1, quickSearchPageInfo.size)) || 1));
+}
+
+function applyTemplatePromotionCandidates(response: ApiResponse<unknown>) {
+  templatePromotionCandidates.value = listFromResponse(response);
+  for (const candidate of templatePromotionCandidates.value) {
+    const key = String(candidate.id);
+    candidatePublishDrafts[key] = candidatePublishDraft(candidate);
+  }
+}
+
+function candidatePublishDraft(candidate: AnyRecord): { title: string; shortcutCode: string; leadType: string; enabled: boolean } {
+  const key = String(candidate.id);
+  const existing = candidatePublishDrafts[key];
+  if (existing) return existing;
+  const metadata = candidateMetadata(candidate);
+  return {
+    title: String(candidate.editedTitle || '').trim(),
+    shortcutCode: `TM${Number(candidate.id).toString(36).toUpperCase()}`,
+    leadType: String(metadata.leadType || '').trim(),
+    enabled: true
+  };
+}
+
+async function refreshTemplatePromotionCandidates() {
+  await runWithNotice(async () => {
+    applyTemplatePromotionCandidates(await getJson<unknown>(withQuery(
+      '/admin/api/v1/template-promotion-candidates',
+      { status: 'CANDIDATE' }
+    )));
+  }, '模板候选已刷新');
+}
+
+async function publishTemplateCandidate(candidate: AnyRecord) {
+  const draft = candidatePublishDraft(candidate);
+  await runWithNotice(async () => {
+    await postJson(`/admin/api/v1/template-promotion-candidates/${candidate.id}/publish`, {
+      title: draft.title.trim(),
+      shortcutCode: draft.shortcutCode.trim(),
+      leadType: draft.leadType.trim() || null,
+      enabled: draft.enabled
+    });
+    removeTemplatePromotionCandidate(candidate.id);
+  }, '已发布到团队模板库');
+}
+
+async function markTemplateCandidateNotPublished(candidate: AnyRecord) {
+  await runWithNotice(async () => {
+    await postJson(`/admin/api/v1/template-promotion-candidates/${candidate.id}/not-publish`, {});
+    removeTemplatePromotionCandidate(candidate.id);
+  }, '已标记为暂不发布');
+}
+
+function removeTemplatePromotionCandidate(id: unknown) {
+  templatePromotionCandidates.value = templatePromotionCandidates.value.filter((candidate) => String(candidate.id) !== String(id));
+  delete candidatePublishDrafts[String(id)];
+}
+
+function candidateMetadataSummary(candidate: AnyRecord): string {
+  const metadata = candidateMetadata(candidate);
+  const values = [metadata.channelCode, metadata.scene, metadata.leadType, ...(Array.isArray(metadata.labels) ? metadata.labels : [])]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  return values.join(' · ') || '未设置适用信息';
+}
+
+function candidateMetadata(candidate: AnyRecord): AnyRecord {
+  const metadata = candidate.metadata;
+  return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata as AnyRecord
+    : {};
 }
 
 function applyVersionList(response: ApiResponse<unknown>) {

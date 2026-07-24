@@ -27,6 +27,7 @@
       <p class="reply-text">{{ primarySuggestion.text }}</p>
       <p class="reason">{{ primarySuggestion.reason || '推荐理由暂缺' }}</p>
       <div class="reply-actions reply-primary-actions">
+        <button data-testid="save-reply-template" class="secondary small" type="button" @click="openTemplateEditor(primarySuggestion)">保存为模板</button>
         <button
           v-if="state.showRegenerateButton"
           class="secondary small"
@@ -51,7 +52,10 @@
       <article v-for="(suggestion, index) in secondarySuggestions" :key="`${suggestion.direction}-${index + 1}`" class="reply-card reply-alt-card">
         <div class="card-head">
           <span class="direction">{{ directionLabel(suggestion.direction) }}</span>
-          <button class="primary small" @click="selectReply(suggestion)">复制</button>
+          <div class="reply-card-head-actions">
+            <button class="secondary small" type="button" @click="openTemplateEditor(suggestion)">保存为模板</button>
+            <button class="primary small" type="button" @click="selectReply(suggestion)">复制</button>
+          </div>
         </div>
         <p class="reply-text">{{ suggestion.text }}</p>
         <p class="reason">{{ suggestion.reason || '推荐理由暂缺' }}</p>
@@ -286,6 +290,7 @@ import type {
   RecognizeResultPayload,
   ReplyCandidate,
   ReplyScene,
+  ReplySuggestion,
   ReplySourceInfo,
   ReplySession,
   ReplySessionStatus
@@ -555,6 +560,19 @@ function sessionStatusClass(session: ReplySession): string {
 
 function canCopySession(session: ReplySession): boolean {
   return (session.status === 'READY' || session.status === 'FALLBACK' || session.status === 'COPIED') && session.suggestions.length > 0;
+}
+
+function openTemplateEditor(suggestion: ReplySuggestion): void {
+  const session = activeSession.value;
+  eventBus.emit('template-editor:show', {
+    body: suggestion.text,
+    originalAiReply: suggestion.text,
+    sourceReplySessionId: session?.sessionId || null,
+    metadata: {
+      leadType: session?.currentLeadType || null,
+      labels: []
+    }
+  });
 }
 
 function toggleCopySuggestions(): void {

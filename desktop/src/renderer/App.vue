@@ -98,9 +98,13 @@
           <span class="action-icon" aria-hidden="true">识</span>
           <strong class="action-label">{{ recognitionState.isRecognizePending ? '继续识别' : '识别' }}</strong>
         </button>
-        <button class="secondary sidebar-quick-button" type="button" title="打开模板" @click="openQuickSearch">
+        <button class="secondary sidebar-quick-button" type="button" title="打开模板" @click="openTemplateLibrary">
           <span class="action-icon" aria-hidden="true">模</span>
           <strong class="action-label">模板</strong>
+        </button>
+        <button class="secondary sidebar-quick-button" type="button" title="打开快捷内容" @click="openQuickSearch">
+          <span class="action-icon" aria-hidden="true">快</span>
+          <strong class="action-label">快捷</strong>
         </button>
         <button class="secondary sidebar-quick-button" type="button" title="打开待办队列" @click="openTaskQueue()">
           <span class="action-icon" aria-hidden="true">批</span>
@@ -165,6 +169,8 @@
       <CopyBackfillAgent />
       <NewLeadToastAgent />
       <QuickSearchOverlay />
+      <TemplateLibraryOverlay />
+      <PersonalTemplateEditor />
       <BatchTemplateOverlay />
       <HelpModeAgent />
       <ClipboardCaptureConfirmAgent />
@@ -216,6 +222,8 @@ import HelpModeAgent from './modules/help-mode/HelpModeAgent.vue';
 import NewLeadToastAgent from './modules/new-lead-toast/NewLeadToastAgent.vue';
 import OfflineStatusBar from './modules/offline/OfflineStatusBar.vue';
 import QuickSearchOverlay from './modules/quick-search/QuickSearchOverlay.vue';
+import TemplateLibraryOverlay from './modules/templates/TemplateLibraryOverlay.vue';
+import PersonalTemplateEditor from './modules/templates/PersonalTemplateEditor.vue';
 import ReplySuggestionPanel from './modules/reply-suggestions/ReplySuggestionPanel.vue';
 import ReplyTaskDrawer from './modules/reply-suggestions/ReplyTaskDrawer.vue';
 import ReplyTaskSidebar from './modules/reply-suggestions/ReplyTaskSidebar.vue';
@@ -719,6 +727,10 @@ function openTaskQueue(tab: 'OVERDUE' | 'DUE_TODAY' | 'APPOINTMENT' | 'NEW_LEAD'
 
 function closeTaskQueue() {
   taskQueueOpen.value = false;
+}
+
+function openTemplateLibrary(): void {
+  eventBus.emit('template-library:show', { tab: 'PERSONAL' });
 }
 
 function openReplyTask(sessionId: string): void {
