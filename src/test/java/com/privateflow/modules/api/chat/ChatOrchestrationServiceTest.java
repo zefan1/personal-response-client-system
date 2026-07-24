@@ -49,6 +49,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -156,6 +157,160 @@ class ChatOrchestrationServiceTest {
   }
 
   @Test
+  void recognizeForJobUsesCapturedEmployeeForCustomerIsolationAndRestoresWorkerContext() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    AuthUser executorContext = new AuthUser("keeper-worker", "Worker", Role.KEEPER, null);
+    AuthContext.set(executorContext);
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice",
+        "18800001111",
+        List.of(new com.privateflow.modules.image.Message("client", "hello")),
+        "12:00"));
+    when(customerMatchService.match(any())).thenReturn(MatchResult.none());
+
+    service.recognizeForJob(new ChatRecognizeRequest(
+        null,
+        null,
+        null,
+        "lead",
+        "crm",
+        List.of(),
+        "reply-queued"), "jpeg".getBytes(), queuedEmployee);
+
+    org.mockito.ArgumentCaptor<MatchRequest> request = org.mockito.ArgumentCaptor.forClass(MatchRequest.class);
+    verify(customerMatchService).match(request.capture());
+    assertEquals("keeper-queued", request.getValue().currentUser());
+    assertEquals(executorContext, AuthContext.current());
+  }
+
+  @Test
+  void recognizeForJobStopsBeforeCustomerMatchingWhenTheQueuedJobWasCancelled() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice", "18800001111", List.of(), "12:00"));
+
+    ChatResponse response = service.recognizeForJob(new ChatRecognizeRequest(
+        null, null, null, "lead", "crm", List.of(), "reply-cancelled"),
+        "jpeg".getBytes(), queuedEmployee, () -> false);
+
+    assertNull(response);
+    verify(customerMatchService, never()).match(any());
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(pendingReplyTaskService, never()).createWaitingTask(any());
+  }
+
+  @Test
+  void recognizeForJobStopsBeforeGeneratingWhenTheJobIsCancelledDuringMatching() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    AtomicBoolean active = new AtomicBoolean(true);
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice", "18800001111", List.of(), "12:00"));
+    when(customerMatchService.match(any())).thenAnswer(invocation -> {
+      active.set(false);
+      return MatchResult.none();
+    });
+
+    ChatResponse response = service.recognizeForJob(
+        new ChatRecognizeRequest(null, null, null, "lead", "crm", List.of(), "reply-cancelled"),
+        "jpeg".getBytes(),
+        queuedEmployee,
+        active::get);
+
+    assertNull(response);
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(contextStore, never()).save(any(), any(), any());
+  }
+
+  @Test
+  void recognizeForJobDoesNotPersistOrReturnAReplyWhenCancelledDuringGeneration() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    AtomicBoolean active = new AtomicBoolean(true);
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice", "18800001111", List.of(), "12:00"));
+    when(customerMatchService.match(any())).thenReturn(MatchResult.none());
+    when(skillGatewayService.generateReplies(any())).thenAnswer(invocation -> {
+      active.set(false);
+      return new SkillResponse(List.of(new Suggestion("reply", "NEXT_STEP", "reason")), null, null, null);
+    });
+
+    ChatResponse response = service.recognizeForJob(
+        new ChatRecognizeRequest(null, null, null, "lead", "crm", List.of(), "reply-cancelled"),
+        "jpeg".getBytes(),
+        queuedEmployee,
+        active::get);
+
+    assertNull(response);
+    verify(contextStore, never()).save(any(), any(), any());
+    verify(supervisionEventService, never()).recordGeneratedReply(any(), any(), any(), any(), any(), any());
+    verify(auditLogger, never()).log(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void recognizeForJobDoesNotRecordAFailureWhenCancelledDuringRecognition() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    AtomicBoolean active = new AtomicBoolean(true);
+    when(imageRecognitionService.recognize(any(), any())).thenAnswer(invocation -> {
+      active.set(false);
+      throw new ImageRecognitionException(ImageErrorCodes.IMAGE_RECOGNITION_FAILED, "recognition failed");
+    });
+
+    ChatResponse response = service.recognizeForJob(
+        new ChatRecognizeRequest(null, null, null, "lead", "crm", List.of(), "reply-cancelled"),
+        "jpeg".getBytes(),
+        queuedEmployee,
+        active::get);
+
+    assertNull(response);
+    verify(supervisionEventService, never()).recordRecognitionFailed(any(), any(), any(), any());
+  }
+
+  @Test
+  void recognizeForJobRejectsAResolvedCustomerOutsideTheQueuedEmployeesAccessScope() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice", "18800001111", List.of(), "12:00"));
+    when(customerMatchService.match(any())).thenReturn(new MatchResult(
+        MatchType.EXACT,
+        List.of(new CustomerSummary("18800001111", "18800001111", "Alice", "WECHAT", "lead",
+            "other-keeper", null, null, Confidence.HIGH)),
+        1));
+    when(customerAccessService.canAccess(accessibleCustomer)).thenReturn(false);
+
+    ApiException exception = assertThrows(ApiException.class, () -> service.recognizeForJob(
+        new ChatRecognizeRequest(null, null, null, "lead", "crm", List.of(), "reply-forbidden"),
+        "jpeg".getBytes(), queuedEmployee, () -> true));
+
+    assertEquals(ApiErrorCodes.FORBIDDEN, exception.getErrorCode());
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(pendingReplyTaskService, never()).createWaitingTask(any());
+  }
+
+  @Test
+  void recognizeForJobDoesNotExposeInaccessibleAmbiguousCandidates() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    Customer inaccessibleCustomer = customer("18800002222");
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice", null, List.of(), "12:00"));
+    when(customerMatchService.match(any())).thenReturn(new MatchResult(
+        MatchType.MULTIPLE,
+        List.of(new CustomerSummary("18800002222", "18800002222", "Alice", "WECHAT", "lead",
+            "other-keeper", null, null, Confidence.HIGH)),
+        2));
+    when(customerQueryService.getByPhone("18800002222")).thenReturn(inaccessibleCustomer);
+    when(customerAccessService.canAccess(inaccessibleCustomer)).thenReturn(false);
+
+    ChatResponse response = service.recognizeForJob(
+        new ChatRecognizeRequest(null, null, null, "lead", "crm", List.of(), "reply-forbidden"),
+        "jpeg".getBytes(),
+        queuedEmployee,
+        () -> true);
+
+    assertEquals(MatchType.NONE, response.match().matchType());
+    assertEquals(List.of(), response.match().customers());
+    verify(pendingReplyTaskService, never()).createWaitingTask(any());
+  }
+
+  @Test
   void recognizeRecordsGeneratedReplyAndPendingEntryForAResolvedCustomer() {
     when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
         "Alice",
@@ -248,6 +403,9 @@ class ChatOrchestrationServiceTest {
 
   @Test
   void recognizeMultipleCreatesWaitingTaskWithoutCallingSkillOrReplyLlm() {
+    Customer secondAccessibleCustomer = customer("18800002222");
+    when(customerQueryService.getByPhone("18800002222")).thenReturn(secondAccessibleCustomer);
+    when(customerAccessService.canAccess(secondAccessibleCustomer)).thenReturn(true);
     when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
         "同名客户",
         null,

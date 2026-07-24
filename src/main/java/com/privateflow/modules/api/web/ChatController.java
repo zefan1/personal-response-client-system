@@ -53,7 +53,7 @@ public class ChatController {
   @PostMapping("/recognition-jobs")
   public ApiResponse<RecognitionJobView> submitRecognitionJob(
       @RequestBody ChatRecognizeRequest request) {
-    return ApiResponse.ok(recognitionJobService.submit(AuthContext.username(), request));
+    return ApiResponse.ok(recognitionJobService.submit(AuthContext.current(), request));
   }
 
   @GetMapping("/recognition-jobs/{jobId}")

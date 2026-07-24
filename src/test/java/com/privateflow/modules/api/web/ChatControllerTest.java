@@ -10,6 +10,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.Role;
+import com.privateflow.modules.api.auth.AuthContext;
+import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.api.chat.AiUsageRequest;
 import com.privateflow.modules.api.chat.ChatOrchestrationService;
 import com.privateflow.modules.api.chat.ChatReplySource;
@@ -85,32 +88,38 @@ class ChatControllerTest {
 
   @Test
   void recognitionJobEndpointsSubmitPollAndCancelOnlyTheCallerJob() throws Exception {
+    AuthUser caller = new AuthUser("SYSTEM", "System", Role.KEEPER, null);
+    AuthContext.set(caller);
     RecognitionJobView submitted = recognitionJob(RecognitionJobStatus.QUEUED);
     RecognitionJobView ready = recognitionJob(RecognitionJobStatus.READY);
     RecognitionJobView cancelled = recognitionJob(RecognitionJobStatus.CANCELLED);
-    when(recognitionJobService.submit(org.mockito.ArgumentMatchers.eq("SYSTEM"), any()))
+    when(recognitionJobService.submit(org.mockito.ArgumentMatchers.eq(caller), any()))
         .thenReturn(submitted);
     when(recognitionJobService.getOwned("job-1", "SYSTEM")).thenReturn(ready);
     when(recognitionJobService.cancelOwned("job-1", "SYSTEM")).thenReturn(cancelled);
 
-    mockMvc.perform(post("/api/v1/chat/recognition-jobs")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"imageBase64\":\"c2NyZWVuc2hvdA==\",\"replySessionId\":\"reply-1\"}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.jobId").value("job-1"))
-        .andExpect(jsonPath("$.data.status").value("QUEUED"));
+    try {
+      mockMvc.perform(post("/api/v1/chat/recognition-jobs")
+              .contentType(MediaType.APPLICATION_JSON)
+              .content("{\"imageBase64\":\"c2NyZWVuc2hvdA==\",\"replySessionId\":\"reply-1\"}"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.jobId").value("job-1"))
+          .andExpect(jsonPath("$.data.status").value("QUEUED"));
 
-    mockMvc.perform(get("/api/v1/chat/recognition-jobs/job-1"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("READY"));
+      mockMvc.perform(get("/api/v1/chat/recognition-jobs/job-1"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.status").value("READY"));
 
-    mockMvc.perform(post("/api/v1/chat/recognition-jobs/job-1/cancel"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+      mockMvc.perform(post("/api/v1/chat/recognition-jobs/job-1/cancel"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.status").value("CANCELLED"));
 
-    verify(recognitionJobService).submit(org.mockito.ArgumentMatchers.eq("SYSTEM"), any());
-    verify(recognitionJobService).getOwned("job-1", "SYSTEM");
-    verify(recognitionJobService).cancelOwned("job-1", "SYSTEM");
+      verify(recognitionJobService).submit(org.mockito.ArgumentMatchers.eq(caller), any());
+      verify(recognitionJobService).getOwned("job-1", "SYSTEM");
+      verify(recognitionJobService).cancelOwned("job-1", "SYSTEM");
+    } finally {
+      AuthContext.clear();
+    }
   }
 
   @Test

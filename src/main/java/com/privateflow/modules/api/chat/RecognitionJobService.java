@@ -2,11 +2,15 @@ package com.privateflow.modules.api.chat;
 
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.Role;
+import com.privateflow.modules.api.auth.AuthContext;
+import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.image.ImageRecognitionException;
 import com.privateflow.modules.image.processing.ImagePreprocessor;
 import com.privateflow.modules.image.processing.ImageValidator;
 import com.privateflow.modules.supervision.SupervisionConfig;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -14,6 +18,7 @@ import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -30,18 +35,52 @@ public class RecognitionJobService {
   private final ImagePreprocessor imagePreprocessor;
   private final SupervisionConfig supervisionConfig;
   private final Executor executor;
+  private final ChatOrchestrationService orchestrationService;
+  private final ChatTaskConfig taskConfig;
   private final Clock clock;
   private final Object monitor = new Object();
 
+  @Autowired
   public RecognitionJobService(
       RecognitionJobRepository repository,
       TemporaryRecognitionImageStore imageStore,
       ImageValidator imageValidator,
       ImagePreprocessor imagePreprocessor,
       SupervisionConfig supervisionConfig,
-      @Qualifier("chatRecognitionExecutor") Executor executor) {
-    this(repository, imageStore, imageValidator, imagePreprocessor, supervisionConfig, executor,
+      @Qualifier("chatRecognitionExecutor") Executor executor,
+      ChatOrchestrationService orchestrationService,
+      ChatTaskConfig taskConfig) {
+    this(
+        repository,
+        imageStore,
+        imageValidator,
+        imagePreprocessor,
+        supervisionConfig,
+        executor,
+        orchestrationService,
+        taskConfig,
         Clock.systemUTC());
+  }
+
+  // Kept package-visible for focused scheduling tests that do not execute an orchestration worker.
+  RecognitionJobService(
+      RecognitionJobRepository repository,
+      TemporaryRecognitionImageStore imageStore,
+      ImageValidator imageValidator,
+      ImagePreprocessor imagePreprocessor,
+      SupervisionConfig supervisionConfig,
+      Executor executor,
+      Clock clock) {
+    this(
+        repository,
+        imageStore,
+        imageValidator,
+        imagePreprocessor,
+        supervisionConfig,
+        executor,
+        null,
+        null,
+        clock);
   }
 
   RecognitionJobService(
@@ -51,6 +90,8 @@ public class RecognitionJobService {
       ImagePreprocessor imagePreprocessor,
       SupervisionConfig supervisionConfig,
       Executor executor,
+      ChatOrchestrationService orchestrationService,
+      ChatTaskConfig taskConfig,
       Clock clock) {
     this.repository = repository;
     this.imageStore = imageStore;
@@ -58,11 +99,22 @@ public class RecognitionJobService {
     this.imagePreprocessor = imagePreprocessor;
     this.supervisionConfig = supervisionConfig;
     this.executor = executor;
+    this.orchestrationService = orchestrationService;
+    this.taskConfig = taskConfig;
     this.clock = clock;
   }
 
   public RecognitionJobView submit(String username, ChatRecognizeRequest request) {
-    validateSubmission(username, request);
+    AuthUser current = AuthContext.current();
+    AuthUser employee = current != null && username != null && username.equals(current.username())
+        ? current
+        : new AuthUser(username, username, Role.KEEPER, null);
+    return submit(employee, request);
+  }
+
+  public RecognitionJobView submit(AuthUser employee, ChatRecognizeRequest request) {
+    validateSubmission(employee, request);
+    String username = employee.username();
     synchronized (monitor) {
       ensureEmployeeHasCapacity(username);
     }
@@ -73,6 +125,7 @@ public class RecognitionJobService {
       RecognitionJob job = new RecognitionJob(
           UUID.randomUUID().toString(),
           username,
+          employee,
           imageToken,
           withoutImagePayload(request),
           clock.instant());
@@ -94,6 +147,7 @@ public class RecognitionJobService {
       boolean deleteImmediately = job.cancel(clock.instant());
       if (deleteImmediately) {
         imageStore.delete(job.imageToken());
+        pruneTerminalHistory();
       }
       return job.view();
     }
@@ -111,6 +165,7 @@ public class RecognitionJobService {
         return;
       }
       imageStore.delete(job.imageToken());
+      pruneTerminalHistory();
       drainQueue();
     }
   }
@@ -123,6 +178,7 @@ public class RecognitionJobService {
         return;
       }
       imageStore.delete(job.imageToken());
+      pruneTerminalHistory();
       drainQueue();
     }
   }
@@ -132,10 +188,15 @@ public class RecognitionJobService {
     imageStore.cleanupExpired();
     synchronized (monitor) {
       for (RecognitionJob job : repository.activeJobs()) {
-        if (!imageStore.exists(job.imageToken()) && job.expire(clock.instant())) {
+        if ((job.requiresTemporaryImage() && !imageStore.exists(job.imageToken()))
+            || job.resultExpired(clock.instant(), taskRetention())) {
+          if (!job.expire(clock.instant())) {
+            continue;
+          }
           imageStore.delete(job.imageToken());
         }
       }
+      pruneTerminalHistory();
       drainQueue();
     }
   }
@@ -152,12 +213,76 @@ public class RecognitionJobService {
       } catch (RejectedExecutionException ex) {
         next.fail("RECOGNITION_QUEUE_UNAVAILABLE", clock.instant());
         imageStore.delete(next.imageToken());
+        pruneTerminalHistory();
       }
     }
   }
 
   private void runWorker(String jobId) {
-    // Task 3 supplies recognition execution and always finishes through completeForWorker/failForWorker.
+    RecognitionJob job;
+    synchronized (monitor) {
+      job = repository.find(jobId).orElse(null);
+      if (job == null) {
+        return;
+      }
+    }
+    try {
+      if (!isJobStillActive(jobId)) {
+        return;
+      }
+      if (orchestrationService == null) {
+        throw new IllegalStateException("recognition orchestration is unavailable");
+      }
+      byte[] jpegBytes = imageStore.read(job.imageToken());
+      if (!isJobStillActive(jobId)) {
+        return;
+      }
+      ChatResponse response = orchestrationService.recognizeForJob(
+          job.request(), jpegBytes, job.authUser(), () -> isJobStillActive(jobId));
+      completeFromRunningWorker(job, response, response != null && response.pendingTask() != null
+          ? RecognitionJobStatus.WAITING_CUSTOMER
+          : RecognitionJobStatus.READY);
+    } catch (ApiException ex) {
+      failFromRunningWorker(job, ex.getErrorCode());
+    } catch (RuntimeException ex) {
+      failFromRunningWorker(job, "RECOGNITION_PROCESSING_FAILED");
+    } finally {
+      imageStore.delete(job.imageToken());
+      synchronized (monitor) {
+        pruneTerminalHistory();
+        drainQueue();
+      }
+    }
+  }
+
+  private void completeFromRunningWorker(
+      RecognitionJob job, ChatResponse response, RecognitionJobStatus completedStatus) {
+    synchronized (monitor) {
+      job.complete(response, completedStatus, clock.instant());
+    }
+  }
+
+  private void failFromRunningWorker(RecognitionJob job, String publicErrorCode) {
+    synchronized (monitor) {
+      job.fail(publicErrorCode, clock.instant());
+    }
+  }
+
+  private boolean isJobStillActive(String jobId) {
+    synchronized (monitor) {
+      return repository.find(jobId)
+          .map(RecognitionJob::runningAndActive)
+          .orElse(false);
+    }
+  }
+
+  private Duration taskRetention() {
+    int hours = taskConfig == null ? 24 : taskConfig.pendingReplyTtlHours();
+    return Duration.ofHours(Math.max(1, hours));
+  }
+
+  private void pruneTerminalHistory() {
+    repository.pruneTerminalHistory(supervisionConfig.recentTaskDisplayCap());
   }
 
   private RecognitionJob owned(String jobId, String username) {
@@ -172,8 +297,8 @@ public class RecognitionJobService {
     return job;
   }
 
-  private void validateSubmission(String username, ChatRecognizeRequest request) {
-    if (blank(username) || request == null || blank(request.imageBase64())) {
+  private void validateSubmission(AuthUser employee, ChatRecognizeRequest request) {
+    if (employee == null || blank(employee.username()) || request == null || blank(request.imageBase64())) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "识图任务需要聊天截图");
     }
   }

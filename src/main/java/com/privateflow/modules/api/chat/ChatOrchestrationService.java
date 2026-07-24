@@ -5,6 +5,7 @@ import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.auth.AuthContext;
+import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.service.CustomerAccessService;
@@ -23,6 +24,7 @@ import com.privateflow.modules.match.MatchResult;
 import com.privateflow.modules.match.MatchType;
 import com.privateflow.modules.profile.service.FollowupConfirmationService;
 import com.privateflow.modules.match.CustomerMatchService;
+import com.privateflow.modules.match.CustomerSummary;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillGatewayService;
 import com.privateflow.modules.skill.SkillRequest;
@@ -35,6 +37,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -99,9 +102,7 @@ public class ChatOrchestrationService {
   }
 
   public ChatResponse recognize(ChatRecognizeRequest request) {
-    if (request == null || (blank(request.imageBase64()) && blank(request.textMessage()))) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "please provide screenshot or chat text");
-    }
+    validateRecognitionRequest(request, request == null ? null : request.imageBase64());
     RecognitionResult recognized;
     try {
       recognized = recognizeImage(request.imageBase64());
@@ -113,19 +114,90 @@ public class ChatOrchestrationService {
           ex.getErrorCode()), "recognition failure");
       throw ex;
     }
+    return recognizeResolvedConversation(request, recognized);
+  }
+
+  /**
+   * Executes a queued screenshot job under the authenticated employee captured at submission time.
+   * The image remains an in-memory byte array after the temporary store has read it; it is never
+   * serialized into a chat task, event, or audit record.
+   */
+  ChatResponse recognizeForJob(ChatRecognizeRequest request, byte[] jpegBytes, AuthUser employee) {
+    return recognizeForJob(request, jpegBytes, employee, () -> true);
+  }
+
+  ChatResponse recognizeForJob(
+      ChatRecognizeRequest request,
+      byte[] jpegBytes,
+      AuthUser employee,
+      BooleanSupplier stillActive) {
+    validateRecognitionRequest(request, jpegBytes);
+    if (employee == null || blank(employee.username())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "recognition employee is required");
+    }
+    AuthUser previous = AuthContext.current();
+    try {
+      AuthContext.set(employee);
+      RecognitionResult recognized = recognizeImage(jpegBytes);
+      if (stillActive == null || !stillActive.getAsBoolean()) {
+        return null;
+      }
+      return recognizeResolvedConversation(request, recognized, stillActive);
+    } catch (ApiException ex) {
+      if (!stillActive(stillActive)) {
+        return null;
+      }
+      recordSupervision(() -> supervisionEventService.recordRecognitionFailed(
+          request.leadType(),
+          request.sourceTable(),
+          request.replySessionId(),
+          ex.getErrorCode()), "recognition failure");
+      throw ex;
+    } finally {
+      if (previous == null) {
+        AuthContext.clear();
+      } else {
+        AuthContext.set(previous);
+      }
+    }
+  }
+
+  private ChatResponse recognizeResolvedConversation(
+      ChatRecognizeRequest request, RecognitionResult recognized) {
+    return recognizeResolvedConversation(request, recognized, () -> true);
+  }
+
+  private ChatResponse recognizeResolvedConversation(
+      ChatRecognizeRequest request, RecognitionResult recognized, BooleanSupplier stillActive) {
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     String nickname = firstNonBlank(request.customerIdentifier(), recognized == null ? null : recognized.nickname());
     String phone = recognized == null ? null : recognized.phone();
     MatchResult match = match(nickname, phone, request.leadType(), request.sourceTable());
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     String platformIdentifier = recognized == null ? null : recognized.customerIdentifier();
     if ((isNoMatch(match) || match.matchType() == MatchType.MULTIPLE)
         && blank(request.customerIdentifier())
         && !blank(platformIdentifier)
         && !platformIdentifier.equals(nickname)) {
       match = match(platformIdentifier, phone, request.leadType(), request.sourceTable());
+      if (!stillActive(stillActive)) {
+        return null;
+      }
+    }
+    match = visibleMatch(match);
+    if (!stillActive(stillActive)) {
+      return null;
     }
     String clientMessage = buildClientMessage(request, recognized);
     List<Map<String, String>> chatContext = messages(request, recognized);
     if (match.matchType() == MatchType.MULTIPLE) {
+      if (!stillActive(stillActive)) {
+        return null;
+      }
       PendingReplyTaskView pendingTask = pendingReplyTaskService.createWaitingTask(new PendingReplyTaskDraft(
           firstNonBlank(request.replySessionId(), "reply-" + UUID.randomUUID()),
           AuthContext.username(),
@@ -139,15 +211,33 @@ public class ChatOrchestrationService {
           match.customers()));
       return new ChatResponse(null, nickname, false, match, null, null, null, pendingTask);
     }
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     Customer customer = firstCustomer(match);
+    if (customer != null && !customerAccessService.canAccess(customer)) {
+      throw new ApiException(ApiErrorCodes.FORBIDDEN, "no access to this customer");
+    }
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     if (customer != null) {
       recordSupervision(
           () -> supervisionEventService.recordPendingEntered(customer, null),
           "pending entered");
     }
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     GeneratedReplies generated = generateSkill(Scene.CHAT_RECOGNIZE, request.leadType(), customer, phone, clientMessage, List.of(), chatContext);
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     String responsePhone = customer == null ? phone : customer.getPhone();
     saveContext(responsePhone, generated, 0);
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     recordSupervision(() -> supervisionEventService.recordGeneratedReply(
         customer,
         Scene.CHAT_RECOGNIZE.name(),
@@ -155,6 +245,9 @@ public class ChatOrchestrationService {
         request.replySessionId(),
         generated.source(),
         generated.skill()), "reply generated");
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", responsePhone, "chat recognize");
     return new ChatResponse(responsePhone, nickname, match.matchType() == MatchType.NONE, match, generated.skill(), null, generated.source());
   }
@@ -415,13 +508,31 @@ public class ChatOrchestrationService {
       return null;
     }
     try {
-      return imageRecognitionService.recognize(Base64.getDecoder().decode(imageBase64), Source.BUTTON_CLICK);
+      return recognizeImage(Base64.getDecoder().decode(imageBase64));
+    } catch (ApiException ex) {
+      throw ex;
     } catch (IllegalArgumentException ex) {
       throw new ApiException("30-10002", "图片格式不支持，请重新截图或使用 PNG/JPG");
     } catch (ImageRecognitionException ex) {
       throw new ApiException(ex.getErrorCode(), ex.getMessage());
     } catch (RuntimeException ex) {
       throw new ApiException("30-10001", "图片识别失败，请使用文字通道后重新生成回复");
+    }
+  }
+
+  private RecognitionResult recognizeImage(byte[] imageBytes) {
+    try {
+      return imageRecognitionService.recognize(imageBytes, Source.BUTTON_CLICK);
+    } catch (ImageRecognitionException ex) {
+      throw new ApiException(ex.getErrorCode(), ex.getMessage());
+    } catch (RuntimeException ex) {
+      throw new ApiException("30-10001", "图片识别失败，请使用文字通道后重新生成回复");
+    }
+  }
+
+  private void validateRecognitionRequest(ChatRecognizeRequest request, Object imagePayload) {
+    if (request == null || (imagePayload == null && blank(request.textMessage()))) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "please provide screenshot or chat text");
     }
   }
 
@@ -463,6 +574,31 @@ public class ChatOrchestrationService {
 
   private boolean isNoMatch(MatchResult result) {
     return result == null || result.matchType() == MatchType.NONE;
+  }
+
+  private MatchResult visibleMatch(MatchResult match) {
+    if (match == null) {
+      return MatchResult.none();
+    }
+    if (match.matchType() != MatchType.MULTIPLE || match.customers() == null) {
+      return match;
+    }
+    List<CustomerSummary> accessibleCandidates = match.customers().stream()
+        .filter(java.util.Objects::nonNull)
+        .filter(this::canAccessCandidate)
+        .toList();
+    if (accessibleCandidates.isEmpty()) {
+      return MatchResult.none();
+    }
+    if (accessibleCandidates.size() == 1) {
+      return new MatchResult(MatchType.FUZZY, accessibleCandidates, 1);
+    }
+    return new MatchResult(MatchType.MULTIPLE, accessibleCandidates, accessibleCandidates.size());
+  }
+
+  private boolean canAccessCandidate(CustomerSummary candidate) {
+    Customer customer = customerQueryService.getByPhone(candidate.phone());
+    return customer != null && customerAccessService.canAccess(customer);
   }
 
   private ChatReplySource replySourceForSkill(SkillResponse skill) {
@@ -612,6 +748,10 @@ public class ChatOrchestrationService {
 
   private boolean blank(String value) {
     return value == null || value.isBlank();
+  }
+
+  private boolean stillActive(BooleanSupplier stillActive) {
+    return stillActive != null && stillActive.getAsBoolean();
   }
 
   private String pendingTaskErrorCode(RuntimeException ex) {
