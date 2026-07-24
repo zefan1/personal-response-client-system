@@ -26,6 +26,9 @@ import org.springframework.stereotype.Component;
 public class HttpImageRecognitionClient implements ImageRecognitionClient, ConfigurableImageRecognitionClient {
 
   private static final Logger log = LoggerFactory.getLogger(HttpImageRecognitionClient.class);
+  private static final int DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
+  private static final int MIN_REQUEST_TIMEOUT_MS = 1_000;
+  private static final int MAX_REQUEST_TIMEOUT_MS = 60_000;
   private final HttpClient httpClient;
   private final ImageConfigProvider configProvider;
   private final ObjectMapper objectMapper;
@@ -52,11 +55,9 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient, Confi
     byte[] body = requestBody(config, jpegImage);
     HttpRequest.Builder builder = HttpRequest.newBuilder()
         .uri(URI.create(chatCompletionsUrl(config.apiBaseUrl())))
+        .timeout(Duration.ofMillis(requestTimeoutMs(config.timeoutMs())))
         .header("Content-Type", "application/json")
         .POST(HttpRequest.BodyPublishers.ofByteArray(body));
-    if (config.timeoutMs() > 0) {
-      builder.timeout(Duration.ofMillis(config.timeoutMs()));
-    }
     if (config.apiKey() != null && !config.apiKey().isBlank()) {
       builder.header("Authorization", "Bearer " + config.apiKey());
     }
@@ -142,5 +143,14 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient, Confi
 
   private ImageRecognitionException failed(String message) {
     return new ImageRecognitionException(ImageErrorCodes.IMAGE_RECOGNITION_FAILED, message);
+  }
+
+  private int requestTimeoutMs(int configuredTimeoutMs) {
+    if (configuredTimeoutMs >= MIN_REQUEST_TIMEOUT_MS && configuredTimeoutMs <= MAX_REQUEST_TIMEOUT_MS) {
+      return configuredTimeoutMs;
+    }
+    log.warn("IMAGE_API_TIMEOUT_INVALID configuredTimeoutMs={}, usingDefaultMs={}",
+        configuredTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
+    return DEFAULT_REQUEST_TIMEOUT_MS;
   }
 }
