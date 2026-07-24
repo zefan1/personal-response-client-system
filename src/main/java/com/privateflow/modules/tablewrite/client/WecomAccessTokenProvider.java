@@ -106,10 +106,11 @@ public class WecomAccessTokenProvider {
           redact(root.path("errmsg").asText("")));
     }
 
-    String token = root.path("access_token").asText("").trim();
-    if (token.isBlank()) {
+    JsonNode tokenNode = root.get("access_token");
+    if (tokenNode == null || !tokenNode.isTextual() || tokenNode.textValue().trim().isBlank()) {
       throw new WecomSmartSheetException(OPERATION, "response missing access token", null);
     }
+    String token = tokenNode.textValue().trim();
     JsonNode expiresInNode = root.get("expires_in");
     if (expiresInNode == null || !expiresInNode.isIntegralNumber() || !expiresInNode.canConvertToLong()
         || expiresInNode.longValue() <= 0) {

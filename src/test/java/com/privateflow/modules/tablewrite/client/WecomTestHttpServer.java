@@ -1,5 +1,7 @@
 package com.privateflow.modules.tablewrite.client;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -11,12 +13,15 @@ import java.util.Map;
 
 final class WecomTestHttpServer implements AutoCloseable {
 
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
   record Reply(int status, String body) {}
 
   private final HttpServer server;
   private final Object monitor = new Object();
   private final Map<String, ArrayDeque<Reply>> repliesByPath = new HashMap<>();
   private int requestCount;
+  private String lastMethod;
   private String lastQuery;
   private String lastJson;
 
@@ -56,15 +61,28 @@ final class WecomTestHttpServer implements AutoCloseable {
     }
   }
 
+  String lastMethod() {
+    synchronized (monitor) {
+      return lastMethod;
+    }
+  }
+
   String lastQuery() {
     synchronized (monitor) {
       return lastQuery;
     }
   }
 
-  String lastJson() {
+  /** Returns captured UTF-8 JSON, with an empty request body represented by an empty object. */
+  JsonNode lastJson() {
     synchronized (monitor) {
-      return lastJson;
+      try {
+        return lastJson == null || lastJson.isBlank()
+            ? OBJECT_MAPPER.createObjectNode()
+            : OBJECT_MAPPER.readTree(lastJson);
+      } catch (IOException ex) {
+        throw new IllegalStateException("Captured request body was not valid JSON", ex);
+      }
     }
   }
 
@@ -80,6 +98,7 @@ final class WecomTestHttpServer implements AutoCloseable {
     Reply reply;
     synchronized (monitor) {
       requestCount++;
+      lastMethod = exchange.getRequestMethod();
       lastQuery = query;
       lastJson = json;
       ArrayDeque<Reply> queue = repliesByPath.get(path);

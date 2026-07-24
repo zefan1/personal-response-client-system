@@ -15,7 +15,7 @@ public final class WecomSmartSheetException extends IllegalStateException {
   }
 
   public WecomSmartSheetException(String operation, String message, Throwable cause) {
-    super("WeCom " + safeOperation(operation) + " failed: " + oneLine(message), cause);
+    super("WeCom " + safeOperation(operation) + " failed: " + oneLine(message));
     this.operation = safeOperation(operation);
     this.errcode = UNKNOWN_ERRCODE;
   }
