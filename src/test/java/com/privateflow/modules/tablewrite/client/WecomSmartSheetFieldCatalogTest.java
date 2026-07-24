@@ -15,11 +15,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class WecomSmartSheetFieldCatalogTest {
@@ -138,39 +136,57 @@ class WecomSmartSheetFieldCatalogTest {
     BlockingThenRetryClient api = new BlockingThenRetryClient("""
         {"errcode":0,"total":1,"fields":[{"field_id":"f2","field_title":"Recovered","field_type":"FIELD_TYPE_TEXT"}]}""");
     WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC());
-    ExecutorService workers = Executors.newFixedThreadPool(4);
-    CountDownLatch ready = new CountDownLatch(4);
-    CountDownLatch start = new CountDownLatch(1);
+    AtomicReference<RuntimeException> leaderFailure = new AtomicReference<>();
+    AtomicReference<RuntimeException> followerFailure = new AtomicReference<>();
+    Thread leader = failureThread("catalog-refresh-leader", catalog, leaderFailure);
     try {
-      List<Future<RuntimeException>> failures = new ArrayList<>();
-      for (int i = 0; i < 4; i++) {
-        failures.add(workers.submit(() -> {
-          ready.countDown();
-          start.await(2, TimeUnit.SECONDS);
-          try {
-            catalog.visibleFields(Duration.ofSeconds(1));
-            throw new AssertionError("expected refresh failure");
-          } catch (RuntimeException ex) {
-            return ex;
-          }
-        }));
-      }
-      assertThat(ready.await(2, TimeUnit.SECONDS)).isTrue();
-      start.countDown();
+      leader.start();
       assertThat(api.firstStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      Thread follower = failureThread("catalog-refresh-follower", catalog, followerFailure);
+      follower.start();
+      assertThat(awaitingCatalogResult(follower)).isTrue();
       api.releaseFirst.countDown();
-      RuntimeException first = failures.get(0).get(2, TimeUnit.SECONDS);
-      for (Future<RuntimeException> failure : failures) {
-        RuntimeException error = failure.get(2, TimeUnit.SECONDS);
-        assertThat(error).isSameAs(first);
-        assertThat(error.getMessage()).doesNotContain("raw-refresh-pii");
-      }
+      leader.join(2_000);
+      follower.join(2_000);
+      assertThat(leader.isAlive()).isFalse();
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(followerFailure.get()).isSameAs(leaderFailure.get());
+      assertThat(leaderFailure.get().getMessage()).doesNotContain("raw-refresh-pii");
       assertThat(api.calls.get()).isEqualTo(1);
       assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Recovered");
       assertThat(api.calls.get()).isEqualTo(2);
     } finally {
-      workers.shutdownNow();
+      api.releaseFirst.countDown();
+      leader.join(2_000);
     }
+  }
+
+  private static Thread failureThread(
+      String name,
+      WecomSmartSheetFieldCatalog catalog,
+      AtomicReference<RuntimeException> failure) {
+    return new Thread(() -> {
+      try {
+        catalog.visibleFields(Duration.ofSeconds(1));
+        throw new AssertionError("expected refresh failure");
+      } catch (RuntimeException ex) {
+        failure.set(ex);
+      }
+    }, name);
+  }
+
+  private static boolean awaitingCatalogResult(Thread thread) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+    while (System.nanoTime() < deadline) {
+      for (StackTraceElement frame : thread.getStackTrace()) {
+        if (frame.getClassName().equals(WecomSmartSheetFieldCatalog.class.getName())
+            && frame.getMethodName().equals("await")) {
+          return true;
+        }
+      }
+      Thread.onSpinWait();
+    }
+    return false;
   }
 
   @Test

@@ -93,7 +93,11 @@ public class WecomSmartSheetValueCodec {
     if (!value.isNumber()) {
       return compact(value);
     }
-    return value.decimalValue().stripTrailingZeros().toPlainString();
+    try {
+      return value.decimalValue().stripTrailingZeros().toPlainString();
+    } catch (RuntimeException ex) {
+      return compact(value);
+    }
   }
 
   private String dateText(WecomSmartSheetField field, JsonNode value) {

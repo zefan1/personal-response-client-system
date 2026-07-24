@@ -1,6 +1,7 @@
 package com.privateflow.modules.tablewrite.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -62,6 +63,16 @@ class WecomSmartSheetValueCodecTest {
     assertSafeFailure(() -> codec.encode(field, "0.12345678901"), "Amount", "0.12345678901");
     assertSafeFailure(() -> codec.encode(field, Double.NaN), "Amount", "NaN");
     assertSafeFailure(() -> codec.encode(field, Float.POSITIVE_INFINITY), "Amount", "Infinity");
+  }
+
+  @Test
+  void fallsBackSafelyWhenAnExtremeNumericNodeCannotBecomeBigDecimal() throws Exception {
+    WecomSmartSheetField field = field("Amount", "FIELD_TYPE_NUMBER", Map.of(), false);
+    JsonNode extreme = JSON.readTree("1E+10000");
+    String[] decoded = new String[1];
+
+    assertThatCode(() -> decoded[0] = codec.decode(field, extreme)).doesNotThrowAnyException();
+    assertThat(decoded[0]).isEqualTo(JSON.writeValueAsString(extreme));
   }
 
   @Test
