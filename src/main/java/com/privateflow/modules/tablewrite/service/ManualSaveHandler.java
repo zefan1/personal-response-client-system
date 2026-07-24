@@ -110,8 +110,8 @@ public class ManualSaveHandler {
           new ArrayList<>(fields.keySet()),
           exchange.filteredFields(),
           exchange.unmatched().size());
-    } catch (RuntimeException ex) {
-      throw new TableWriteException(TableWriteErrorCodes.TABLE_WRITE_FAILED, "table write failed: " + ex.getMessage());
+    } catch (RuntimeException ignored) {
+      throw new TableWriteException(TableWriteErrorCodes.TABLE_WRITE_FAILED, "table write failed");
     }
   }
 
