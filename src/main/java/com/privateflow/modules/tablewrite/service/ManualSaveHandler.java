@@ -69,20 +69,31 @@ public class ManualSaveHandler {
     if (!customerAccessService.canAccess(customer)) {
       throw new TableWriteException(TableWriteErrorCodes.BAD_REQUEST, "该客户不在你的负责范围内");
     }
+    String serverTable = customer.getSourceTable();
+    String serverRowId = customer.getSourceRowId();
+    if (blank(serverTable) || blank(serverRowId)) {
+      throw new TableWriteException(TableWriteErrorCodes.BAD_REQUEST, "source reference is invalid");
+    }
+    serverTable = serverTable.trim();
+    serverRowId = serverRowId.trim();
+    if (!serverTable.equals(request.sourceTable().trim())
+        || !serverRowId.equals(request.sourceRowId().trim())) {
+      throw new TableWriteException(TableWriteErrorCodes.BAD_REQUEST, "source reference is invalid");
+    }
     try {
       Map<String, Object> internalFields = mappingResolver == null
           ? Map.of()
-          : mappingResolver.toInternalFields(request.sourceTable(), request.fields());
+          : mappingResolver.toInternalFields(serverTable, request.fields());
       TagExchangeResult exchange = exchangeService == null
           ? new TagExchangeResult(internalFields, java.util.List.of(), java.util.List.of())
           : exchangeService.prepareOutbound(
               TagExchangeSourceType.TABLE_WRITE,
-              request.sourceRowId(),
+              serverRowId,
               internalFields);
       Map<String, Object> fields = mappingResolver == null
           ? request.fields()
           : mappingResolver.mergeSourceFields(
-              request.sourceTable(),
+              serverTable,
               request.fields(),
               exchange.acceptedFields(),
               exchange.filteredFields());
@@ -90,8 +101,8 @@ public class ManualSaveHandler {
         return new ManualSaveResult(false, java.util.List.of(), exchange.filteredFields(), exchange.unmatched().size());
       }
       tableClient.updateRow(
-          request.sourceTable(),
-          request.sourceRowId(),
+          serverTable,
+          serverRowId,
           fields,
           Duration.ofMillis(configProvider.get().writeTimeoutMs()));
       return new ManualSaveResult(
