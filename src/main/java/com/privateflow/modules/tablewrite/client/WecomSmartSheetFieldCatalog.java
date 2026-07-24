@@ -36,6 +36,7 @@ public class WecomSmartSheetFieldCatalog {
   }
 
   public Map<String, WecomSmartSheetField> visibleFields(Duration timeout) {
+    config.requireConfigured();
     Snapshot current = snapshot;
     Instant now = clock.instant();
     if (isFresh(current, now)) {
@@ -96,7 +97,6 @@ public class WecomSmartSheetFieldCatalog {
   }
 
   private Map<String, WecomSmartSheetField> load(Duration timeout) {
-    config.requireConfigured();
     Map<String, WecomSmartSheetField> fieldsByTitle = new LinkedHashMap<>();
     Set<String> fieldIds = new HashSet<>();
     int offset = 0;

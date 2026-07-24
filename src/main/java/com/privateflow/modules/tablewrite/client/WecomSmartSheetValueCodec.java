@@ -28,6 +28,10 @@ public class WecomSmartSheetValueCodec {
       DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss");
   private static final DateTimeFormatter DATE_TIME_MILLIS_FORMATTER =
       DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS");
+  // WeCom number cells are double-oriented; keep writes within stable business precision.
+  private static final int MAX_NUMBER_PRECISION = 15;
+  private static final int MAX_NUMBER_SCALE = 10;
+  private static final int MAX_NUMBER_INTEGER_DIGITS = 15;
   private final ZoneId zoneId;
 
   public WecomSmartSheetValueCodec(WecomSmartSheetConfig config) {
@@ -135,8 +139,12 @@ public class WecomSmartSheetValueCodec {
       decimal = new BigDecimal(number);
     } else if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long) {
       decimal = BigDecimal.valueOf(((Number) value).longValue());
-    } else if (value instanceof Float || value instanceof Double) {
-      double number = ((Number) value).doubleValue();
+    } else if (value instanceof Float number) {
+      if (!Float.isFinite(number)) {
+        throw invalid(field);
+      }
+      decimal = new BigDecimal(Float.toString(number));
+    } else if (value instanceof Double number) {
       if (!Double.isFinite(number)) {
         throw invalid(field);
       }
@@ -144,7 +152,12 @@ public class WecomSmartSheetValueCodec {
     } else {
       throw invalid(field);
     }
-    return JsonNodeFactory.instance.numberNode(new BigDecimal(decimal.stripTrailingZeros().toPlainString()));
+    BigDecimal canonical = decimal.stripTrailingZeros();
+    if (canonical.precision() > MAX_NUMBER_PRECISION || canonical.scale() > MAX_NUMBER_SCALE
+        || canonical.precision() - canonical.scale() > MAX_NUMBER_INTEGER_DIGITS) {
+      throw invalid(field);
+    }
+    return JsonNodeFactory.instance.numberNode(new BigDecimal(canonical.toPlainString()));
   }
 
   private static boolean checkbox(WecomSmartSheetField field, Object value) {

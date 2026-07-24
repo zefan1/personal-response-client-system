@@ -9,6 +9,7 @@ import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -42,6 +43,25 @@ class WecomSmartSheetValueCodecTest {
     assertThat(codec.encode(field, "1E+3").toString()).isEqualTo("1000");
     assertThatThrownBy(() -> codec.encode(field, "PII-987654321"))
         .hasMessageContaining("Amount").hasMessageNotContaining("PII-987654321");
+  }
+
+  @Test
+  void canonicalizesAllowedNumericWrappersAndRejectsUnsafeNumberSizes() {
+    WecomSmartSheetField field = field("Amount", "FIELD_TYPE_NUMBER", Map.of(), false);
+    assertThat(codec.encode(field, 0.1f).toString()).isEqualTo("0.1");
+    assertThat(codec.encode(field, 0.1d).toString()).isEqualTo("0.1");
+    assertThat(codec.encode(field, (byte) 7).toString()).isEqualTo("7");
+    assertThat(codec.encode(field, (short) 8).toString()).isEqualTo("8");
+    assertThat(codec.encode(field, 9).toString()).isEqualTo("9");
+    assertThat(codec.encode(field, 10L).toString()).isEqualTo("10");
+    assertThat(codec.encode(field, new BigInteger("11")).toString()).isEqualTo("11");
+    assertThat(codec.encode(field, new BigDecimal("12.3400")).toString()).isEqualTo("12.34");
+    assertSafeFailure(() -> codec.encode(field, "1E+100000000"), "Amount", "1E+100000000");
+    assertSafeFailure(() -> codec.encode(field, "1E-100000000"), "Amount", "1E-100000000");
+    assertSafeFailure(() -> codec.encode(field, "1234567890123456"), "Amount", "1234567890123456");
+    assertSafeFailure(() -> codec.encode(field, "0.12345678901"), "Amount", "0.12345678901");
+    assertSafeFailure(() -> codec.encode(field, Double.NaN), "Amount", "NaN");
+    assertSafeFailure(() -> codec.encode(field, Float.POSITIVE_INFINITY), "Amount", "Infinity");
   }
 
   @Test

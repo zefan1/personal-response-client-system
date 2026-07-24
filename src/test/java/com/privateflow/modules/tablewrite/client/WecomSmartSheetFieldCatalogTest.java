@@ -187,6 +187,40 @@ class WecomSmartSheetFieldCatalogTest {
   }
 
   @Test
+  void preservesSafeMissingConfigurationDiagnosisBeforeProviderLoad() {
+    WecomSmartSheetConfig missing = new WecomSmartSheetConfig("http://127.0.0.1", "", "", "", "", "", "", "",
+        ZoneId.of("Asia/Shanghai"));
+    WecomSmartSheetApiClient api = new WecomSmartSheetApiClient(JSON, config(), null) {
+      @Override public JsonNode post(String operation, Object body, Duration timeout) {
+        throw new IllegalStateException("raw-provider-response");
+      }
+    };
+    WecomSmartSheetFieldCatalog catalog = new WecomSmartSheetFieldCatalog(api, missing, Clock.systemUTC());
+
+    assertThatThrownBy(() -> catalog.visibleFields(Duration.ofSeconds(1))).satisfies(error -> {
+      assertThat(error.getMessage()).contains("WECOM_CORP_ID", "WECOM_APP_SECRET", "WECOM_SMARTSHEET_DOC_ID",
+          "WECOM_SMARTSHEET_SHEET_ID", "WECOM_SMARTSHEET_VIEW_ID", "WECOM_SMARTSHEET_SOURCE_TABLE",
+          "WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE").doesNotContain("raw-provider-response");
+    });
+  }
+
+  @Test
+  void neverServesAnExpiredSnapshotAfterRefreshFailureAndLaterReplacesIt() throws Exception {
+    MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+    SnapshotRecoveryClient api = new SnapshotRecoveryClient(
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f-old\",\"field_title\":\"Old\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f-new\",\"field_title\":\"New\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+    WecomSmartSheetFieldCatalog catalog = catalog(api, clock);
+
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsOnlyKeys("Old");
+    clock.advance(Duration.ofMinutes(5));
+    assertThatThrownBy(() -> catalog.visibleFields(Duration.ofSeconds(1))).hasMessageNotContaining("Old");
+    assertThat(api.calls.get()).isEqualTo(2);
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsOnlyKeys("New");
+    assertThat(api.calls.get()).isEqualTo(3);
+  }
+
+  @Test
   void rejectsInvalidAndStalledCatalogPagesWithoutResponseContents() throws Exception {
     List<String> invalidResponses = List.of(
         "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Same\",\"field_type\":\"FIELD_TYPE_TEXT\"},{\"field_id\":\"f2\",\"field_title\":\"Same\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
@@ -275,6 +309,26 @@ class WecomSmartSheetFieldCatalogTest {
         throw new IllegalStateException("raw-refresh-pii");
       }
       return retryResponse;
+    }
+  }
+
+  private static final class SnapshotRecoveryClient extends WecomSmartSheetApiClient {
+    private final JsonNode oldResponse;
+    private final JsonNode newResponse;
+    private final AtomicInteger calls = new AtomicInteger();
+
+    private SnapshotRecoveryClient(String oldResponse, String newResponse) throws Exception {
+      super(JSON, config(), null);
+      this.oldResponse = JSON.readTree(oldResponse);
+      this.newResponse = JSON.readTree(newResponse);
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      return switch (calls.incrementAndGet()) {
+        case 1 -> oldResponse;
+        case 2 -> throw new IllegalStateException("raw-refresh-failure");
+        default -> newResponse;
+      };
     }
   }
 
