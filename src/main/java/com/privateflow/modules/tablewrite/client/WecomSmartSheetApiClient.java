@@ -1,8 +1,10 @@
 package com.privateflow.modules.tablewrite.client;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
 import java.io.IOException;
 import java.net.URI;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class WecomSmartSheetApiClient {
 
+  private static final String SAFE_OPERATION = "request";
   private static final Map<String, String> PATHS = Map.of(
       "get_fields", "/cgi-bin/wedoc/smartsheet/get_fields",
       "get_records", "/cgi-bin/wedoc/smartsheet/get_records",
@@ -51,15 +54,20 @@ public class WecomSmartSheetApiClient {
   }
 
   public JsonNode post(String operation, Object body, Duration timeout) {
+    if (operation == null) {
+      throw failure(SAFE_OPERATION, "unsupported operation");
+    }
     String path = PATHS.get(operation);
     if (path == null) {
-      throw failure(operation, "unsupported operation");
+      throw failure(SAFE_OPERATION, "unsupported operation");
     }
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw failure(operation, "request timeout must be positive");
     }
     try {
       config.requireConfigured();
+    } catch (IllegalStateException ex) {
+      throw failure(operation, ex.getMessage());
     } catch (RuntimeException ex) {
       throw failure(operation, "configuration is incomplete");
     }
@@ -91,6 +99,8 @@ public class WecomSmartSheetApiClient {
   private String token(String operation) {
     try {
       return tokenProvider.get();
+    } catch (WecomSmartSheetException ex) {
+      throw ex;
     } catch (RuntimeException ex) {
       throw failure(operation, "access token could not be obtained");
     }
@@ -99,6 +109,8 @@ public class WecomSmartSheetApiClient {
   private void invalidate(String operation, String token) {
     try {
       tokenProvider.invalidate(token);
+    } catch (WecomSmartSheetException ex) {
+      throw ex;
     } catch (RuntimeException ex) {
       throw failure(operation, "access token could not be invalidated");
     }
@@ -129,7 +141,8 @@ public class WecomSmartSheetApiClient {
     }
     JsonNode root;
     try {
-      root = objectMapper.readTree(response.body());
+      ObjectReader reader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+      root = reader.readTree(response.body());
     } catch (IOException | RuntimeException ex) {
       throw failure(operation, "response was not valid JSON");
     }

@@ -36,21 +36,40 @@ import java.util.stream.Stream;
 class WecomSmartSheetApiClientTest {
 
   private static final String GET_FIELDS_PATH = "/cgi-bin/wedoc/smartsheet/get_fields";
+  private static final String GET_RECORDS_PATH = "/cgi-bin/wedoc/smartsheet/get_records";
+  private static final String ADD_RECORDS_PATH = "/cgi-bin/wedoc/smartsheet/add_records";
+  private static final String UPDATE_RECORDS_PATH = "/cgi-bin/wedoc/smartsheet/update_records";
+  private static final String COMPLETE_SUCCESS = "{\"errcode\":0,\"errmsg\":\"ok\",\"total\":1,"
+      + "\"fields\":[{\"field_id\":\"f_name\",\"title\":\"Name\",\"type\":\"text\"}],"
+      + "\"has_more\":true,\"next\":\"cursor-1\",\"records\":[{\"record_id\":\"rec-1\","
+      + "\"values\":{\"Name\":\"Ada\"}}]}";
 
-  @Test
-  void postsJsonToTheFixedPathAndReturnsTheSuccessObject() throws Exception {
-    try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
-      server.respond(GET_FIELDS_PATH, 200, "{\"errcode\":0,\"fields\":[]}");
-      WecomAccessTokenProvider tokens = tokens("token-one");
-      WecomSmartSheetApiClient client = client(server, tokens);
+  @TestFactory
+  Stream<DynamicTest> postsEachOperationToItsFixedPathAndPreservesCompleteOfficialResponses() {
+    return Stream.of(
+        new OperationFixture("get_fields", GET_FIELDS_PATH),
+        new OperationFixture("get_records", GET_RECORDS_PATH),
+        new OperationFixture("add_records", ADD_RECORDS_PATH),
+        new OperationFixture("update_records", UPDATE_RECORDS_PATH))
+        .map(operation -> DynamicTest.dynamicTest(operation.name(), () -> {
+          try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
+            server.respond(operation.path(), 200, COMPLETE_SUCCESS);
 
-      var result = client.post("get_fields", Map.of("docid", "s3_doc"), Duration.ofSeconds(2));
+            var result = client(server, tokens("token-one"))
+                .post(operation.name(), Map.of("docid", "s3_doc"), Duration.ofSeconds(2));
 
-      assertThat(result.path("errcode").intValue()).isZero();
-      assertThat(server.lastMethod()).isEqualTo("POST");
-      assertThat(server.lastJson().path("docid").asText()).isEqualTo("s3_doc");
-      assertThat(decodeQuery(server.lastQuery()).get("access_token")).isEqualTo("token-one");
-    }
+            assertThat(server.lastMethod()).isEqualTo("POST");
+            assertThat(server.lastJson().path("docid").asText()).isEqualTo("s3_doc");
+            assertThat(decodeQuery(server.lastQuery()).get("access_token")).isEqualTo("token-one");
+            assertThat(result).isEqualTo(new ObjectMapper().readTree(COMPLETE_SUCCESS));
+            assertThat(result.path("errmsg").asText()).isEqualTo("ok");
+            assertThat(result.path("total").intValue()).isEqualTo(1);
+            assertThat(result.path("fields").get(0).path("field_id").asText()).isEqualTo("f_name");
+            assertThat(result.path("has_more").booleanValue()).isTrue();
+            assertThat(result.path("next").asText()).isEqualTo("cursor-1");
+            assertThat(result.path("records").get(0).path("record_id").asText()).isEqualTo("rec-1");
+          }
+        }));
   }
 
   @Test
@@ -130,6 +149,22 @@ class WecomSmartSheetApiClientTest {
         }));
   }
 
+  @TestFactory
+  Stream<DynamicTest> rejectsTrailingJsonTokensWithoutExposingThem() {
+    return Stream.of("{\"errcode\":0} trailing-secret", "{\"errcode\":0}{\"second\":1}")
+        .map(body -> DynamicTest.dynamicTest("rejects trailing response tokens", () -> {
+          try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
+            server.respond(GET_FIELDS_PATH, 200, body);
+
+            assertThatThrownBy(() -> client(server, tokens("token-one"))
+                .post("get_fields", Map.of(), Duration.ofSeconds(2)))
+                .isInstanceOf(WecomSmartSheetException.class)
+                .hasMessageContaining("response was not valid JSON")
+                .satisfies(error -> assertThrowableDoesNotContain(error, body, "trailing-secret", "second"));
+          }
+        }));
+  }
+
   @Test
   void rejectsUnknownOperationsAndInvalidTimeoutsBeforeTokenOrNetwork() throws Exception {
     try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
@@ -138,14 +173,54 @@ class WecomSmartSheetApiClientTest {
 
       assertThatThrownBy(() -> client.post("delete_records", Map.of(), Duration.ofSeconds(1)))
           .isInstanceOf(WecomSmartSheetException.class);
+      assertThatThrownBy(() -> client.post(null, Map.of(), Duration.ofSeconds(1)))
+          .isInstanceOf(WecomSmartSheetException.class)
+          .satisfies(error -> assertThat(((WecomSmartSheetException) error).operation()).isEqualTo("request"));
+      assertThatThrownBy(() -> client.post("token-one access_token raw-request-value", Map.of(), Duration.ofSeconds(1)))
+          .isInstanceOf(WecomSmartSheetException.class)
+          .satisfies(error -> {
+            assertThat(((WecomSmartSheetException) error).operation()).isEqualTo("request");
+            assertThrowableDoesNotContain(error, "token-one", "access_token", "raw-request-value");
+          });
       assertThatThrownBy(() -> client.post("get_fields", Map.of(), null))
           .isInstanceOf(WecomSmartSheetException.class);
       assertThatThrownBy(() -> client.post("get_fields", Map.of(), Duration.ZERO))
+          .isInstanceOf(WecomSmartSheetException.class);
+      assertThatThrownBy(() -> client.post("get_fields", Map.of(), Duration.ofMillis(-1)))
           .isInstanceOf(WecomSmartSheetException.class);
 
       verify(tokens, never()).get();
       assertThat(server.requestCount()).isZero();
     }
+  }
+
+  @Test
+  void rethrowsSanitizedTokenProviderExceptionsUnchanged() {
+    WecomAccessTokenProvider tokens = mock(WecomAccessTokenProvider.class);
+    WecomSmartSheetException tokenFailure = new WecomSmartSheetException("gettoken", 40013, "invalid corpid");
+    when(tokens.get()).thenThrow(tokenFailure);
+
+    assertThatThrownBy(() -> new WecomSmartSheetApiClient(new ObjectMapper(), configured("http://127.0.0.1"), tokens)
+        .post("get_fields", Map.of(), Duration.ofSeconds(1)))
+        .isSameAs(tokenFailure)
+        .satisfies(error -> {
+          WecomSmartSheetException wecomError = (WecomSmartSheetException) error;
+          assertThat(wecomError.operation()).isEqualTo("gettoken");
+          assertThat(wecomError.errcode()).isEqualTo(40013);
+          assertThrowableDoesNotContain(error, "CorpID-sentinel", "app-secret-value", "token-one", "access_token");
+        });
+  }
+
+  @Test
+  void preservesSanitizedMissingEnvironmentVariableNames() {
+    WecomSmartSheetConfig incomplete = new WecomSmartSheetConfig("http://127.0.0.1", "", "app-secret-value",
+        "document-1", "sheet-1", "view-1", "Customers", "Customer ID", ZoneId.of("Asia/Shanghai"));
+
+    assertThatThrownBy(() -> new WecomSmartSheetApiClient(new ObjectMapper(), incomplete, tokens("token-one"))
+        .post("get_fields", Map.of(), Duration.ofSeconds(1)))
+        .isInstanceOf(WecomSmartSheetException.class)
+        .hasMessageContaining("WECOM_CORP_ID")
+        .satisfies(error -> assertThrowableDoesNotContain(error, "app-secret-value", "document-1", "token-one"));
   }
 
   @Test
@@ -252,6 +327,8 @@ class WecomSmartSheetApiClientTest {
   }
 
   private record FailureCase(int status, String body, String reason) {}
+
+  private record OperationFixture(String name, String path) {}
 
   private static final class SelfReferencingBody {
     private SelfReferencingBody self;
