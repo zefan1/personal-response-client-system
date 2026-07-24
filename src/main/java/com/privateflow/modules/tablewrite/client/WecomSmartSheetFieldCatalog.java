@@ -1,0 +1,194 @@
+package com.privateflow.modules.tablewrite.client;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.springframework.stereotype.Component;
+
+@Component
+public class WecomSmartSheetFieldCatalog {
+
+  private static final Duration CACHE_TTL = Duration.ofMinutes(5);
+  private static final int PAGE_SIZE = 1000;
+
+  private final WecomSmartSheetApiClient apiClient;
+  private final WecomSmartSheetConfig config;
+  private final Clock clock;
+  private volatile Snapshot snapshot;
+
+  public WecomSmartSheetFieldCatalog(WecomSmartSheetApiClient apiClient, WecomSmartSheetConfig config) {
+    this(apiClient, config, Clock.systemUTC());
+  }
+
+  WecomSmartSheetFieldCatalog(WecomSmartSheetApiClient apiClient, WecomSmartSheetConfig config, Clock clock) {
+    this.apiClient = apiClient;
+    this.config = config;
+    this.clock = clock;
+  }
+
+  public Map<String, WecomSmartSheetField> visibleFields(Duration timeout) {
+    Snapshot current = snapshot;
+    Instant now = clock.instant();
+    if (isFresh(current, now)) {
+      return current.fields();
+    }
+    synchronized (this) {
+      current = snapshot;
+      now = clock.instant();
+      if (isFresh(current, now)) {
+        return current.fields();
+      }
+      Map<String, WecomSmartSheetField> fields = load(timeout);
+      Snapshot loaded = new Snapshot(Map.copyOf(fields), now);
+      snapshot = loaded;
+      return loaded.fields();
+    }
+  }
+
+  public WecomSmartSheetField requireWritable(String title, Duration timeout) {
+    String requested = title == null ? "" : title.trim();
+    if (requested.isEmpty()) {
+      throw new IllegalArgumentException("Field title is required");
+    }
+    WecomSmartSheetField field = visibleFields(timeout).get(requested);
+    if (field == null) {
+      throw new IllegalArgumentException("Unknown visible field: " + requested);
+    }
+    if (!field.writable()) {
+      throw new IllegalArgumentException("Field is visible but read-only: " + requested);
+    }
+    return field;
+  }
+
+  private Map<String, WecomSmartSheetField> load(Duration timeout) {
+    config.requireConfigured();
+    Map<String, WecomSmartSheetField> fieldsByTitle = new LinkedHashMap<>();
+    int offset = 0;
+    Integer expectedTotal = null;
+    while (expectedTotal == null || offset < expectedTotal) {
+      Map<String, Object> request = new LinkedHashMap<>();
+      request.put("docid", config.documentId());
+      request.put("sheet_id", config.sheetId());
+      request.put("view_id", config.viewId());
+      request.put("offset", offset);
+      request.put("limit", PAGE_SIZE);
+      JsonNode response = apiClient.post("get_fields", request, timeout);
+      Page page = page(response);
+      if (expectedTotal == null) {
+        expectedTotal = page.total();
+      } else if (expectedTotal != page.total()) {
+        throw invalidCatalog();
+      }
+      if (page.fields().isEmpty() && offset < expectedTotal) {
+        throw invalidCatalog();
+      }
+      for (WecomSmartSheetField field : page.fields()) {
+        if (fieldsByTitle.putIfAbsent(field.title(), field) != null) {
+          throw invalidCatalog();
+        }
+      }
+      int nextOffset = offset + page.fields().size();
+      if (nextOffset <= offset && offset < expectedTotal) {
+        throw invalidCatalog();
+      }
+      offset = nextOffset;
+      if (offset > expectedTotal) {
+        throw invalidCatalog();
+      }
+    }
+    return fieldsByTitle;
+  }
+
+  private static Page page(JsonNode response) {
+    if (response == null || !response.isObject()) {
+      throw invalidCatalog();
+    }
+    JsonNode total = response.get("total");
+    JsonNode fields = response.get("fields");
+    if (total == null || !total.isIntegralNumber() || !total.canConvertToInt() || total.intValue() < 0
+        || fields == null || !fields.isArray()) {
+      throw invalidCatalog();
+    }
+    Map<String, WecomSmartSheetField> parsed = new LinkedHashMap<>();
+    for (JsonNode node : fields) {
+      WecomSmartSheetField field = field(node);
+      if (parsed.putIfAbsent(field.title(), field) != null) {
+        throw invalidCatalog();
+      }
+    }
+    return new Page(total.intValue(), parsed.values().stream().toList());
+  }
+
+  private static WecomSmartSheetField field(JsonNode node) {
+    if (node == null || !node.isObject()) {
+      throw invalidCatalog();
+    }
+    String fieldId = requiredText(node.get("field_id"));
+    String title = requiredText(node.get("field_title"));
+    String type = requiredText(node.get("field_type"));
+    boolean includesTime = "FIELD_TYPE_DATE_TIME".equals(type) && dateTimeIncludesTime(node.get("property_date_time"));
+    Map<String, String> options = options(node, type);
+    return new WecomSmartSheetField(fieldId, title, type, options, includesTime);
+  }
+
+  private static boolean dateTimeIncludesTime(JsonNode property) {
+    if (property == null || !property.isObject() || !property.path("format").isTextual()) {
+      throw invalidCatalog();
+    }
+    String format = property.path("format").textValue().trim();
+    if (format.isEmpty()) {
+      throw invalidCatalog();
+    }
+    return format.toLowerCase(java.util.Locale.ROOT).contains("h");
+  }
+
+  private static Map<String, String> options(JsonNode field, String type) {
+    String propertyName = switch (type) {
+      case "FIELD_TYPE_SELECT" -> "property_select";
+      case "FIELD_TYPE_SINGLE_SELECT" -> "property_single_select";
+      default -> null;
+    };
+    if (propertyName == null) {
+      return Map.of();
+    }
+    JsonNode property = field.get(propertyName);
+    JsonNode options = property == null ? null : property.get("options");
+    if (property == null || !property.isObject() || options == null || !options.isArray()) {
+      throw invalidCatalog();
+    }
+    Map<String, String> idsByText = new LinkedHashMap<>();
+    for (JsonNode option : options) {
+      if (option == null || !option.isObject()) {
+        throw invalidCatalog();
+      }
+      String id = requiredText(option.get("id"));
+      String text = requiredText(option.get("text"));
+      if (idsByText.putIfAbsent(text, id) != null) {
+        throw invalidCatalog();
+      }
+    }
+    return idsByText;
+  }
+
+  private static String requiredText(JsonNode value) {
+    if (value == null || !value.isTextual() || value.textValue().trim().isEmpty()) {
+      throw invalidCatalog();
+    }
+    return value.textValue().trim();
+  }
+
+  private static boolean isFresh(Snapshot current, Instant now) {
+    return current != null && now.isBefore(current.loadedAt().plus(CACHE_TTL));
+  }
+
+  private static IllegalStateException invalidCatalog() {
+    return new IllegalStateException("WeCom visible field catalog was invalid");
+  }
+
+  private record Page(int total, java.util.List<WecomSmartSheetField> fields) {}
+  private record Snapshot(Map<String, WecomSmartSheetField> fields, Instant loadedAt) {}
+}
