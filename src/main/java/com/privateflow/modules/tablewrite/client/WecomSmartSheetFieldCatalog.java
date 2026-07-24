@@ -7,6 +7,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -19,6 +23,7 @@ public class WecomSmartSheetFieldCatalog {
   private final WecomSmartSheetConfig config;
   private final Clock clock;
   private volatile Snapshot snapshot;
+  private InFlight inFlight;
 
   public WecomSmartSheetFieldCatalog(WecomSmartSheetApiClient apiClient, WecomSmartSheetConfig config) {
     this(apiClient, config, Clock.systemUTC());
@@ -36,16 +41,42 @@ public class WecomSmartSheetFieldCatalog {
     if (isFresh(current, now)) {
       return current.fields();
     }
+    InFlight active;
+    boolean loader = false;
     synchronized (this) {
       current = snapshot;
       now = clock.instant();
       if (isFresh(current, now)) {
         return current.fields();
       }
-      Map<String, WecomSmartSheetField> fields = load(timeout);
-      Snapshot loaded = new Snapshot(Map.copyOf(fields), clock.instant());
-      snapshot = loaded;
-      return loaded.fields();
+      if (inFlight == null) {
+        active = new InFlight();
+        inFlight = active;
+        loader = true;
+      } else {
+        active = inFlight;
+      }
+      active.participants++;
+    }
+    try {
+      if (loader) {
+        try {
+          Map<String, WecomSmartSheetField> fields = load(timeout);
+          Snapshot loaded = new Snapshot(Map.copyOf(fields), clock.instant());
+          snapshot = loaded;
+          active.result.complete(loaded);
+        } catch (RuntimeException ex) {
+          active.result.completeExceptionally(loadFailure(ex));
+        }
+      }
+      return await(active.result).fields();
+    } finally {
+      synchronized (this) {
+        active.participants--;
+        if (active.participants == 0 && inFlight == active) {
+          inFlight = null;
+        }
+      }
     }
   }
 
@@ -67,6 +98,7 @@ public class WecomSmartSheetFieldCatalog {
   private Map<String, WecomSmartSheetField> load(Duration timeout) {
     config.requireConfigured();
     Map<String, WecomSmartSheetField> fieldsByTitle = new LinkedHashMap<>();
+    Set<String> fieldIds = new HashSet<>();
     int offset = 0;
     Integer expectedTotal = null;
     while (expectedTotal == null || offset < expectedTotal) {
@@ -88,6 +120,9 @@ public class WecomSmartSheetFieldCatalog {
       }
       for (WecomSmartSheetField field : page.fields()) {
         if (fieldsByTitle.putIfAbsent(field.title(), field) != null) {
+          throw invalidCatalog();
+        }
+        if (!fieldIds.add(field.fieldId())) {
           throw invalidCatalog();
         }
       }
@@ -161,6 +196,7 @@ public class WecomSmartSheetFieldCatalog {
       throw invalidCatalog();
     }
     Map<String, String> idsByText = new LinkedHashMap<>();
+    Set<String> optionIds = new HashSet<>();
     for (JsonNode option : options) {
       if (option == null || !option.isObject()) {
         throw invalidCatalog();
@@ -168,6 +204,9 @@ public class WecomSmartSheetFieldCatalog {
       String id = requiredText(option.get("id"));
       String text = requiredText(option.get("text"));
       if (idsByText.putIfAbsent(text, id) != null) {
+        throw invalidCatalog();
+      }
+      if (!optionIds.add(id)) {
         throw invalidCatalog();
       }
     }
@@ -189,6 +228,29 @@ public class WecomSmartSheetFieldCatalog {
     return new IllegalStateException("WeCom visible field catalog was invalid");
   }
 
+  private static IllegalStateException loadFailure() {
+    return new IllegalStateException("WeCom visible field catalog could not be loaded");
+  }
+
+  private static RuntimeException loadFailure(RuntimeException failure) {
+    return failure instanceof WecomSmartSheetException ? failure : loadFailure();
+  }
+
+  private static Snapshot await(CompletableFuture<Snapshot> result) {
+    try {
+      return result.join();
+    } catch (CompletionException ex) {
+      if (ex.getCause() instanceof RuntimeException failure) {
+        throw failure;
+      }
+      throw loadFailure();
+    }
+  }
+
   private record Page(int total, java.util.List<WecomSmartSheetField> fields) {}
   private record Snapshot(Map<String, WecomSmartSheetField> fields, Instant loadedAt) {}
+  private static final class InFlight {
+    private final CompletableFuture<Snapshot> result = new CompletableFuture<>();
+    private int participants;
+  }
 }

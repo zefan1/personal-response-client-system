@@ -14,6 +14,12 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class WecomSmartSheetFieldCatalogTest {
@@ -48,8 +54,6 @@ class WecomSmartSheetFieldCatalogTest {
     assertThat(fields.get("\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4").fieldId()).isEqualTo("fNext");
     assertThat(fields.get("\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4").type()).isEqualTo("FIELD_TYPE_DATE_TIME");
     assertThat(fields.get("\u4e0b\u6b21\u8ddf\u8fdb\u65f6\u95f4").dateTimeIncludesTime()).isTrue();
-    assertThat(api.lastResponse.at("/fields/3/property_single_select/options/0/style").isIntegralNumber()).isTrue();
-    assertThat(api.lastResponse.at("/fields/3/property_single_select/options/0/style").intValue()).isEqualTo(1);
     assertThat(fields.get("\u5ba2\u6237\u9636\u6bb5").fieldId()).isEqualTo("fStage");
     assertThat(fields.get("\u5ba2\u6237\u9636\u6bb5").type()).isEqualTo("FIELD_TYPE_SINGLE_SELECT");
     assertThat(fields.get("\u5ba2\u6237\u9636\u6bb5").optionId(" \u8ddf\u8fdb\u4e2d ")).contains("opt1");
@@ -109,6 +113,80 @@ class WecomSmartSheetFieldCatalogTest {
   }
 
   @Test
+  void parsesMultiSelectOptionsAsImmutableAndRejectsDuplicateIds() throws Exception {
+    WecomSmartSheetFieldCatalog catalog = catalog(client("""
+        {"errcode":0,"total":1,"fields":[{"field_id":"fTags","field_title":"Tags","field_type":"FIELD_TYPE_SELECT","property_select":{"options":[{"id":"o1","text":"A","style":1},{"id":"o2","text":"B","style":1}]}}]}"""), Clock.systemUTC());
+    WecomSmartSheetField tags = catalog.visibleFields(Duration.ofSeconds(1)).get("Tags");
+    assertThat(tags.optionId("A")).contains("o1");
+    assertThatThrownBy(() -> tags.optionIdsByText().put("C", "o3")).isInstanceOf(UnsupportedOperationException.class);
+
+    assertThatThrownBy(() -> catalog(client("""
+        {"errcode":0,"total":1,"fields":[{"field_id":"fTags","field_title":"Tags","field_type":"FIELD_TYPE_SELECT","property_select":{"options":[{"id":"o1","text":"A","style":1},{"id":"o1","text":"B","style":1}]}}]}"""), Clock.systemUTC()).visibleFields(Duration.ofSeconds(1)))
+        .hasMessageNotContaining("o1");
+  }
+
+  @Test
+  void rejectsDuplicateFieldIdsAcrossPages() throws Exception {
+    WecomSmartSheetFieldCatalog catalog = catalog(client(
+        "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"One\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Two\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}"), Clock.systemUTC());
+    assertThatThrownBy(() -> catalog.visibleFields(Duration.ofSeconds(1))).hasMessageNotContaining("f1");
+  }
+
+  @Test
+  void sharesOneExpiredRefreshFailureThenAllowsRetry() throws Exception {
+    BlockingThenRetryClient api = new BlockingThenRetryClient("""
+        {"errcode":0,"total":1,"fields":[{"field_id":"f2","field_title":"Recovered","field_type":"FIELD_TYPE_TEXT"}]}""");
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC());
+    ExecutorService workers = Executors.newFixedThreadPool(4);
+    CountDownLatch ready = new CountDownLatch(4);
+    CountDownLatch start = new CountDownLatch(1);
+    try {
+      List<Future<RuntimeException>> failures = new ArrayList<>();
+      for (int i = 0; i < 4; i++) {
+        failures.add(workers.submit(() -> {
+          ready.countDown();
+          start.await(2, TimeUnit.SECONDS);
+          try {
+            catalog.visibleFields(Duration.ofSeconds(1));
+            throw new AssertionError("expected refresh failure");
+          } catch (RuntimeException ex) {
+            return ex;
+          }
+        }));
+      }
+      assertThat(ready.await(2, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+      assertThat(api.firstStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      api.releaseFirst.countDown();
+      RuntimeException first = failures.get(0).get(2, TimeUnit.SECONDS);
+      for (Future<RuntimeException> failure : failures) {
+        RuntimeException error = failure.get(2, TimeUnit.SECONDS);
+        assertThat(error).isSameAs(first);
+        assertThat(error.getMessage()).doesNotContain("raw-refresh-pii");
+      }
+      assertThat(api.calls.get()).isEqualTo(1);
+      assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Recovered");
+      assertThat(api.calls.get()).isEqualTo(2);
+    } finally {
+      workers.shutdownNow();
+    }
+  }
+
+  @Test
+  void preservesAlreadySanitizedApiFailures() {
+    WecomSmartSheetException expected = new WecomSmartSheetException("get_fields", 40058, "remote API returned an error");
+    WecomSmartSheetApiClient api = new WecomSmartSheetApiClient(JSON, config(), null) {
+      @Override public JsonNode post(String operation, Object body, Duration timeout) {
+        throw expected;
+      }
+    };
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC());
+
+    assertThatThrownBy(() -> catalog.visibleFields(Duration.ofSeconds(1))).isSameAs(expected);
+  }
+
+  @Test
   void rejectsInvalidAndStalledCatalogPagesWithoutResponseContents() throws Exception {
     List<String> invalidResponses = List.of(
         "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Same\",\"field_type\":\"FIELD_TYPE_TEXT\"},{\"field_id\":\"f2\",\"field_title\":\"Same\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
@@ -135,7 +213,7 @@ class WecomSmartSheetFieldCatalogTest {
         .hasMessageContaining("Formula title").hasMessageNotContaining("errcode");
   }
 
-  private static WecomSmartSheetFieldCatalog catalog(ScriptedClient api, Clock clock) {
+  private static WecomSmartSheetFieldCatalog catalog(WecomSmartSheetApiClient api, Clock clock) {
     return new WecomSmartSheetFieldCatalog(api, config(), clock);
   }
 
@@ -151,7 +229,6 @@ class WecomSmartSheetFieldCatalogTest {
   private static final class ScriptedClient extends WecomSmartSheetApiClient {
     private final ArrayDeque<JsonNode> responses = new ArrayDeque<>();
     private final List<JsonNode> bodies = new ArrayList<>();
-    private JsonNode lastResponse;
     private Runnable beforeFirstResponse = () -> {};
 
     private ScriptedClient(String... source) throws Exception {
@@ -166,12 +243,38 @@ class WecomSmartSheetFieldCatalogTest {
       if (bodies.size() == 1) {
         beforeFirstResponse.run();
       }
-      lastResponse = responses.removeFirst();
-      return lastResponse;
+      return responses.removeFirst();
     }
 
     void advanceClockBeforeFirstResponse(MutableClock clock, Duration duration) {
       beforeFirstResponse = () -> clock.advance(duration);
+    }
+  }
+
+  private static final class BlockingThenRetryClient extends WecomSmartSheetApiClient {
+    private final JsonNode retryResponse;
+    private final AtomicInteger calls = new AtomicInteger();
+    private final CountDownLatch firstStarted = new CountDownLatch(1);
+    private final CountDownLatch releaseFirst = new CountDownLatch(1);
+
+    private BlockingThenRetryClient(String retryResponse) throws Exception {
+      super(JSON, config(), null);
+      this.retryResponse = JSON.readTree(retryResponse);
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      if (calls.incrementAndGet() == 1) {
+        firstStarted.countDown();
+        try {
+          if (!releaseFirst.await(2, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("raw-refresh-pii");
+          }
+        } catch (InterruptedException ex) {
+          Thread.currentThread().interrupt();
+        }
+        throw new IllegalStateException("raw-refresh-pii");
+      }
+      return retryResponse;
     }
   }
 

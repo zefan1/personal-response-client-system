@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -14,7 +15,9 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -23,6 +26,8 @@ public class WecomSmartSheetValueCodec {
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final DateTimeFormatter DATE_TIME_FORMATTER =
       DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss");
+  private static final DateTimeFormatter DATE_TIME_MILLIS_FORMATTER =
+      DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS");
   private final ZoneId zoneId;
 
   public WecomSmartSheetValueCodec(WecomSmartSheetConfig config) {
@@ -47,22 +52,24 @@ public class WecomSmartSheetValueCodec {
 
   public JsonNode encode(WecomSmartSheetField field, Object value) {
     requireField(field);
-    if (value == null) {
+    try {
+      if (value == null || !field.writable()) {
+        throw invalid(field);
+      }
+      return switch (field.type()) {
+        case "FIELD_TYPE_TEXT" -> encodeText(field, value);
+        case "FIELD_TYPE_PHONE_NUMBER", "FIELD_TYPE_EMAIL" ->
+            JsonNodeFactory.instance.textNode(stringValue(field, value));
+        case "FIELD_TYPE_NUMBER" -> encodeNumber(field, value);
+        case "FIELD_TYPE_CHECKBOX" -> JsonNodeFactory.instance.booleanNode(checkbox(field, value));
+        case "FIELD_TYPE_DATE_TIME" -> encodeDate(field, value);
+        case "FIELD_TYPE_SINGLE_SELECT" -> encodeSingleSelect(field, value);
+        case "FIELD_TYPE_SELECT" -> encodeMultiSelect(field, value);
+        default -> throw invalid(field);
+      };
+    } catch (RuntimeException ex) {
       throw invalid(field);
     }
-    if (!field.writable()) {
-      throw invalid(field);
-    }
-    return switch (field.type()) {
-      case "FIELD_TYPE_TEXT" -> encodeText(value);
-      case "FIELD_TYPE_PHONE_NUMBER", "FIELD_TYPE_EMAIL" -> JsonNodeFactory.instance.textNode(textValue(value));
-      case "FIELD_TYPE_NUMBER" -> encodeNumber(field, value);
-      case "FIELD_TYPE_CHECKBOX" -> JsonNodeFactory.instance.booleanNode(checkbox(field, value));
-      case "FIELD_TYPE_DATE_TIME" -> encodeDate(field, value);
-      case "FIELD_TYPE_SINGLE_SELECT" -> encodeSingleSelect(field, value);
-      case "FIELD_TYPE_SELECT" -> encodeMultiSelect(field, value);
-      default -> throw invalid(field);
-    };
   }
 
   private static String text(JsonNode value) {
@@ -89,7 +96,10 @@ public class WecomSmartSheetValueCodec {
     try {
       long millis = value.isIntegralNumber() ? value.longValue() : Long.parseLong(value.textValue());
       LocalDateTime local = LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), zoneId);
-      return field.dateTimeIncludesTime() ? DATE_TIME_FORMATTER.format(local) : local.toLocalDate().toString();
+      if (!field.dateTimeIncludesTime()) {
+        return local.toLocalDate().toString();
+      }
+      return local.getNano() == 0 ? DATE_TIME_FORMATTER.format(local) : DATE_TIME_MILLIS_FORMATTER.format(local);
     } catch (RuntimeException ex) {
       return compact(value);
     }
@@ -108,26 +118,33 @@ public class WecomSmartSheetValueCodec {
     return String.join("、", texts);
   }
 
-  private static ArrayNode encodeText(Object value) {
+  private static ArrayNode encodeText(WecomSmartSheetField field, Object value) {
     ObjectNode part = JsonNodeFactory.instance.objectNode();
     part.put("type", "text");
-    part.put("text", textValue(value));
+    part.put("text", stringValue(field, value));
     return JsonNodeFactory.instance.arrayNode().add(part);
   }
 
   private static JsonNode encodeNumber(WecomSmartSheetField field, Object value) {
-    try {
-      if (value instanceof Number number) {
-        return JsonNodeFactory.instance.numberNode(new BigDecimal(number.toString()));
-      }
-      String text = textValue(value).trim();
-      if (text.isEmpty()) {
+    BigDecimal decimal;
+    if (value instanceof String text) {
+      decimal = new BigDecimal(text.trim());
+    } else if (value instanceof BigDecimal number) {
+      decimal = number;
+    } else if (value instanceof BigInteger number) {
+      decimal = new BigDecimal(number);
+    } else if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long) {
+      decimal = BigDecimal.valueOf(((Number) value).longValue());
+    } else if (value instanceof Float || value instanceof Double) {
+      double number = ((Number) value).doubleValue();
+      if (!Double.isFinite(number)) {
         throw invalid(field);
       }
-      return JsonNodeFactory.instance.numberNode(new BigDecimal(text));
-    } catch (NumberFormatException ex) {
+      decimal = BigDecimal.valueOf(number);
+    } else {
       throw invalid(field);
     }
+    return JsonNodeFactory.instance.numberNode(new BigDecimal(decimal.stripTrailingZeros().toPlainString()));
   }
 
   private static boolean checkbox(WecomSmartSheetField field, Object value) {
@@ -146,34 +163,35 @@ public class WecomSmartSheetValueCodec {
   }
 
   private JsonNode encodeDate(WecomSmartSheetField field, Object value) {
-    String text = value instanceof String string ? string.trim() : null;
-    if (text != null && text.isEmpty()) {
+    if (value instanceof String text && text.trim().isEmpty()) {
       return JsonNodeFactory.instance.textNode("");
     }
-    try {
-      Instant instant;
-      if (value instanceof LocalDate date) {
-        instant = date.atStartOfDay(zoneId).toInstant();
-      } else if (value instanceof LocalDateTime dateTime) {
-        instant = dateTime.atZone(zoneId).toInstant();
-      } else if (text != null) {
-        instant = field.dateTimeIncludesTime()
-            ? LocalDateTime.parse(text).atZone(zoneId).toInstant()
-            : LocalDate.parse(text).atStartOfDay(zoneId).toInstant();
-      } else {
+    if (!field.dateTimeIncludesTime()) {
+      LocalDate date = value instanceof LocalDate localDate ? localDate
+          : value instanceof String text ? LocalDate.parse(text.trim()) : null;
+      if (date == null) {
         throw invalid(field);
       }
-      return JsonNodeFactory.instance.textNode(Long.toString(instant.toEpochMilli()));
-    } catch (RuntimeException ex) {
-      if (ex instanceof IllegalArgumentException) {
-        throw (IllegalArgumentException) ex;
-      }
+      return JsonNodeFactory.instance.textNode(Long.toString(date.atStartOfDay(zoneId).toInstant().toEpochMilli()));
+    }
+    LocalDateTime dateTime;
+    if (value instanceof LocalDate localDate) {
+      dateTime = localDate.atStartOfDay();
+    } else if (value instanceof LocalDateTime localDateTime) {
+      dateTime = localDateTime;
+    } else if (value instanceof String text) {
+      dateTime = LocalDateTime.parse(text.trim());
+    } else {
       throw invalid(field);
     }
+    if (dateTime.getNano() % 1_000_000 != 0) {
+      throw invalid(field);
+    }
+    return JsonNodeFactory.instance.textNode(Long.toString(dateTime.atZone(zoneId).toInstant().toEpochMilli()));
   }
 
   private static ArrayNode encodeSingleSelect(WecomSmartSheetField field, Object value) {
-    String option = textValue(value).trim();
+    String option = stringValue(field, value).trim();
     ArrayNode result = JsonNodeFactory.instance.arrayNode();
     if (option.isEmpty()) {
       return result;
@@ -183,21 +201,23 @@ public class WecomSmartSheetValueCodec {
   }
 
   private static ArrayNode encodeMultiSelect(WecomSmartSheetField field, Object value) {
-    List<String> names = new ArrayList<>();
+    Set<String> names = new LinkedHashSet<>();
     if (value instanceof Collection<?> collection) {
       for (Object item : collection) {
-        if (item == null) {
+        if (!(item instanceof String text)) {
           throw invalid(field);
         }
-        names.add(textValue(item).trim());
+        names.add(text.trim());
       }
-    } else {
-      String text = textValue(value).trim();
+    } else if (value instanceof String string) {
+      String text = string.trim();
       if (!text.isEmpty()) {
         for (String item : text.split("、", -1)) {
           names.add(item.trim());
         }
       }
+    } else {
+      throw invalid(field);
     }
     ArrayNode result = JsonNodeFactory.instance.arrayNode();
     for (String name : names) {
@@ -214,8 +234,11 @@ public class WecomSmartSheetValueCodec {
     return JsonNodeFactory.instance.objectNode().put("id", id);
   }
 
-  private static String textValue(Object value) {
-    return value instanceof CharSequence sequence ? sequence.toString() : String.valueOf(value);
+  private static String stringValue(WecomSmartSheetField field, Object value) {
+    if (!(value instanceof String text)) {
+      throw invalid(field);
+    }
+    return text;
   }
 
   private static void requireField(WecomSmartSheetField field) {
