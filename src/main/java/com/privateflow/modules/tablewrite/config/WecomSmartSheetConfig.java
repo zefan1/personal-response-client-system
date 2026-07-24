@@ -72,10 +72,10 @@ public final class WecomSmartSheetConfig {
   public void requireTarget(String requestedDocumentId, String requestedSourceTable) {
     requireConfigured();
     if (!documentId.equals(trimmed(requestedDocumentId))) {
-      throw new IllegalStateException("Requested document does not match configured document");
+      throw new IllegalArgumentException("Requested document does not match configured document");
     }
     if (!sourceTable.equals(trimmed(requestedSourceTable))) {
-      throw new IllegalStateException("Requested source table does not match configured source table");
+      throw new IllegalArgumentException("Requested source table does not match configured source table");
     }
   }
 
