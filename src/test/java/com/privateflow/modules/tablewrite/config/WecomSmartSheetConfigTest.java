@@ -1,0 +1,52 @@
+package com.privateflow.modules.tablewrite.config;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+
+import java.time.ZoneId;
+import org.junit.jupiter.api.Test;
+
+class WecomSmartSheetConfigTest {
+
+  @Test
+  void configuredTargetValidatesAndDoesNotExposeSecretInToString() {
+    WecomSmartSheetConfig config = configured();
+
+    config.requireTarget("document-1", "Customers");
+
+    assertThat(config.documentId()).isEqualTo("document-1");
+    assertThat(config.zoneId()).isEqualTo(ZoneId.of("Asia/Shanghai"));
+    assertThat(config.toString()).doesNotContain("app-secret-value");
+  }
+
+  @Test
+  void missingRequiredValuesNameEnvironmentVariablesWithoutLeakingSecret() {
+    WecomSmartSheetConfig config = new WecomSmartSheetConfig(
+        "https://qyapi.weixin.qq.com", " ", "app-secret-value", "", "sheet-1", "view-1",
+        "Customers", "Customer ID", ZoneId.of("Asia/Shanghai"));
+
+    assertThatIllegalStateException()
+        .isThrownBy(config::requireConfigured)
+        .withMessageContaining("WECOM_CORP_ID")
+        .withMessageContaining("WECOM_SMARTSHEET_DOC_ID")
+        .satisfies(error -> assertThat(error.getMessage()).doesNotContain("app-secret-value"));
+  }
+
+  @Test
+  void differentDocumentOrSourceTableIsRejectedBeforeApiCall() {
+    WecomSmartSheetConfig config = configured();
+
+    assertThatIllegalStateException()
+        .isThrownBy(() -> config.requireTarget("other-document", "Customers"))
+        .withMessageContaining("document");
+    assertThatIllegalStateException()
+        .isThrownBy(() -> config.requireTarget("document-1", "Other customers"))
+        .withMessageContaining("source table");
+  }
+
+  private WecomSmartSheetConfig configured() {
+    return new WecomSmartSheetConfig(
+        "https://qyapi.weixin.qq.com/", "corp-1", "app-secret-value", "document-1", "sheet-1",
+        "view-1", "Customers", "Customer ID", ZoneId.of("Asia/Shanghai"));
+  }
+}
