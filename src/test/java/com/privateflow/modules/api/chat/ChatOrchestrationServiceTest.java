@@ -44,10 +44,12 @@ import com.privateflow.modules.skill.ReplyTagSnapshot;
 import com.privateflow.modules.skill.Suggestion;
 import com.privateflow.modules.skill.config.SkillConfig;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
+import com.privateflow.modules.supervision.SupervisionEventService;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,6 +73,7 @@ class ChatOrchestrationServiceTest {
   private ReplyTagSnapshotBuilder replyTagSnapshotBuilder;
   private FollowupConfirmationService followupConfirmationService;
   private PendingReplyTaskService pendingReplyTaskService;
+  private SupervisionEventService supervisionEventService;
   private Customer accessibleCustomer;
   private ChatOrchestrationService service;
 
@@ -92,6 +95,7 @@ class ChatOrchestrationServiceTest {
     replyTagSnapshotBuilder = org.mockito.Mockito.mock(ReplyTagSnapshotBuilder.class);
     followupConfirmationService = org.mockito.Mockito.mock(FollowupConfirmationService.class);
     pendingReplyTaskService = org.mockito.Mockito.mock(PendingReplyTaskService.class);
+    supervisionEventService = org.mockito.Mockito.mock(SupervisionEventService.class);
     when(skillConfigProvider.get()).thenReturn(skillConfig(3));
     when(skillGatewayService.generateReplies(any())).thenReturn(new SkillResponse(
         List.of(new Suggestion("skill guidance", "NEXT_STEP", "fixed workflow")),
@@ -119,7 +123,8 @@ class ChatOrchestrationServiceTest {
         llmFollowupSuggestionService,
         llmSummaryService,
         followupConfirmationService,
-        pendingReplyTaskService);
+        pendingReplyTaskService,
+        supervisionEventService);
   }
 
   @AfterEach
@@ -144,6 +149,197 @@ class ChatOrchestrationServiceTest {
     assertEquals(ImageErrorCodes.IMAGE_RECOGNITION_FAILED, exception.getErrorCode());
     verify(customerMatchService, never()).match(any());
     verify(skillGatewayService, never()).generateReplies(any());
+    verify(supervisionEventService).recordRecognitionFailed(
+        null,
+        null,
+        null,
+        ImageErrorCodes.IMAGE_RECOGNITION_FAILED);
+  }
+
+  @Test
+  void recognizeForJobUsesCapturedEmployeeForCustomerIsolationAndRestoresWorkerContext() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    AuthUser executorContext = new AuthUser("keeper-worker", "Worker", Role.KEEPER, null);
+    AuthContext.set(executorContext);
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice",
+        "18800001111",
+        List.of(new com.privateflow.modules.image.Message("client", "hello")),
+        "12:00"));
+    when(customerMatchService.match(any())).thenReturn(MatchResult.none());
+
+    service.recognizeForJob(new ChatRecognizeRequest(
+        null,
+        null,
+        null,
+        "lead",
+        "crm",
+        List.of(),
+        "reply-queued"), "jpeg".getBytes(), queuedEmployee);
+
+    org.mockito.ArgumentCaptor<MatchRequest> request = org.mockito.ArgumentCaptor.forClass(MatchRequest.class);
+    verify(customerMatchService).match(request.capture());
+    assertEquals("keeper-queued", request.getValue().currentUser());
+    assertEquals(executorContext, AuthContext.current());
+  }
+
+  @Test
+  void recognizeForJobStopsBeforeCustomerMatchingWhenTheQueuedJobWasCancelled() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice", "18800001111", List.of(), "12:00"));
+
+    ChatResponse response = service.recognizeForJob(new ChatRecognizeRequest(
+        null, null, null, "lead", "crm", List.of(), "reply-cancelled"),
+        "jpeg".getBytes(), queuedEmployee, () -> false);
+
+    assertNull(response);
+    verify(customerMatchService, never()).match(any());
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(pendingReplyTaskService, never()).createWaitingTask(any());
+  }
+
+  @Test
+  void recognizeForJobStopsBeforeGeneratingWhenTheJobIsCancelledDuringMatching() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    AtomicBoolean active = new AtomicBoolean(true);
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice", "18800001111", List.of(), "12:00"));
+    when(customerMatchService.match(any())).thenAnswer(invocation -> {
+      active.set(false);
+      return MatchResult.none();
+    });
+
+    ChatResponse response = service.recognizeForJob(
+        new ChatRecognizeRequest(null, null, null, "lead", "crm", List.of(), "reply-cancelled"),
+        "jpeg".getBytes(),
+        queuedEmployee,
+        active::get);
+
+    assertNull(response);
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(contextStore, never()).save(any(), any(), any());
+  }
+
+  @Test
+  void recognizeForJobDoesNotPersistOrReturnAReplyWhenCancelledDuringGeneration() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    AtomicBoolean active = new AtomicBoolean(true);
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice", "18800001111", List.of(), "12:00"));
+    when(customerMatchService.match(any())).thenReturn(MatchResult.none());
+    when(skillGatewayService.generateReplies(any())).thenAnswer(invocation -> {
+      active.set(false);
+      return new SkillResponse(List.of(new Suggestion("reply", "NEXT_STEP", "reason")), null, null, null);
+    });
+
+    ChatResponse response = service.recognizeForJob(
+        new ChatRecognizeRequest(null, null, null, "lead", "crm", List.of(), "reply-cancelled"),
+        "jpeg".getBytes(),
+        queuedEmployee,
+        active::get);
+
+    assertNull(response);
+    verify(contextStore, never()).save(any(), any(), any());
+    verify(supervisionEventService, never()).recordGeneratedReply(any(), any(), any(), any(), any(), any());
+    verify(auditLogger, never()).log(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void recognizeForJobDoesNotRecordAFailureWhenCancelledDuringRecognition() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    AtomicBoolean active = new AtomicBoolean(true);
+    when(imageRecognitionService.recognize(any(), any())).thenAnswer(invocation -> {
+      active.set(false);
+      throw new ImageRecognitionException(ImageErrorCodes.IMAGE_RECOGNITION_FAILED, "recognition failed");
+    });
+
+    ChatResponse response = service.recognizeForJob(
+        new ChatRecognizeRequest(null, null, null, "lead", "crm", List.of(), "reply-cancelled"),
+        "jpeg".getBytes(),
+        queuedEmployee,
+        active::get);
+
+    assertNull(response);
+    verify(supervisionEventService, never()).recordRecognitionFailed(any(), any(), any(), any());
+  }
+
+  @Test
+  void recognizeForJobRejectsAResolvedCustomerOutsideTheQueuedEmployeesAccessScope() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice", "18800001111", List.of(), "12:00"));
+    when(customerMatchService.match(any())).thenReturn(new MatchResult(
+        MatchType.EXACT,
+        List.of(new CustomerSummary("18800001111", "18800001111", "Alice", "WECHAT", "lead",
+            "other-keeper", null, null, Confidence.HIGH)),
+        1));
+    when(customerAccessService.canAccess(accessibleCustomer)).thenReturn(false);
+
+    ApiException exception = assertThrows(ApiException.class, () -> service.recognizeForJob(
+        new ChatRecognizeRequest(null, null, null, "lead", "crm", List.of(), "reply-forbidden"),
+        "jpeg".getBytes(), queuedEmployee, () -> true));
+
+    assertEquals(ApiErrorCodes.FORBIDDEN, exception.getErrorCode());
+    verify(skillGatewayService, never()).generateReplies(any());
+    verify(pendingReplyTaskService, never()).createWaitingTask(any());
+  }
+
+  @Test
+  void recognizeForJobDoesNotExposeInaccessibleAmbiguousCandidates() {
+    AuthUser queuedEmployee = new AuthUser("keeper-queued", "Queued", Role.KEEPER, null);
+    Customer inaccessibleCustomer = customer("18800002222");
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice", null, List.of(), "12:00"));
+    when(customerMatchService.match(any())).thenReturn(new MatchResult(
+        MatchType.MULTIPLE,
+        List.of(new CustomerSummary("18800002222", "18800002222", "Alice", "WECHAT", "lead",
+            "other-keeper", null, null, Confidence.HIGH)),
+        2));
+    when(customerQueryService.getByPhone("18800002222")).thenReturn(inaccessibleCustomer);
+    when(customerAccessService.canAccess(inaccessibleCustomer)).thenReturn(false);
+
+    ChatResponse response = service.recognizeForJob(
+        new ChatRecognizeRequest(null, null, null, "lead", "crm", List.of(), "reply-forbidden"),
+        "jpeg".getBytes(),
+        queuedEmployee,
+        () -> true);
+
+    assertEquals(MatchType.NONE, response.match().matchType());
+    assertEquals(List.of(), response.match().customers());
+    verify(pendingReplyTaskService, never()).createWaitingTask(any());
+  }
+
+  @Test
+  void recognizeRecordsGeneratedReplyAndPendingEntryForAResolvedCustomer() {
+    when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
+        "Alice",
+        "18800001111",
+        List.of(new com.privateflow.modules.image.Message("client", "hello")),
+        "12:00"));
+    when(customerMatchService.match(any())).thenReturn(new MatchResult(
+        MatchType.EXACT,
+        List.of(new CustomerSummary(
+            "18800001111", "18800001111", "Alice", "WECHAT", "TUAN_GOU", "keeper-1", null, null, Confidence.HIGH)),
+        1));
+
+    service.recognize(new ChatRecognizeRequest(
+        Base64.getEncoder().encodeToString("image".getBytes()),
+        null,
+        null,
+        "TUAN_GOU",
+        "customer_sheet",
+        List.of(),
+        "reply-100-1"));
+
+    verify(supervisionEventService).recordPendingEntered(accessibleCustomer, null);
+    verify(supervisionEventService).recordGeneratedReply(
+        accessibleCustomer,
+        "CHAT_RECOGNIZE",
+        null,
+        "reply-100-1",
+        ChatReplySource.skill(),
+        new SkillResponse(List.of(new Suggestion("skill guidance", "NEXT_STEP", "fixed workflow")), null, null, null));
   }
 
   @Test
@@ -207,6 +403,9 @@ class ChatOrchestrationServiceTest {
 
   @Test
   void recognizeMultipleCreatesWaitingTaskWithoutCallingSkillOrReplyLlm() {
+    Customer secondAccessibleCustomer = customer("18800002222");
+    when(customerQueryService.getByPhone("18800002222")).thenReturn(secondAccessibleCustomer);
+    when(customerAccessService.canAccess(secondAccessibleCustomer)).thenReturn(true);
     when(imageRecognitionService.recognize(any(), any())).thenReturn(new RecognitionResult(
         "同名客户",
         null,
@@ -314,6 +513,24 @@ class ChatOrchestrationServiceTest {
   }
 
   @Test
+  void retryPendingReplyTaskRecordsTheNewReplyWithoutRecordingAnotherCustomerSelection() {
+    PendingReplyTask task = claimedTask();
+    when(pendingReplyTaskService.claimRetry("task-1", "keeper-1")).thenReturn(task);
+
+    service.retryPendingReplyTask("task-1");
+
+    verify(supervisionEventService, never()).recordPendingEntered(any(), any());
+    verify(supervisionEventService, never()).recordCustomerSelected(any(), any(), any());
+    verify(supervisionEventService).recordGeneratedReply(
+        accessibleCustomer,
+        "CHAT_RECOGNIZE",
+        "task-1",
+        "reply-100-1",
+        ChatReplySource.skill(),
+        new SkillResponse(List.of(new Suggestion("skill guidance", "NEXT_STEP", "fixed workflow")), null, null, null));
+  }
+
+  @Test
   void retryPendingReplyTaskReleasesSelectionWhenTheSelectedCustomerWasDeleted() {
     PendingReplyTask task = claimedTask();
     when(pendingReplyTaskService.claimRetry("task-1", "keeper-1")).thenReturn(task);
@@ -395,6 +612,15 @@ class ChatOrchestrationServiceTest {
     assertEquals("我想了解项目", requestCaptor.getValue().clientMessage());
     assertEquals("我想了解项目", requestCaptor.getValue().chatContext().get(0).get("text"));
     verify(pendingReplyTaskService).markReady(eq(task), eq(response));
+    verify(supervisionEventService).recordPendingEntered(secondCandidate, "task-1");
+    verify(supervisionEventService).recordCustomerSelected(secondCandidate, "task-1", "reply-100-1");
+    verify(supervisionEventService).recordGeneratedReply(
+        secondCandidate,
+        "CHAT_RECOGNIZE",
+        "task-1",
+        "reply-100-1",
+        ChatReplySource.skill(),
+        response.skill());
   }
 
   @Test
@@ -902,6 +1128,7 @@ class ChatOrchestrationServiceTest {
     verify(llmFollowupSuggestionService, never()).trySuggest(any());
     verify(llmSummaryService, never()).trySummarize(any());
     verify(auditLogger).log("SEND_CONFIRM", "keeper-1", "CUSTOMER", "18800001111", "message sent");
+    verify(supervisionEventService, never()).recordAiUsage(any());
   }
 
   @Test

@@ -224,9 +224,38 @@ async function runRendererSmoke(window: BrowserWindow) {
           const actionButtons = [...document.querySelectorAll('.sidebar-quick-actions button')];
           const actionLabels = [...document.querySelectorAll('.sidebar-quick-actions .action-label')]
             .map((item) => item.textContent.trim());
-          if (actionLabels.join('|') !== '识别|模板|批量') {
+          if (actionLabels.join('|') !== '识别|模板|快捷|批量') {
             throw new Error('sidebar quick actions mismatch: ' + actionLabels.join('|'));
           }
+          const replyTaskSidebar = await waitForSelector('.reply-task-sidebar');
+          if (!(document.querySelector('.sidebar-quick-actions').compareDocumentPosition(replyTaskSidebar)
+            & Node.DOCUMENT_POSITION_FOLLOWING)) {
+            throw new Error('reply task sidebar is not below quick actions');
+          }
+          const adminShortcut = findButton('后台');
+          if (!adminShortcut || !(replyTaskSidebar.compareDocumentPosition(adminShortcut)
+            & Node.DOCUMENT_POSITION_FOLLOWING)) {
+            throw new Error('reply task sidebar is not before the admin shortcut');
+          }
+          const replyTaskMore = replyTaskSidebar.querySelector('[data-testid="open-reply-task-drawer"]');
+          if (!replyTaskMore) {
+            throw new Error('reply task full-list entry is missing');
+          }
+          replyTaskMore.click();
+          const replyTaskDrawer = await waitForSelector('.reply-task-drawer-backdrop');
+          assertVisibleButtonContentFits('.reply-task-drawer', '420px reply task drawer');
+          window.resizeTo(360, 560);
+          await delay(250);
+          assertVisibleButtonContentFits('.reply-task-drawer', '360px reply task drawer');
+          window.resizeTo(420, 760);
+          await delay(250);
+          const closeReplyTaskDrawer = [...replyTaskDrawer.querySelectorAll('button')]
+            .find((button) => (button.getAttribute('aria-label') || '').includes('关闭回复任务列表'));
+          closeReplyTaskDrawer?.click();
+          await waitForCondition(
+            () => !document.querySelector('.reply-task-drawer-backdrop'),
+            'reply task drawer closed'
+          );
           if (document.documentElement.scrollWidth > window.innerWidth + 1) {
             throw new Error('desktop has horizontal overflow');
           }
@@ -236,7 +265,7 @@ async function runRendererSmoke(window: BrowserWindow) {
           assertVisibleButtonContentFits('.desktop-shell', '360px desktop');
           window.resizeTo(420, 760);
           await delay(250);
-          actionButtons[2].click();
+          actionButtons[3].click();
           const drawer = await waitForSelector('.task-queue-backdrop');
           if (getComputedStyle(drawer).display === 'none') {
             throw new Error('task queue drawer did not open');
@@ -352,6 +381,16 @@ async function runRendererSmoke(window: BrowserWindow) {
           }
           assertReplyCurrentTaskLayout();
           actionButtons[1].click();
+          const templateLibrary = await waitForSelector('.template-library-overlay');
+          if (templateLibrary.querySelectorAll('.template-library-tabs button').length !== 2) {
+            throw new Error('template library tabs are missing');
+          }
+          assertVisibleButtonContentFits('.template-library-shell', '420px template library');
+          const closeTemplateLibrary = [...templateLibrary.querySelectorAll('button')]
+            .find((button) => (button.getAttribute('aria-label') || '').includes('关闭模板库'));
+          closeTemplateLibrary?.click();
+          await waitForCondition(() => !document.querySelector('.template-library-overlay'), 'template library closed');
+          actionButtons[2].click();
           const quickInput = await waitForSelector('.quick-search-overlay .quick-search-input');
           const quickDrawer = await waitForSelector('.quick-search-box');
           if (quickDrawer.getAttribute('aria-label') !== '模板') {

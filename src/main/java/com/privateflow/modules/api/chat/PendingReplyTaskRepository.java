@@ -16,6 +16,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,10 +27,20 @@ public class PendingReplyTaskRepository {
   };
   private final JdbcTemplate jdbcTemplate;
   private final ObjectMapper objectMapper;
+  private final ReplyTaskClock taskClock;
 
   public PendingReplyTaskRepository(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    this(jdbcTemplate, objectMapper, new ReplyTaskClock());
+  }
+
+  @Autowired
+  public PendingReplyTaskRepository(
+      JdbcTemplate jdbcTemplate,
+      ObjectMapper objectMapper,
+      ReplyTaskClock taskClock) {
     this.jdbcTemplate = jdbcTemplate;
     this.objectMapper = objectMapper;
+    this.taskClock = taskClock;
   }
 
   @Transactional
@@ -39,7 +50,7 @@ public class PendingReplyTaskRepository {
 
   @Transactional
   public PendingReplyTask create(PendingReplyTaskDraft draft, int ttlHours) {
-    LocalDateTime now = LocalDateTime.now();
+    LocalDateTime now = taskClock.now();
     String taskId = UUID.randomUUID().toString();
     jdbcTemplate.update("""
         INSERT INTO pending_reply_tasks (
@@ -85,13 +96,14 @@ public class PendingReplyTaskRepository {
   }
 
   public boolean claim(String taskId, String username, String phone) {
+    Timestamp now = Timestamp.valueOf(taskClock.now());
     return jdbcTemplate.update("""
         UPDATE pending_reply_tasks
-        SET status = ?, selected_phone = ?, generation_started_at = CURRENT_TIMESTAMP,
-            error_code = NULL, updated_at = CURRENT_TIMESTAMP, version = version + 1
+        SET status = ?, selected_phone = ?, generation_started_at = ?,
+            error_code = NULL, updated_at = ?, version = version + 1
         WHERE task_id = ? AND username = ?
           AND status = ?
-          AND expires_at > CURRENT_TIMESTAMP
+          AND expires_at > ?
           AND EXISTS (
             SELECT 1
             FROM pending_reply_task_candidates candidate
@@ -101,20 +113,24 @@ public class PendingReplyTaskRepository {
         """,
         PendingReplyTaskStatus.GENERATING.name(),
         phone,
+        now,
+        now,
         taskId,
         username,
         PendingReplyTaskStatus.WAITING_CUSTOMER.name(),
+        now,
         phone) == 1;
   }
 
   public boolean claimRetry(String taskId, String username, String selectedPhone) {
+    Timestamp now = Timestamp.valueOf(taskClock.now());
     return jdbcTemplate.update("""
         UPDATE pending_reply_tasks
-        SET status = ?, generation_started_at = CURRENT_TIMESTAMP,
-            error_code = NULL, updated_at = CURRENT_TIMESTAMP, version = version + 1
+        SET status = ?, generation_started_at = ?,
+            error_code = NULL, updated_at = ?, version = version + 1
         WHERE task_id = ? AND username = ? AND status = ?
           AND selected_phone = ?
-          AND expires_at > CURRENT_TIMESTAMP
+          AND expires_at > ?
           AND EXISTS (
             SELECT 1
             FROM pending_reply_task_candidates candidate
@@ -123,10 +139,13 @@ public class PendingReplyTaskRepository {
           )
         """,
         PendingReplyTaskStatus.GENERATING.name(),
+        now,
+        now,
         taskId,
         username,
         PendingReplyTaskStatus.FAILED.name(),
         selectedPhone,
+        now,
         selectedPhone) == 1;
   }
 
@@ -156,15 +175,18 @@ public class PendingReplyTaskRepository {
     if (!hasMatchingSelectedPhone(target.selectedPhone(), response)) {
       throw new IllegalArgumentException("invalid pending reply task response");
     }
+    Timestamp now = Timestamp.valueOf(taskClock.now());
     return jdbcTemplate.update("""
         UPDATE pending_reply_tasks
-        SET status = ?, result_json = ?, error_code = NULL, finished_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP, version = version + 1
+        SET status = ?, result_json = ?, error_code = NULL, finished_at = ?,
+            updated_at = ?, version = version + 1
         WHERE task_id = ? AND username = ? AND status = ?
           AND selected_phone = ? AND version = ?
         """,
         PendingReplyTaskStatus.READY.name(),
         writeResult(target.replySessionId(), response),
+        now,
+        now,
         taskId,
         username,
         PendingReplyTaskStatus.GENERATING.name(),
@@ -194,40 +216,48 @@ public class PendingReplyTaskRepository {
   }
 
   public boolean releaseSelection(String taskId, String username) {
+    Timestamp now = Timestamp.valueOf(taskClock.now());
     return jdbcTemplate.update("""
         UPDATE pending_reply_tasks
         SET status = ?, selected_phone = NULL, generation_started_at = NULL, finished_at = NULL,
-            error_code = NULL, updated_at = CURRENT_TIMESTAMP, version = version + 1
+            error_code = NULL, updated_at = ?, version = version + 1
         WHERE task_id = ? AND username = ? AND status = ?
         """,
         PendingReplyTaskStatus.WAITING_CUSTOMER.name(),
+        now,
         taskId,
         username,
         PendingReplyTaskStatus.GENERATING.name()) == 1;
   }
 
   public boolean markFailed(String taskId, String username, String publicErrorCode) {
+    Timestamp now = Timestamp.valueOf(taskClock.now());
     return jdbcTemplate.update("""
         UPDATE pending_reply_tasks
-        SET status = ?, error_code = ?, finished_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP, version = version + 1
+        SET status = ?, error_code = ?, finished_at = ?,
+            updated_at = ?, version = version + 1
         WHERE task_id = ? AND username = ? AND status = ?
         """,
         PendingReplyTaskStatus.FAILED.name(),
         publicErrorCode,
+        now,
+        now,
         taskId,
         username,
         PendingReplyTaskStatus.GENERATING.name()) == 1;
   }
 
   public boolean cancel(String taskId, String username) {
+    Timestamp now = Timestamp.valueOf(taskClock.now());
     return jdbcTemplate.update("""
         UPDATE pending_reply_tasks
-        SET status = ?, error_code = NULL, finished_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP, version = version + 1
+        SET status = ?, error_code = NULL, finished_at = ?,
+            updated_at = ?, version = version + 1
         WHERE task_id = ? AND username = ? AND status IN (?, ?)
         """,
         PendingReplyTaskStatus.CANCELLED.name(),
+        now,
+        now,
         taskId,
         username,
         PendingReplyTaskStatus.WAITING_CUSTOMER.name(),
@@ -250,11 +280,13 @@ public class PendingReplyTaskRepository {
     Timestamp timestamp = Timestamp.valueOf(now);
     int recovered = jdbcTemplate.update("""
         UPDATE pending_reply_tasks
-        SET status = ?, error_code = NULL, finished_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP, version = version + 1
+        SET status = ?, error_code = NULL, finished_at = ?,
+            updated_at = ?, version = version + 1
         WHERE status IN (?, ?) AND expires_at <= ?
         """,
         PendingReplyTaskStatus.EXPIRED.name(),
+        timestamp,
+        timestamp,
         PendingReplyTaskStatus.WAITING_CUSTOMER.name(),
         PendingReplyTaskStatus.FAILED.name(),
         timestamp);
@@ -268,19 +300,38 @@ public class PendingReplyTaskRepository {
             + ")";
     String stalledSql = """
         UPDATE pending_reply_tasks
-        SET status = ?, error_code = ?, finished_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP, version = version + 1
+        SET status = ?, error_code = ?, finished_at = ?,
+            updated_at = ?, version = version + 1
         WHERE status = ? AND generation_started_at IS NOT NULL
           AND generation_started_at < ?
         """ + activeExclusion;
     List<Object> stalledParameters = new ArrayList<>();
     stalledParameters.add(PendingReplyTaskStatus.FAILED.name());
     stalledParameters.add(ApiErrorCodes.INTERNAL_ERROR);
+    stalledParameters.add(timestamp);
+    stalledParameters.add(timestamp);
     stalledParameters.add(PendingReplyTaskStatus.GENERATING.name());
     stalledParameters.add(Timestamp.valueOf(now.minusSeconds(generatingTimeoutSeconds)));
     stalledParameters.addAll(activeIds);
     recovered += jdbcTemplate.update(stalledSql, stalledParameters.toArray());
     return recovered;
+  }
+
+  @Transactional
+  public int deletePhysicallyExpiredBefore(LocalDateTime cutoff) {
+    if (cutoff == null) {
+      throw new IllegalArgumentException("pending reply task cleanup cutoff is required");
+    }
+    return jdbcTemplate.update("""
+        DELETE FROM pending_reply_tasks
+        WHERE finished_at < ?
+          AND status IN (?, ?, ?, ?)
+        """,
+        Timestamp.valueOf(cutoff),
+        PendingReplyTaskStatus.EXPIRED.name(),
+        PendingReplyTaskStatus.CANCELLED.name(),
+        PendingReplyTaskStatus.READY.name(),
+        PendingReplyTaskStatus.FAILED.name());
   }
 
   public List<PendingReplyTask> findActiveOwned(String username, LocalDateTime now) {

@@ -5,6 +5,7 @@ import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.auth.AuthContext;
+import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.service.CustomerAccessService;
@@ -23,6 +24,7 @@ import com.privateflow.modules.match.MatchResult;
 import com.privateflow.modules.match.MatchType;
 import com.privateflow.modules.profile.service.FollowupConfirmationService;
 import com.privateflow.modules.match.CustomerMatchService;
+import com.privateflow.modules.match.CustomerSummary;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillGatewayService;
 import com.privateflow.modules.skill.SkillRequest;
@@ -30,10 +32,12 @@ import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.ReplyTagSnapshot;
 import com.privateflow.modules.skill.Suggestion;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
+import com.privateflow.modules.supervision.SupervisionEventService;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -60,6 +64,7 @@ public class ChatOrchestrationService {
   private final LlmSummaryService llmSummaryService;
   private final FollowupConfirmationService followupConfirmationService;
   private final PendingReplyTaskService pendingReplyTaskService;
+  private final SupervisionEventService supervisionEventService;
 
   public ChatOrchestrationService(
       ImageRecognitionService imageRecognitionService,
@@ -76,7 +81,8 @@ public class ChatOrchestrationService {
       LlmFollowupSuggestionService llmFollowupSuggestionService,
       LlmSummaryService llmSummaryService,
       FollowupConfirmationService followupConfirmationService,
-      PendingReplyTaskService pendingReplyTaskService) {
+      PendingReplyTaskService pendingReplyTaskService,
+      SupervisionEventService supervisionEventService) {
     this.imageRecognitionService = imageRecognitionService;
     this.customerMatchService = customerMatchService;
     this.skillGatewayService = skillGatewayService;
@@ -92,26 +98,106 @@ public class ChatOrchestrationService {
     this.llmSummaryService = llmSummaryService;
     this.followupConfirmationService = followupConfirmationService;
     this.pendingReplyTaskService = pendingReplyTaskService;
+    this.supervisionEventService = supervisionEventService;
   }
 
   public ChatResponse recognize(ChatRecognizeRequest request) {
-    if (request == null || (blank(request.imageBase64()) && blank(request.textMessage()))) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "please provide screenshot or chat text");
+    validateRecognitionRequest(request, request == null ? null : request.imageBase64());
+    RecognitionResult recognized;
+    try {
+      recognized = recognizeImage(request.imageBase64());
+    } catch (ApiException ex) {
+      recordSupervision(() -> supervisionEventService.recordRecognitionFailed(
+          request.leadType(),
+          request.sourceTable(),
+          request.replySessionId(),
+          ex.getErrorCode()), "recognition failure");
+      throw ex;
     }
-    RecognitionResult recognized = recognizeImage(request.imageBase64());
+    return recognizeResolvedConversation(request, recognized);
+  }
+
+  /**
+   * Executes a queued screenshot job under the authenticated employee captured at submission time.
+   * The image remains an in-memory byte array after the temporary store has read it; it is never
+   * serialized into a chat task, event, or audit record.
+   */
+  ChatResponse recognizeForJob(ChatRecognizeRequest request, byte[] jpegBytes, AuthUser employee) {
+    return recognizeForJob(request, jpegBytes, employee, () -> true);
+  }
+
+  ChatResponse recognizeForJob(
+      ChatRecognizeRequest request,
+      byte[] jpegBytes,
+      AuthUser employee,
+      BooleanSupplier stillActive) {
+    validateRecognitionRequest(request, jpegBytes);
+    if (employee == null || blank(employee.username())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "recognition employee is required");
+    }
+    AuthUser previous = AuthContext.current();
+    try {
+      AuthContext.set(employee);
+      RecognitionResult recognized = recognizeImage(jpegBytes);
+      if (stillActive == null || !stillActive.getAsBoolean()) {
+        return null;
+      }
+      return recognizeResolvedConversation(request, recognized, stillActive);
+    } catch (ApiException ex) {
+      if (!stillActive(stillActive)) {
+        return null;
+      }
+      recordSupervision(() -> supervisionEventService.recordRecognitionFailed(
+          request.leadType(),
+          request.sourceTable(),
+          request.replySessionId(),
+          ex.getErrorCode()), "recognition failure");
+      throw ex;
+    } finally {
+      if (previous == null) {
+        AuthContext.clear();
+      } else {
+        AuthContext.set(previous);
+      }
+    }
+  }
+
+  private ChatResponse recognizeResolvedConversation(
+      ChatRecognizeRequest request, RecognitionResult recognized) {
+    return recognizeResolvedConversation(request, recognized, () -> true);
+  }
+
+  private ChatResponse recognizeResolvedConversation(
+      ChatRecognizeRequest request, RecognitionResult recognized, BooleanSupplier stillActive) {
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     String nickname = firstNonBlank(request.customerIdentifier(), recognized == null ? null : recognized.nickname());
     String phone = recognized == null ? null : recognized.phone();
     MatchResult match = match(nickname, phone, request.leadType(), request.sourceTable());
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     String platformIdentifier = recognized == null ? null : recognized.customerIdentifier();
     if ((isNoMatch(match) || match.matchType() == MatchType.MULTIPLE)
         && blank(request.customerIdentifier())
         && !blank(platformIdentifier)
         && !platformIdentifier.equals(nickname)) {
       match = match(platformIdentifier, phone, request.leadType(), request.sourceTable());
+      if (!stillActive(stillActive)) {
+        return null;
+      }
+    }
+    match = visibleMatch(match);
+    if (!stillActive(stillActive)) {
+      return null;
     }
     String clientMessage = buildClientMessage(request, recognized);
     List<Map<String, String>> chatContext = messages(request, recognized);
     if (match.matchType() == MatchType.MULTIPLE) {
+      if (!stillActive(stillActive)) {
+        return null;
+      }
       PendingReplyTaskView pendingTask = pendingReplyTaskService.createWaitingTask(new PendingReplyTaskDraft(
           firstNonBlank(request.replySessionId(), "reply-" + UUID.randomUUID()),
           AuthContext.username(),
@@ -125,10 +211,43 @@ public class ChatOrchestrationService {
           match.customers()));
       return new ChatResponse(null, nickname, false, match, null, null, null, pendingTask);
     }
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     Customer customer = firstCustomer(match);
+    if (customer != null && !customerAccessService.canAccess(customer)) {
+      throw new ApiException(ApiErrorCodes.FORBIDDEN, "no access to this customer");
+    }
+    if (!stillActive(stillActive)) {
+      return null;
+    }
+    if (customer != null) {
+      recordSupervision(
+          () -> supervisionEventService.recordPendingEntered(customer, null),
+          "pending entered");
+    }
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     GeneratedReplies generated = generateSkill(Scene.CHAT_RECOGNIZE, request.leadType(), customer, phone, clientMessage, List.of(), chatContext);
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     String responsePhone = customer == null ? phone : customer.getPhone();
     saveContext(responsePhone, generated, 0);
+    if (!stillActive(stillActive)) {
+      return null;
+    }
+    recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+        customer,
+        Scene.CHAT_RECOGNIZE.name(),
+        null,
+        request.replySessionId(),
+        generated.source(),
+        generated.skill()), "reply generated");
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", responsePhone, "chat recognize");
     return new ChatResponse(responsePhone, nickname, match.matchType() == MatchType.NONE, match, generated.skill(), null, generated.source());
   }
@@ -141,7 +260,7 @@ public class ChatOrchestrationService {
         taskId,
         AuthContext.username(),
         request.phone());
-    return generatePendingReplyTask(task);
+    return generatePendingReplyTask(task, true);
   }
 
   public List<PendingReplyTaskView> listPendingReplyTasks() {
@@ -154,14 +273,14 @@ public class ChatOrchestrationService {
 
   public ChatResponse retryPendingReplyTask(String taskId) {
     PendingReplyTask task = pendingReplyTaskService.claimRetry(taskId, AuthContext.username());
-    return generatePendingReplyTask(task);
+    return generatePendingReplyTask(task, false);
   }
 
   public PendingReplyTaskView cancelPendingReplyTask(String taskId) {
     return pendingReplyTaskService.cancel(taskId, AuthContext.username());
   }
 
-  private ChatResponse generatePendingReplyTask(PendingReplyTask task) {
+  private ChatResponse generatePendingReplyTask(PendingReplyTask task, boolean customerSelectedNow) {
     pendingReplyTaskService.beginGeneration(task.taskId());
     try {
       String selectedPhone = task.selectedPhone();
@@ -187,6 +306,15 @@ public class ChatOrchestrationService {
         pendingReplyTaskService.releaseSelection(task);
         throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权操作该客户");
       }
+      if (customerSelectedNow) {
+        recordSupervision(
+            () -> supervisionEventService.recordPendingEntered(customer, task.taskId()),
+            "pending entered");
+        recordSupervision(() -> supervisionEventService.recordCustomerSelected(
+            customer,
+            task.taskId(),
+            task.replySessionId()), "customer selected");
+      }
       try {
         GeneratedReplies generated = generateSkill(
             Scene.CHAT_RECOGNIZE,
@@ -206,6 +334,13 @@ public class ChatOrchestrationService {
             null,
             generated.source());
         pendingReplyTaskService.markReady(task, response);
+        recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+            customer,
+            Scene.CHAT_RECOGNIZE.name(),
+            task.taskId(),
+            task.replySessionId(),
+            generated.source(),
+            generated.skill()), "reply generated");
         auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", customer.getPhone(), "pending reply task confirmed");
         return response;
       } catch (RuntimeException ex) {
@@ -229,6 +364,13 @@ public class ChatOrchestrationService {
     String clientMessage = blank(request.clientMessage()) ? customer.getFollowupNotes() : request.clientMessage();
     GeneratedReplies generated = generateSkill(scene, customer.getLeadType(), customer, customer.getPhone(), clientMessage, List.of(), List.of());
     saveContext(customer.getPhone(), generated, 0);
+    recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+        customer,
+        scene.name(),
+        null,
+        null,
+        generated.source(),
+        generated.skill()), "reply generated");
     return new ChatResponse(customer.getPhone(), customer.getNickname(), false, null, generated.skill(), null, generated.source());
   }
 
@@ -262,6 +404,13 @@ public class ChatOrchestrationService {
     GeneratedReplies generated = generateReplies(next);
     int count = context.regenerateCount() + 1;
     contextStore.save(AuthContext.username(), request.phone(), new RequestContext(generated.request(), generated.skill(), count));
+    recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+        latest,
+        Scene.REGENERATE.name(),
+        null,
+        null,
+        generated.source(),
+        generated.skill()), "reply generated");
     String warning = regenerateWarning(count);
     return new ChatResponse(request.phone(), null, false, null, generated.skill(), warning, generated.source());
   }
@@ -359,13 +508,31 @@ public class ChatOrchestrationService {
       return null;
     }
     try {
-      return imageRecognitionService.recognize(Base64.getDecoder().decode(imageBase64), Source.BUTTON_CLICK);
+      return recognizeImage(Base64.getDecoder().decode(imageBase64));
+    } catch (ApiException ex) {
+      throw ex;
     } catch (IllegalArgumentException ex) {
       throw new ApiException("30-10002", "图片格式不支持，请重新截图或使用 PNG/JPG");
     } catch (ImageRecognitionException ex) {
       throw new ApiException(ex.getErrorCode(), ex.getMessage());
     } catch (RuntimeException ex) {
       throw new ApiException("30-10001", "图片识别失败，请使用文字通道后重新生成回复");
+    }
+  }
+
+  private RecognitionResult recognizeImage(byte[] imageBytes) {
+    try {
+      return imageRecognitionService.recognize(imageBytes, Source.BUTTON_CLICK);
+    } catch (ImageRecognitionException ex) {
+      throw new ApiException(ex.getErrorCode(), ex.getMessage());
+    } catch (RuntimeException ex) {
+      throw new ApiException("30-10001", "图片识别失败，请使用文字通道后重新生成回复");
+    }
+  }
+
+  private void validateRecognitionRequest(ChatRecognizeRequest request, Object imagePayload) {
+    if (request == null || (imagePayload == null && blank(request.textMessage()))) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "please provide screenshot or chat text");
     }
   }
 
@@ -407,6 +574,31 @@ public class ChatOrchestrationService {
 
   private boolean isNoMatch(MatchResult result) {
     return result == null || result.matchType() == MatchType.NONE;
+  }
+
+  private MatchResult visibleMatch(MatchResult match) {
+    if (match == null) {
+      return MatchResult.none();
+    }
+    if (match.matchType() != MatchType.MULTIPLE || match.customers() == null) {
+      return match;
+    }
+    List<CustomerSummary> accessibleCandidates = match.customers().stream()
+        .filter(java.util.Objects::nonNull)
+        .filter(this::canAccessCandidate)
+        .toList();
+    if (accessibleCandidates.isEmpty()) {
+      return MatchResult.none();
+    }
+    if (accessibleCandidates.size() == 1) {
+      return new MatchResult(MatchType.FUZZY, accessibleCandidates, 1);
+    }
+    return new MatchResult(MatchType.MULTIPLE, accessibleCandidates, accessibleCandidates.size());
+  }
+
+  private boolean canAccessCandidate(CustomerSummary candidate) {
+    Customer customer = customerQueryService.getByPhone(candidate.phone());
+    return customer != null && customerAccessService.canAccess(customer);
   }
 
   private ChatReplySource replySourceForSkill(SkillResponse skill) {
@@ -558,6 +750,10 @@ public class ChatOrchestrationService {
     return value == null || value.isBlank();
   }
 
+  private boolean stillActive(BooleanSupplier stillActive) {
+    return stillActive != null && stillActive.getAsBoolean();
+  }
+
   private String pendingTaskErrorCode(RuntimeException ex) {
     if (ex instanceof ApiException apiException && !blank(apiException.getErrorCode())) {
       return apiException.getErrorCode();
@@ -571,6 +767,17 @@ public class ChatOrchestrationService {
     } catch (RuntimeException markFailedFailure) {
       originalFailure.addSuppressed(markFailedFailure);
       log.warn("Could not mark pending reply task {} as failed", task.taskId(), markFailedFailure);
+    }
+  }
+
+  private void recordSupervision(Runnable record, String event) {
+    if (supervisionEventService == null) {
+      return;
+    }
+    try {
+      record.run();
+    } catch (RuntimeException ex) {
+      log.warn("Supervision event recording skipped, event={}", event);
     }
   }
 

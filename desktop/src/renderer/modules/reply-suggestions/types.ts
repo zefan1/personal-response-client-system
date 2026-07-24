@@ -124,10 +124,29 @@ export type ReplySelectedPayload = {
   reason: string;
   phone: string;
   displayPhone?: string;
+  taskId?: string;
+  replySessionId?: string;
+  replySource?: 'LLM' | 'SKILL' | 'FALLBACK';
   isFallback: boolean;
 };
 
-export type ReplySessionStatus = 'LOADING' | 'READY' | 'FAILED' | 'FALLBACK' | 'COPIED' | 'MULTIPLE';
+export type RecognitionJobStatus =
+  | 'QUEUED'
+  | 'RECOGNIZING'
+  | 'READY'
+  | 'WAITING_CUSTOMER'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'EXPIRED';
+
+export type RecognitionJobUpdate = {
+  sessionId: string;
+  jobId: string;
+  status: RecognitionJobStatus;
+  errorCode?: string | null;
+};
+
+export type ReplySessionStatus = 'LOADING' | 'READY' | 'FAILED' | 'FALLBACK' | 'COPIED' | 'MULTIPLE' | 'CANCELLED';
 export type RecognizeProgressStage = 'CAPTURED' | 'UPLOADING' | 'WAITING_MODEL' | 'GENERATING' | 'DONE' | 'FAILED';
 
 export type ReplySession = {
@@ -135,6 +154,8 @@ export type ReplySession = {
   status: ReplySessionStatus;
   pendingTaskId: string;
   pendingTaskStatus: PendingReplyTaskStatus | null;
+  recognitionJobId: string;
+  recognitionJobStatus: RecognitionJobStatus | null;
   source?: string;
   createdAt: number;
   updatedAt: number;
@@ -166,4 +187,8 @@ export type ReplySession = {
   abnormalAlert: AbnormalAlertPayload | null;
   activeHelpId: string | number | '';
   toast: string;
+};
+
+export type ArchivedReplySession = ReplySession & {
+  archivedAt: number;
 };

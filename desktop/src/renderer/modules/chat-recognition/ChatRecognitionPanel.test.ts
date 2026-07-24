@@ -78,6 +78,7 @@ describe('ChatRecognitionPanel', () => {
   });
 
   it('captures from the rendered button and emits recognize events after a successful screenshot request', async () => {
+    mocks.postJson.mockResolvedValueOnce({ success: true, data: recognitionJob('job-button', response('EXACT')) });
     const { app, host, eventBus } = await mountPanel();
     const events: Array<{ event: string; payload: unknown }> = [];
     eventBus.on('recognize:start', (payload) => events.push({ event: 'recognize:start', payload }));
@@ -90,12 +91,11 @@ describe('ChatRecognitionPanel', () => {
     expect(mocks.connectWsMessageBus).toHaveBeenCalled();
     expect(mocks.captureScreenshot).toHaveBeenCalled();
     await waitForPostJson();
-    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/recognize', {
+    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/recognition-jobs', {
       imageBase64: 'button-image',
       textMessage: undefined,
       customerIdentifier: undefined,
-      replySessionId: expect.stringMatching(/^reply-/),
-      source: 'BUTTON_CLICK'
+      replySessionId: expect.stringMatching(/^reply-/)
     }, 0);
     expect(events[0]).toMatchObject({ event: 'recognize:start', payload: { source: 'BUTTON_CLICK' } });
     expect(events[1]).toMatchObject({ event: 'recognize:result', payload: { source: 'BUTTON_CLICK', response: response('EXACT') } });
@@ -206,4 +206,8 @@ function response(matchType: 'EXACT' | 'MULTIPLE') {
       suggestions: [{ text: 'hello', direction: 'NEXT_STEP', reason: 'reason' }]
     }
   };
+}
+
+function recognitionJob(jobId: string, reply: ReturnType<typeof response>) {
+  return { jobId, status: 'READY' as const, response: reply };
 }

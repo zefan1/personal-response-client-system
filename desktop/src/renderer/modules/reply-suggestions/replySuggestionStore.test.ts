@@ -1,3 +1,4 @@
+import { nextTick } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AbnormalAlertPayload, ChatResponse, ProfileSuggestion, ReplySuggestion } from './types';
 
@@ -105,14 +106,17 @@ describe('replySuggestionStore', () => {
     expect(replies.replySuggestionState.abnormalAlert).toMatchObject({ alertId: 'alert-a' });
 
     replies.selectReply(replies.replySuggestionState.suggestions[0]);
-    expect(selected).toEqual([{
+    expect(selected).toEqual([expect.objectContaining({
       text: 'Use this',
       direction: 'NEXT_STEP',
       reason: 'reason',
       phone: '18800001111',
       displayPhone: '****1111',
+      replySource: 'SKILL',
       isFallback: false
-    }]);
+    })]);
+    expect((selected[0] as Record<string, unknown>).replySessionId).toEqual(expect.any(String));
+    expect((selected[0] as Record<string, unknown>).taskId).toBeUndefined();
   });
 
   it('keeps multiple customer reply sessions and lets the user switch back to older replies', async () => {
@@ -153,6 +157,36 @@ describe('replySuggestionStore', () => {
 
     expect(replies.replySuggestionState.currentPhone).toBe('18800002222');
     expect(replies.replySuggestionState.suggestions.map((item) => item.text)).toEqual(['Second customer']);
+  });
+
+  it('tracks a screenshot job on its original reply session through cancellation', async () => {
+    const { replies } = await freshStore();
+    replies.startRecognizeLoading({ sessionId: 'session-a', source: 'BUTTON_CLICK' });
+
+    replies.syncRecognitionJobIntoSession({
+      sessionId: 'session-a',
+      jobId: 'job-1',
+      status: 'QUEUED'
+    });
+
+    expect(replies.replySuggestionState.sessions[0]).toMatchObject({
+      sessionId: 'session-a',
+      recognitionJobId: 'job-1',
+      recognitionJobStatus: 'QUEUED',
+      status: 'LOADING'
+    });
+
+    replies.syncRecognitionJobIntoSession({
+      sessionId: 'session-a',
+      jobId: 'job-1',
+      status: 'CANCELLED'
+    });
+
+    expect(replies.replySuggestionState.sessions[0]).toMatchObject({
+      recognitionJobStatus: 'CANCELLED',
+      status: 'CANCELLED',
+      currentStageText: '任务已取消'
+    });
   });
 
   it('updates the matching queue task when recognition fails by session id', async () => {
@@ -212,6 +246,118 @@ describe('replySuggestionStore', () => {
 
     expect(replies.replySuggestionState.sessions).toHaveLength(1);
     expect(replies.replySuggestionState.activeSessionId).toBe('session-reusable');
+  });
+
+  it('archives only copied terminal replies without changing the active reply', async () => {
+    const { replies } = await freshStore();
+    replies.showRecognizeResult({
+      sessionId: 'session-a',
+      response: response('18800001111', [suggestion('First reply')])
+    });
+    replies.showRecognizeResult({
+      sessionId: 'session-b',
+      response: response('18800002222', [suggestion('Second reply')])
+    });
+
+    expect(replies.archiveQueuedReplySessions()).toEqual([]);
+    expect(replies.replySuggestionState.sessions).toHaveLength(2);
+
+    replies.activateSession('session-a');
+    replies.selectReply(replies.replySuggestionState.suggestions[0]);
+    replies.activateSession('session-b');
+    const archived = replies.archiveQueuedReplySessions();
+
+    expect(replies.replySuggestionState.activeSessionId).toBe('session-b');
+    expect(replies.replySuggestionState.sessions).toEqual([
+      expect.objectContaining({ sessionId: 'session-b' })
+    ]);
+    expect(archived).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-a',
+        currentNickname: 'Alice',
+        currentPhone: '18800001111',
+        suggestions: [suggestion('First reply')]
+      })
+    ]);
+    expect(replies.replySuggestionState.archivedSessions).toHaveLength(1);
+
+    expect(replies.restoreArchivedReplySession('session-a')).toBe(true);
+    expect(replies.replySuggestionState.activeSessionId).toBe('session-a');
+    expect(replies.replySuggestionState.suggestions).toEqual([suggestion('First reply')]);
+    expect(replies.replySuggestionState.archivedSessions).toEqual([]);
+  });
+
+  it('clears every local reply task and returns in-flight recognition jobs for cancellation', async () => {
+    const { replies } = await freshStore();
+    replies.hydrateReplySuggestionStore();
+    replies.showRecognizeResult({
+      sessionId: 'session-archived',
+      response: response('18800001111', [suggestion('Archived reply')])
+    });
+    replies.selectReply(replies.replySuggestionState.suggestions[0]);
+    replies.showRecognizeResult({
+      sessionId: 'session-ready',
+      response: response('18800002222', [suggestion('Ready reply')])
+    });
+    replies.archiveQueuedReplySessions();
+    replies.startRecognizeLoading({ sessionId: 'session-running', source: 'BUTTON_CLICK' });
+    replies.syncRecognitionJobIntoSession({
+      sessionId: 'session-running',
+      jobId: 'job-running',
+      status: 'RECOGNIZING'
+    });
+
+    expect(replies.clearReplyTaskQueue()).toEqual([
+      { jobId: 'job-running', sessionId: 'session-running' }
+    ]);
+    await nextTick();
+
+    expect(replies.replySuggestionState.sessions).toEqual([]);
+    expect(replies.replySuggestionState.archivedSessions).toEqual([]);
+    expect(replies.replySuggestionState.activeSessionId).toBe('');
+    expect(JSON.parse(localStorage.getItem('reply-suggestion-sessions-v1:anonymous') ?? '{}')).toEqual({
+      sessions: [],
+      archivedSessions: [],
+      activeSessionId: ''
+    });
+
+    replies.showRecognizeResult({
+      sessionId: 'session-ready',
+      response: response('18800002222', [suggestion('Delayed reply')])
+    });
+    expect(replies.replySuggestionState.sessions).toEqual([]);
+  });
+
+  it('persists archived replies across a store cleanup and restores the original reply after hydration', async () => {
+    const { replies } = await freshStore();
+    replies.hydrateReplySuggestionStore();
+    replies.showRecognizeResult({
+      sessionId: 'session-a',
+      response: response('18800001111', [suggestion('First reply')])
+    });
+    replies.showRecognizeResult({
+      sessionId: 'session-b',
+      response: response('18800002222', [suggestion('Second reply')])
+    });
+    replies.activateSession('session-a');
+    replies.selectReply(replies.replySuggestionState.suggestions[0]);
+    replies.activateSession('session-b');
+    replies.archiveQueuedReplySessions();
+    replies.cleanupReplySuggestionStore();
+
+    vi.resetModules();
+    const restored = await import('./replySuggestionStore');
+    restored.hydrateReplySuggestionStore();
+
+    expect(restored.replySuggestionState.archivedSessions).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-a',
+        currentPhone: '18800001111',
+        suggestions: [suggestion('First reply')]
+      })
+    ]);
+    expect(restored.restoreArchivedReplySession('session-a')).toBe(true);
+    expect(restored.replySuggestionState.suggestions).toEqual([suggestion('First reply')]);
   });
 
   it('persists account A before clearing memory and never writes the cleanup snapshot under account B', async () => {
@@ -335,6 +481,25 @@ describe('replySuggestionStore', () => {
     });
     expect(replies.replySuggestionState.suggestions.map((item) => item.text)).toEqual(['Saved server reply']);
     expect(postJsonMock).not.toHaveBeenCalled();
+  });
+
+  it('carries pending task, session, and source metadata when a saved reply is copied', async () => {
+    const { replies, eventBus } = await freshStore();
+    const selected: unknown[] = [];
+    eventBus.on('reply:selected', (payload) => selected.push(payload));
+    replies.syncPendingReplyTaskIntoSession(pendingTask('READY', {
+      response: response('18800001111', [suggestion('Saved server reply')]),
+      selectedPhone: '18800001111'
+    }));
+
+    replies.selectReply(replies.replySuggestionState.suggestions[0]);
+
+    expect(selected).toEqual([expect.objectContaining({
+      phone: '18800001111',
+      taskId: 'task-1',
+      replySessionId: 'reply-session-1',
+      replySource: 'SKILL'
+    })]);
   });
 
   it('shows a saved fallback reply without automatically regenerating it', async () => {

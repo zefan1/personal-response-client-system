@@ -4,6 +4,9 @@ export type ReplySelectedPayload = {
   reason: string;
   phone: string;
   displayPhone?: string;
+  taskId?: string;
+  replySessionId?: string;
+  replySource?: 'LLM' | 'SKILL' | 'FALLBACK';
   isFallback: boolean;
 };
 

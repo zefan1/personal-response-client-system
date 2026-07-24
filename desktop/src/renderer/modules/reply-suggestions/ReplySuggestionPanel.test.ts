@@ -102,14 +102,15 @@ describe('ReplySuggestionPanel', () => {
     copyButton?.click();
     await flushUi();
 
-    expect(selected).toEqual([{
+    expect(selected).toEqual([expect.objectContaining({
       text: 'Ask for budget',
       direction: 'NEXT_STEP',
       reason: 'reason',
       phone: '18800001111',
       displayPhone: '****1111',
+      replySource: 'SKILL',
       isFallback: false
-    }]);
+    })]);
 
     const actionButtons = [...host.querySelectorAll('.reply-actions button')] as HTMLButtonElement[];
     actionButtons.at(-1)?.click();
@@ -234,7 +235,7 @@ describe('ReplySuggestionPanel', () => {
     app.unmount();
   });
 
-  it('keeps multiple customer tasks in the queue and can switch back to a previous reply', async () => {
+  it('keeps the active reply available while task switching moves to the task drawer', async () => {
     const { app, host, eventBus } = await mountPanel();
 
     eventBus.emit('recognize:start', { sessionId: 'session-a', source: 'BUTTON_CLICK' });
@@ -245,20 +246,74 @@ describe('ReplySuggestionPanel', () => {
     eventBus.emit('recognize:result', { sessionId: 'session-b', response: response('18800002222', [suggestion('Second reply')]) });
     await flushUi();
 
-    expect(host.querySelectorAll('.reply-task-row')).toHaveLength(1);
-    expect(host.textContent).toContain('待处理队列');
-    expect(host.textContent).toContain('可复制');
-    expect(host.querySelector('.reply-task-time')?.textContent).toBe('刚刚');
+    expect(host.querySelector('.reply-task-queue')).toBeFalsy();
+    expect(host.querySelector('.reply-current-task')).toBeTruthy();
     expect(host.textContent).toContain('Second reply');
-
-    (host.querySelector('.reply-task-row') as HTMLElement | undefined)?.click();
-    await flushUi();
-
-    expect(host.textContent).toContain('First reply');
     app.unmount();
   });
 
-  it('keeps the full reply workflow while promoting the first suggestion above the task queue', async () => {
+  it('keeps generated reply text out of the current task summary', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    eventBus.emit('recognize:result', { response: response('18800001111', [suggestion('Only show this in reply cards')]) });
+    await flushUi();
+
+    expect(host.querySelector('.reply-primary-card')?.textContent).toContain('Only show this in reply cards');
+    expect(host.querySelector('.reply-current-task')?.textContent).not.toContain('Only show this in reply cards');
+    app.unmount();
+  });
+
+  it('renders queued and cancelled recognition job states for the original task', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    eventBus.emit('recognize:start', { sessionId: 'session-job', source: 'BUTTON_CLICK' });
+    eventBus.emit('recognize:job', { sessionId: 'session-job', jobId: 'job-1', status: 'QUEUED' });
+    await flushUi();
+
+    expect(host.querySelector('.reply-current-task.status-loading')?.textContent).toContain('正在排队识图');
+
+    eventBus.emit('recognize:job', { sessionId: 'session-job', jobId: 'job-1', status: 'CANCELLED' });
+    await flushUi();
+
+    expect(host.querySelector('.reply-current-task.status-cancelled')?.textContent).toContain('任务已取消');
+    app.unmount();
+  });
+
+  it('removes the duplicate header recognition action and keeps the primary copy control fixed', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    eventBus.emit('recognize:result', { response: response('18800001111', [suggestion('Primary reply')]) });
+    await flushUi();
+
+    const headerButtons = [...host.querySelectorAll('.reply-hero button')];
+    expect(headerButtons.some((button) => button.textContent?.trim() === '识别聊天')).toBe(false);
+    expect(host.querySelector('.reply-primary-copy')).toBeTruthy();
+    app.unmount();
+  });
+
+  it('opens the personal template editor from an AI reply without copying or sending it', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    const openings: unknown[] = [];
+    eventBus.on('template-editor:show', (payload) => openings.push(payload));
+    eventBus.emit('recognize:start', { sessionId: 'session-template', source: 'BUTTON_CLICK' });
+    eventBus.emit('recognize:result', {
+      sessionId: 'session-template',
+      response: response('18800001111', [suggestion('AI response to edit')])
+    });
+    await flushUi();
+
+    const saveButton = host.querySelector('[data-testid="save-reply-template"]') as HTMLButtonElement | null;
+    expect(saveButton).toBeTruthy();
+    saveButton?.click();
+    await flushUi();
+
+    expect(openings).toEqual([expect.objectContaining({
+      body: 'AI response to edit',
+      originalAiReply: 'AI response to edit',
+      sourceReplySessionId: 'session-template'
+    })]);
+    expect(mocks.postJson).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it('keeps the full reply workflow without embedding the task list', async () => {
     const { app, host, eventBus } = await mountPanel();
 
     eventBus.emit('recognize:result', {
@@ -274,36 +329,26 @@ describe('ReplySuggestionPanel', () => {
     const primaryIndex = panelChildren.findIndex((item) => item.classList.contains('reply-primary-card'));
     const moreIndex = panelChildren.findIndex((item) => item.classList.contains('reply-alt-list'));
     const currentTaskIndex = panelChildren.findIndex((item) => item.classList.contains('reply-current-task'));
-    const queueIndex = panelChildren.findIndex((item) => item.classList.contains('reply-task-queue'));
     expect(primaryIndex).toBeGreaterThanOrEqual(0);
     expect(moreIndex).toBeGreaterThan(primaryIndex);
     expect(currentTaskIndex).toBeGreaterThan(moreIndex);
-    expect(queueIndex).toBeGreaterThan(currentTaskIndex);
 
     expect(host.querySelector('.reply-primary-card')?.textContent).toContain('Primary reply');
     expect(host.querySelector('.reply-alt-list')?.textContent).toContain('Second reply');
     expect(host.querySelector('.reply-alt-list')?.textContent).toContain('Third reply');
-    expect(host.querySelector('.reply-task-queue')?.textContent).toContain('待处理队列');
-    expect(host.querySelector('.reply-queue-empty')?.textContent ?? '').toContain('暂无其他待处理任务');
+    expect(host.querySelector('.reply-task-queue')).toBeFalsy();
 
     app.unmount();
   });
 
-  it('shows readable updated times for queue tasks', async () => {
+  it('shows a readable updated time for the current task', async () => {
     const { app, host, eventBus } = await mountPanel();
 
     eventBus.emit('recognize:start', { sessionId: 'session-time', source: 'BUTTON_CLICK' });
     eventBus.emit('recognize:result', { sessionId: 'session-time', response: response('18800001111', [suggestion('Timed reply')]) });
     await flushUi();
 
-    expect(host.querySelector('.reply-queue-empty')?.textContent ?? '').toContain('暂无其他待处理任务');
-
-    vi.setSystemTime(new Date('2026-07-03T12:03:00Z'));
-    eventBus.emit('recognize:start', { sessionId: 'session-newer', source: 'BUTTON_CLICK' });
-    eventBus.emit('recognize:result', { sessionId: 'session-newer', response: response('18800002222', [suggestion('Newer reply')]) });
-    await flushUi();
-
-    expect(host.querySelector('.reply-task-time')?.textContent).toBe('3 分钟前');
+    expect(host.querySelector('.reply-current-time')?.textContent).toBe('刚刚');
     app.unmount();
   });
 
@@ -429,8 +474,7 @@ describe('ReplySuggestionPanel', () => {
     eventBus.emit('recognize:start', { sessionId: 'session-close', source: 'BUTTON_CLICK' });
     await flushUi();
 
-    expect(host.querySelectorAll('.reply-task-row')).toHaveLength(0);
-    expect(host.querySelector('.reply-queue-empty')?.textContent ?? '').toContain('暂无其他待处理任务');
+    expect(host.querySelector('.reply-task-queue')).toBeFalsy();
     const closeButton = host.querySelector('.reply-current-task .icon-close-button') as HTMLButtonElement | null;
     expect(closeButton).toBeTruthy();
 
@@ -455,7 +499,6 @@ describe('ReplySuggestionPanel', () => {
     removeButton?.click();
     await flushUi();
 
-    expect(host.querySelectorAll('.reply-task-row')).toHaveLength(0);
     expect(host.querySelector('.reply-current-task')).toBeFalsy();
     expect(host.querySelector('.reply-empty-state')?.textContent ?? '').toContain('还没有识别当前聊天');
 
@@ -463,7 +506,27 @@ describe('ReplySuggestionPanel', () => {
     await flushUi();
 
     expect(host.textContent).not.toContain('Late reply');
-    expect(host.querySelectorAll('.reply-task-row')).toHaveLength(0);
+    expect(host.querySelector('.reply-task-queue')).toBeFalsy();
+    app.unmount();
+  });
+
+  it('cancels an active recognition job before removing its local task', async () => {
+    const { app, host, eventBus } = await mountPanel();
+    const cancellations: unknown[] = [];
+    eventBus.on('recognition-job:cancel', (payload) => cancellations.push(payload));
+    eventBus.emit('recognize:start', { sessionId: 'session-cancel', source: 'BUTTON_CLICK' });
+    eventBus.emit('recognize:job', { sessionId: 'session-cancel', jobId: 'job-1', status: 'QUEUED' });
+    await flushUi();
+
+    (host.querySelector('.reply-current-task .icon-close-button') as HTMLButtonElement).click();
+    await flushUi();
+    const removeButton = [...host.querySelectorAll('.reply-task-remove-confirm button')]
+      .find((button) => button.textContent?.includes('移除')) as HTMLButtonElement | undefined;
+    removeButton?.click();
+    await flushUi();
+
+    expect(cancellations).toEqual([{ jobId: 'job-1', sessionId: 'session-cancel' }]);
+    expect(host.querySelector('.reply-current-task')).toBeFalsy();
     app.unmount();
   });
 
@@ -475,7 +538,7 @@ describe('ReplySuggestionPanel', () => {
 
     const loadingTask = host.querySelector('.reply-current-task.status-loading') as HTMLElement | null;
     expect(loadingTask).toBeTruthy();
-    expect(host.querySelector('.reply-queue-empty')?.textContent ?? '').toContain('暂无其他待处理任务');
+    expect(host.querySelector('.reply-task-queue')).toBeFalsy();
     expect(host.querySelector('.reply-progress-panel')?.textContent).toContain('文字通道');
     expect(host.querySelector('.reply-progress-panel')?.textContent).not.toContain('重试');
     expect(loadingTask?.querySelector('.icon-close-button')).toBeTruthy();

@@ -37,14 +37,14 @@ class HttpImageRecognitionClientTest {
   }
 
   @Test
-  void treatsZeroTimeoutAsNoRequestDeadline() throws Exception {
+  void appliesTheDefaultDeadlineWhenStoredTimeoutIsZero() throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/v1/chat/completions", exchange -> {
       try (var input = exchange.getRequestBody()) {
         input.transferTo(java.io.OutputStream.nullOutputStream());
       }
       try {
-        Thread.sleep(150);
+        Thread.sleep(5_250);
       } catch (InterruptedException ex) {
         Thread.currentThread().interrupt();
       }
@@ -71,7 +71,9 @@ class HttpImageRecognitionClientTest {
           "qwen3-vl-plus",
           3);
 
-      assertThat(client.recognize(new byte[] {1, 2, 3}, config)).isEqualTo("{}");
+      assertThatThrownBy(() -> client.recognize(new byte[] {1, 2, 3}, config))
+          .isInstanceOf(ImageRecognitionException.class)
+          .hasMessageContaining("timed out");
     } finally {
       server.stop(0);
     }

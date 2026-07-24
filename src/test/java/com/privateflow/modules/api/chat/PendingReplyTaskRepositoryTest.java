@@ -11,9 +11,11 @@ import java.sql.Timestamp;
 import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.Suggestion;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -758,6 +760,77 @@ class PendingReplyTaskRepositoryTest {
         waiting.taskId())).isEqualTo(versionBeforeCancel + 1);
   }
 
+  @Test
+  void physicalCleanupDeletesOnlyTerminalTasksFinishedBeforeTheRetentionCutoff() {
+    LocalDateTime cutoff = LocalDateTime.of(2026, 7, 20, 0, 0);
+    PendingReplyTask expiredOld = createTask("reply-expired-old", "keeper-1");
+    PendingReplyTask readyOld = createTask("reply-ready-old", "keeper-1");
+    PendingReplyTask failedOld = createTask("reply-failed-old", "keeper-1");
+    PendingReplyTask cancelledOld = createTask("reply-cancelled-old", "keeper-1");
+    PendingReplyTask expiredAtFinishBoundary = createTask("reply-expired-finish-boundary", "keeper-1");
+    PendingReplyTask readyWithoutFinishTime = createTask("reply-ready-without-finish-time", "keeper-1");
+    PendingReplyTask waitingOld = createTask("reply-waiting-old", "keeper-1");
+    PendingReplyTask generatingOld = createTask("reply-generating-old", "keeper-1");
+    LocalDateTime oldExpiry = cutoff.minusSeconds(1);
+
+    setTaskStatusAndTimes(expiredOld, PendingReplyTaskStatus.EXPIRED, oldExpiry, oldExpiry);
+    setTaskStatusAndTimes(readyOld, PendingReplyTaskStatus.READY, oldExpiry, oldExpiry);
+    setTaskStatusAndTimes(failedOld, PendingReplyTaskStatus.FAILED, oldExpiry, oldExpiry);
+    setTaskStatusAndTimes(cancelledOld, PendingReplyTaskStatus.CANCELLED, oldExpiry, oldExpiry);
+    setTaskStatusAndTimes(expiredAtFinishBoundary, PendingReplyTaskStatus.EXPIRED, oldExpiry, cutoff);
+    setTaskStatusAndTimes(readyWithoutFinishTime, PendingReplyTaskStatus.READY, oldExpiry, null);
+    setTaskStatusAndTimes(waitingOld, PendingReplyTaskStatus.WAITING_CUSTOMER, oldExpiry, null);
+    setTaskStatusAndTimes(generatingOld, PendingReplyTaskStatus.GENERATING, oldExpiry, null);
+
+    assertThat(repository.deletePhysicallyExpiredBefore(cutoff)).isEqualTo(4);
+
+    assertThat(repository.findOwned(expiredOld.taskId(), "keeper-1")).isEmpty();
+    assertThat(repository.findOwned(readyOld.taskId(), "keeper-1")).isEmpty();
+    assertThat(repository.findOwned(failedOld.taskId(), "keeper-1")).isEmpty();
+    assertThat(repository.findOwned(cancelledOld.taskId(), "keeper-1")).isEmpty();
+    assertThat(repository.findOwned(expiredAtFinishBoundary.taskId(), "keeper-1")).isPresent();
+    assertThat(repository.findOwned(readyWithoutFinishTime.taskId(), "keeper-1")).isPresent();
+    assertThat(repository.findOwned(waitingOld.taskId(), "keeper-1")).isPresent();
+    assertThat(repository.findOwned(generatingOld.taskId(), "keeper-1")).isPresent();
+  }
+
+  @Test
+  void createUsesShanghaiTimeForTheFullTwentyFourHourTtlWhenJvmDefaultIsUtc() {
+    TimeZone originalDefault = TimeZone.getDefault();
+    TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+    try {
+      LocalDateTime lowerBound = toMicroseconds(
+          LocalDateTime.now(ZoneId.of("Asia/Shanghai")).plusHours(24));
+
+      PendingReplyTask task = createTask("reply-utc-ttl", "keeper-1");
+
+      LocalDateTime upperBound = toMicroseconds(
+          LocalDateTime.now(ZoneId.of("Asia/Shanghai")).plusHours(24));
+      assertThat(task.expiresAt()).isBetween(lowerBound, upperBound);
+    } finally {
+      TimeZone.setDefault(originalDefault);
+    }
+  }
+
+  @Test
+  void activeGenerationCreatedUnderUtcDoesNotBecomeStaleInShanghaiTime() {
+    TimeZone originalDefault = TimeZone.getDefault();
+    TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+    try {
+      PendingReplyTask task = createTask("reply-utc-generation", "keeper-1");
+      assertThat(repository.claim(task.taskId(), "keeper-1", "18800001111")).isTrue();
+
+      repository.recoverExpiredAndStalledTasks(
+          LocalDateTime.now(ZoneId.of("Asia/Shanghai")),
+          120);
+
+      assertThat(repository.findOwned(task.taskId(), "keeper-1").orElseThrow().status())
+          .isEqualTo(PendingReplyTaskStatus.GENERATING);
+    } finally {
+      TimeZone.setDefault(originalDefault);
+    }
+  }
+
   private PendingReplyTask createClaimedTask() {
     PendingReplyTask task = repository.create(new PendingReplyTaskDraft(
         "reply-100-1",
@@ -772,6 +845,23 @@ class PendingReplyTaskRepositoryTest {
         List.of(candidate("18800001111", "same-name customer"))));
     assertThat(repository.claim(task.taskId(), "keeper-1", "18800001111")).isTrue();
     return repository.findOwned(task.taskId(), "keeper-1").orElseThrow();
+  }
+
+  private void setTaskStatusAndTimes(
+      PendingReplyTask task,
+      PendingReplyTaskStatus status,
+      LocalDateTime expiresAt,
+      LocalDateTime finishedAt) {
+    jdbcTemplate.update(
+        "UPDATE pending_reply_tasks SET status = ?, expires_at = ?, finished_at = ? WHERE task_id = ?",
+        status.name(),
+        Timestamp.valueOf(expiresAt),
+        finishedAt == null ? null : Timestamp.valueOf(finishedAt),
+        task.taskId());
+  }
+
+  private LocalDateTime toMicroseconds(LocalDateTime value) {
+    return value.withNano((value.getNano() / 1_000) * 1_000);
   }
 
   private PendingReplyTask createTask(String replySessionId, String username) {
