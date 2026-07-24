@@ -1,7 +1,9 @@
 package com.privateflow.modules.tablewrite.client;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
 import java.io.IOException;
 import java.net.URI;
@@ -13,6 +15,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.LongSupplier;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -20,17 +26,20 @@ public class WecomAccessTokenProvider {
 
   private static final String OPERATION = "gettoken";
   private static final Duration EARLY_REFRESH = Duration.ofMinutes(5);
+  private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
 
   private final ObjectMapper objectMapper;
   private final WecomSmartSheetConfig config;
   private final HttpClient httpClient;
   private final Clock clock;
-  private volatile Token cachedToken;
+  private final LongSupplier ticker;
+  private final AtomicReference<Token> cachedToken = new AtomicReference<>();
+  private final ReentrantLock refreshLock = new ReentrantLock();
 
   public WecomAccessTokenProvider(ObjectMapper objectMapper, WecomSmartSheetConfig config) {
     this(objectMapper, config, HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(3))
-        .build(), Clock.systemUTC());
+        .build(), Clock.systemUTC(), System::nanoTime);
   }
 
   WecomAccessTokenProvider(
@@ -38,40 +47,78 @@ public class WecomAccessTokenProvider {
       WecomSmartSheetConfig config,
       HttpClient httpClient,
       Clock clock) {
+    this(objectMapper, config, httpClient, clock, System::nanoTime);
+  }
+
+  WecomAccessTokenProvider(
+      ObjectMapper objectMapper,
+      WecomSmartSheetConfig config,
+      HttpClient httpClient,
+      Clock clock,
+      LongSupplier ticker) {
     this.objectMapper = objectMapper;
     this.config = config;
     this.httpClient = httpClient;
     this.clock = clock;
+    this.ticker = ticker;
   }
 
   public String get() {
-    Token current = cachedToken;
+    return get(DEFAULT_TIMEOUT);
+  }
+
+  public String get(Duration timeout) {
+    WecomRequestDeadline deadline = WecomRequestDeadline.start(timeout, OPERATION, ticker);
+    Token current = cachedToken.get();
     if (isUsable(current)) {
       return current.value();
     }
-    synchronized (this) {
-      current = cachedToken;
+    boolean locked = false;
+    try {
+      locked = tryRefreshLock(deadline);
+      current = cachedToken.get();
       if (isUsable(current)) {
         return current.value();
       }
-      Token refreshed = requestToken();
-      cachedToken = refreshed;
+      Token refreshed = requestToken(deadline);
+      cachedToken.set(refreshed);
       return refreshed.value();
+    } finally {
+      if (locked) {
+        refreshLock.unlock();
+      }
     }
   }
 
-  public synchronized void invalidate(String rejectedToken) {
-    if (cachedToken != null && cachedToken.value().equals(rejectedToken)) {
-      cachedToken = null;
+  public void invalidate(String rejectedToken) {
+    Token current = cachedToken.get();
+    while (current != null && current.value().equals(rejectedToken)) {
+      if (cachedToken.compareAndSet(current, null)) {
+        return;
+      }
+      current = cachedToken.get();
     }
   }
 
-  private Token requestToken() {
+  private boolean tryRefreshLock(WecomRequestDeadline deadline) {
+    try {
+      if (!refreshLock.tryLock(deadline.remaining().toNanos(), TimeUnit.NANOSECONDS)) {
+        throw new WecomSmartSheetException(OPERATION, "token refresh coordination timed out", null);
+      }
+      return true;
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw new WecomSmartSheetException(OPERATION, "token refresh coordination was interrupted", ex);
+    }
+  }
+
+  private Token requestToken(WecomRequestDeadline deadline) {
     config.requireConfigured();
     HttpResponse<String> response;
     try {
       response = httpClient.send(HttpRequest.newBuilder()
           .uri(tokenUri())
+          .timeout(deadline.remaining())
           .GET()
           .build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     } catch (IOException ex) {
@@ -88,8 +135,9 @@ public class WecomAccessTokenProvider {
 
     JsonNode root;
     try {
-      root = objectMapper.readTree(response.body());
-    } catch (IOException ex) {
+      ObjectReader reader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+      root = reader.readTree(response.body());
+    } catch (IOException | RuntimeException ex) {
       throw new WecomSmartSheetException(OPERATION, "response was not valid JSON", ex);
     }
     if (root == null || !root.isObject()) {
@@ -102,8 +150,7 @@ public class WecomAccessTokenProvider {
     }
     int errcode = errcodeNode.intValue();
     if (errcode != 0) {
-      throw new WecomSmartSheetException(OPERATION, errcode,
-          redact(root.path("errmsg").asText("")));
+      throw new WecomSmartSheetException(OPERATION, errcode, "remote API returned an error");
     }
 
     JsonNode tokenNode = root.get("access_token");
@@ -130,12 +177,6 @@ public class WecomAccessTokenProvider {
 
   private boolean isUsable(Token token) {
     return token != null && clock.instant().isBefore(token.refreshAt());
-  }
-
-  private String redact(String message) {
-    return message.replace(config.corpId(), "[redacted]")
-        .replace(config.appSecret(), "[redacted]")
-        .replaceAll("(?i)corp(?:id|secret)\\s*=\\s*[^\\s&]+", "[redacted]");
   }
 
   private static String encode(String value) {

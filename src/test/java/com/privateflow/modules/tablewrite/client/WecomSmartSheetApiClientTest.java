@@ -2,6 +2,7 @@ package com.privateflow.modules.tablewrite.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -21,11 +22,16 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.ZoneId;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.LongSupplier;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import org.junit.jupiter.api.Test;
@@ -79,7 +85,7 @@ class WecomSmartSheetApiClientTest {
           new WecomTestHttpServer.Reply(200, "{\"errcode\":42001,\"errmsg\":\"expired\"}"),
           new WecomTestHttpServer.Reply(200, "{\"errcode\":0,\"fields\":[]}"));
       WecomAccessTokenProvider tokens = mock(WecomAccessTokenProvider.class);
-      when(tokens.get()).thenReturn("old-token", "new-token");
+      when(tokens.get(any(Duration.class))).thenReturn("old-token", "new-token");
 
       assertThat(client(server, tokens).post("get_fields", Map.of(), Duration.ofSeconds(2))
           .path("errcode").intValue()).isZero();
@@ -97,7 +103,7 @@ class WecomSmartSheetApiClientTest {
           new WecomTestHttpServer.Reply(200, "{\"errcode\":40014,\"errmsg\":\"first\"}"),
           new WecomTestHttpServer.Reply(200, "{\"errcode\":40014,\"errmsg\":\"second\"}"));
       WecomAccessTokenProvider tokens = mock(WecomAccessTokenProvider.class);
-      when(tokens.get()).thenReturn("old-token", "new-token");
+      when(tokens.get(any(Duration.class))).thenReturn("old-token", "new-token");
 
       assertThatThrownBy(() -> client(server, tokens).post("get_fields", Map.of(), Duration.ofSeconds(2)))
           .isInstanceOf(WecomSmartSheetException.class)
@@ -189,7 +195,7 @@ class WecomSmartSheetApiClientTest {
       assertThatThrownBy(() -> client.post("get_fields", Map.of(), Duration.ofMillis(-1)))
           .isInstanceOf(WecomSmartSheetException.class);
 
-      verify(tokens, never()).get();
+      verify(tokens, never()).get(any(Duration.class));
       assertThat(server.requestCount()).isZero();
     }
   }
@@ -198,7 +204,7 @@ class WecomSmartSheetApiClientTest {
   void rethrowsSanitizedTokenProviderExceptionsUnchanged() {
     WecomAccessTokenProvider tokens = mock(WecomAccessTokenProvider.class);
     WecomSmartSheetException tokenFailure = new WecomSmartSheetException("gettoken", 40013, "invalid corpid");
-    when(tokens.get()).thenThrow(tokenFailure);
+    when(tokens.get(any(Duration.class))).thenThrow(tokenFailure);
 
     assertThatThrownBy(() -> new WecomSmartSheetApiClient(new ObjectMapper(), configured("http://127.0.0.1"), tokens)
         .post("get_fields", Map.of(), Duration.ofSeconds(1)))
@@ -239,13 +245,78 @@ class WecomSmartSheetApiClientTest {
   void sendsTheExactCallerTimeout() {
     CapturingHttpClient http = new CapturingHttpClient();
     WecomSmartSheetApiClient client = new WecomSmartSheetApiClient(new ObjectMapper(), configured("http://127.0.0.1"),
-        tokens("token-one"), http);
+        tokens("token-one"), http, () -> 0L);
     Duration timeout = Duration.ofMillis(1234);
 
     assertThat(client.post("get_fields", Map.of(), timeout).path("errcode").intValue()).isZero();
 
     assertThat(http.request.timeout()).contains(timeout);
     assertThat(http.request.headers().firstValue("Content-Type")).contains("application/json");
+  }
+
+  @Test
+  void obtainsTokenWithTheCallsRemainingTimeout() {
+    CapturingHttpClient http = new CapturingHttpClient();
+    WecomAccessTokenProvider tokens = mock(WecomAccessTokenProvider.class);
+    when(tokens.get()).thenReturn("legacy-token");
+    when(tokens.get(any(Duration.class))).thenReturn("deadline-token");
+    WecomSmartSheetApiClient client = new WecomSmartSheetApiClient(
+        new ObjectMapper(), configured("http://127.0.0.1"), tokens, http);
+
+    assertThat(client.post("get_fields", Map.of(), Duration.ofSeconds(2)).path("errcode").intValue()).isZero();
+
+    verify(tokens).get(any(Duration.class));
+    verify(tokens, never()).get();
+  }
+
+  @Test
+  void decreasesOneDeadlineAcrossTokenRefreshAndBothHttpRequests() {
+    MutableTicker ticker = new MutableTicker();
+    List<Duration> tokenTimeouts = new ArrayList<>();
+    AtomicInteger tokenCalls = new AtomicInteger();
+    WecomAccessTokenProvider tokens = mock(WecomAccessTokenProvider.class);
+    when(tokens.get(any(Duration.class))).thenAnswer(invocation -> {
+      tokenTimeouts.add(invocation.getArgument(0));
+      ticker.advance(Duration.ofMillis(100));
+      return tokenCalls.getAndIncrement() == 0 ? "old-token" : "new-token";
+    });
+    DeadlineHttpClient http = new DeadlineHttpClient(ticker, Duration.ofMillis(200),
+        "{\"errcode\":42001,\"errmsg\":\"expired\"}",
+        "{\"errcode\":0,\"fields\":[]}");
+    WecomSmartSheetApiClient client = new WecomSmartSheetApiClient(
+        new ObjectMapper(), configured("http://127.0.0.1"), tokens, http, ticker);
+
+    assertThat(client.post("get_fields", Map.of(), Duration.ofSeconds(2)).path("errcode").intValue()).isZero();
+
+    assertThat(tokenTimeouts).containsExactly(Duration.ofSeconds(2), Duration.ofMillis(1700));
+    assertThat(http.requests).extracting(request -> request.timeout().orElseThrow())
+        .containsExactly(Duration.ofMillis(1900), Duration.ofMillis(1600));
+    verify(tokens).invalidate("old-token");
+  }
+
+  @Test
+  void exhaustedBudgetAfterFirstHttpDoesNotObtainAnotherTokenOrSendAnotherRequest() {
+    MutableTicker ticker = new MutableTicker();
+    List<Duration> tokenTimeouts = new ArrayList<>();
+    WecomAccessTokenProvider tokens = mock(WecomAccessTokenProvider.class);
+    when(tokens.get(any(Duration.class))).thenAnswer(invocation -> {
+      tokenTimeouts.add(invocation.getArgument(0));
+      ticker.advance(Duration.ofMillis(100));
+      return "old-token";
+    });
+    DeadlineHttpClient http = new DeadlineHttpClient(ticker, Duration.ofMillis(900),
+        "{\"errcode\":40014,\"errmsg\":\"expired\"}");
+    WecomSmartSheetApiClient client = new WecomSmartSheetApiClient(
+        new ObjectMapper(), configured("http://127.0.0.1"), tokens, http, ticker);
+
+    assertThatThrownBy(() -> client.post("get_fields", Map.of(), Duration.ofSeconds(1)))
+        .isInstanceOf(WecomSmartSheetException.class)
+        .hasMessageContaining("timeout expired");
+
+    assertThat(tokenTimeouts).containsExactly(Duration.ofSeconds(1));
+    assertThat(http.requests).singleElement().satisfies(request ->
+        assertThat(request.timeout()).contains(Duration.ofMillis(900)));
+    verify(tokens).invalidate("old-token");
   }
 
   @Test
@@ -293,7 +364,7 @@ class WecomSmartSheetApiClientTest {
 
   private WecomAccessTokenProvider tokens(String value) {
     WecomAccessTokenProvider provider = mock(WecomAccessTokenProvider.class);
-    when(provider.get()).thenReturn(value);
+    when(provider.get(any(Duration.class))).thenReturn(value);
     return provider;
   }
 
@@ -371,6 +442,40 @@ class WecomSmartSheetApiClientTest {
         throw ioException;
       }
       throw (InterruptedException) failure;
+    }
+  }
+
+  private static final class DeadlineHttpClient extends CapturingHttpClient {
+    private final MutableTicker ticker;
+    private final Duration elapsedPerRequest;
+    private final ArrayDeque<String> responses = new ArrayDeque<>();
+    private final List<HttpRequest> requests = new ArrayList<>();
+
+    private DeadlineHttpClient(MutableTicker ticker, Duration elapsedPerRequest, String... responses) {
+      this.ticker = ticker;
+      this.elapsedPerRequest = elapsedPerRequest;
+      this.responses.addAll(List.of(responses));
+    }
+
+    @Override public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
+      requests.add(request);
+      ticker.advance(elapsedPerRequest);
+      @SuppressWarnings("unchecked")
+      HttpResponse<T> response = (HttpResponse<T>) new FixedResponse(200, responses.removeFirst());
+      return response;
+    }
+  }
+
+  private static final class MutableTicker implements LongSupplier {
+    private long nanos;
+
+    void advance(Duration duration) {
+      nanos += duration.toNanos();
+    }
+
+    @Override
+    public long getAsLong() {
+      return nanos;
     }
   }
 

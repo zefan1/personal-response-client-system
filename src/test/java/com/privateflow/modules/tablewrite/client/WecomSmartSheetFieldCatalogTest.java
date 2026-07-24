@@ -18,6 +18,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 import org.junit.jupiter.api.Test;
 
 class WecomSmartSheetFieldCatalogTest {
@@ -73,6 +74,32 @@ class WecomSmartSheetFieldCatalogTest {
     assertThat(fields).containsKeys("One", "Two");
     assertThat(api.bodies).extracting(body -> body.path("offset").asInt()).containsExactly(0, 1);
     assertThatThrownBy(() -> fields.put("Three", fields.get("One"))).isInstanceOf(UnsupportedOperationException.class);
+  }
+
+  @Test
+  void decreasesOneDeadlineAcrossAllCatalogPages() throws Exception {
+    MutableTicker ticker = new MutableTicker();
+    DeadlineScriptedClient api = new DeadlineScriptedClient(ticker,
+        "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"One\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f2\",\"field_title\":\"Two\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+
+    assertThat(catalog(api, Clock.systemUTC(), ticker).visibleFields(Duration.ofSeconds(1)))
+        .containsKeys("One", "Two");
+
+    assertThat(api.timeouts).containsExactly(Duration.ofSeconds(1), Duration.ofMillis(900));
+  }
+
+  @Test
+  void requiresPositiveTimeoutBeforeLoadingCatalog() throws Exception {
+    for (Duration timeout : new Duration[] {null, Duration.ZERO, Duration.ofNanos(-1)}) {
+      ScriptedClient api = client(
+          "{\"errcode\":0,\"total\":0,\"fields\":[]}");
+
+      assertThatThrownBy(() -> catalog(api, Clock.systemUTC()).visibleFields(timeout))
+          .isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("timeout must be positive");
+      assertThat(api.bodies).isEmpty();
+    }
   }
 
   @Test
@@ -135,7 +162,8 @@ class WecomSmartSheetFieldCatalogTest {
   void sharesOneExpiredRefreshFailureThenAllowsRetry() throws Exception {
     BlockingThenRetryClient api = new BlockingThenRetryClient("""
         {"errcode":0,"total":1,"fields":[{"field_id":"f2","field_title":"Recovered","field_type":"FIELD_TYPE_TEXT"}]}""");
-    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC());
+    SignalingTicker ticker = new SignalingTicker();
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC(), ticker);
     AtomicReference<RuntimeException> leaderFailure = new AtomicReference<>();
     AtomicReference<RuntimeException> followerFailure = new AtomicReference<>();
     Thread leader = failureThread("catalog-refresh-leader", catalog, leaderFailure);
@@ -143,8 +171,9 @@ class WecomSmartSheetFieldCatalogTest {
       leader.start();
       assertThat(api.firstStarted.await(2, TimeUnit.SECONDS)).isTrue();
       Thread follower = failureThread("catalog-refresh-follower", catalog, followerFailure);
+      ticker.watch(follower);
       follower.start();
-      assertThat(awaitingCatalogResult(follower)).isTrue();
+      assertThat(ticker.beforeFollowerWait.await(2, TimeUnit.SECONDS)).isTrue();
       api.releaseFirst.countDown();
       leader.join(2_000);
       follower.join(2_000);
@@ -175,18 +204,100 @@ class WecomSmartSheetFieldCatalogTest {
     }, name);
   }
 
-  private static boolean awaitingCatalogResult(Thread thread) {
-    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-    while (System.nanoTime() < deadline) {
-      for (StackTraceElement frame : thread.getStackTrace()) {
-        if (frame.getClassName().equals(WecomSmartSheetFieldCatalog.class.getName())
-            && frame.getMethodName().equals("await")) {
-          return true;
-        }
+  @Test
+  void followerTimesOutWithoutCancellingLoaderAndSuccessfulCacheRemainsUsable() throws Exception {
+    BlockingSuccessClient api = new BlockingSuccessClient();
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC());
+    AtomicReference<Map<String, WecomSmartSheetField>> loaderResult = new AtomicReference<>();
+    AtomicReference<RuntimeException> loaderFailure = new AtomicReference<>();
+    Thread loader = new Thread(() -> {
+      try {
+        loaderResult.set(catalog.visibleFields(Duration.ofSeconds(5)));
+      } catch (RuntimeException ex) {
+        loaderFailure.set(ex);
       }
-      Thread.onSpinWait();
+    }, "catalog-timeout-loader");
+    AtomicReference<RuntimeException> followerFailure = new AtomicReference<>();
+    Thread follower = new Thread(() -> {
+      try {
+        catalog.visibleFields(Duration.ofMillis(250));
+      } catch (RuntimeException ex) {
+        followerFailure.set(ex);
+      }
+    }, "catalog-timeout-follower");
+    try {
+      loader.start();
+      assertThat(api.started.await(2, TimeUnit.SECONDS)).isTrue();
+      follower.start();
+      follower.join(2_000);
+
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(followerFailure.get()).isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("timed out");
+      assertThat(api.calls.get()).isEqualTo(1);
+
+      api.release.countDown();
+      loader.join(2_000);
+      assertThat(loader.isAlive()).isFalse();
+      assertThat(loaderFailure.get()).isNull();
+      assertThat(loaderResult.get()).containsKey("Loaded");
+      assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Loaded");
+      assertThat(api.calls.get()).isEqualTo(1);
+    } finally {
+      api.release.countDown();
+      follower.interrupt();
+      loader.interrupt();
+      follower.join(2_000);
+      loader.join(2_000);
     }
-    return false;
+  }
+
+  @Test
+  void interruptedFollowerRestoresFlagWithoutCancellingLoaderAndCacheRemainsUsable() throws Exception {
+    BlockingSuccessClient api = new BlockingSuccessClient();
+    SignalingTicker ticker = new SignalingTicker();
+    WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC(), ticker);
+    AtomicReference<Map<String, WecomSmartSheetField>> loaderResult = new AtomicReference<>();
+    Thread loader = new Thread(() -> loaderResult.set(catalog.visibleFields(Duration.ofSeconds(5))),
+        "catalog-interrupt-loader");
+    AtomicReference<RuntimeException> followerFailure = new AtomicReference<>();
+    AtomicReference<Boolean> followerInterrupted = new AtomicReference<>(false);
+    Thread follower = new Thread(() -> {
+      try {
+        catalog.visibleFields(Duration.ofSeconds(5));
+      } catch (RuntimeException ex) {
+        followerFailure.set(ex);
+        followerInterrupted.set(Thread.currentThread().isInterrupted());
+      }
+    }, "catalog-interrupt-follower");
+    try {
+      loader.start();
+      assertThat(api.started.await(2, TimeUnit.SECONDS)).isTrue();
+      ticker.watch(follower);
+      follower.start();
+      assertThat(ticker.beforeFollowerWait.await(2, TimeUnit.SECONDS)).isTrue();
+
+      follower.interrupt();
+      follower.join(2_000);
+
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(followerFailure.get()).isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("interrupted");
+      assertThat(followerInterrupted.get()).isTrue();
+      assertThat(api.calls.get()).isEqualTo(1);
+
+      api.release.countDown();
+      loader.join(2_000);
+      assertThat(loaderResult.get()).containsKey("Loaded");
+      assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Loaded");
+      assertThat(api.calls.get()).isEqualTo(1);
+    } finally {
+      api.release.countDown();
+      follower.interrupt();
+      loader.interrupt();
+      follower.join(2_000);
+      loader.join(2_000);
+    }
   }
 
   @Test
@@ -267,6 +378,13 @@ class WecomSmartSheetFieldCatalogTest {
     return new WecomSmartSheetFieldCatalog(api, config(), clock);
   }
 
+  private static WecomSmartSheetFieldCatalog catalog(
+      WecomSmartSheetApiClient api,
+      Clock clock,
+      LongSupplier ticker) {
+    return new WecomSmartSheetFieldCatalog(api, config(), clock, ticker);
+  }
+
   private static WecomSmartSheetConfig config() {
     return new WecomSmartSheetConfig("http://127.0.0.1", "corp", "secret", "doc-1", "sheet-1", "vView",
         "Customers", "Customer ID", ZoneId.of("Asia/Shanghai"));
@@ -345,6 +463,84 @@ class WecomSmartSheetFieldCatalogTest {
         case 2 -> throw new IllegalStateException("raw-refresh-failure");
         default -> newResponse;
       };
+    }
+  }
+
+  private static final class DeadlineScriptedClient extends WecomSmartSheetApiClient {
+    private final ArrayDeque<JsonNode> responses = new ArrayDeque<>();
+    private final List<Duration> timeouts = new ArrayList<>();
+    private final MutableTicker ticker;
+
+    private DeadlineScriptedClient(MutableTicker ticker, String... source) throws Exception {
+      super(JSON, config(), null);
+      this.ticker = ticker;
+      for (String value : source) {
+        responses.add(JSON.readTree(value));
+      }
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      timeouts.add(timeout);
+      ticker.advance(Duration.ofMillis(100));
+      return responses.removeFirst();
+    }
+  }
+
+  private static final class BlockingSuccessClient extends WecomSmartSheetApiClient {
+    private final AtomicInteger calls = new AtomicInteger();
+    private final CountDownLatch started = new CountDownLatch(1);
+    private final CountDownLatch release = new CountDownLatch(1);
+
+    private BlockingSuccessClient() {
+      super(JSON, config(), null);
+    }
+
+    @Override public JsonNode post(String operation, Object body, Duration timeout) {
+      calls.incrementAndGet();
+      started.countDown();
+      try {
+        if (!release.await(5, TimeUnit.SECONDS)) {
+          throw new IllegalStateException("raw-loader-timeout");
+        }
+        return JSON.readTree(
+            "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Loaded\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+      } catch (InterruptedException ex) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("raw-loader-interrupted");
+      } catch (java.io.IOException ex) {
+        throw new IllegalStateException("test response was invalid", ex);
+      }
+    }
+  }
+
+  private static final class MutableTicker implements LongSupplier {
+    private long nanos;
+
+    void advance(Duration duration) {
+      nanos += duration.toNanos();
+    }
+
+    @Override
+    public long getAsLong() {
+      return nanos;
+    }
+  }
+
+  private static final class SignalingTicker implements LongSupplier {
+    private final AtomicReference<Thread> watched = new AtomicReference<>();
+    private final AtomicInteger watchedReads = new AtomicInteger();
+    private final CountDownLatch beforeFollowerWait = new CountDownLatch(1);
+
+    void watch(Thread thread) {
+      watched.set(thread);
+    }
+
+    @Override
+    public long getAsLong() {
+      if (Thread.currentThread() == watched.get() && watchedReads.incrementAndGet() == 2) {
+        beforeFollowerWait.countDown();
+      }
+      return System.nanoTime();
     }
   }
 

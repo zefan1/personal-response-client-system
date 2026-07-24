@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.Authenticator;
@@ -18,6 +19,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,6 +31,10 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 import java.util.stream.Stream;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
@@ -112,12 +118,47 @@ class WecomAccessTokenProviderTest {
   }
 
   @Test
+  void nonzeroErrcodeNeverIncludesTokenResponseContentOrUri() throws Exception {
+    String responseSecret = "raw-token-response-sentinel";
+    String token = "access-token-sentinel";
+    String uri = "http://wecom.invalid/cgi-bin/gettoken?corpid=CorpID-sentinel&corpsecret=app-secret-value";
+    try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
+      server.respond(GET_TOKEN_PATH, 200,
+          "{\"errcode\":40013,\"errmsg\":\"" + responseSecret + " " + token + " " + uri + "\"}");
+      WecomAccessTokenProvider provider = provider(server, new MutableClock());
+
+      assertThatThrownBy(provider::get)
+          .isInstanceOf(WecomSmartSheetException.class)
+          .satisfies(error -> assertThrowableDoesNotContain(error,
+              responseSecret, token, uri, "CorpID-sentinel", "app-secret-value", "gettoken?"));
+    }
+  }
+
+  @Test
   void transportAndMalformedResponsesAreSanitized() throws Exception {
     assertSanitizedFailure(503, "unavailable");
     assertSanitizedFailure(200, "not-json");
     assertSanitizedFailure(200, "{\"errcode\":0,\"expires_in\":600}");
     assertSanitizedFailure(200, "{\"errcode\":0,\"access_token\":\"  \",\"expires_in\":600}");
     assertSanitizedFailure(200, "{\"errcode\":0,\"access_token\":\"token-one\",\"expires_in\":0}");
+  }
+
+  @TestFactory
+  Stream<DynamicTest> rejectsTrailingTokenResponseContentWithoutExposingIt() {
+    return Stream.of(
+        success("token-one", 600) + " trailing-token-response",
+        success("token-one", 600) + "{\"second\":\"raw-token-response\"}")
+        .map(body -> DynamicTest.dynamicTest("rejects trailing token response content", () -> {
+          try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
+            server.respond(GET_TOKEN_PATH, 200, body);
+
+            assertThatThrownBy(() -> provider(server, new MutableClock()).get())
+                .isInstanceOf(WecomSmartSheetException.class)
+                .hasMessageContaining("response was not valid JSON")
+                .satisfies(error -> assertThrowableDoesNotContain(error,
+                    body, "token-one", "trailing-token-response", "raw-token-response"));
+          }
+        }));
   }
 
   @Test
@@ -188,6 +229,110 @@ class WecomAccessTokenProviderTest {
         executor.shutdownNow();
       }
       assertThat(server.requestCount()).isEqualTo(1);
+    }
+  }
+
+  @Test
+  void requiresPositiveTimeoutBeforeStartingTokenRequest() {
+    RecordingHttpClient http = new RecordingHttpClient();
+    WecomAccessTokenProvider provider = new WecomAccessTokenProvider(
+        new ObjectMapper(), configured("http://127.0.0.1", "corp id", "app-secret-value"),
+        http, new MutableClock());
+
+    assertThatThrownBy(() -> provider.get(null)).isInstanceOf(WecomSmartSheetException.class);
+    assertThatThrownBy(() -> provider.get(Duration.ZERO)).isInstanceOf(WecomSmartSheetException.class);
+    assertThatThrownBy(() -> provider.get(Duration.ofNanos(-1))).isInstanceOf(WecomSmartSheetException.class);
+
+    assertThat(http.requests).isEmpty();
+  }
+
+  @Test
+  void tokenRequestUsesRemainingTimeoutAndDefaultGetIsFinite() {
+    RecordingHttpClient http = new RecordingHttpClient();
+    LongSupplier fixedTicker = () -> 100L;
+    WecomAccessTokenProvider provider = new WecomAccessTokenProvider(
+        new ObjectMapper(), configured("http://127.0.0.1", "corp id", "app-secret-value"),
+        http, new MutableClock(), fixedTicker);
+
+    assertThat(provider.get(Duration.ofMillis(1234))).isEqualTo("token-one");
+    assertThat(http.requests.get(0).timeout()).contains(Duration.ofMillis(1234));
+
+    provider.invalidate("token-one");
+    assertThat(provider.get()).isEqualTo("token-one");
+    assertThat(http.requests.get(1).timeout()).hasValueSatisfying(timeout -> {
+      assertThat(timeout).isPositive();
+      assertThat(timeout).isLessThanOrEqualTo(Duration.ofSeconds(30));
+    });
+  }
+
+  @Test
+  void refreshFollowerTimesOutWithoutStartingAnotherRequestAndLoaderStillCaches() throws Exception {
+    BlockingHttpClient http = new BlockingHttpClient();
+    WecomAccessTokenProvider provider = new WecomAccessTokenProvider(
+        new ObjectMapper(), configured("http://127.0.0.1", "corp id", "app-secret-value"),
+        http, new MutableClock());
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Future<String> loader = executor.submit(() -> provider.get(Duration.ofSeconds(5)));
+    try {
+      assertThat(http.started.await(2, TimeUnit.SECONDS)).isTrue();
+
+      assertThatThrownBy(() -> provider.get(Duration.ofMillis(250)))
+          .isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("timed out");
+      assertThat(http.requests).hasSize(1);
+
+      http.release.countDown();
+      assertThat(loader.get(2, TimeUnit.SECONDS)).isEqualTo("token-one");
+      assertThat(provider.get(Duration.ofSeconds(1))).isEqualTo("token-one");
+      assertThat(http.requests).hasSize(1);
+    } finally {
+      http.release.countDown();
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void interruptedRefreshFollowerRestoresFlagWithoutAffectingLoaderOrCache() throws Exception {
+    BlockingHttpClient http = new BlockingHttpClient();
+    SignalingTicker ticker = new SignalingTicker();
+    WecomAccessTokenProvider provider = new WecomAccessTokenProvider(
+        new ObjectMapper(), configured("http://127.0.0.1", "corp id", "app-secret-value"),
+        http, new MutableClock(), ticker);
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Future<String> loader = executor.submit(() -> provider.get(Duration.ofSeconds(5)));
+    AtomicReference<RuntimeException> followerFailure = new AtomicReference<>();
+    AtomicReference<Boolean> followerInterrupted = new AtomicReference<>(false);
+    Thread follower = new Thread(() -> {
+      try {
+        provider.get(Duration.ofSeconds(5));
+      } catch (RuntimeException ex) {
+        followerFailure.set(ex);
+        followerInterrupted.set(Thread.currentThread().isInterrupted());
+      }
+    }, "token-refresh-follower");
+    try {
+      assertThat(http.started.await(2, TimeUnit.SECONDS)).isTrue();
+      ticker.watch(follower);
+      follower.start();
+      assertThat(ticker.beforeFollowerWait.await(2, TimeUnit.SECONDS)).isTrue();
+
+      follower.interrupt();
+      follower.join(2_000);
+
+      assertThat(follower.isAlive()).isFalse();
+      assertThat(followerFailure.get()).isInstanceOf(WecomSmartSheetException.class)
+          .hasMessageContaining("interrupted");
+      assertThat(followerInterrupted.get()).isTrue();
+      assertThat(http.requests).hasSize(1);
+
+      http.release.countDown();
+      assertThat(loader.get(2, TimeUnit.SECONDS)).isEqualTo("token-one");
+      assertThat(provider.get(Duration.ofSeconds(1))).isEqualTo("token-one");
+    } finally {
+      http.release.countDown();
+      follower.interrupt();
+      follower.join(2_000);
+      executor.shutdownNow();
     }
   }
 
@@ -325,6 +470,89 @@ class WecomAccessTokenProviderTest {
     public Instant instant() {
       return instant;
     }
+  }
+
+  private static class RecordingHttpClient extends HttpClient {
+    protected final List<HttpRequest> requests = new ArrayList<>();
+
+    @Override public Optional<CookieHandler> cookieHandler() { return Optional.empty(); }
+    @Override public Optional<Duration> connectTimeout() { return Optional.empty(); }
+    @Override public Redirect followRedirects() { return Redirect.NEVER; }
+    @Override public Optional<ProxySelector> proxy() { return Optional.empty(); }
+    @Override public SSLContext sslContext() {
+      try {
+        return SSLContext.getDefault();
+      } catch (java.security.NoSuchAlgorithmException ex) {
+        throw new IllegalStateException(ex);
+      }
+    }
+    @Override public SSLParameters sslParameters() { return new SSLParameters(); }
+    @Override public Optional<Authenticator> authenticator() { return Optional.empty(); }
+    @Override public Version version() { return Version.HTTP_1_1; }
+    @Override public Optional<Executor> executor() { return Optional.empty(); }
+    @Override public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler)
+        throws IOException, InterruptedException {
+      requests.add(request);
+      @SuppressWarnings("unchecked")
+      HttpResponse<T> response = (HttpResponse<T>) new FixedResponse(200, success("token-one", 600));
+      return response;
+    }
+    @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+        HttpRequest request, HttpResponse.BodyHandler<T> handler) {
+      return CompletableFuture.failedFuture(new UnsupportedOperationException());
+    }
+    @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+        HttpRequest request,
+        HttpResponse.BodyHandler<T> handler,
+        HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
+      return CompletableFuture.failedFuture(new UnsupportedOperationException());
+    }
+  }
+
+  private static final class BlockingHttpClient extends RecordingHttpClient {
+    private final CountDownLatch started = new CountDownLatch(1);
+    private final CountDownLatch release = new CountDownLatch(1);
+
+    @Override public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler)
+        throws IOException, InterruptedException {
+      requests.add(request);
+      started.countDown();
+      if (!release.await(5, TimeUnit.SECONDS)) {
+        throw new IOException("test token request did not release");
+      }
+      @SuppressWarnings("unchecked")
+      HttpResponse<T> response = (HttpResponse<T>) new FixedResponse(200, success("token-one", 600));
+      return response;
+    }
+  }
+
+  private static final class SignalingTicker implements LongSupplier {
+    private final AtomicReference<Thread> watched = new AtomicReference<>();
+    private final AtomicInteger watchedReads = new AtomicInteger();
+    private final CountDownLatch beforeFollowerWait = new CountDownLatch(1);
+
+    void watch(Thread thread) {
+      watched.set(thread);
+    }
+
+    @Override
+    public long getAsLong() {
+      if (Thread.currentThread() == watched.get() && watchedReads.incrementAndGet() == 2) {
+        beforeFollowerWait.countDown();
+      }
+      return System.nanoTime();
+    }
+  }
+
+  private record FixedResponse(int statusCode, String body) implements HttpResponse<String> {
+    @Override public HttpRequest request() { return null; }
+    @Override public Optional<HttpResponse<String>> previousResponse() { return Optional.empty(); }
+    @Override public java.net.http.HttpHeaders headers() {
+      return java.net.http.HttpHeaders.of(Map.of(), (left, right) -> true);
+    }
+    @Override public java.net.URI uri() { return java.net.URI.create("http://127.0.0.1"); }
+    @Override public HttpClient.Version version() { return HttpClient.Version.HTTP_1_1; }
+    @Override public Optional<javax.net.ssl.SSLSession> sslSession() { return Optional.empty(); }
   }
 
   private static final class InterruptingHttpClient extends HttpClient {

@@ -15,6 +15,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
+import java.util.function.LongSupplier;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -31,6 +32,7 @@ public class WecomSmartSheetApiClient {
   private final WecomSmartSheetConfig config;
   private final WecomAccessTokenProvider tokenProvider;
   private final HttpClient httpClient;
+  private final LongSupplier ticker;
 
   public WecomSmartSheetApiClient(
       ObjectMapper objectMapper,
@@ -39,7 +41,7 @@ public class WecomSmartSheetApiClient {
     this(objectMapper, config, tokenProvider, HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(3))
         .version(HttpClient.Version.HTTP_1_1)
-        .build());
+        .build(), System::nanoTime);
   }
 
   WecomSmartSheetApiClient(
@@ -47,10 +49,20 @@ public class WecomSmartSheetApiClient {
       WecomSmartSheetConfig config,
       WecomAccessTokenProvider tokenProvider,
       HttpClient httpClient) {
+    this(objectMapper, config, tokenProvider, httpClient, System::nanoTime);
+  }
+
+  WecomSmartSheetApiClient(
+      ObjectMapper objectMapper,
+      WecomSmartSheetConfig config,
+      WecomAccessTokenProvider tokenProvider,
+      HttpClient httpClient,
+      LongSupplier ticker) {
     this.objectMapper = objectMapper;
     this.config = config;
     this.tokenProvider = tokenProvider;
     this.httpClient = httpClient;
+    this.ticker = ticker;
   }
 
   public JsonNode post(String operation, Object body, Duration timeout) {
@@ -64,6 +76,7 @@ public class WecomSmartSheetApiClient {
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw failure(operation, "request timeout must be positive");
     }
+    WecomRequestDeadline deadline = WecomRequestDeadline.start(timeout, operation, ticker);
     try {
       config.requireConfigured();
     } catch (IllegalStateException ex) {
@@ -74,8 +87,8 @@ public class WecomSmartSheetApiClient {
 
     String json = serialize(operation, body);
     for (int attempt = 0; attempt < 2; attempt++) {
-      String token = token(operation);
-      Response response = send(operation, path, token, json, timeout);
+      String token = token(operation, deadline.remaining());
+      Response response = send(operation, path, token, json, deadline.remaining());
       if (response.errcode() == 0) {
         return response.root();
       }
@@ -96,9 +109,9 @@ public class WecomSmartSheetApiClient {
     }
   }
 
-  private String token(String operation) {
+  private String token(String operation, Duration timeout) {
     try {
-      return tokenProvider.get();
+      return tokenProvider.get(timeout);
     } catch (WecomSmartSheetException ex) {
       throw ex;
     } catch (RuntimeException ex) {
