@@ -2,14 +2,19 @@ package com.privateflow.modules.api.web;
 
 import com.privateflow.modules.api.chat.ChatOrchestrationService;
 import com.privateflow.modules.api.chat.AiUsageRequest;
+import com.privateflow.modules.api.auth.AuthContext;
+import com.privateflow.modules.api.chat.ChatTaskRuntimeConfigResponse;
 import com.privateflow.modules.api.chat.ChatRecognizeRequest;
 import com.privateflow.modules.api.chat.ChatResponse;
 import com.privateflow.modules.api.chat.GenerateRequest;
 import com.privateflow.modules.api.chat.PendingReplyTaskSelectRequest;
 import com.privateflow.modules.api.chat.PendingReplyTaskView;
 import com.privateflow.modules.api.chat.RegenerateRequest;
+import com.privateflow.modules.api.chat.RecognitionJobService;
+import com.privateflow.modules.api.chat.RecognitionJobView;
 import com.privateflow.modules.api.chat.SendConfirmRequest;
 import com.privateflow.modules.match.ApiResponse;
+import com.privateflow.modules.supervision.SupervisionConfig;
 import com.privateflow.modules.supervision.SupervisionEventService;
 import java.util.List;
 import java.util.Map;
@@ -26,17 +31,46 @@ public class ChatController {
 
   private final ChatOrchestrationService orchestrationService;
   private final SupervisionEventService supervisionEventService;
+  private final RecognitionJobService recognitionJobService;
+  private final SupervisionConfig supervisionConfig;
 
   public ChatController(
       ChatOrchestrationService orchestrationService,
-      SupervisionEventService supervisionEventService) {
+      SupervisionEventService supervisionEventService,
+      RecognitionJobService recognitionJobService,
+      SupervisionConfig supervisionConfig) {
     this.orchestrationService = orchestrationService;
     this.supervisionEventService = supervisionEventService;
+    this.recognitionJobService = recognitionJobService;
+    this.supervisionConfig = supervisionConfig;
   }
 
   @PostMapping("/recognize")
   public ApiResponse<ChatResponse> recognize(@RequestBody ChatRecognizeRequest request) {
     return ApiResponse.ok(orchestrationService.recognize(request));
+  }
+
+  @PostMapping("/recognition-jobs")
+  public ApiResponse<RecognitionJobView> submitRecognitionJob(
+      @RequestBody ChatRecognizeRequest request) {
+    return ApiResponse.ok(recognitionJobService.submit(AuthContext.username(), request));
+  }
+
+  @GetMapping("/recognition-jobs/{jobId}")
+  public ApiResponse<RecognitionJobView> getRecognitionJob(@PathVariable("jobId") String jobId) {
+    return ApiResponse.ok(recognitionJobService.getOwned(jobId, AuthContext.username()));
+  }
+
+  @PostMapping("/recognition-jobs/{jobId}/cancel")
+  public ApiResponse<RecognitionJobView> cancelRecognitionJob(@PathVariable("jobId") String jobId) {
+    return ApiResponse.ok(recognitionJobService.cancelOwned(jobId, AuthContext.username()));
+  }
+
+  @GetMapping("/task-runtime-config")
+  public ApiResponse<ChatTaskRuntimeConfigResponse> taskRuntimeConfig() {
+    return ApiResponse.ok(new ChatTaskRuntimeConfigResponse(
+        supervisionConfig.unfinishedTaskCap(),
+        supervisionConfig.recentTaskDisplayCap()));
   }
 
   @GetMapping("/reply-tasks")

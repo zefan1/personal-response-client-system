@@ -9,7 +9,6 @@ import java.nio.file.StandardOpenOption;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
@@ -125,14 +124,7 @@ public class TemporaryRecognitionImageStore {
 
   public void cleanupExpired(Instant now) {
     Instant cutoff = now.minusSeconds(ttlSeconds());
-    Path currentRoot = root();
-    cleanupDirectory(currentRoot, cutoff);
-    activePaths.values().stream()
-        .map(Path::getParent)
-        .filter(Objects::nonNull)
-        .filter(path -> !path.equals(currentRoot))
-        .distinct()
-        .forEach(path -> cleanupDirectory(path, cutoff));
+    cleanupApplicationTempRoot(cutoff);
   }
 
   @Scheduled(fixedDelay = 60_000)
@@ -145,6 +137,23 @@ public class TemporaryRecognitionImageStore {
       return;
     }
     try (Stream<Path> files = Files.list(root)) {
+      files.filter(Files::isRegularFile)
+          .filter(this::isManagedJpeg)
+          .filter(path -> modifiedAt(path).compareTo(cutoff) <= 0)
+          .forEach(path -> {
+            deleteQuietly(path);
+            activePaths.entrySet().removeIf(entry -> entry.getValue().equals(path));
+          });
+    } catch (IOException ignored) {
+      // Recognition jobs delete their own image in a finally block; scheduled cleanup is a fallback.
+    }
+  }
+
+  private void cleanupApplicationTempRoot(Instant cutoff) {
+    if (!Files.isDirectory(applicationTempRoot)) {
+      return;
+    }
+    try (Stream<Path> files = Files.walk(applicationTempRoot)) {
       files.filter(Files::isRegularFile)
           .filter(this::isManagedJpeg)
           .filter(path -> modifiedAt(path).compareTo(cutoff) <= 0)

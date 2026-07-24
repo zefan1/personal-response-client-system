@@ -10,11 +10,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.chat.AiUsageRequest;
 import com.privateflow.modules.api.chat.ChatOrchestrationService;
 import com.privateflow.modules.api.chat.ChatReplySource;
 import com.privateflow.modules.api.chat.ChatRecognizeRequest;
 import com.privateflow.modules.api.chat.ChatResponse;
-import com.privateflow.modules.api.chat.AiUsageRequest;
+import com.privateflow.modules.api.chat.RecognitionJobService;
+import com.privateflow.modules.api.chat.RecognitionJobStatus;
+import com.privateflow.modules.api.chat.RecognitionJobView;
 import com.privateflow.modules.api.chat.GenerateRequest;
 import com.privateflow.modules.api.chat.PendingReplyTaskSelectRequest;
 import com.privateflow.modules.api.chat.PendingReplyTaskStatus;
@@ -23,7 +26,9 @@ import com.privateflow.modules.api.chat.RegenerateRequest;
 import com.privateflow.modules.api.chat.SendConfirmRequest;
 import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.Suggestion;
+import com.privateflow.modules.supervision.SupervisionConfig;
 import com.privateflow.modules.supervision.SupervisionEventService;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -38,14 +43,22 @@ class ChatControllerTest {
 
   private ChatOrchestrationService service;
   private SupervisionEventService supervisionEventService;
+  private RecognitionJobService recognitionJobService;
+  private SupervisionConfig supervisionConfig;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     service = org.mockito.Mockito.mock(ChatOrchestrationService.class);
     supervisionEventService = org.mockito.Mockito.mock(SupervisionEventService.class);
+    recognitionJobService = org.mockito.Mockito.mock(RecognitionJobService.class);
+    supervisionConfig = org.mockito.Mockito.mock(SupervisionConfig.class);
     mockMvc = MockMvcBuilders
-        .standaloneSetup(new ChatController(service, supervisionEventService))
+        .standaloneSetup(new ChatController(
+            service,
+            supervisionEventService,
+            recognitionJobService,
+            supervisionConfig))
         .setControllerAdvice(new GlobalApiExceptionHandler())
         .build();
   }
@@ -68,6 +81,47 @@ class ChatControllerTest {
     org.junit.jupiter.api.Assertions.assertEquals("hello", captor.getValue().textMessage());
     org.junit.jupiter.api.Assertions.assertEquals("Alice", captor.getValue().customerIdentifier());
     org.junit.jupiter.api.Assertions.assertEquals(1, captor.getValue().rawMessages().size());
+  }
+
+  @Test
+  void recognitionJobEndpointsSubmitPollAndCancelOnlyTheCallerJob() throws Exception {
+    RecognitionJobView submitted = recognitionJob(RecognitionJobStatus.QUEUED);
+    RecognitionJobView ready = recognitionJob(RecognitionJobStatus.READY);
+    RecognitionJobView cancelled = recognitionJob(RecognitionJobStatus.CANCELLED);
+    when(recognitionJobService.submit(org.mockito.ArgumentMatchers.eq("SYSTEM"), any()))
+        .thenReturn(submitted);
+    when(recognitionJobService.getOwned("job-1", "SYSTEM")).thenReturn(ready);
+    when(recognitionJobService.cancelOwned("job-1", "SYSTEM")).thenReturn(cancelled);
+
+    mockMvc.perform(post("/api/v1/chat/recognition-jobs")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"imageBase64\":\"c2NyZWVuc2hvdA==\",\"replySessionId\":\"reply-1\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.jobId").value("job-1"))
+        .andExpect(jsonPath("$.data.status").value("QUEUED"));
+
+    mockMvc.perform(get("/api/v1/chat/recognition-jobs/job-1"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("READY"));
+
+    mockMvc.perform(post("/api/v1/chat/recognition-jobs/job-1/cancel"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+
+    verify(recognitionJobService).submit(org.mockito.ArgumentMatchers.eq("SYSTEM"), any());
+    verify(recognitionJobService).getOwned("job-1", "SYSTEM");
+    verify(recognitionJobService).cancelOwned("job-1", "SYSTEM");
+  }
+
+  @Test
+  void taskRuntimeConfigIsReadOnlyAndDoesNotExposeAnEmployeeConfigurationMutation() throws Exception {
+    when(supervisionConfig.unfinishedTaskCap()).thenReturn(20);
+    when(supervisionConfig.recentTaskDisplayCap()).thenReturn(30);
+
+    mockMvc.perform(get("/api/v1/chat/task-runtime-config"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.unfinishedTaskCap").value(20))
+        .andExpect(jsonPath("$.data.recentTaskDisplayCap").value(30));
   }
 
   @Test
@@ -268,5 +322,17 @@ class ChatControllerTest {
         savedResponse,
         null,
         LocalDateTime.of(2026, 7, 23, 10, 0));
+  }
+
+  private RecognitionJobView recognitionJob(RecognitionJobStatus status) {
+    return new RecognitionJobView(
+        "job-1",
+        "reply-1",
+        status,
+        null,
+        status == RecognitionJobStatus.READY ? response("18800001111", "Alice", false) : null,
+        null,
+        Instant.parse("2026-07-24T10:00:00Z"),
+        Instant.parse("2026-07-24T10:00:00Z"));
   }
 }

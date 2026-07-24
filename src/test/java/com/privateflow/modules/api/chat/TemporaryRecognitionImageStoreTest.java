@@ -95,6 +95,27 @@ class TemporaryRecognitionImageStoreTest {
   }
 
   @Test
+  void cleanupRemovesExpiredFilesFromAnOldControlledDirectoryAfterRestartAndRootChange()
+      throws Exception {
+    String oldToken = UUID.randomUUID().toString();
+    Path oldFile = temporaryDirectory.resolve("previous-root").resolve(oldToken + ".jpg");
+    Files.createDirectories(oldFile.getParent());
+    Files.write(oldFile, new byte[] {1, 2, 3});
+    Files.setLastModifiedTime(oldFile, FileTime.from(NOW.minusSeconds(600)));
+    configValues.put("chat.recognition_temp_root", "new-root");
+
+    TemporaryRecognitionImageStore restartedStore = new TemporaryRecognitionImageStore(
+        configRepository,
+        imageConfigProvider,
+        Clock.fixed(NOW, ZoneOffset.UTC),
+        temporaryDirectory);
+
+    restartedStore.cleanupExpired(NOW);
+
+    assertThat(Files.exists(oldFile)).isFalse();
+  }
+
+  @Test
   void enforcesSingleImageAndTotalTemporaryCapacity() {
     configValues.put("chat.recognition_temp_max_total_bytes", "4");
 
