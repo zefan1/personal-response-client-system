@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.function.LongSupplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -34,6 +35,7 @@ public class WecomSmartSheetApiClient {
   private final HttpClient httpClient;
   private final LongSupplier ticker;
 
+  @Autowired
   public WecomSmartSheetApiClient(
       ObjectMapper objectMapper,
       WecomSmartSheetConfig config,

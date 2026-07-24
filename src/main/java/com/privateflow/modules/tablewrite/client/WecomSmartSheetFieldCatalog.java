@@ -14,6 +14,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -30,6 +31,7 @@ public class WecomSmartSheetFieldCatalog {
   private volatile Snapshot snapshot;
   private InFlight inFlight;
 
+  @Autowired
   public WecomSmartSheetFieldCatalog(WecomSmartSheetApiClient apiClient, WecomSmartSheetConfig config) {
     this(apiClient, config, Clock.systemUTC(), System::nanoTime);
   }

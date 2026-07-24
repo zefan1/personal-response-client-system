@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.LongSupplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -36,6 +37,7 @@ public class WecomAccessTokenProvider {
   private final AtomicReference<Token> cachedToken = new AtomicReference<>();
   private final ReentrantLock refreshLock = new ReentrantLock();
 
+  @Autowired
   public WecomAccessTokenProvider(ObjectMapper objectMapper, WecomSmartSheetConfig config) {
     this(objectMapper, config, HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(3))
