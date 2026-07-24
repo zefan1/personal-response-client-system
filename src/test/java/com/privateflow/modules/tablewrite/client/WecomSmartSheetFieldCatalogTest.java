@@ -23,11 +23,12 @@ class WecomSmartSheetFieldCatalogTest {
   @Test
   void loadsOfficialVisibleFieldShapeAndRejectsFormulaWrites() throws Exception {
     ScriptedClient api = client("""
-        {"errcode":0,"total":5,"fields":[
+        {"errcode":0,"total":6,"fields":[
           {"field_id":"f-text","field_title":"Name","field_type":"FIELD_TYPE_TEXT"},
           {"field_id":"f-phone","field_title":"Phone","field_type":"FIELD_TYPE_PHONE_NUMBER"},
           {"field_id":"f-date","field_title":"Follow up","field_type":"FIELD_TYPE_DATE_TIME","property_date_time":{"format":"yyyy-mm-dd hh:mm"}},
-          {"field_id":"f-tier","field_title":"Tier","field_type":"FIELD_TYPE_SINGLE_SELECT","property_single_select":{"options":[{"id":"o-vip","text":"VIP","style":"blue"}]}},
+          {"field_id":"f-tier","field_title":"Tier","field_type":"FIELD_TYPE_SINGLE_SELECT","property_single_select":{"options":[{"id":"opt1","text":"\u8ddf\u8fdb\u4e2d","style":1}]}},
+          {"field_id":"f-tags","field_title":"Tags","field_type":"FIELD_TYPE_SELECT","property_select":{"options":[{"id":"opt2","text":"\u91cd\u70b9","style":1}]}},
           {"field_id":"f-formula","field_title":"Score","field_type":"FIELD_TYPE_FORMULA"}
         ]}""");
     WecomSmartSheetFieldCatalog catalog = catalog(api, Clock.systemUTC());
@@ -44,7 +45,10 @@ class WecomSmartSheetFieldCatalogTest {
     assertThat(fields.get("Name").fieldId()).isEqualTo("f-text");
     assertThat(fields.get("Phone").writable()).isTrue();
     assertThat(fields.get("Follow up").dateTimeIncludesTime()).isTrue();
-    assertThat(fields.get("Tier").optionId(" VIP ")).contains("o-vip");
+    assertThat(api.lastResponse.at("/fields/3/property_single_select/options/0/style").isIntegralNumber()).isTrue();
+    assertThat(api.lastResponse.at("/fields/3/property_single_select/options/0/style").intValue()).isEqualTo(1);
+    assertThat(fields.get("Tier").optionId(" \u8ddf\u8fdb\u4e2d ")).contains("opt1");
+    assertThat(fields.get("Tags").optionId("\u91cd\u70b9")).contains("opt2");
     assertThat(fields.get("Score").writable()).isFalse();
     assertThatThrownBy(() -> catalog.requireWritable("Score", Duration.ofSeconds(1)))
         .hasMessageContaining("Score");
@@ -74,6 +78,26 @@ class WecomSmartSheetFieldCatalogTest {
     assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("First");
     assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("First");
     clock.advance(Duration.ofMinutes(5));
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Second");
+    assertThat(api.bodies).hasSize(2);
+  }
+
+  @Test
+  void startsTheCacheLifetimeAfterTheSuccessfulLoadCompletes() throws Exception {
+    MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+    ScriptedClient api = client(
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"First\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f2\",\"field_title\":\"Second\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}");
+    api.advanceClockBeforeFirstResponse(clock, Duration.ofMinutes(4));
+    WecomSmartSheetFieldCatalog catalog = catalog(api, clock);
+
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("First");
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("First");
+    assertThat(api.bodies).hasSize(1);
+    clock.advance(Duration.ofMinutes(4).plusSeconds(59));
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("First");
+    assertThat(api.bodies).hasSize(1);
+    clock.advance(Duration.ofSeconds(1));
     assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKey("Second");
     assertThat(api.bodies).hasSize(2);
   }
@@ -121,6 +145,8 @@ class WecomSmartSheetFieldCatalogTest {
   private static final class ScriptedClient extends WecomSmartSheetApiClient {
     private final ArrayDeque<JsonNode> responses = new ArrayDeque<>();
     private final List<JsonNode> bodies = new ArrayList<>();
+    private JsonNode lastResponse;
+    private Runnable beforeFirstResponse = () -> {};
 
     private ScriptedClient(String... source) throws Exception {
       super(JSON, config(), null);
@@ -131,7 +157,15 @@ class WecomSmartSheetFieldCatalogTest {
 
     @Override public JsonNode post(String operation, Object body, Duration timeout) {
       bodies.add(JSON.valueToTree(body));
-      return responses.removeFirst();
+      if (bodies.size() == 1) {
+        beforeFirstResponse.run();
+      }
+      lastResponse = responses.removeFirst();
+      return lastResponse;
+    }
+
+    void advanceClockBeforeFirstResponse(MutableClock clock, Duration duration) {
+      beforeFirstResponse = () -> clock.advance(duration);
     }
   }
 

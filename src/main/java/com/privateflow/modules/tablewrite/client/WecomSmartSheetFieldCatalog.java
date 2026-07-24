@@ -43,7 +43,7 @@ public class WecomSmartSheetFieldCatalog {
         return current.fields();
       }
       Map<String, WecomSmartSheetField> fields = load(timeout);
-      Snapshot loaded = new Snapshot(Map.copyOf(fields), now);
+      Snapshot loaded = new Snapshot(Map.copyOf(fields), clock.instant());
       snapshot = loaded;
       return loaded.fields();
     }

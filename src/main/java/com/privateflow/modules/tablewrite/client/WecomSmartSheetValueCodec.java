@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -20,6 +21,8 @@ import org.springframework.stereotype.Component;
 public class WecomSmartSheetValueCodec {
 
   private static final ObjectMapper JSON = new ObjectMapper();
+  private static final DateTimeFormatter DATE_TIME_FORMATTER =
+      DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss");
   private final ZoneId zoneId;
 
   public WecomSmartSheetValueCodec(WecomSmartSheetConfig config) {
@@ -86,7 +89,7 @@ public class WecomSmartSheetValueCodec {
     try {
       long millis = value.isIntegralNumber() ? value.longValue() : Long.parseLong(value.textValue());
       LocalDateTime local = LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), zoneId);
-      return field.dateTimeIncludesTime() ? local.withNano(0).toString() : local.toLocalDate().toString();
+      return field.dateTimeIncludesTime() ? DATE_TIME_FORMATTER.format(local) : local.toLocalDate().toString();
     } catch (RuntimeException ex) {
       return compact(value);
     }
