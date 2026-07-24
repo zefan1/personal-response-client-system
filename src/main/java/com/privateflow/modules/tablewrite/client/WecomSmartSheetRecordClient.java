@@ -16,6 +16,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -87,34 +89,42 @@ public class WecomSmartSheetRecordClient {
 
   public String createRow(String sourceTable, Map<String, Object> fields, Duration timeout) {
     validateWrite(sourceTable, fields, timeout);
+    long deadline = deadline(timeout);
     String uniqueTitle = config.uniqueFieldTitle();
     Object uniqueValue = fields.get(uniqueTitle);
     if (!(uniqueValue instanceof String exactValue) || exactValue.isBlank()) {
       throw new IllegalArgumentException("A nonblank value is required for unique field: " + uniqueTitle);
     }
-    Map<String, JsonNode> encoded = encodeFields(fields, timeout);
-    WecomSmartSheetField uniqueField = fieldCatalog.requireWritable(uniqueTitle, timeout);
     String lockKey = normalizedLockKey(exactValue);
     CreateLock lock = acquireCreateLock(lockKey);
+    boolean locked = false;
     try {
-      synchronized (lock) {
-        Match match = exactMatch(uniqueField, exactValue, timeout);
-        if (match.count() > 1) {
-          throw invalid(GET_OPERATION, "multiple exact unique-field matches were found");
-        }
-        if (match.count() == 1) {
-          lock.confirmedRecordId = match.recordId();
-          return match.recordId();
-        }
-        if (lock.confirmedRecordId != null) {
-          return lock.confirmedRecordId;
-        }
-        String createdRecordId = add(encoded, timeout);
-        lock.confirmedRecordId = createdRecordId;
-        return createdRecordId;
+      locked = tryCreateLock(lock, deadline);
+      Map<String, JsonNode> encoded = encodeFieldsUntil(fields, deadline);
+      WecomSmartSheetField uniqueField =
+          fieldCatalog.requireWritable(uniqueTitle, remaining(deadline, ADD_OPERATION));
+      Match match = exactMatch(uniqueField, exactValue, deadline);
+      if (match.count() > 1) {
+        throw invalid(GET_OPERATION, "multiple exact unique-field matches were found");
       }
+      if (match.count() == 1) {
+        lock.confirmedRecordId = match.recordId();
+        return match.recordId();
+      }
+      if (lock.confirmedRecordId != null) {
+        return lock.confirmedRecordId;
+      }
+      String createdRecordId = add(encoded, remaining(deadline, ADD_OPERATION));
+      lock.confirmedRecordId = createdRecordId;
+      return createdRecordId;
     } finally {
-      releaseCreateLock(lockKey, lock);
+      try {
+        if (locked) {
+          lock.coordination.unlock();
+        }
+      } finally {
+        releaseCreateLock(lockKey, lock);
+      }
     }
   }
 
@@ -150,7 +160,7 @@ public class WecomSmartSheetRecordClient {
     return request;
   }
 
-  private Match exactMatch(WecomSmartSheetField uniqueField, String exactValue, Duration timeout) {
+  private Match exactMatch(WecomSmartSheetField uniqueField, String exactValue, long deadline) {
     Set<String> recordIds = new HashSet<>();
     Long expectedTotal = null;
     long loadedCount = 0;
@@ -159,7 +169,8 @@ public class WecomSmartSheetRecordClient {
     String matchedRecordId = null;
 
     for (int pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
-      JsonNode response = apiClient.post(GET_OPERATION, lookupRequest(uniqueField.fieldId(), offset), timeout);
+      JsonNode response = apiClient.post(
+          GET_OPERATION, lookupRequest(uniqueField.fieldId(), offset), remaining(deadline, GET_OPERATION));
       Page page = page(response);
       expectedTotal = expectedTotal(expectedTotal, page.total());
       loadedCount = add(loadedCount, page.records().size());
@@ -237,6 +248,19 @@ public class WecomSmartSheetRecordClient {
     return encoded;
   }
 
+  private Map<String, JsonNode> encodeFieldsUntil(Map<String, Object> fields, long deadline) {
+    Map<String, JsonNode> encoded = new LinkedHashMap<>();
+    for (Map.Entry<String, Object> entry : fields.entrySet()) {
+      if (entry.getValue() == null) {
+        continue;
+      }
+      WecomSmartSheetField field =
+          fieldCatalog.requireWritable(entry.getKey(), remaining(deadline, ADD_OPERATION));
+      encoded.put(field.fieldId(), valueCodec.encode(field, entry.getValue()));
+    }
+    return encoded;
+  }
+
   private String add(Map<String, JsonNode> encoded, Duration timeout) {
     JsonNode response = apiClient.post(ADD_OPERATION, writeRequest(Map.of("values", encoded)), timeout);
     if (response == null || !response.isObject()) {
@@ -292,6 +316,37 @@ public class WecomSmartSheetRecordClient {
       }
     }
     return normalized.toString();
+  }
+
+  private static long deadline(Duration timeout) {
+    long timeoutNanos;
+    try {
+      timeoutNanos = timeout.toNanos();
+    } catch (ArithmeticException ex) {
+      timeoutNanos = Long.MAX_VALUE;
+    }
+    return System.nanoTime() + timeoutNanos;
+  }
+
+  private static Duration remaining(long deadline, String operation) {
+    long remainingNanos = deadline - System.nanoTime();
+    if (remainingNanos <= 0) {
+      throw invalid(operation, "request timeout expired");
+    }
+    return Duration.ofNanos(remainingNanos);
+  }
+
+  private static boolean tryCreateLock(CreateLock lock, long deadline) {
+    try {
+      long remainingNanos = remaining(deadline, ADD_OPERATION).toNanos();
+      if (!lock.coordination.tryLock(remainingNanos, TimeUnit.NANOSECONDS)) {
+        throw invalid(ADD_OPERATION, "duplicate-write coordination timed out");
+      }
+      return true;
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw invalid(ADD_OPERATION, "duplicate-write coordination was interrupted");
+    }
   }
 
   private CreateLock acquireCreateLock(String lockKey) {
@@ -472,6 +527,7 @@ public class WecomSmartSheetRecordClient {
   private record Match(int count, String recordId) {}
 
   private static final class CreateLock {
+    private final ReentrantLock coordination = new ReentrantLock();
     private int participants;
     private volatile boolean retired;
     private String confirmedRecordId;

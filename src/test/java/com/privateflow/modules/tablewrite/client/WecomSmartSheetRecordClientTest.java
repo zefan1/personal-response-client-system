@@ -14,12 +14,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.AbstractMap;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -355,13 +357,14 @@ class WecomSmartSheetRecordClientTest {
     AtomicReference<Throwable> firstFailure = new AtomicReference<>();
     AtomicReference<Throwable> secondFailure = new AtomicReference<>();
     Thread first = createThread("create-first", client, firstResult, firstFailure);
-    Thread second = createThread("create-second", client, secondResult, secondFailure);
+    SignalingFields secondFields = new SignalingFields(Map.of("Phone", "13800000011"), false);
+    Thread second = createThread("create-second", client, secondFields, TIMEOUT, secondResult, secondFailure);
 
     try {
       first.start();
       assertThat(api.addStarted.await(2, TimeUnit.SECONDS)).isTrue();
       second.start();
-      assertThat(awaitingCreateLock(second)).isTrue();
+      assertThat(secondFields.uniqueRead.await(2, TimeUnit.SECONDS)).isTrue();
       api.releaseAdd.countDown();
       first.join(2_000);
       second.join(2_000);
@@ -394,20 +397,24 @@ class WecomSmartSheetRecordClientTest {
     AtomicReference<Throwable> secondFailure = new AtomicReference<>();
     AtomicReference<Throwable> thirdFailure = new AtomicReference<>();
     Thread first = createThread("create-normalized-first", client, "138-0000-0013", firstResult, firstFailure);
-    Thread second = createThread("create-normalized-second", client, "13800000013", secondResult, secondFailure);
-    Thread third = createThread("create-normalized-third", client, "13800000013", thirdResult, thirdFailure);
+    SignalingFields secondFields = new SignalingFields(Map.of("Phone", "13800000013"), false);
+    SignalingFields thirdFields = new SignalingFields(Map.of("Phone", "13800000013"), false);
+    Thread second = createThread(
+        "create-normalized-second", client, secondFields, TIMEOUT, secondResult, secondFailure);
+    Thread third = createThread(
+        "create-normalized-third", client, thirdFields, TIMEOUT, thirdResult, thirdFailure);
 
     try {
       first.start();
       assertThat(api.firstAddStarted.await(2, TimeUnit.SECONDS)).isTrue();
       second.start();
-      assertThat(awaitingCreateLock(second)).isTrue();
+      assertThat(secondFields.uniqueRead.await(2, TimeUnit.SECONDS)).isTrue();
       api.releaseFirstAdd.countDown();
       first.join(2_000);
       assertThat(first.isAlive()).isFalse();
       assertThat(api.secondLookupStarted.await(2, TimeUnit.SECONDS)).isTrue();
       third.start();
-      assertThat(awaitingCreateLock(third)).isTrue();
+      assertThat(thirdFields.uniqueRead.await(2, TimeUnit.SECONDS)).isTrue();
       api.releaseSecondLookup.countDown();
       second.join(2_000);
       third.join(2_000);
@@ -445,16 +452,18 @@ class WecomSmartSheetRecordClientTest {
     AtomicReference<Throwable> secondFailure = new AtomicReference<>();
     AtomicReference<Throwable> thirdFailure = new AtomicReference<>();
     Thread first = createThread("create-lag-first", client, "138-0000-0015", firstResult, firstFailure);
-    Thread second = createThread("create-lag-second", client, "13800000015", secondResult, secondFailure);
-    Thread third = createThread("create-lag-third", client, "(138) 0000 0015", thirdResult, thirdFailure);
+    SignalingFields secondFields = new SignalingFields(Map.of("Phone", "13800000015"), false);
+    SignalingFields thirdFields = new SignalingFields(Map.of("Phone", "(138) 0000 0015"), false);
+    Thread second = createThread("create-lag-second", client, secondFields, TIMEOUT, secondResult, secondFailure);
+    Thread third = createThread("create-lag-third", client, thirdFields, TIMEOUT, thirdResult, thirdFailure);
 
     try {
       first.start();
       assertThat(api.firstAddStarted.await(2, TimeUnit.SECONDS)).isTrue();
       second.start();
       third.start();
-      assertThat(awaitingCreateLock(second)).isTrue();
-      assertThat(awaitingCreateLock(third)).isTrue();
+      assertThat(secondFields.uniqueRead.await(2, TimeUnit.SECONDS)).isTrue();
+      assertThat(thirdFields.uniqueRead.await(2, TimeUnit.SECONDS)).isTrue();
       api.releaseFirstAdd.countDown();
       first.join(2_000);
       second.join(2_000);
@@ -479,6 +488,195 @@ class WecomSmartSheetRecordClientTest {
       first.join(2_000);
       second.join(2_000);
       third.join(2_000);
+    }
+  }
+
+  @Test
+  void registersNormalizedParticipantBeforeEncodingCanPause() throws Exception {
+    VisibilityLagApi api = new VisibilityLagApi();
+    WecomSmartSheetRecordClient client = client(api);
+    AtomicReference<String> firstResult = new AtomicReference<>();
+    AtomicReference<String> secondResult = new AtomicReference<>();
+    AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+    AtomicReference<Throwable> secondFailure = new AtomicReference<>();
+    SignalingFields secondFields = new SignalingFields(Map.of("Phone", "13800000016"), true);
+    Thread first = createThread(
+        "create-encoding-first", client, "138-0000-0016", firstResult, firstFailure);
+    Thread second = createThread(
+        "create-encoding-second", client, secondFields, TIMEOUT, secondResult, secondFailure);
+
+    try {
+      first.start();
+      assertThat(api.firstAddStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      second.start();
+      assertThat(secondFields.uniqueRead.await(2, TimeUnit.SECONDS)).isTrue();
+      boolean encodingPausedBeforeFirstCompleted =
+          secondFields.encodingStarted.await(500, TimeUnit.MILLISECONDS);
+      api.releaseFirstAdd.countDown();
+      first.join(2_000);
+      assertThat(first.isAlive()).isFalse();
+      if (!encodingPausedBeforeFirstCompleted) {
+        assertThat(secondFields.encodingStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      }
+      secondFields.releaseEncoding.countDown();
+      second.join(2_000);
+
+      assertThat(second.isAlive()).isFalse();
+      assertThat(firstFailure.get()).isNull();
+      assertThat(secondFailure.get()).isNull();
+      assertThat(firstResult.get()).isEqualTo("r-created");
+      assertThat(secondResult.get()).isEqualTo("r-created");
+      assertThat(api.recordCalls.get()).isEqualTo(2);
+      assertThat(api.addCalls.get()).isEqualTo(1);
+    } finally {
+      api.releaseFirstAdd.countDown();
+      secondFields.releaseEncoding.countDown();
+      first.interrupt();
+      second.interrupt();
+      first.join(2_000);
+      second.join(2_000);
+    }
+  }
+
+  @Test
+  void timesOutWaitingForCreateLockAndAllowsLaterRequest() throws Exception {
+    ConcurrentCreateApi api = new ConcurrentCreateApi();
+    WecomSmartSheetRecordClient client = client(api);
+    AtomicReference<String> holderResult = new AtomicReference<>();
+    AtomicReference<Throwable> holderFailure = new AtomicReference<>();
+    AtomicReference<Throwable> waiterFailure = new AtomicReference<>();
+    AtomicReference<Duration> waiterElapsed = new AtomicReference<>();
+    SignalingFields waiterFields = new SignalingFields(
+        Map.of("Phone", "13800000011", "Name", "private-timeout-value"), false);
+    Thread holder = createThread("create-timeout-holder", client, holderResult, holderFailure);
+    Thread waiter = new Thread(() -> {
+      long started = System.nanoTime();
+      try {
+        client.createRow("Customers", waiterFields, Duration.ofMillis(100));
+      } catch (Throwable ex) {
+        waiterFailure.set(ex);
+      } finally {
+        waiterElapsed.set(Duration.ofNanos(System.nanoTime() - started));
+      }
+    }, "create-timeout-waiter");
+
+    try {
+      holder.start();
+      assertThat(api.addStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      waiter.start();
+      assertThat(waiterFields.uniqueRead.await(2, TimeUnit.SECONDS)).isTrue();
+      waiter.join(1_000);
+
+      assertThat(waiter.isAlive()).isFalse();
+      assertThat(waiterFailure.get()).isInstanceOf(WecomSmartSheetException.class);
+      assertSafeThrowable(waiterFailure.get(), "13800000011", "private-timeout-value", "r-created");
+      assertThat(waiterElapsed.get()).isLessThan(Duration.ofSeconds(1));
+      assertThat(api.addCalls.get()).isEqualTo(1);
+
+      api.releaseAdd.countDown();
+      holder.join(2_000);
+      assertThat(holder.isAlive()).isFalse();
+      assertThat(holderFailure.get()).isNull();
+      assertThat(holderResult.get()).isEqualTo("r-created");
+      assertThat(client.createRow("Customers", Map.of("Phone", "13800000011"), TIMEOUT))
+          .isEqualTo("r-created");
+    } finally {
+      api.releaseAdd.countDown();
+      holder.interrupt();
+      waiter.interrupt();
+      holder.join(2_000);
+      waiter.join(2_000);
+    }
+  }
+
+  @Test
+  void interruptingCreateLockWaiterRestoresFlagAndAllowsLaterRequest() throws Exception {
+    ConcurrentCreateApi api = new ConcurrentCreateApi();
+    WecomSmartSheetRecordClient client = client(api);
+    AtomicReference<String> holderResult = new AtomicReference<>();
+    AtomicReference<Throwable> holderFailure = new AtomicReference<>();
+    AtomicReference<Throwable> waiterFailure = new AtomicReference<>();
+    AtomicBoolean interruptRestored = new AtomicBoolean();
+    SignalingFields waiterFields = new SignalingFields(
+        Map.of("Phone", "13800000011", "Name", "private-interrupt-value"), false);
+    Thread holder = createThread("create-interrupt-holder", client, holderResult, holderFailure);
+    Thread waiter = new Thread(() -> {
+      try {
+        client.createRow("Customers", waiterFields, TIMEOUT);
+      } catch (Throwable ex) {
+        waiterFailure.set(ex);
+        interruptRestored.set(Thread.currentThread().isInterrupted());
+      }
+    }, "create-interrupt-waiter");
+
+    try {
+      holder.start();
+      assertThat(api.addStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      waiter.start();
+      assertThat(waiterFields.uniqueRead.await(2, TimeUnit.SECONDS)).isTrue();
+      waiter.interrupt();
+      waiter.join(1_000);
+
+      assertThat(waiter.isAlive()).isFalse();
+      assertThat(waiterFailure.get()).isInstanceOf(WecomSmartSheetException.class);
+      assertThat(interruptRestored.get()).isTrue();
+      assertSafeThrowable(waiterFailure.get(), "13800000011", "private-interrupt-value", "r-created");
+      assertThat(api.addCalls.get()).isEqualTo(1);
+
+      api.releaseAdd.countDown();
+      holder.join(2_000);
+      assertThat(holder.isAlive()).isFalse();
+      assertThat(holderFailure.get()).isNull();
+      assertThat(holderResult.get()).isEqualTo("r-created");
+      assertThat(client.createRow("Customers", Map.of("Phone", "13800000011"), TIMEOUT))
+          .isEqualTo("r-created");
+    } finally {
+      api.releaseAdd.countDown();
+      holder.interrupt();
+      waiter.interrupt();
+      holder.join(2_000);
+      waiter.join(2_000);
+    }
+  }
+
+  @Test
+  void passesOnlyRemainingDeadlineBudgetAfterWaitingForCreateLock() throws Exception {
+    ConcurrentCreateApi api = new ConcurrentCreateApi();
+    WecomSmartSheetRecordClient client = client(api);
+    Duration waiterTimeout = Duration.ofMillis(800);
+    AtomicReference<String> holderResult = new AtomicReference<>();
+    AtomicReference<String> waiterResult = new AtomicReference<>();
+    AtomicReference<Throwable> holderFailure = new AtomicReference<>();
+    AtomicReference<Throwable> waiterFailure = new AtomicReference<>();
+    SignalingFields waiterFields = new SignalingFields(Map.of("Phone", "13800000011"), false);
+    Thread holder = createThread("create-budget-holder", client, holderResult, holderFailure);
+    Thread waiter = createThread(
+        "create-budget-waiter", client, waiterFields, waiterTimeout, waiterResult, waiterFailure);
+
+    try {
+      holder.start();
+      assertThat(api.addStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      waiter.start();
+      assertThat(waiterFields.uniqueRead.await(2, TimeUnit.SECONDS)).isTrue();
+      waiterFields.encodingStarted.await(200, TimeUnit.MILLISECONDS);
+      api.releaseAdd.countDown();
+      holder.join(2_000);
+      waiter.join(2_000);
+
+      assertThat(holder.isAlive()).isFalse();
+      assertThat(waiter.isAlive()).isFalse();
+      assertThat(holderFailure.get()).isNull();
+      assertThat(waiterFailure.get()).isNull();
+      assertThat(holderResult.get()).isEqualTo("r-created");
+      assertThat(waiterResult.get()).isEqualTo("r-created");
+      assertThat(api.recordTimeouts).hasSize(2);
+      assertThat(api.recordTimeouts.get(1)).isPositive().isLessThan(waiterTimeout);
+    } finally {
+      api.releaseAdd.countDown();
+      holder.interrupt();
+      waiter.interrupt();
+      holder.join(2_000);
+      waiter.join(2_000);
     }
   }
 
@@ -607,14 +805,16 @@ class WecomSmartSheetRecordClientTest {
   }
 
   private static void assertSafeFailure(ThrowingRunnable action, String... pii) {
-    assertThatThrownBy(action::run).satisfies(error -> {
-      StringWriter output = new StringWriter();
-      error.printStackTrace(new PrintWriter(output));
-      for (String sensitive : pii) {
-        assertThat(error.getMessage()).doesNotContain(sensitive);
-        assertThat(output.toString()).doesNotContain(sensitive);
-      }
-    });
+    assertThatThrownBy(action::run).satisfies(error -> assertSafeThrowable(error, pii));
+  }
+
+  private static void assertSafeThrowable(Throwable error, String... pii) {
+    StringWriter output = new StringWriter();
+    error.printStackTrace(new PrintWriter(output));
+    for (String sensitive : pii) {
+      assertThat(error.getMessage()).doesNotContain(sensitive);
+      assertThat(output.toString()).doesNotContain(sensitive);
+    }
   }
 
   private static WecomSmartSheetRecordClient client(WecomSmartSheetApiClient api) {
@@ -687,34 +887,64 @@ class WecomSmartSheetRecordClientTest {
       String phone,
       AtomicReference<String> result,
       AtomicReference<Throwable> failure) {
+    return createThread(name, client, Map.of("Phone", phone), TIMEOUT, result, failure);
+  }
+
+  private static Thread createThread(
+      String name,
+      WecomSmartSheetRecordClient client,
+      Map<String, Object> fields,
+      Duration timeout,
+      AtomicReference<String> result,
+      AtomicReference<Throwable> failure) {
     return new Thread(() -> {
       try {
-        result.set(client.createRow("Customers", Map.of("Phone", phone), TIMEOUT));
+        result.set(client.createRow("Customers", fields, timeout));
       } catch (Throwable ex) {
         failure.set(ex);
       }
     }, name);
   }
 
-  private static boolean awaitingCreateLock(Thread thread) {
-    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-    while (System.nanoTime() < deadline) {
-      if (thread.getState() == Thread.State.BLOCKED) {
-        for (StackTraceElement frame : thread.getStackTrace()) {
-          if (frame.getClassName().equals(WecomSmartSheetRecordClient.class.getName())
-              && frame.getMethodName().equals("createRow")) {
-            return true;
-          }
-        }
-      }
-      Thread.onSpinWait();
-    }
-    return false;
-  }
-
   @FunctionalInterface
   private interface ThrowingRunnable {
     void run() throws Exception;
+  }
+
+  private static final class SignalingFields extends AbstractMap<String, Object> {
+    private final Map<String, Object> delegate;
+    private final boolean blockEncoding;
+    private final CountDownLatch uniqueRead = new CountDownLatch(1);
+    private final CountDownLatch encodingStarted = new CountDownLatch(1);
+    private final CountDownLatch releaseEncoding = new CountDownLatch(1);
+
+    private SignalingFields(Map<String, Object> delegate, boolean blockEncoding) {
+      this.delegate = Map.copyOf(delegate);
+      this.blockEncoding = blockEncoding;
+    }
+
+    @Override public Object get(Object key) {
+      Object value = delegate.get(key);
+      if ("Phone".equals(key)) {
+        uniqueRead.countDown();
+      }
+      return value;
+    }
+
+    @Override public Set<Entry<String, Object>> entrySet() {
+      encodingStarted.countDown();
+      if (blockEncoding) {
+        try {
+          if (!releaseEncoding.await(2, TimeUnit.SECONDS)) {
+            throw new AssertionError("timed out waiting to release field encoding");
+          }
+        } catch (InterruptedException ex) {
+          Thread.currentThread().interrupt();
+          throw new AssertionError("field encoding interrupted");
+        }
+      }
+      return delegate.entrySet();
+    }
   }
 
   private record InvalidField(String name, String title, String value) {}
@@ -770,6 +1000,7 @@ class WecomSmartSheetRecordClientTest {
     private final JsonNode existingResponse;
     private final JsonNode addResponse;
     private final List<Call> bodies = new CopyOnWriteArrayList<>();
+    private final List<Duration> recordTimeouts = new CopyOnWriteArrayList<>();
     private final CountDownLatch addStarted = new CountDownLatch(1);
     private final CountDownLatch releaseAdd = new CountDownLatch(1);
     private final AtomicInteger addCalls = new AtomicInteger();
@@ -791,7 +1022,10 @@ class WecomSmartSheetRecordClientTest {
       bodies.add(new Call(operation, JSON.valueToTree(body)));
       return switch (operation) {
         case "get_fields" -> fieldResponse;
-        case "get_records" -> addCompleted.get() ? existingResponse : emptyResponse;
+        case "get_records" -> {
+          recordTimeouts.add(timeout);
+          yield addCompleted.get() ? existingResponse : emptyResponse;
+        }
         case "add_records" -> add();
         default -> throw new AssertionError("unexpected operation");
       };
