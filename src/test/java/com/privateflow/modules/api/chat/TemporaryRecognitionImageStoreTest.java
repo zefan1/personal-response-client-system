@@ -154,6 +154,15 @@ class TemporaryRecognitionImageStoreTest {
   }
 
   @Test
+  void rejectsTheApplicationTemporaryRootInsteadOfAChildDirectory() {
+    configValues.put("chat.recognition_temp_root", ".");
+
+    assertThatThrownBy(() -> store.put(new byte[] {1}))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("controlled relative directory");
+  }
+
+  @Test
   void enforcesFiveMegabyteHardLimitWhenImageConfigurationAllowsMore() {
     int hardLimit = 5 * 1024 * 1024;
     configValues.put("chat.recognition_temp_max_total_bytes", String.valueOf(hardLimit + 2));

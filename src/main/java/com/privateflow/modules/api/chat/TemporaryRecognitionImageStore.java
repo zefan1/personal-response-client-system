@@ -195,8 +195,8 @@ public class TemporaryRecognitionImageStore {
           "temporary recognition image directory must be a controlled relative directory");
     }
     try {
-      Path relative = Path.of(candidate);
-      if (relative.isAbsolute()) {
+      Path relative = Path.of(candidate).normalize();
+      if (relative.isAbsolute() || ".".equals(relative.toString()) || relative.toString().isBlank()) {
         throw new IllegalArgumentException(
             "temporary recognition image directory must be a controlled relative directory");
       }

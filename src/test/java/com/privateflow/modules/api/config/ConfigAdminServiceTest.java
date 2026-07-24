@@ -255,6 +255,10 @@ class ConfigAdminServiceTest {
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("controlled relative directory");
     assertThatThrownBy(() -> service.update(
+        "chat.recognition_temp_root", Map.of("value", ".")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("controlled relative directory");
+    assertThatThrownBy(() -> service.update(
         "chat.recognition_temp_root",
         Map.of("value", java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "outside").toString())))
         .isInstanceOf(ApiException.class)

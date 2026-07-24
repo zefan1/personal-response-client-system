@@ -436,7 +436,8 @@ public class ConfigAdminService {
           key + " must be a controlled relative directory");
     }
     try {
-      if (java.nio.file.Path.of(trimmed).isAbsolute()) {
+      java.nio.file.Path relative = java.nio.file.Path.of(trimmed).normalize();
+      if (relative.isAbsolute() || ".".equals(relative.toString()) || relative.toString().isBlank()) {
         throw new ApiException(ApiErrorCodes.CONFIG_INVALID,
             key + " must be a controlled relative directory");
       }

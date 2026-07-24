@@ -22,40 +22,40 @@ class SupervisionFlywayMariaDbIntegrationTest {
   void rejectsMigrationUrlsOutsideTheDedicatedTemporaryDatabasePrefix() {
     assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("pda_v78_it_");
+        .hasMessageContaining("pda_v79_it_");
     assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
         "jdbc:mariadb://127.0.0.1:3306/private_domain_assistant_dev"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("pda_v78_it_");
+        .hasMessageContaining("pda_v79_it_");
     assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(""))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("pda_v78_it_");
+        .hasMessageContaining("pda_v79_it_");
     assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
         "jdbc:mariadb://127.0.0.1:3306/"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("pda_v78_it_");
+        .hasMessageContaining("pda_v79_it_");
     assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
-        "jdbc:mariadb://127.0.0.1:3306/pda_v77_it_abc"))
+        "jdbc:mariadb://127.0.0.1:3306/pda_v78_it_abc"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("pda_v78_it_");
+        .hasMessageContaining("pda_v79_it_");
     assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
-        "jdbc:mariadb://127.0.0.1:3306/pda_v78_it_abc/another_database"))
+        "jdbc:mariadb://127.0.0.1:3306/pda_v79_it_abc/another_database"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("pda_v78_it_");
+        .hasMessageContaining("pda_v79_it_");
     assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
-        "jdbc:mariadb://127.0.0.1:3306/pda_v78_it_abc?x=1"))
+        "jdbc:mariadb://127.0.0.1:3306/pda_v79_it_abc?x=1"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("pda_v78_it_");
+        .hasMessageContaining("pda_v79_it_");
     assertThatThrownBy(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
-        "jdbc:mariadb://127.0.0.1:3306/pda_v78_it_abc#fragment"))
+        "jdbc:mariadb://127.0.0.1:3306/pda_v79_it_abc#fragment"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("pda_v78_it_");
+        .hasMessageContaining("pda_v79_it_");
   }
 
   @Test
   void acceptsAWellFormedDedicatedTemporaryMigrationUrlWithoutConnecting() {
     assertThatCode(() -> SupervisionFlywayMariaDbIntegrationTest.requireTemporaryMigrationUrl(
-        "jdbc:mariadb://127.0.0.1:3306/pda_v78_it_abc"))
+        "jdbc:mariadb://127.0.0.1:3306/pda_v79_it_abc"))
         .doesNotThrowAnyException();
   }
 
@@ -130,14 +130,14 @@ class SupervisionFlywayMariaDbIntegrationTest {
     MigrateResult first = flyway.migrate();
     MigrateResult second = flyway.migrate();
 
-    assertThat(first.targetSchemaVersion).isEqualTo("78");
+    assertThat(first.targetSchemaVersion).isEqualTo("79");
     assertThat(first.migrationsExecuted).isGreaterThan(0);
     assertThat(second.migrationsExecuted).isZero();
     try (var connection = DriverManager.getConnection(url, username, password);
          var statement = connection.createStatement()) {
       assertThat(queryCount(statement, """
           SELECT COUNT(*) FROM flyway_schema_history
-          WHERE version='78' AND success=1
+          WHERE version='79' AND success=1
           """)).isEqualTo(1);
       assertThat(queryCount(statement, """
           SELECT COUNT(*) FROM information_schema.TABLES
@@ -238,6 +238,10 @@ class SupervisionFlywayMariaDbIntegrationTest {
           SELECT config_value FROM system_configs
           WHERE config_key='chat.recognition_temp_ttl_seconds'
           """)).isEqualTo("600");
+      assertThat(queryString(statement, """
+          SELECT config_value FROM system_configs
+          WHERE config_key='chat.recognition_temp_root'
+          """)).isEqualTo("active");
     }
   }
 
@@ -264,7 +268,7 @@ class SupervisionFlywayMariaDbIntegrationTest {
   }
 
   static void requireTemporaryMigrationUrl(String rawUrl) {
-    String message = "SUPERVISION_FLYWAY_URL must target a pda_v78_it_ temporary database";
+    String message = "SUPERVISION_FLYWAY_URL must target a pda_v79_it_ temporary database";
     if (rawUrl == null || rawUrl.isBlank() || !rawUrl.startsWith("jdbc:mariadb://")) {
       throw new IllegalArgumentException(message);
     }
@@ -276,7 +280,7 @@ class SupervisionFlywayMariaDbIntegrationTest {
           || uri.getRawQuery() != null
           || uri.getRawFragment() != null
           || database == null
-          || !database.matches("/pda_v78_it_[A-Za-z0-9_]+")) {
+          || !database.matches("/pda_v79_it_[A-Za-z0-9_]+")) {
         throw new IllegalArgumentException(message);
       }
     } catch (IllegalArgumentException ex) {
