@@ -3,6 +3,7 @@ param(
   [ValidateSet('Status', 'Configure', 'Provision', 'Accept', 'Start')]
   [string]$Mode = 'Status',
   [string]$Path = (Join-Path $env:LOCALAPPDATA 'PrivateDomainAssistant\wecom-smartsheet.clixml'),
+  [string]$RelayPath = (Join-Path $env:LOCALAPPDATA 'PrivateDomainAssistant\wecom-relay.clixml'),
   [string]$SmartSheetLink,
   [string]$CorpId,
   [string]$DraftSecretPath = (Join-Path $env:LOCALAPPDATA 'PrivateDomainAssistant\wecom-smartsheet-secret-draft.clixml'),
@@ -286,6 +287,29 @@ switch ($Mode) {
         }
       }.GetNewClosure()
     }
+    $relayNames = @(
+      'WECOM_TRANSPORT_MODE',
+      'WECOM_RELAY_BASE_URL',
+      'WECOM_RELAY_KEY_ID',
+      'WECOM_RELAY_SECRET'
+    )
+    $previousRelayValues = @{}
+    $relayConfigured = Test-Path -LiteralPath $RelayPath -PathType Leaf
+    if ($relayConfigured) {
+      $relayStored = Import-Clixml -LiteralPath $RelayPath -ErrorAction Stop
+      foreach ($name in $relayNames) {
+        $property = $relayStored.Values.PSObject.Properties[$name]
+        if ($null -eq $property -or $property.Value -isnot [System.Security.SecureString]) {
+          throw "Encrypted WeCom relay configuration is incomplete: $name"
+        }
+        $previousRelayValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+        $plainValue = [System.Net.NetworkCredential]::new('', $property.Value).Password
+        if ([string]::IsNullOrWhiteSpace($plainValue)) {
+          throw "Encrypted WeCom relay configuration is incomplete: $name"
+        }
+        Set-Item -Path "Env:$name" -Value $plainValue
+      }
+    }
     $previousWslEnv = $env:WSLENV
     try {
       $entries = @()
@@ -301,6 +325,9 @@ switch ($Mode) {
         'WECOM_SMARTSHEET_SOURCE_TABLE',
         'WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE'
       )
+      if ($relayConfigured) {
+        $entries += $relayNames
+      }
       $env:WSLENV = (@($entries | Select-Object -Unique) -join ':')
       Invoke-WithWecomSmartSheetEnvironment -Path $Path -Command $RunCommand
     } finally {
@@ -308,6 +335,16 @@ switch ($Mode) {
         Remove-Item Env:WSLENV -ErrorAction SilentlyContinue
       } else {
         $env:WSLENV = $previousWslEnv
+      }
+      foreach ($name in $relayNames) {
+        if (-not $previousRelayValues.ContainsKey($name)) {
+          continue
+        }
+        if ($null -eq $previousRelayValues[$name]) {
+          Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+        } else {
+          Set-Item -Path "Env:$name" -Value $previousRelayValues[$name]
+        }
       }
     }
   }

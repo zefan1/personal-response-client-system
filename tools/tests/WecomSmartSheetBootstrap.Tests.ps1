@@ -374,6 +374,45 @@ Describe 'WeCom Smart Sheet local configuration' {
     $env:WECOM_CORP_ID | Should Be $beforeCorpId
   }
 
+  It 'passes encrypted relay settings to WSL when starting in relay mode' {
+    $path = Join-Path $TestDrive 'wecom-smartsheet.clixml'
+    $relayPath = Join-Path $TestDrive 'wecom-relay.clixml'
+    $values = @{
+      WECOM_CORP_ID = 'test-corp'
+      WECOM_APP_SECRET = 'test-app-secret'
+      WECOM_SMARTSHEET_DOC_ID = 'test-doc'
+      WECOM_SMARTSHEET_SHEET_ID = 'test-sheet'
+      WECOM_SMARTSHEET_VIEW_ID = 'test-view'
+      WECOM_SMARTSHEET_SOURCE_TABLE = 'Customers'
+      WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE = 'External ID'
+    }
+    Initialize-WecomSmartSheetConfiguration -Path $path -ReadValue {
+      param($name, $secret)
+      $values[$name]
+    } | Out-Null
+    [pscustomobject]@{
+      Version = 1
+      Values = [pscustomobject]@{
+        WECOM_TRANSPORT_MODE = ConvertTo-SecureString 'RELAY' -AsPlainText -Force
+        WECOM_RELAY_BASE_URL = ConvertTo-SecureString 'https://relay.test' -AsPlainText -Force
+        WECOM_RELAY_KEY_ID = ConvertTo-SecureString 'relay-key' -AsPlainText -Force
+        WECOM_RELAY_SECRET = ConvertTo-SecureString 'relay-secret' -AsPlainText -Force
+      }
+    } | Export-Clixml -LiteralPath $relayPath
+
+    $during = & $launcherPath -Mode Start -Path $path -RelayPath $relayPath -RunCommand {
+      [pscustomobject]@{
+        TransportMode = $env:WECOM_TRANSPORT_MODE
+        RelayBaseUrl = $env:WECOM_RELAY_BASE_URL
+        WslEnv = $env:WSLENV
+      }
+    }
+
+    $during.TransportMode | Should Be 'RELAY'
+    $during.RelayBaseUrl | Should Be 'https://relay.test'
+    $during.WslEnv | Should Match 'WECOM_RELAY_SECRET'
+  }
+
   It 'provisions from the encrypted secret draft and stores a complete configuration' {
     $path = Join-Path $TestDrive 'wecom-smartsheet.clixml'
     $draft = Join-Path $TestDrive 'secret-draft.clixml'
