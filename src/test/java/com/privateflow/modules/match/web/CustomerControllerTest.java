@@ -20,11 +20,13 @@ import com.privateflow.modules.match.CustomerSummary;
 import com.privateflow.modules.match.service.CustomerProfileService;
 import com.privateflow.modules.match.service.CustomerSearchService;
 import com.privateflow.modules.profile.BatchResolveResult;
+import com.privateflow.modules.profile.CustomerPhoneAssignmentResult;
 import com.privateflow.modules.profile.CustomerProfileView;
 import com.privateflow.modules.profile.ManualProfileUpdateResult;
 import com.privateflow.modules.profile.ProfileErrorCodes;
 import com.privateflow.modules.profile.ProfileUpdateException;
 import com.privateflow.modules.profile.service.ManualEditHandler;
+import com.privateflow.modules.profile.service.CustomerPhoneAssignmentService;
 import com.privateflow.modules.profile.service.SuggestionQueueManager;
 import com.privateflow.modules.tablewrite.ManualSaveResult;
 import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
@@ -50,6 +52,7 @@ class CustomerControllerTest {
   private SuggestionQueueManager suggestionQueueManager;
   private ManualSaveHandler manualSaveHandler;
   private CustomerTagUpdateService customerTagUpdateService;
+  private CustomerPhoneAssignmentService customerPhoneAssignmentService;
   private MockMvc mockMvc;
   private ObjectMapper objectMapper;
 
@@ -61,6 +64,7 @@ class CustomerControllerTest {
     suggestionQueueManager = org.mockito.Mockito.mock(SuggestionQueueManager.class);
     manualSaveHandler = org.mockito.Mockito.mock(ManualSaveHandler.class);
     customerTagUpdateService = org.mockito.Mockito.mock(CustomerTagUpdateService.class);
+    customerPhoneAssignmentService = org.mockito.Mockito.mock(CustomerPhoneAssignmentService.class);
     mockMvc = MockMvcBuilders
         .standaloneSetup(new CustomerController(
             customerSearchService,
@@ -68,7 +72,8 @@ class CustomerControllerTest {
             manualEditHandler,
             suggestionQueueManager,
             manualSaveHandler,
-            customerTagUpdateService))
+            customerTagUpdateService,
+            customerPhoneAssignmentService))
         .build();
     objectMapper = new ObjectMapper();
   }
@@ -139,6 +144,21 @@ class CustomerControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.written").value(true))
         .andExpect(jsonPath("$.data.updatedFields[0]").value("nickname"));
+  }
+
+  @Test
+  void assignsPhoneToPhoneLessCustomerById() throws Exception {
+    when(customerPhoneAssignmentService.assign(eq(56L), any()))
+        .thenReturn(new CustomerPhoneAssignmentResult(56L, 2));
+
+    mockMvc.perform(put("/api/v1/customers/by-id/56/phone")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"phone\":\"13434567622\",\"version\":1,\"operator\":\"admin\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.customerId").value(56))
+        .andExpect(jsonPath("$.data.version").value(2));
+
+    verify(customerPhoneAssignmentService).assign(eq(56L), any());
   }
 
   @Test

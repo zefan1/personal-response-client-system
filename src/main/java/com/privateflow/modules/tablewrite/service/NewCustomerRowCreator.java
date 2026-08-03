@@ -68,8 +68,48 @@ public class NewCustomerRowCreator {
           TableWriteErrorCodes.TABLE_WRITE_BLOCKED,
           "smart table create is blocked because the configured unique field has no phone value");
     }
-    Map<String, Object> internal = newCustomerFields(event);
-    String sourceTable = resolveSourceTable(event.sourceTable());
+    createRow(
+        event.customerId(),
+        event.phone(),
+        event.nickname(),
+        event.leadType(),
+        event.sourceTable(),
+        newCustomerFields(event));
+  }
+
+  public void create(Customer customer) {
+    if (customer == null || customer.getPhone() == null || customer.getPhone().isBlank()) {
+      throw new TableWriteException(
+          TableWriteErrorCodes.TABLE_WRITE_BLOCKED,
+          "smart table create is blocked because the configured unique field has no phone value");
+    }
+    Map<String, Object> internal = newCustomerFields(customer);
+    createRow(
+        customer.getId(),
+        customer.getPhone(),
+        customer.getNickname(),
+        customer.getLeadType(),
+        customer.getSourceTable(),
+        internal);
+  }
+
+  public Map<String, Object> newCustomerFields(Customer customer) {
+    Map<String, Object> fields = new LinkedHashMap<>();
+    fields.put("phone", customer.getPhone());
+    fields.put("nickname", customer.getNickname());
+    fields.entrySet().removeIf(entry -> entry.getValue() == null
+        || (entry.getValue() instanceof String value && value.isBlank()));
+    return fields;
+  }
+
+  private void createRow(
+      Long customerId,
+      String phone,
+      String nickname,
+      String leadType,
+      String requestedSourceTable,
+      Map<String, Object> internal) {
+    String sourceTable = resolveSourceTable(requestedSourceTable);
     TagExchangeResult exchange = exchangeService == null
         ? new TagExchangeResult(internal, java.util.List.of(), java.util.List.of())
         : exchangeService.prepareOutbound(TagExchangeSourceType.TABLE_WRITE, null, internal);
@@ -81,15 +121,15 @@ public class NewCustomerRowCreator {
         sourceTable,
         sourceFields,
         Duration.ofMillis(configProvider.get().writeTimeoutMs()));
-    if (event.customerId() != null && event.customerId() > 0) {
-      customerRepository.linkTableRow(event.customerId(), sourceTable, rowId);
-      eventPublisher.publishEvent(new ProfileUpdatedEvent(event.phone(), List.copyOf(internal.keySet())));
+    if (customerId != null && customerId > 0) {
+      customerRepository.linkTableRow(customerId, sourceTable, rowId);
+      eventPublisher.publishEvent(new ProfileUpdatedEvent(phone, List.copyOf(internal.keySet())));
       return;
     }
     Customer customer = new Customer();
-    customer.setPhone(event.phone());
-    customer.setNickname(event.nickname());
-    customer.setLeadType(LeadTypes.normalize(event.leadType()));
+    customer.setPhone(phone);
+    customer.setNickname(nickname);
+    customer.setLeadType(LeadTypes.normalize(leadType));
     applyAnalysisFields(customer, internal);
     customer.setSourceTable(sourceTable);
     customer.setSourceRowId(rowId);
@@ -99,7 +139,7 @@ public class NewCustomerRowCreator {
     } else {
       customerRepository.upsert(customer, exchange, TagExchangeSourceType.TABLE_WRITE, rowId);
     }
-    eventPublisher.publishEvent(new ProfileUpdatedEvent(event.phone(), List.copyOf(internal.keySet())));
+    eventPublisher.publishEvent(new ProfileUpdatedEvent(phone, List.copyOf(internal.keySet())));
   }
 
   public Map<String, Object> newCustomerFields(CustomerMessageSentEvent event) {

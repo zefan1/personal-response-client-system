@@ -9,6 +9,8 @@ import com.privateflow.modules.match.CustomerMatchException;
 import com.privateflow.modules.match.CustomerSearchResult;
 import com.privateflow.modules.profile.BatchResolveRequest;
 import com.privateflow.modules.profile.BatchResolveResult;
+import com.privateflow.modules.profile.CustomerPhoneAssignmentRequest;
+import com.privateflow.modules.profile.CustomerPhoneAssignmentResult;
 import com.privateflow.modules.profile.CustomerProfileView;
 import com.privateflow.modules.profile.ManualProfileUpdateRequest;
 import com.privateflow.modules.profile.ManualProfileUpdateResult;
@@ -17,6 +19,7 @@ import com.privateflow.modules.profile.ProfileUpdateException;
 import com.privateflow.modules.match.service.CustomerProfileService;
 import com.privateflow.modules.match.service.CustomerSearchService;
 import com.privateflow.modules.profile.service.ManualEditHandler;
+import com.privateflow.modules.profile.service.CustomerPhoneAssignmentService;
 import com.privateflow.modules.profile.service.SuggestionQueueManager;
 import com.privateflow.modules.tablewrite.ManualSaveRequest;
 import com.privateflow.modules.tablewrite.ManualSaveResult;
@@ -52,6 +55,7 @@ public class CustomerController {
   private final SuggestionQueueManager suggestionQueueManager;
   private final ManualSaveHandler manualSaveHandler;
   private final CustomerTagUpdateService customerTagUpdateService;
+  private final CustomerPhoneAssignmentService customerPhoneAssignmentService;
 
   public CustomerController(
       CustomerSearchService customerSearchService,
@@ -59,13 +63,15 @@ public class CustomerController {
       ManualEditHandler manualEditHandler,
       SuggestionQueueManager suggestionQueueManager,
       ManualSaveHandler manualSaveHandler,
-      CustomerTagUpdateService customerTagUpdateService) {
+      CustomerTagUpdateService customerTagUpdateService,
+      CustomerPhoneAssignmentService customerPhoneAssignmentService) {
     this.customerSearchService = customerSearchService;
     this.customerProfileService = customerProfileService;
     this.manualEditHandler = manualEditHandler;
     this.suggestionQueueManager = suggestionQueueManager;
     this.manualSaveHandler = manualSaveHandler;
     this.customerTagUpdateService = customerTagUpdateService;
+    this.customerPhoneAssignmentService = customerPhoneAssignmentService;
   }
 
   @GetMapping("/search")
@@ -83,6 +89,13 @@ public class CustomerController {
   @GetMapping("/by-id/{customerId}")
   public ApiResponse<CustomerProfileView> profileById(@PathVariable("customerId") long customerId) {
     return ApiResponse.ok(customerProfileService.getProfileById(customerId));
+  }
+
+  @PutMapping("/by-id/{customerId}/phone")
+  public ApiResponse<CustomerPhoneAssignmentResult> assignPhone(
+      @PathVariable("customerId") long customerId,
+      @RequestBody CustomerPhoneAssignmentRequest request) {
+    return ApiResponse.ok(customerPhoneAssignmentService.assign(customerId, request));
   }
 
   @PostMapping("/batch")

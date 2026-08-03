@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.common.events.CustomerFollowupAnalysisCompletedEvent;
+import com.privateflow.common.events.CustomerTableSyncRequestedEvent;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.tablewrite.PendingWritePayload;
@@ -115,6 +116,19 @@ class TableWriteOrchestratorTest {
         TableWriteActionType.INSERT,
         new PendingWritePayload("private_customers", null, queuedFields),
         "table down");
+  }
+
+  @Test
+  void createsTableRowForPhoneAssignedCustomerById() {
+    Customer customer = new Customer();
+    customer.setId(56L);
+    customer.setPhone("13434567622");
+    customer.setNickname("少花");
+    when(customerQueryService.getById(56L)).thenReturn(customer);
+
+    orchestrator.onCustomerTableSyncRequested(new CustomerTableSyncRequestedEvent(56L));
+
+    verify(newCustomerRowCreator).create(customer);
   }
 
   private CustomerMessageSentEvent sentEvent() {

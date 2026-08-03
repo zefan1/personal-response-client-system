@@ -2,6 +2,7 @@ package com.privateflow.modules.tablewrite.service;
 
 import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.common.events.CustomerFollowupAnalysisCompletedEvent;
+import com.privateflow.common.events.CustomerTableSyncRequestedEvent;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.tablewrite.PendingWritePayload;
@@ -82,6 +83,50 @@ public class TableWriteOrchestrator {
           new PendingWritePayload(customer.getSourceTable(), customer.getSourceRowId(), fields),
           ex.getMessage());
     }
+  }
+
+  @Async("tableWriteExecutor")
+  @EventListener
+  public void onCustomerTableSyncRequested(CustomerTableSyncRequestedEvent event) {
+    if (event == null || event.customerId() <= 0) {
+      return;
+    }
+    Customer customer = customerQueryService.getById(event.customerId());
+    if (customer == null || customer.getPhone() == null || customer.getPhone().isBlank()) {
+      log.warn("skip smart table sync request for missing customer or phone, customerId={}", event.customerId());
+      return;
+    }
+    boolean shouldCreate = customer.getSourceRowId() == null || customer.getSourceRowId().isBlank();
+    try {
+      if (shouldCreate) {
+        withOneImmediateRetry(() -> newCustomerRowCreator.create(customer));
+      } else {
+        withOneImmediateRetry(() -> existingCustomerUpdater.updateFields(customer, syncFields(customer)));
+      }
+    } catch (RuntimeException ex) {
+      TableWriteActionType actionType = shouldCreate ? TableWriteActionType.INSERT : TableWriteActionType.UPDATE;
+      Map<String, Object> fields = shouldCreate
+          ? newCustomerRowCreator.newCustomerFields(customer)
+          : syncFields(customer);
+      String sourceTable = shouldCreate
+          ? newCustomerRowCreator.resolveSourceTable(customer.getSourceTable())
+          : customer.getSourceTable();
+      queueManager.enqueue(
+          customer.getId(),
+          customer.getPhone(),
+          actionType,
+          new PendingWritePayload(sourceTable, shouldCreate ? null : customer.getSourceRowId(), fields),
+          ex.getMessage());
+    }
+  }
+
+  private Map<String, Object> syncFields(Customer customer) {
+    Map<String, Object> fields = new java.util.LinkedHashMap<>();
+    fields.put("phone", customer.getPhone());
+    if (customer.getNickname() != null && !customer.getNickname().isBlank()) {
+      fields.put("nickname", customer.getNickname());
+    }
+    return fields;
   }
 
   private void enqueueFallback(CustomerMessageSentEvent event, Customer customer, boolean create, RuntimeException ex) {

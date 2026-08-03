@@ -18,6 +18,7 @@ public class ProfileFieldRegistry {
   private static final Map<String, FieldSpec> FIELDS = new LinkedHashMap<>();
 
   static {
+    register("phone", "phone", String.class);
     register("nickname", "nickname", String.class);
     register("sourceChannel", "source_channel", String.class);
     register("intendedStore", "intended_store", String.class);

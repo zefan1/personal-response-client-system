@@ -100,6 +100,22 @@ class NewCustomerRowCreatorTest {
   }
 
   @Test
+  void phoneAssignmentSyncUsesOnlyPhoneAndNickname() {
+    Customer customer = new Customer();
+    customer.setPhone("13434567622");
+    customer.setNickname("少花");
+    customer.setLeadType("XIAN_SUO");
+    customer.setCustomerStage("legacy stage outside table options");
+    customer.setSourceChannel("legacy source outside table options");
+
+    java.util.Map<String, Object> fields = creator.newCustomerFields(customer);
+
+    assertThat(fields).containsOnly(
+        java.util.Map.entry("phone", "13434567622"),
+        java.util.Map.entry("nickname", "少花"));
+  }
+
+  @Test
   void newCustomerFieldsIncludeTheSharedStructuredAnalysis() {
     java.util.Map<String, Object> analysisFields = java.util.Map.of(
         "internalNote", "先说明评估流程",
