@@ -131,6 +131,39 @@ class TableWriteOrchestratorTest {
     verify(newCustomerRowCreator).create(customer);
   }
 
+  @Test
+  void queuesFullProfileFieldsWhenPhoneAssignmentUpdateFails() {
+    Customer customer = new Customer();
+    customer.setId(56L);
+    customer.setPhone("13434567622");
+    customer.setNickname("少花");
+    customer.setSourceTable("th1zyU");
+    customer.setSourceRowId("row-56");
+    customer.setBodyConcerns("lower-back-pain");
+    customer.setFollowupNotes("first-consultation");
+    when(customerQueryService.getById(56L)).thenReturn(customer);
+    when(newCustomerRowCreator.newCustomerFields(customer)).thenReturn(java.util.Map.of(
+        "phone", "13434567622",
+        "nickname", "少花",
+        "bodyConcerns", "lower-back-pain",
+        "followupNotes", "first-consultation"));
+    doThrow(new IllegalStateException("table down"))
+        .when(existingCustomerUpdater).updateFields(org.mockito.Mockito.eq(customer), org.mockito.Mockito.anyMap());
+
+    orchestrator.onCustomerTableSyncRequested(new CustomerTableSyncRequestedEvent(56L));
+
+    ArgumentCaptor<PendingWritePayload> payloadCaptor = ArgumentCaptor.forClass(PendingWritePayload.class);
+    verify(queueManager).enqueue(
+        org.mockito.Mockito.eq(56L),
+        org.mockito.Mockito.eq("13434567622"),
+        org.mockito.Mockito.eq(TableWriteActionType.UPDATE),
+        payloadCaptor.capture(),
+        org.mockito.Mockito.eq("table down"));
+    assertThat(payloadCaptor.getValue().fields())
+        .containsEntry("bodyConcerns", "lower-back-pain")
+        .containsEntry("followupNotes", "first-consultation");
+  }
+
   private CustomerMessageSentEvent sentEvent() {
     return new CustomerMessageSentEvent(
         "18800001111",

@@ -34,6 +34,7 @@ public class QueueRetryManager {
   private final NewCustomerRowCreator newCustomerRowCreator;
   private final TableFieldMappingResolver mappingResolver;
   private final TagExchangeService exchangeService;
+  private final ProfileProjectionFieldFilter profileProjectionFieldFilter;
 
   @Autowired
   public QueueRetryManager(
@@ -44,7 +45,8 @@ public class QueueRetryManager {
       CustomerQueryService customerQueryService,
       NewCustomerRowCreator newCustomerRowCreator,
       TableFieldMappingResolver mappingResolver,
-      TagExchangeService exchangeService) {
+      TagExchangeService exchangeService,
+      ProfileProjectionFieldFilter profileProjectionFieldFilter) {
     this.repository = repository;
     this.tableClient = tableClient;
     this.configProvider = configProvider;
@@ -53,6 +55,28 @@ public class QueueRetryManager {
     this.newCustomerRowCreator = newCustomerRowCreator;
     this.mappingResolver = mappingResolver;
     this.exchangeService = exchangeService;
+    this.profileProjectionFieldFilter = profileProjectionFieldFilter;
+  }
+
+  public QueueRetryManager(
+      PendingTableWriteRepository repository,
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      ObjectMapper objectMapper,
+      CustomerQueryService customerQueryService,
+      NewCustomerRowCreator newCustomerRowCreator,
+      TableFieldMappingResolver mappingResolver,
+      TagExchangeService exchangeService) {
+    this(
+        repository,
+        tableClient,
+        configProvider,
+        objectMapper,
+        customerQueryService,
+        newCustomerRowCreator,
+        mappingResolver,
+        exchangeService,
+        null);
   }
 
   public QueueRetryManager(
@@ -62,7 +86,7 @@ public class QueueRetryManager {
       ObjectMapper objectMapper,
       CustomerQueryService customerQueryService,
       NewCustomerRowCreator newCustomerRowCreator) {
-    this(repository, tableClient, configProvider, objectMapper, customerQueryService, newCustomerRowCreator, null, null);
+    this(repository, tableClient, configProvider, objectMapper, customerQueryService, newCustomerRowCreator, null, null, null);
   }
 
   @Scheduled(fixedDelayString = "#{@tableConfigProvider.get().retryIntervalS() * 1000L}")
@@ -74,7 +98,7 @@ public class QueueRetryManager {
         TagExchangeResult exchange = exchangeService == null
             ? new TagExchangeResult(payload.fields(), java.util.List.of(), java.util.List.of())
             : exchangeService.prepareOutbound(
-                TagExchangeSourceType.TABLE_WRITE,
+                TagExchangeSourceType.TABLE_DISPLAY_PROJECTION,
                 String.valueOf(item.getId()),
                 payload.fields());
         if (exchange.acceptedFields().isEmpty()) {
@@ -82,7 +106,8 @@ public class QueueRetryManager {
           continue;
         }
         if (item.getActionType() == TableWriteActionType.INSERT) {
-          MapPayload remote = remotePayload(payload, exchange);
+          MapPayload remote = remotePayload(payload, exchange, Duration.ofMillis(config.writeTimeoutMs()));
+          logSkippedSelectableFields(item.getId(), remote.skippedSelectableFields());
           if (remote.fields().isEmpty()) {
             repository.markResolved(item.getId());
             continue;
@@ -92,7 +117,8 @@ public class QueueRetryManager {
               item.getCustomerId(), item.getPhone(), remote.sourceTable(), rowId, exchange.acceptedFields());
         } else {
           PendingWritePayload resolved = resolveExistingRow(item.getCustomerId(), item.getPhone(), payload);
-          MapPayload remote = remotePayload(resolved, exchange);
+          MapPayload remote = remotePayload(resolved, exchange, Duration.ofMillis(config.writeTimeoutMs()));
+          logSkippedSelectableFields(item.getId(), remote.skippedSelectableFields());
           if (remote.fields().isEmpty()) {
             repository.markResolved(item.getId());
             continue;
@@ -128,17 +154,33 @@ public class QueueRetryManager {
     return new PendingWritePayload(customer.getSourceTable(), customer.getSourceRowId(), payload.fields());
   }
 
-  private MapPayload remotePayload(PendingWritePayload payload, TagExchangeResult exchange) {
+  private MapPayload remotePayload(PendingWritePayload payload, TagExchangeResult exchange, Duration timeout) {
+    if (profileProjectionFieldFilter != null) {
+      ProfileProjectionFieldFilter.Result filtered = profileProjectionFieldFilter.filter(
+          payload.sourceTable(), exchange.acceptedFields(), timeout);
+      return new MapPayload(payload.sourceTable(), payload.sourceRowId(), filtered.fields(), filtered.skippedSelectableFields());
+    }
     if (mappingResolver == null) {
-      return new MapPayload(payload.sourceTable(), payload.sourceRowId(), exchange.acceptedFields());
+      return new MapPayload(payload.sourceTable(), payload.sourceRowId(), exchange.acceptedFields(), java.util.List.of());
     }
     return new MapPayload(
         payload.sourceTable(),
         payload.sourceRowId(),
-        mappingResolver.toSourceFields(payload.sourceTable(), exchange.acceptedFields()));
+        mappingResolver.toSourceFields(payload.sourceTable(), exchange.acceptedFields()),
+        java.util.List.of());
   }
 
-  private record MapPayload(String sourceTable, String sourceRowId, java.util.Map<String, Object> fields) {
+  private void logSkippedSelectableFields(long queueId, java.util.List<String> fields) {
+    if (!fields.isEmpty()) {
+      log.warn("skip invalid smart table select values during retry, queueId={}, fields={}", queueId, fields);
+    }
+  }
+
+  private record MapPayload(
+      String sourceTable,
+      String sourceRowId,
+      java.util.Map<String, Object> fields,
+      java.util.List<String> skippedSelectableFields) {
   }
 
   private boolean blank(String value) {

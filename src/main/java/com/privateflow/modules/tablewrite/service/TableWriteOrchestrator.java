@@ -121,12 +121,7 @@ public class TableWriteOrchestrator {
   }
 
   private Map<String, Object> syncFields(Customer customer) {
-    Map<String, Object> fields = new java.util.LinkedHashMap<>();
-    fields.put("phone", customer.getPhone());
-    if (customer.getNickname() != null && !customer.getNickname().isBlank()) {
-      fields.put("nickname", customer.getNickname());
-    }
-    return fields;
+    return newCustomerRowCreator.newCustomerFields(customer);
   }
 
   private void enqueueFallback(CustomerMessageSentEvent event, Customer customer, boolean create, RuntimeException ex) {

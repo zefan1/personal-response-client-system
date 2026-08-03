@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 import com.privateflow.modules.customer.admin.DatasourceAdminRepository;
 import com.privateflow.modules.customer.sync.SheetSource;
@@ -100,19 +102,79 @@ class NewCustomerRowCreatorTest {
   }
 
   @Test
-  void phoneAssignmentSyncUsesOnlyPhoneAndNickname() {
+  void phoneAssignmentSyncIncludesAllNonblankCustomerProfileFields() {
     Customer customer = new Customer();
     customer.setPhone("13434567622");
     customer.setNickname("少花");
     customer.setLeadType("XIAN_SUO");
-    customer.setCustomerStage("legacy stage outside table options");
-    customer.setSourceChannel("legacy source outside table options");
+    customer.setCustomerStage("intent-stage");
+    customer.setBodyConcerns("lower-back-pain");
+    customer.setFollowupNotes("first-consultation");
+    customer.setInternalNote("answer-gently");
+    customer.setCustomerProfileSummary("postpartum-profile");
+    customer.setNextFollowupAt(java.time.LocalDateTime.of(2026, 8, 4, 10, 30));
+    customer.setNextFollowupDir("arrange-trial");
+    customer.setFirstTrackingCapture("capture-1");
+    customer.setSecondTrackingCapture("capture-2");
+    customer.setThirdTrackingCapture("capture-3");
 
     java.util.Map<String, Object> fields = creator.newCustomerFields(customer);
 
-    assertThat(fields).containsOnly(
-        java.util.Map.entry("phone", "13434567622"),
-        java.util.Map.entry("nickname", "少花"));
+    assertThat(fields)
+        .containsEntry("phone", "13434567622")
+        .containsEntry("nickname", "少花")
+        .containsEntry("leadType", "XIAN_SUO")
+        .containsEntry("customerStage", "intent-stage")
+        .containsEntry("bodyConcerns", "lower-back-pain")
+        .containsEntry("followupNotes", "first-consultation")
+        .containsEntry("internalNote", "answer-gently")
+        .containsEntry("customerProfileSummary", "postpartum-profile")
+        .containsEntry("nextFollowupAt", java.time.LocalDateTime.of(2026, 8, 4, 10, 30))
+        .containsEntry("nextFollowupDir", "arrange-trial")
+        .containsEntry("firstTrackingCapture", "capture-1")
+        .containsEntry("secondTrackingCapture", "capture-2")
+        .containsEntry("thirdTrackingCapture", "capture-3");
+  }
+
+  @Test
+  void phoneAssignmentCreateUsesFilteredFieldsWhenASelectValueIsInvalid() {
+    WecomTableClient tableClient = mock(WecomTableClient.class);
+    TableConfigProvider configProvider = mock(TableConfigProvider.class);
+    TableFieldMappingResolver mappingResolver = mock(TableFieldMappingResolver.class);
+    CustomerRepository customerRepository = mock(CustomerRepository.class);
+    ProfileProjectionFieldFilter fieldFilter = mock(ProfileProjectionFieldFilter.class);
+    NewCustomerRowCreator localCreator = new NewCustomerRowCreator(
+        tableClient,
+        configProvider,
+        mappingResolver,
+        customerRepository,
+        datasourceRepository,
+        mock(ApplicationEventPublisher.class),
+        null,
+        fieldFilter);
+    Customer customer = new Customer();
+    customer.setId(56L);
+    customer.setPhone("13434567622");
+    customer.setNickname("少花");
+    customer.setSourceTable("th1zyU");
+    customer.setCustomerStage("intent-stage");
+    customer.setBodyConcerns("lower-back-pain");
+    when(configProvider.get()).thenReturn(new com.privateflow.modules.tablewrite.config.TableConfig(
+        "", "", 5000, 5, 60, 1, "ADMIN", 100, 1000));
+    when(fieldFilter.filter(eq("th1zyU"), any(), eq(java.time.Duration.ofMillis(5000))))
+        .thenReturn(new ProfileProjectionFieldFilter.Result(
+            java.util.Map.of("联系方式", "13434567622", "客户关注点", "lower-back-pain"),
+            java.util.List.of("客户阶段")));
+    when(tableClient.createRow(eq("th1zyU"), any(), eq(java.time.Duration.ofMillis(5000))))
+        .thenReturn("row-56");
+
+    localCreator.create(customer);
+
+    verify(tableClient).createRow(
+        "th1zyU",
+        java.util.Map.of("联系方式", "13434567622", "客户关注点", "lower-back-pain"),
+        java.time.Duration.ofMillis(5000));
+    verify(customerRepository).linkTableRow(56L, "th1zyU", "row-56");
   }
 
   @Test

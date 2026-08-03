@@ -119,6 +119,20 @@ class TagExchangeServiceTest {
     assertThat(outbound.filteredFields()).contains("intentLevel");
   }
 
+  @Test
+  void preservesFreeTextForOutboundTableDisplayProjection() {
+    TagExchangeResult result = service.prepareOutbound(
+        TagExchangeSourceType.TABLE_DISPLAY_PROJECTION,
+        "customer-56",
+        Map.of("bodyConcerns", "我一直觉得腰痛、肚子也很大", "nickname", "少花"));
+
+    assertThat(result.acceptedFields())
+        .containsEntry("bodyConcerns", "我一直觉得腰痛、肚子也很大")
+        .containsEntry("nickname", "少花");
+    assertThat(result.filteredFields()).isEmpty();
+    assertThat(result.unmatched()).isEmpty();
+  }
+
   private TagCategory category(
       long id,
       String categoryKey,

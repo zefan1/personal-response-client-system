@@ -22,9 +22,13 @@ import java.util.Map;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class NewCustomerRowCreator {
+
+  private static final Logger log = LoggerFactory.getLogger(NewCustomerRowCreator.class);
 
   private final WecomTableClient tableClient;
   private final TableConfigProvider configProvider;
@@ -33,6 +37,7 @@ public class NewCustomerRowCreator {
   private final DatasourceAdminRepository datasourceRepository;
   private final ApplicationEventPublisher eventPublisher;
   private final TagExchangeService exchangeService;
+  private final ProfileProjectionFieldFilter profileProjectionFieldFilter;
 
   @Autowired
   public NewCustomerRowCreator(
@@ -42,7 +47,8 @@ public class NewCustomerRowCreator {
       CustomerRepository customerRepository,
       DatasourceAdminRepository datasourceRepository,
       ApplicationEventPublisher eventPublisher,
-      TagExchangeService exchangeService) {
+      TagExchangeService exchangeService,
+      ProfileProjectionFieldFilter profileProjectionFieldFilter) {
     this.tableClient = tableClient;
     this.configProvider = configProvider;
     this.mappingResolver = mappingResolver;
@@ -50,6 +56,19 @@ public class NewCustomerRowCreator {
     this.datasourceRepository = datasourceRepository;
     this.eventPublisher = eventPublisher;
     this.exchangeService = exchangeService;
+    this.profileProjectionFieldFilter = profileProjectionFieldFilter;
+  }
+
+  public NewCustomerRowCreator(
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      TableFieldMappingResolver mappingResolver,
+      CustomerRepository customerRepository,
+      DatasourceAdminRepository datasourceRepository,
+      ApplicationEventPublisher eventPublisher,
+      TagExchangeService exchangeService) {
+    this(tableClient, configProvider, mappingResolver, customerRepository, datasourceRepository, eventPublisher,
+        exchangeService, null);
   }
 
   public NewCustomerRowCreator(
@@ -59,7 +78,8 @@ public class NewCustomerRowCreator {
       CustomerRepository customerRepository,
       DatasourceAdminRepository datasourceRepository,
       ApplicationEventPublisher eventPublisher) {
-    this(tableClient, configProvider, mappingResolver, customerRepository, datasourceRepository, eventPublisher, null);
+    this(tableClient, configProvider, mappingResolver, customerRepository, datasourceRepository, eventPublisher,
+        null, null);
   }
 
   public void create(CustomerMessageSentEvent event) {
@@ -97,6 +117,17 @@ public class NewCustomerRowCreator {
     Map<String, Object> fields = new LinkedHashMap<>();
     fields.put("phone", customer.getPhone());
     fields.put("nickname", customer.getNickname());
+    fields.put("leadType", LeadTypes.normalize(customer.getLeadType()));
+    fields.put("customerStage", customer.getCustomerStage());
+    fields.put("bodyConcerns", customer.getBodyConcerns());
+    fields.put("followupNotes", customer.getFollowupNotes());
+    fields.put("internalNote", customer.getInternalNote());
+    fields.put("customerProfileSummary", customer.getCustomerProfileSummary());
+    fields.put("nextFollowupAt", customer.getNextFollowupAt());
+    fields.put("nextFollowupDir", customer.getNextFollowupDir());
+    fields.put("firstTrackingCapture", customer.getFirstTrackingCapture());
+    fields.put("secondTrackingCapture", customer.getSecondTrackingCapture());
+    fields.put("thirdTrackingCapture", customer.getThirdTrackingCapture());
     fields.entrySet().removeIf(entry -> entry.getValue() == null
         || (entry.getValue() instanceof String value && value.isBlank()));
     return fields;
@@ -112,15 +143,27 @@ public class NewCustomerRowCreator {
     String sourceTable = resolveSourceTable(requestedSourceTable);
     TagExchangeResult exchange = exchangeService == null
         ? new TagExchangeResult(internal, java.util.List.of(), java.util.List.of())
-        : exchangeService.prepareOutbound(TagExchangeSourceType.TABLE_WRITE, null, internal);
-    Map<String, Object> sourceFields = mappingResolver.toSourceFields(sourceTable, exchange.acceptedFields());
+        : exchangeService.prepareOutbound(TagExchangeSourceType.TABLE_DISPLAY_PROJECTION, null, internal);
+    Duration timeout = Duration.ofMillis(configProvider.get().writeTimeoutMs());
+    Map<String, Object> sourceFields;
+    if (profileProjectionFieldFilter == null) {
+      sourceFields = mappingResolver.toSourceFields(sourceTable, exchange.acceptedFields());
+    } else {
+      ProfileProjectionFieldFilter.Result filtered = profileProjectionFieldFilter.filter(
+          sourceTable, exchange.acceptedFields(), timeout);
+      sourceFields = filtered.fields();
+      if (!filtered.skippedSelectableFields().isEmpty()) {
+        log.warn("skip invalid smart table select values, customerId={}, fields={}",
+            customerId, filtered.skippedSelectableFields());
+      }
+    }
     if (sourceFields.isEmpty()) {
       throw new TableWriteException(TableWriteErrorCodes.TABLE_WRITE_FAILED, "no fields remain after tag validation");
     }
     String rowId = tableClient.createRow(
         sourceTable,
         sourceFields,
-        Duration.ofMillis(configProvider.get().writeTimeoutMs()));
+        timeout);
     if (customerId != null && customerId > 0) {
       customerRepository.linkTableRow(customerId, sourceTable, rowId);
       eventPublisher.publishEvent(new ProfileUpdatedEvent(phone, List.copyOf(internal.keySet())));

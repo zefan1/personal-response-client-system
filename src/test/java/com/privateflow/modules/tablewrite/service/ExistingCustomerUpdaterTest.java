@@ -121,7 +121,7 @@ class ExistingCustomerUpdaterTest {
     TagExchangeService exchangeService = mock(TagExchangeService.class);
     when(config.get()).thenReturn(new TableConfig("", "", 5000, 3, 30, 1, "ADMIN", 50, 500));
     when(exchangeService.prepareOutbound(
-        eq(TagExchangeSourceType.TABLE_WRITE), eq("row-1"), any(Map.class)))
+        eq(TagExchangeSourceType.TABLE_DISPLAY_PROJECTION), eq("row-1"), any(Map.class)))
         .thenReturn(new TagExchangeResult(Map.of(), List.of("bodyConcerns"), List.of()));
     when(mapping.toSourceFields("table_a", Map.of())).thenReturn(Map.of());
     ExistingCustomerUpdater updater = new ExistingCustomerUpdater(client, config, mapping, exchangeService);
@@ -132,6 +132,34 @@ class ExistingCustomerUpdaterTest {
     updater.update(customer, event());
 
     verify(client, never()).updateRow(any(), any(), any(), any(Duration.class));
+  }
+
+  @Test
+  void updatesRemainingFieldsWhenAProfileSelectValueIsInvalid() {
+    WecomTableClient client = mock(WecomTableClient.class);
+    TableConfigProvider config = mock(TableConfigProvider.class);
+    TableFieldMappingResolver mapping = mock(TableFieldMappingResolver.class);
+    ProfileProjectionFieldFilter filter = mock(ProfileProjectionFieldFilter.class);
+    when(config.get()).thenReturn(new TableConfig("", "", 5000, 3, 30, 1, "ADMIN", 50, 500));
+    when(filter.filter(eq("table_a"), any(Map.class), eq(Duration.ofMillis(5000))))
+        .thenReturn(new ProfileProjectionFieldFilter.Result(
+            Map.of("联系方式", "13800000000", "客户关注点", "lower-back-pain"),
+            List.of("客户阶段")));
+    ExistingCustomerUpdater updater = new ExistingCustomerUpdater(client, config, mapping, null, filter);
+    Customer customer = new Customer();
+    customer.setSourceTable("table_a");
+    customer.setSourceRowId("row-1");
+
+    updater.updateFields(customer, Map.of(
+        "phone", "13800000000",
+        "customerStage", "intent-stage",
+        "bodyConcerns", "lower-back-pain"));
+
+    verify(client).updateRow(
+        "table_a",
+        "row-1",
+        Map.of("联系方式", "13800000000", "客户关注点", "lower-back-pain"),
+        Duration.ofMillis(5000));
   }
 
   private CustomerMessageSentEvent event() {

@@ -15,32 +15,47 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class ExistingCustomerUpdater {
+
+  private static final Logger log = LoggerFactory.getLogger(ExistingCustomerUpdater.class);
 
   private final WecomTableClient tableClient;
   private final TableConfigProvider configProvider;
   private final TableFieldMappingResolver mappingResolver;
   private final TagExchangeService exchangeService;
+  private final ProfileProjectionFieldFilter profileProjectionFieldFilter;
 
   @Autowired
   public ExistingCustomerUpdater(
       WecomTableClient tableClient,
       TableConfigProvider configProvider,
       TableFieldMappingResolver mappingResolver,
-      TagExchangeService exchangeService) {
+      TagExchangeService exchangeService,
+      ProfileProjectionFieldFilter profileProjectionFieldFilter) {
     this.tableClient = tableClient;
     this.configProvider = configProvider;
     this.mappingResolver = mappingResolver;
     this.exchangeService = exchangeService;
+    this.profileProjectionFieldFilter = profileProjectionFieldFilter;
+  }
+
+  public ExistingCustomerUpdater(
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      TableFieldMappingResolver mappingResolver,
+      TagExchangeService exchangeService) {
+    this(tableClient, configProvider, mappingResolver, exchangeService, null);
   }
 
   public ExistingCustomerUpdater(
       WecomTableClient tableClient,
       TableConfigProvider configProvider,
       TableFieldMappingResolver mappingResolver) {
-    this(tableClient, configProvider, mappingResolver, null);
+    this(tableClient, configProvider, mappingResolver, null, null);
   }
 
   public void update(Customer customer, CustomerMessageSentEvent event) {
@@ -59,10 +74,22 @@ public class ExistingCustomerUpdater {
     TagExchangeResult exchange = exchangeService == null
         ? new TagExchangeResult(fields, java.util.List.of(), java.util.List.of())
         : exchangeService.prepareOutbound(
-            TagExchangeSourceType.TABLE_WRITE,
+            TagExchangeSourceType.TABLE_DISPLAY_PROJECTION,
             customer.getSourceRowId(),
             fields);
-    Map<String, Object> sourceFields = mappingResolver.toSourceFields(customer.getSourceTable(), exchange.acceptedFields());
+    Duration timeout = Duration.ofMillis(configProvider.get().writeTimeoutMs());
+    Map<String, Object> sourceFields;
+    if (profileProjectionFieldFilter == null) {
+      sourceFields = mappingResolver.toSourceFields(customer.getSourceTable(), exchange.acceptedFields());
+    } else {
+      ProfileProjectionFieldFilter.Result filtered = profileProjectionFieldFilter.filter(
+          customer.getSourceTable(), exchange.acceptedFields(), timeout);
+      sourceFields = filtered.fields();
+      if (!filtered.skippedSelectableFields().isEmpty()) {
+        log.warn("skip invalid smart table select values, customerId={}, fields={}",
+            customer.getId(), filtered.skippedSelectableFields());
+      }
+    }
     if (sourceFields.isEmpty()) {
       return;
     }
@@ -70,7 +97,7 @@ public class ExistingCustomerUpdater {
         customer.getSourceTable(),
         customer.getSourceRowId(),
         sourceFields,
-        Duration.ofMillis(configProvider.get().writeTimeoutMs()));
+        timeout);
   }
 
   public Map<String, Object> followupFields(CustomerMessageSentEvent event) {

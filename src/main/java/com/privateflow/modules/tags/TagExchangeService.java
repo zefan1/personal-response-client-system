@@ -44,6 +44,9 @@ public class TagExchangeService {
     if (sourceType == null || fields == null || fields.isEmpty()) {
       return new TagExchangeResult(Map.of(), List.of(), List.of());
     }
+    if (outbound && sourceType == TagExchangeSourceType.TABLE_DISPLAY_PROJECTION) {
+      return new TagExchangeResult(new LinkedHashMap<>(fields), List.of(), List.of());
+    }
     TagDirectorySnapshot snapshot = directoryService.getSnapshot();
     Map<String, Object> accepted = new LinkedHashMap<>();
     Set<String> filtered = new LinkedHashSet<>();
