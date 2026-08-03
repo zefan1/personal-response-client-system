@@ -25,6 +25,7 @@ class WecomSmartSheetClientSpringWiringTest {
       context.register(
           WecomSmartSheetConfig.class,
           WecomAccessTokenProvider.class,
+          WecomRelayClient.class,
           WecomSmartSheetApiClient.class,
           WecomSmartSheetFieldCatalog.class);
       context.refresh();
