@@ -19,6 +19,8 @@ public final class WecomSmartSheetConfig {
   private final String sourceTable;
   private final String uniqueFieldTitle;
   private final ZoneId zoneId;
+  private final WecomTransportMode transportMode;
+  private final WecomRelayConfig relayConfig;
 
   @Autowired
   public WecomSmartSheetConfig(
@@ -29,7 +31,39 @@ public final class WecomSmartSheetConfig {
       @Value("${WECOM_SMARTSHEET_SHEET_ID:}") String sheetId,
       @Value("${WECOM_SMARTSHEET_VIEW_ID:}") String viewId,
       @Value("${WECOM_SMARTSHEET_SOURCE_TABLE:}") String sourceTable,
-      @Value("${WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE:}") String uniqueFieldTitle) {
+      @Value("${WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE:}") String uniqueFieldTitle,
+      @Value("${WECOM_TRANSPORT_MODE:DIRECT}") String transportMode,
+      @Value("${WECOM_RELAY_BASE_URL:}") String relayBaseUrl,
+      @Value("${WECOM_RELAY_KEY_ID:}") String relayKeyId,
+      @Value("${WECOM_RELAY_SECRET:}") String relaySecret) {
+    this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle,
+        ZoneId.of("Asia/Shanghai"), WecomTransportMode.from(transportMode),
+        new WecomRelayConfig(relayBaseUrl, relayKeyId, relaySecret));
+  }
+
+  public WecomSmartSheetConfig(
+      String apiBaseUrl,
+      String corpId,
+      String appSecret,
+      String documentId,
+      String sheetId,
+      String viewId,
+      String sourceTable,
+      String uniqueFieldTitle,
+      ZoneId zoneId) {
+    this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle,
+        zoneId, WecomTransportMode.DIRECT, new WecomRelayConfig("", "", ""));
+  }
+
+  public WecomSmartSheetConfig(
+      String apiBaseUrl,
+      String corpId,
+      String appSecret,
+      String documentId,
+      String sheetId,
+      String viewId,
+      String sourceTable,
+      String uniqueFieldTitle) {
     this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle,
         ZoneId.of("Asia/Shanghai"));
   }
@@ -43,7 +77,9 @@ public final class WecomSmartSheetConfig {
       String viewId,
       String sourceTable,
       String uniqueFieldTitle,
-      ZoneId zoneId) {
+      ZoneId zoneId,
+      WecomTransportMode transportMode,
+      WecomRelayConfig relayConfig) {
     this.apiBaseUrl = normalizedBaseUrl(apiBaseUrl);
     this.corpId = trimmed(corpId);
     this.appSecret = trimmed(appSecret);
@@ -53,6 +89,8 @@ public final class WecomSmartSheetConfig {
     this.sourceTable = trimmed(sourceTable);
     this.uniqueFieldTitle = trimmed(uniqueFieldTitle);
     this.zoneId = zoneId;
+    this.transportMode = transportMode == null ? WecomTransportMode.DIRECT : transportMode;
+    this.relayConfig = relayConfig == null ? new WecomRelayConfig("", "", "") : relayConfig;
   }
 
   public void requireConfigured() {
@@ -120,6 +158,14 @@ public final class WecomSmartSheetConfig {
 
   public ZoneId zoneId() {
     return zoneId;
+  }
+
+  public WecomTransportMode transportMode() {
+    return transportMode;
+  }
+
+  public WecomRelayConfig relayConfig() {
+    return relayConfig;
   }
 
   private static void require(List<String> missing, String value, String environmentVariable) {

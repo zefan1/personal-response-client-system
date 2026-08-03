@@ -100,6 +100,27 @@ class WecomSmartSheetConfigTest {
     assertThat(config.zoneId()).isEqualTo(ZoneId.of("Asia/Shanghai"));
   }
 
+  @Test
+  void defaultsToDirectTransport() {
+    assertThat(configured().transportMode()).isEqualTo(WecomTransportMode.DIRECT);
+  }
+
+  @Test
+  void legacyEnvironmentConstructorDefaultsToDirectTransport() {
+    WecomSmartSheetConfig config = new WecomSmartSheetConfig(
+        "https://qyapi.weixin.qq.com", "corp-1", "app-secret-value", "document-1", "sheet-1",
+        "view-1", "Customers", "Customer ID");
+
+    assertThat(config.transportMode()).isEqualTo(WecomTransportMode.DIRECT);
+  }
+
+  @Test
+  void relayModeRequiresBaseUrlKeyIdAndSecret() {
+    assertThatIllegalStateException()
+        .isThrownBy(() -> new WecomRelayConfig("", "local-test", "secret").requireConfigured())
+        .withMessageContaining("WECOM_RELAY_BASE_URL");
+  }
+
   private WecomSmartSheetConfig configured() {
     return new WecomSmartSheetConfig(
         "https://qyapi.weixin.qq.com/", "corp-1", "app-secret-value", "document-1", "sheet-1",
