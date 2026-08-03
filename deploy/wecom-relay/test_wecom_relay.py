@@ -34,6 +34,12 @@ class RelayApplicationTest(unittest.TestCase):
 
         self.assertEqual(response.status, 400)
 
+    def test_reused_signed_request_is_rejected(self):
+        headers, raw_body = self.signed_request({"operation": "get_fields", "payload": {}})
+
+        self.assertTrue(self.app._signature_valid(headers, raw_body))
+        self.assertFalse(self.app._signature_valid(headers, raw_body))
+
     def signed_request(self, body):
         body = {**body, "requestId": "request-1"}
         raw_body = json.dumps(body, separators=(",", ":")).encode("utf-8")

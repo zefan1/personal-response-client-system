@@ -29,6 +29,7 @@ ALLOWED_OPERATIONS = {
 }
 MAX_BODY_BYTES = 2 * 1024 * 1024
 MAX_CLOCK_SKEW_SECONDS = 300
+MAX_TRACKED_NONCES = 10_000
 NONCE_PATTERN = re.compile(r"[0-9a-fA-F-]{16,80}\Z")
 SIGNATURE_PATTERN = re.compile(r"[0-9a-fA-F]{64}\Z")
 TIMESTAMP_PATTERN = re.compile(r"\d{10}\Z")
@@ -83,6 +84,8 @@ class RelayApplication:
         self._token_lock = Lock()
         self._token = ""
         self._token_expires_at = 0.0
+        self._nonce_lock = Lock()
+        self._used_nonces: dict[str, int] = {}
 
     def handle(self, headers: Mapping[str, str], raw_body: bytes) -> RelayResponse:
         if not self._signature_valid(headers, raw_body):
@@ -119,7 +122,20 @@ class RelayApplication:
             return False
         signed = timestamp.encode("ascii") + b"." + nonce.encode("ascii") + b"." + raw_body
         expected = hmac.new(self._settings.relay_secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, signature.lower())
+        if not hmac.compare_digest(expected, signature.lower()):
+            return False
+        return self._register_nonce(nonce, int(timestamp) + MAX_CLOCK_SKEW_SECONDS)
+
+    def _register_nonce(self, nonce: str, expires_at: int) -> bool:
+        now = int(self._now())
+        with self._nonce_lock:
+            self._used_nonces = {
+                value: expiry for value, expiry in self._used_nonces.items() if expiry >= now
+            }
+            if nonce in self._used_nonces or len(self._used_nonces) >= MAX_TRACKED_NONCES:
+                return False
+            self._used_nonces[nonce] = expires_at
+            return True
 
     def _request_id_matches(self, headers: Mapping[str, str], request_id: object) -> bool:
         normalized = {str(key).lower(): str(value).strip() for key, value in headers.items()}
