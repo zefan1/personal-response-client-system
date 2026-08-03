@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import com.privateflow.modules.tablewrite.config.WecomTransportMode;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -35,6 +36,7 @@ public class WecomSmartSheetApiClient {
   private final ObjectMapper objectMapper;
   private final WecomSmartSheetConfig config;
   private final WecomAccessTokenProvider tokenProvider;
+  private final WecomRelayClient relayClient;
   private final WecomHttpTransport httpTransport;
   private final LongSupplier ticker;
 
@@ -42,8 +44,16 @@ public class WecomSmartSheetApiClient {
   public WecomSmartSheetApiClient(
       ObjectMapper objectMapper,
       WecomSmartSheetConfig config,
+      WecomAccessTokenProvider tokenProvider,
+      WecomRelayClient relayClient) {
+    this(objectMapper, config, tokenProvider, relayClient, new WecomUrlConnectionTransport(), System::nanoTime);
+  }
+
+  WecomSmartSheetApiClient(
+      ObjectMapper objectMapper,
+      WecomSmartSheetConfig config,
       WecomAccessTokenProvider tokenProvider) {
-    this(objectMapper, config, tokenProvider, new WecomUrlConnectionTransport(), System::nanoTime);
+    this(objectMapper, config, tokenProvider, new WecomRelayClient(objectMapper, config));
   }
 
   WecomSmartSheetApiClient(
@@ -51,7 +61,8 @@ public class WecomSmartSheetApiClient {
       WecomSmartSheetConfig config,
       WecomAccessTokenProvider tokenProvider,
       HttpClient httpClient) {
-    this(objectMapper, config, tokenProvider, WecomHttpTransport.from(httpClient), System::nanoTime);
+    this(objectMapper, config, tokenProvider, new WecomRelayClient(objectMapper, config),
+        WecomHttpTransport.from(httpClient), System::nanoTime);
   }
 
   WecomSmartSheetApiClient(
@@ -60,18 +71,21 @@ public class WecomSmartSheetApiClient {
       WecomAccessTokenProvider tokenProvider,
       HttpClient httpClient,
       LongSupplier ticker) {
-    this(objectMapper, config, tokenProvider, WecomHttpTransport.from(httpClient), ticker);
+    this(objectMapper, config, tokenProvider, new WecomRelayClient(objectMapper, config),
+        WecomHttpTransport.from(httpClient), ticker);
   }
 
   private WecomSmartSheetApiClient(
       ObjectMapper objectMapper,
       WecomSmartSheetConfig config,
       WecomAccessTokenProvider tokenProvider,
+      WecomRelayClient relayClient,
       WecomHttpTransport httpTransport,
       LongSupplier ticker) {
     this.objectMapper = objectMapper;
     this.config = config;
     this.tokenProvider = tokenProvider;
+    this.relayClient = relayClient;
     this.httpTransport = httpTransport;
     this.ticker = ticker;
   }
@@ -94,6 +108,9 @@ public class WecomSmartSheetApiClient {
     }
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw failure(operation, "request timeout must be positive");
+    }
+    if (config.transportMode() == WecomTransportMode.RELAY) {
+      return relayClient.post(operation, body, timeout);
     }
     WecomRequestDeadline deadline = WecomRequestDeadline.start(timeout, operation, ticker);
     try {

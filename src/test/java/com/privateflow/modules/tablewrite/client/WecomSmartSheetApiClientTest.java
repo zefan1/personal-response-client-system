@@ -6,10 +6,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.privateflow.modules.tablewrite.config.WecomRelayConfig;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import com.privateflow.modules.tablewrite.config.WecomTransportMode;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -104,6 +107,40 @@ class WecomSmartSheetApiClientTest {
       assertThat(result.path("docid").asText()).isEqualTo("doc-1");
       assertThat(server.lastJson().path("doc_type").intValue()).isEqualTo(10);
     }
+  }
+
+  @Test
+  void relayModePostsOperationWithoutFetchingDirectAccessToken() {
+    WecomAccessTokenProvider tokens = mock(WecomAccessTokenProvider.class);
+    AtomicInteger relayCalls = new AtomicInteger();
+    WecomRelayClient relay = new WecomRelayClient(
+        new ObjectMapper(), relayConfigured().relayConfig(),
+        (uri, method, headers, body, timeout) -> {
+          relayCalls.incrementAndGet();
+          return new WecomHttpResponse(200, "{\"errcode\":0}");
+        },
+        java.time.Clock.systemUTC(),
+        () -> "nonce-1",
+        () -> "request-1");
+    WecomSmartSheetApiClient client = new WecomSmartSheetApiClient(
+        new ObjectMapper(), relayConfigured(), tokens, relay);
+
+    assertThat(client.post("get_records", Map.of("document_id", "doc-1"), Duration.ofSeconds(2))
+        .path("errcode").asInt()).isZero();
+
+    assertThat(relayCalls).hasValue(1);
+    verifyNoInteractions(tokens);
+  }
+
+  @Test
+  void directModeStillUsesTheExistingWeComEndpoint() {
+    WecomAccessTokenProvider tokens = tokens("token-one");
+    WecomSmartSheetApiClient client = new WecomSmartSheetApiClient(
+        new ObjectMapper(), configured("http://127.0.0.1"), tokens, new CapturingHttpClient());
+
+    assertThat(client.post("get_records", Map.of(), Duration.ofSeconds(2)).path("errcode").asInt()).isZero();
+
+    verify(tokens).get(any(Duration.class));
   }
 
   @Test
@@ -414,6 +451,12 @@ class WecomSmartSheetApiClientTest {
   private WecomSmartSheetConfig configured(String baseUrl) {
     return new WecomSmartSheetConfig(baseUrl, "CorpID-sentinel", "app-secret-value", "document-1", "sheet-1",
         "view-1", "Customers", "Customer ID", ZoneId.of("Asia/Shanghai"));
+  }
+
+  private WecomSmartSheetConfig relayConfigured() {
+    return new WecomSmartSheetConfig("https://unused-direct.example", "", "", "document-1", "sheet-1",
+        "view-1", "Customers", "Customer ID", ZoneId.of("Asia/Shanghai"), WecomTransportMode.RELAY,
+        new WecomRelayConfig("https://relay.example", "local-test", "relay-secret"));
   }
 
   private static Map<String, String> decodeQuery(String query) {
