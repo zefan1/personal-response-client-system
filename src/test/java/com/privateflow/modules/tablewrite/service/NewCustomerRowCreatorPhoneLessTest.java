@@ -2,6 +2,7 @@ package com.privateflow.modules.tablewrite.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.modules.customer.admin.DatasourceAdminRepository;
@@ -19,8 +20,9 @@ class NewCustomerRowCreatorPhoneLessTest {
 
   @Test
   void blocksExternalCreateWhenConfiguredUniquePhoneValueIsUnavailable() {
+    WecomTableClient tableClient = mock(WecomTableClient.class);
     NewCustomerRowCreator creator = new NewCustomerRowCreator(
-        mock(WecomTableClient.class),
+        tableClient,
         mock(TableConfigProvider.class),
         mock(TableFieldMappingResolver.class),
         mock(CustomerRepository.class),
@@ -34,5 +36,6 @@ class NewCustomerRowCreatorPhoneLessTest {
         .isInstanceOf(TableWriteException.class)
         .extracting("errorCode")
         .isEqualTo(TableWriteErrorCodes.TABLE_WRITE_BLOCKED);
+    verifyNoInteractions(tableClient);
   }
 }
