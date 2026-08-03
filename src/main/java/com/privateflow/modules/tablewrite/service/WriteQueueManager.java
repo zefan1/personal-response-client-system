@@ -31,6 +31,10 @@ public class WriteQueueManager {
   }
 
   public void enqueue(String phone, TableWriteActionType actionType, PendingWritePayload payload, String errorMsg) {
+    enqueue(null, phone, actionType, payload, errorMsg);
+  }
+
+  public void enqueue(Long customerId, String phone, TableWriteActionType actionType, PendingWritePayload payload, String errorMsg) {
     int pending = repository.countPending();
     int warnThreshold = configProvider.get().queueWarnThreshold();
     int alertThreshold = configProvider.get().queueAlertThreshold();
@@ -42,6 +46,7 @@ public class WriteQueueManager {
     }
     try {
       repository.enqueue(
+          customerId,
           phone,
           actionType,
           objectMapper.writeValueAsString(payload),

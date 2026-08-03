@@ -48,6 +48,12 @@ class WecomAccessTokenProviderTest {
   private static final String GET_TOKEN_PATH = "/cgi-bin/gettoken";
 
   @Test
+  void defaultClientAllowsTenSecondsToConnectToWeCom() {
+    assertThat(WecomAccessTokenProvider.defaultHttpClient().connectTimeout())
+        .contains(Duration.ofSeconds(10));
+  }
+
+  @Test
   void firstGetReturnsTokenAndSecondGetUsesCache() throws Exception {
     try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
       server.respond(GET_TOKEN_PATH, 200, success("token-one", 600));
@@ -174,6 +180,32 @@ class WecomAccessTokenProviderTest {
           .satisfies(error -> assertThat(error.getMessage()).doesNotContain(
               "corp id", "app-secret-value", "corpid=", "corpsecret="));
     }
+  }
+
+  @Test
+  void tokenCanBeObtainedBeforeASmartSheetTargetExists() throws Exception {
+    try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
+      server.respond(GET_TOKEN_PATH, 200, success("token-one", 600));
+      WecomSmartSheetConfig credentialsOnly = new WecomSmartSheetConfig(
+          server.baseUrl(), "corp id", "app-secret-value", "", "", "", "", "",
+          ZoneId.of("Asia/Shanghai"));
+      WecomAccessTokenProvider provider = new WecomAccessTokenProvider(
+          new ObjectMapper(), credentialsOnly, HttpClient.newHttpClient(), new MutableClock());
+
+      assertThat(provider.get()).isEqualTo("token-one");
+      assertThat(server.requestCount()).isEqualTo(1);
+    }
+  }
+
+  @Test
+  void retriesTransientNetworkFailuresWithinTheRequestDeadline() {
+    FailingThenSucceedingHttpClient http = new FailingThenSucceedingHttpClient(3);
+    WecomAccessTokenProvider provider = new WecomAccessTokenProvider(
+        new ObjectMapper(), configured("https://qyapi.weixin.qq.com", "corp id", "app-secret-value"),
+        http, new MutableClock());
+
+    assertThat(provider.get(Duration.ofSeconds(60))).isEqualTo("token-one");
+    assertThat(http.requests).hasSize(4);
   }
 
   @Test
@@ -602,6 +634,23 @@ class WecomAccessTokenProviderTest {
         ticker.advance(Duration.ofSeconds(1));
       }
       return response;
+    }
+  }
+
+  private static final class FailingThenSucceedingHttpClient extends RecordingHttpClient {
+    private final AtomicInteger failuresRemaining;
+
+    private FailingThenSucceedingHttpClient(int failures) {
+      this.failuresRemaining = new AtomicInteger(failures);
+    }
+
+    @Override public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler)
+        throws IOException, InterruptedException {
+      if (failuresRemaining.getAndDecrement() > 0) {
+        requests.add(request);
+        throw new IOException("transient-connect-failure");
+      }
+      return super.send(request, handler);
     }
   }
 

@@ -635,6 +635,11 @@ public class DatasourceAdminService {
       case "intentLevel" -> "意向等级";
       case "worries" -> "客户顾虑";
       case "customerStage" -> "客户阶段";
+      case "internalNote" -> "备注";
+      case "customerProfileSummary" -> "客户B档案";
+      case "firstTrackingCapture" -> "第一次追踪捕捉";
+      case "secondTrackingCapture" -> "第二次追踪捕捉";
+      case "thirdTrackingCapture" -> "第三次追踪捕捉";
       case "lastFollowupAt" -> "最近跟进时间";
       case "followupNotes" -> "跟进记录";
       case "nextFollowupAt" -> "下次跟进时间";

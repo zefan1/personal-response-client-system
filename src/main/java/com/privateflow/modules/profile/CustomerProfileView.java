@@ -1,6 +1,7 @@
 package com.privateflow.modules.profile;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.communication.CommunicationSummaryVersion;
 import com.privateflow.modules.tags.CustomerTagCategoryLock;
 import com.privateflow.modules.tags.CustomerTagQueryDto;
 import com.privateflow.modules.tags.TagCategory;
@@ -12,7 +13,8 @@ public record CustomerProfileView(
     List<ProfileSuggestion> pendingSuggestions,
     List<CustomerTagQueryDto> currentTags,
     List<CustomerTagCategoryLock> tagLocks,
-    List<TagCategory> editableTagCategories
+    List<TagCategory> editableTagCategories,
+    CommunicationSummaryVersion latestCommunicationSummary
 ) {
 
   public CustomerProfileView {
@@ -25,7 +27,24 @@ public record CustomerProfileView(
   public CustomerProfileView(
       Customer customer,
       String phoneFull,
+      List<ProfileSuggestion> pendingSuggestions,
+      List<CustomerTagQueryDto> currentTags,
+      List<CustomerTagCategoryLock> tagLocks,
+      List<TagCategory> editableTagCategories) {
+    this(
+        customer,
+        phoneFull,
+        pendingSuggestions,
+        currentTags,
+        tagLocks,
+        editableTagCategories,
+        null);
+  }
+
+  public CustomerProfileView(
+      Customer customer,
+      String phoneFull,
       List<ProfileSuggestion> pendingSuggestions) {
-    this(customer, phoneFull, pendingSuggestions, List.of(), List.of(), List.of());
+    this(customer, phoneFull, pendingSuggestions, List.of(), List.of(), List.of(), null);
   }
 }

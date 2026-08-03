@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 public class PendingTableWrite {
 
   private Long id;
+  private Long customerId;
   private String phone;
   private TableWriteActionType actionType;
   private String payload;
@@ -15,6 +16,8 @@ public class PendingTableWrite {
 
   public Long getId() { return id; }
   public void setId(Long id) { this.id = id; }
+  public Long getCustomerId() { return customerId; }
+  public void setCustomerId(Long customerId) { this.customerId = customerId; }
   public String getPhone() { return phone; }
   public void setPhone(String phone) { this.phone = phone; }
   public TableWriteActionType getActionType() { return actionType; }

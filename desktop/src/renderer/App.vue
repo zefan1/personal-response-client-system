@@ -86,11 +86,6 @@
             <span class="nav-label">{{ item.title }}</span>
             <small>{{ item.description }}</small>
           </span>
-          <span
-            v-if="item.key === 'reply' && pendingReplyTaskCount"
-            class="pending-reply-task-count"
-            aria-label="待恢复回复任务数"
-          >{{ pendingReplyTaskCount }}</span>
         </button>
       </nav>
       <nav class="sidebar-quick-actions" aria-label="全局快捷操作">
@@ -98,15 +93,21 @@
           <span class="action-icon" aria-hidden="true">识</span>
           <strong class="action-label">{{ recognitionState.isRecognizePending ? '继续识别' : '识别' }}</strong>
         </button>
-        <button class="secondary sidebar-quick-button" type="button" title="打开模板" @click="openQuickSearch">
-          <span class="action-icon" aria-hidden="true">模</span>
-          <strong class="action-label">模板</strong>
+        <button class="secondary sidebar-quick-button" type="button" title="打开话术库" @click="openTemplateLibrary">
+          <span class="action-icon" aria-hidden="true">话</span>
+          <strong class="action-label">话术库</strong>
         </button>
         <button class="secondary sidebar-quick-button" type="button" title="打开待办队列" @click="openTaskQueue()">
           <span class="action-icon" aria-hidden="true">批</span>
           <strong class="action-label">批量</strong>
         </button>
       </nav>
+      <ReplyTaskSidebar
+        :tasks="compactReplyTasks"
+        :active-session-id="replySuggestionState.activeSessionId"
+        @select="openReplyTask"
+        @open-all="replyTaskDrawerOpen = true"
+      />
       <div class="desktop-sidebar-actions">
         <button v-if="canOpenAdmin" class="secondary small" type="button" title="在浏览器打开管理后台" @click="openAdmin">后台</button>
         <button class="secondary small" type="button" @click="logout">退出</button>
@@ -158,13 +159,15 @@
       <OfflineStatusBar v-if="!topGlobalAlert" />
       <CopyBackfillAgent />
       <NewLeadToastAgent />
-      <QuickSearchOverlay />
+      <TemplateLibraryOverlay />
+      <PersonalTemplateEditor />
       <BatchTemplateOverlay />
       <HelpModeAgent />
       <ClipboardCaptureConfirmAgent />
       <WorkbenchPanel v-show="activeDesktopPanel === 'workbench'" />
       <ChatRecognitionPanel v-show="false" class="recognition-controller" />
       <CustomerProfilePanel v-show="activeDesktopPanel === 'customer'" />
+      <CommunicationHistoryPanel v-show="activeDesktopPanel === 'communication'" />
       <ReplySuggestionPanel v-show="activeDesktopPanel === 'reply'" />
       <div v-show="taskQueueOpen" class="task-queue-backdrop" @click.self="closeTaskQueue">
         <aside class="task-queue-drawer" aria-label="待办队列">
@@ -180,6 +183,15 @@
           <FollowupListPanel />
         </aside>
       </div>
+      <ReplyTaskDrawer
+        :open="replyTaskDrawerOpen"
+        :tasks="replyTaskItems"
+        :active-session-id="replySuggestionState.activeSessionId"
+        @clear="clearReplyTasks"
+        @cancel="cancelReplyTask"
+        @close="replyTaskDrawerOpen = false"
+        @select="openReplyTask"
+      />
     </section>
   </main>
 </template>
@@ -195,19 +207,25 @@ import ClipboardCaptureConfirmAgent from './modules/chat-recognition/ClipboardCa
 import BatchTemplateOverlay from './modules/batch-template/BatchTemplateOverlay.vue';
 import CopyBackfillAgent from './modules/copy-backfill/CopyBackfillAgent.vue';
 import CustomerProfilePanel from './modules/customer-profile/CustomerProfilePanel.vue';
+import CommunicationHistoryPanel from './modules/communication-history/CommunicationHistoryPanel.vue';
+import { openCommunicationHistory, openCommunicationHistoryByCustomerId } from './modules/communication-history/communicationHistoryStore';
 import { customerProfileState } from './modules/customer-profile/customerProfileStore';
 import FollowupListPanel from './modules/followup-list/FollowupListPanel.vue';
 import HelpModeAgent from './modules/help-mode/HelpModeAgent.vue';
 import NewLeadToastAgent from './modules/new-lead-toast/NewLeadToastAgent.vue';
 import OfflineStatusBar from './modules/offline/OfflineStatusBar.vue';
-import QuickSearchOverlay from './modules/quick-search/QuickSearchOverlay.vue';
+import TemplateLibraryOverlay from './modules/templates/TemplateLibraryOverlay.vue';
+import PersonalTemplateEditor from './modules/templates/PersonalTemplateEditor.vue';
 import ReplySuggestionPanel from './modules/reply-suggestions/ReplySuggestionPanel.vue';
+import ReplyTaskDrawer from './modules/reply-suggestions/ReplyTaskDrawer.vue';
+import ReplyTaskSidebar from './modules/reply-suggestions/ReplyTaskSidebar.vue';
+import { buildReplyTaskItems } from './modules/reply-suggestions/replyTaskPresentation';
 import {
-  initializePendingReplyTaskOpenListener,
-  pendingReplyTaskCount,
-  refreshPendingReplyTasks,
-  resetPendingReplyTasksForSessionChange
-} from './modules/reply-suggestions/pendingReplyTaskStore';
+  activateSession,
+  clearReplyTaskQueue,
+  replySuggestionState,
+  restoreArchivedReplySession
+} from './modules/reply-suggestions/replySuggestionStore';
 import { postJson } from './shared/apiClient';
 import { captureScreenshot, getAlwaysOnTop, openAdminConsole, toggleAlwaysOnTop } from './shared/desktopBridge';
 import { clearDesktopNotice, desktopNoticeState, setDesktopNotice } from './shared/desktopNoticeStore';
@@ -216,7 +234,13 @@ import { loadDesktopConfig, saveDesktopConfig } from './shared/config';
 import { eventBus } from './shared/eventBus';
 import { cleanupStageSuggestionHandler, initializeStageSuggestionHandler } from './modules/stage-suggestion/stageSuggestionHandler';
 import WorkbenchPanel from './modules/workbench/WorkbenchPanel.vue';
-import { recognitionState, triggerRecognize } from './modules/chat-recognition/recognitionStore';
+import {
+  beginScreenshotRecognition,
+  cancelRecognitionJob,
+  failScreenshotRecognition,
+  recognitionState,
+  triggerRecognize
+} from './modules/chat-recognition/recognitionStore';
 
 type LoginPayload = {
   accessToken: string;
@@ -235,7 +259,7 @@ type LoginPayload = {
   };
 };
 
-type DesktopPanelKey = 'workbench' | 'customer' | 'reply';
+type DesktopPanelKey = 'workbench' | 'customer' | 'reply' | 'communication';
 type RouteMode = 'admin' | 'desktop' | 'admin-dev';
 type FollowupTab = 'OVERDUE' | 'DUE_TODAY' | 'APPOINTMENT' | 'NEW_LEAD';
 type ProfileReturnContext = {
@@ -263,6 +287,10 @@ const desktopNavItems: DesktopNavItem[] = [
   { key: 'reply', title: '回复助手', description: '建议与求助', icon: '回' }
 ];
 
+desktopNavItems.push(
+  { key: 'communication', title: '聊天记录', description: '跨平台沟通历史', icon: '记' }
+);
+
 const config = loadDesktopConfig();
 const devConsoleEnabled = !import.meta.env.PROD;
 const isElectronRuntime = computed(() => hasDesktopBridge());
@@ -272,6 +300,7 @@ const AdminDevConsole = devConsoleEnabled
 const currentMode = ref<RouteMode>(modeFromHash());
 const activeDesktopPanel = ref<DesktopPanelKey>('workbench');
 const taskQueueOpen = ref(false);
+const replyTaskDrawerOpen = ref(false);
 const profileReturnContext = ref<ProfileReturnContext | null>(null);
 const alwaysOnTop = ref(false);
 const loginLoading = ref(false);
@@ -291,6 +320,13 @@ const session = reactive({
   permissions: normalizePermissions(config.accountPermissions)
 });
 const activeDesktopNav = computed(() => desktopNavItems.find((item) => item.key === activeDesktopPanel.value) ?? desktopNavItems[0]);
+const replyTaskItems = computed(() => buildReplyTaskItems(
+  replySuggestionState.sessions,
+  replySuggestionState.archivedSessions
+));
+const compactReplyTasks = computed(() => replyTaskItems.value
+  .filter((task) => !task.archived)
+  .slice(0, 5));
 const displayAccountName = computed(() => desktopStatusState.accountName || session.accountName || '当前账号');
 const effectiveRole = computed<AccountRole>(() => normalizeRole(desktopStatusState.role) || session.role);
 const effectivePermissions = computed(() => desktopStatusState.loaded
@@ -322,7 +358,6 @@ onMounted(() => {
   window.addEventListener('hashchange', syncModeFromHash);
   initializeAbnormalAlertRouter();
   initializeStageSuggestionHandler();
-  eventDisposers.push(initializePendingReplyTaskOpenListener());
   if (session.accessToken) {
     void initializeAuthenticatedSession();
   }
@@ -345,6 +380,20 @@ onMounted(() => {
     taskQueueOpen.value = false;
     selectDesktopPanel('customer');
   }));
+  eventDisposers.push(eventBus.on<{ phone?: string; customerId?: number; view?: 'messages' | 'summaries' }>('communication:open', (payload) => {
+    const phone = payload?.phone?.trim();
+    const customerId = payload?.customerId;
+    if (!phone && !(customerId && customerId > 0)) {
+      return;
+    }
+    void (customerId && customerId > 0
+      ? openCommunicationHistoryByCustomerId(customerId, phone ?? '', payload.view ?? 'messages')
+      : openCommunicationHistory(phone ?? '', payload.view ?? 'messages'));
+    selectDesktopPanel('communication');
+  }));
+  eventDisposers.push(eventBus.on<{ phone?: string }>('communication:return-profile', () => {
+    selectDesktopPanel('customer');
+  }));
   eventDisposers.push(eventBus.on('candidate:preview', () => selectDesktopPanel('customer')));
   eventDisposers.push(eventBus.on<{ returnToFollowups?: boolean }>('quick-search:sent', (payload) => {
     if (payload.returnToFollowups && profileReturnContext.value) {
@@ -356,10 +405,12 @@ onMounted(() => {
   eventDisposers.push(eventBus.on('recognize:image-failed', focusReplyAssistant));
   eventDisposers.push(eventBus.on('recognize:failed', focusReplyAssistant));
   eventDisposers.push(eventBus.on('recognize:timeout', focusReplyAssistant));
-  eventDisposers.push(eventBus.on('recognize:multiple', focusReplyAssistant));
   eventDisposers.push(eventBus.on('suggestion:show', () => selectDesktopPanel('reply')));
   eventDisposers.push(eventBus.on('desktop:recognize-request', () => {
     void recognizeFromAnywhere();
+  }));
+  eventDisposers.push(eventBus.on<{ jobId: string; sessionId: string }>('recognition-job:cancel', (payload) => {
+    cancelReplyTask(payload.jobId, payload.sessionId);
   }));
   eventDisposers.push(eventBus.on<{ message?: string }>('auth:expired', (payload) => {
     void handleAuthExpired(payload?.message);
@@ -396,7 +447,6 @@ async function login() {
     if (loginRequestEpoch !== sessionEpoch) return;
     sessionEpoch += 1;
     refreshPromise = null;
-    resetPendingReplyTasksForSessionChange();
     const authenticatedEpoch = sessionEpoch;
     const account = response.data.account ?? response.data.userInfo;
     session.accessToken = response.data.accessToken;
@@ -413,7 +463,6 @@ async function login() {
       accountPermissions: session.permissions
     });
     if (!await refreshDesktopStatus(authenticatedEpoch)) return;
-    await refreshPendingReplyTasks();
     if (authenticatedEpoch !== sessionEpoch) return;
     scheduleSessionRefresh();
     setMode(loginForm.mode === 'admin' && !hasDesktopBridge() ? currentMode.value === 'admin-dev' && devConsoleEnabled ? 'admin-dev' : 'admin' : 'desktop');
@@ -475,7 +524,6 @@ async function handleAuthExpired(message?: string): Promise<void> {
     });
     loginError.value = '';
     if (!await refreshDesktopStatus(refreshEpoch)) return;
-    await refreshPendingReplyTasks();
     if (refreshEpoch !== sessionEpoch) return;
     scheduleSessionRefresh();
   })()
@@ -505,7 +553,6 @@ function clearSession(preserveIdentity = false) {
   refreshPromise = null;
   clearSessionRefreshTimer();
   const username = session.accountUsername;
-  resetPendingReplyTasksForSessionChange();
   session.accessToken = '';
   session.refreshToken = '';
   session.accountUsername = preserveIdentity ? username : '';
@@ -531,7 +578,6 @@ async function initializeAuthenticatedSession(): Promise<void> {
     return;
   }
   if (!await refreshDesktopStatus(authenticatedEpoch)) return;
-  await refreshPendingReplyTasks();
   if (authenticatedEpoch !== sessionEpoch) return;
   scheduleSessionRefresh();
 }
@@ -621,12 +667,21 @@ function selectDesktopPanel(panel: DesktopPanelKey) {
 async function recognizeFromAnywhere() {
   clearDesktopNotice();
   selectDesktopPanel('reply');
-  const result = await captureScreenshot();
+  const sessionId = beginScreenshotRecognition('BUTTON_CLICK');
+  if (!sessionId) return;
+  const result = await captureScreenshot().catch(() => ({
+    success: false,
+    error: 'CAPTURE_FAILED',
+    imageBase64: undefined,
+    message: '屏幕截图失败，请重试'
+  }));
   if (!result.success || !result.imageBase64) {
-    setDesktopNotice(result.message ?? '屏幕截图失败，请确认系统允许桌面端录屏后重试', 'error');
+    const message = result.message ?? '屏幕截图失败，请确认系统允许桌面端录屏后重试';
+    failScreenshotRecognition(sessionId, message);
+    setDesktopNotice(message, 'error');
     return;
   }
-  await triggerRecognize('BUTTON_CLICK', { imageBase64: result.imageBase64 });
+  await triggerRecognize('BUTTON_CLICK', { imageBase64: result.imageBase64 }, sessionId);
   selectDesktopPanel('reply');
 }
 
@@ -647,7 +702,7 @@ async function togglePinWindow() {
   setDesktopNotice('窗口置顶不可用，请重启桌面端后重试', 'error');
 }
 
-function openQuickSearch() {
+function openTemplateLibrary(): void {
   const profile = customerProfileState.profile;
   const phone = String(profile?.phoneFull || profile?.customer.phoneFull || profile?.customer.phone || '');
   const context = activeDesktopPanel.value === 'customer' && phone
@@ -661,7 +716,7 @@ function openQuickSearch() {
         customer: { ...profile?.customer }
       }
     : undefined;
-  eventBus.emit('quick-search:show', context);
+  eventBus.emit('template-library:show', context);
 }
 
 function openTaskQueue(tab: 'OVERDUE' | 'DUE_TODAY' | 'APPOINTMENT' | 'NEW_LEAD' = 'DUE_TODAY') {
@@ -671,6 +726,27 @@ function openTaskQueue(tab: 'OVERDUE' | 'DUE_TODAY' | 'APPOINTMENT' | 'NEW_LEAD'
 
 function closeTaskQueue() {
   taskQueueOpen.value = false;
+}
+
+function openReplyTask(sessionId: string): void {
+  const activeSession = replySuggestionState.sessions.find((session) => session.sessionId === sessionId);
+  if (activeSession) {
+    activateSession(activeSession.sessionId);
+  } else if (!restoreArchivedReplySession(sessionId)) {
+    return;
+  }
+  replyTaskDrawerOpen.value = false;
+  selectDesktopPanel('reply');
+}
+
+function clearReplyTasks(): void {
+  clearReplyTaskQueue().forEach(({ jobId, sessionId }) => {
+    void cancelRecognitionJob(jobId, sessionId);
+  });
+}
+
+function cancelReplyTask(jobId: string, sessionId: string): void {
+  void cancelRecognitionJob(jobId, sessionId);
 }
 
 function returnFromCustomerProfile(): void {

@@ -68,6 +68,43 @@ public class ProfileWriter {
     return version;
   }
 
+  @Transactional
+  public int writeByCustomerId(long customerId, Map<String, Object> fields, Integer expectedVersion, boolean publishEvent) {
+    if (customerId <= 0) {
+      throw new ProfileUpdateException(ProfileErrorCodes.VERSION_CONFLICT, "customer id is required");
+    }
+    Map<String, Object> accepted = acceptedFields(fields);
+    if (accepted.isEmpty()) {
+      return currentVersionByCustomerId(customerId);
+    }
+    List<Object> args = new ArrayList<>();
+    StringBuilder sql = new StringBuilder("UPDATE customers SET ");
+    int index = 0;
+    for (Map.Entry<String, Object> entry : accepted.entrySet()) {
+      if (index++ > 0) {
+        sql.append(", ");
+      }
+      ProfileFieldRegistry.FieldSpec spec = fieldRegistry.spec(entry.getKey());
+      sql.append(spec.columnName()).append(" = ?");
+      args.add(fieldRegistry.normalizeValue(entry.getKey(), entry.getValue()));
+    }
+    sql.append(", version = version + 1, updated_at = NOW() WHERE id = ?");
+    args.add(customerId);
+    if (expectedVersion != null) {
+      sql.append(" AND version = ?");
+      args.add(expectedVersion);
+    }
+    int updated = jdbcTemplate.update(sql.toString(), args.toArray());
+    if (updated != 1) {
+      throw new ProfileUpdateException(ProfileErrorCodes.VERSION_CONFLICT, "customer profile is stale or missing");
+    }
+    int version = currentVersionByCustomerId(customerId);
+    if (publishEvent) {
+      eventPublisher.publishEvent(new ProfileUpdatedEvent(null, List.copyOf(accepted.keySet())));
+    }
+    return version;
+  }
+
   public void touchFollowup(String phone, String summary, Integer expectedVersion) {
     Map<String, Object> fields = new LinkedHashMap<>();
     fields.put("lastFollowupAt", LocalDateTime.now());
@@ -93,5 +130,12 @@ public class ProfileWriter {
         "SELECT version FROM customers WHERE phone = ? LIMIT 1",
         (rs, rowNum) -> rs.getInt("version"),
         phone).stream().findFirst().orElse(0);
+  }
+
+  public int currentVersionByCustomerId(long customerId) {
+    return jdbcTemplate.query(
+        "SELECT version FROM customers WHERE id = ? LIMIT 1",
+        (rs, rowNum) -> rs.getInt("version"),
+        customerId).stream().findFirst().orElse(0);
   }
 }

@@ -69,6 +69,11 @@ public class CustomerMergeEngine {
       target.setExerciseHabits(coalesce(source.getExerciseHabits(), target.getExerciseHabits()));
       target.setIntentLevel(coalesce(source.getIntentLevel(), target.getIntentLevel()));
       target.setWorries(coalesce(source.getWorries(), target.getWorries()));
+      target.setInternalNote(coalesce(source.getInternalNote(), target.getInternalNote()));
+      target.setCustomerProfileSummary(coalesce(source.getCustomerProfileSummary(), target.getCustomerProfileSummary()));
+      target.setFirstTrackingCapture(coalesce(source.getFirstTrackingCapture(), target.getFirstTrackingCapture()));
+      target.setSecondTrackingCapture(coalesce(source.getSecondTrackingCapture(), target.getSecondTrackingCapture()));
+      target.setThirdTrackingCapture(coalesce(source.getThirdTrackingCapture(), target.getThirdTrackingCapture()));
     }
     if (followup) {
       target.setLastFollowupAt(coalesce(source.getLastFollowupAt(), target.getLastFollowupAt()));
@@ -114,6 +119,11 @@ public class CustomerMergeEngine {
     c.setIntentLevel(source.getIntentLevel());
     c.setWorries(source.getWorries());
     c.setCustomerStage(source.getCustomerStage());
+    c.setInternalNote(source.getInternalNote());
+    c.setCustomerProfileSummary(source.getCustomerProfileSummary());
+    c.setFirstTrackingCapture(source.getFirstTrackingCapture());
+    c.setSecondTrackingCapture(source.getSecondTrackingCapture());
+    c.setThirdTrackingCapture(source.getThirdTrackingCapture());
     c.setLastFollowupAt(source.getLastFollowupAt());
     c.setFollowupNotes(source.getFollowupNotes());
     c.setNextFollowupAt(source.getNextFollowupAt());

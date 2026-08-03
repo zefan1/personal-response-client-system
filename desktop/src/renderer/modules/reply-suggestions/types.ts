@@ -8,6 +8,7 @@ export type ReplySuggestion = {
 };
 
 export type ChatResponse = {
+  customerId?: number | null;
   phone?: string | null;
   nickname?: string | null;
   needsCustomerIdentifier?: boolean;
@@ -24,7 +25,14 @@ export type ChatResponse = {
   } | null;
   warning?: string | null;
   replySource?: ReplySourceInfo | null;
-  pendingTask?: PendingReplyTask | null;
+  awaitingCustomerSelection?: boolean;
+  recognition?: RecognitionSnapshot | null;
+};
+
+export type RecognitionSnapshot = {
+  platform?: string | null;
+  nickname?: string | null;
+  messages?: Array<{ role?: string | null; text?: string | null }> | null;
 };
 
 export type ReplySourceInfo = {
@@ -43,6 +51,7 @@ export type RecognizeStartPayload = {
   sessionId?: string;
   source?: string;
   stage?: RecognizeProgressStage;
+  message?: string;
 };
 
 export type RecognizeProgressPayload = RecognizeStartPayload & {
@@ -58,36 +67,19 @@ export type RecognizeFailurePayload = {
 export type CustomerSelectedPayload = {
   sessionId?: string;
   phone?: string;
+  customerId?: number | null;
   scene?: ReplyScene;
   leadType?: string;
   sourceFrom?: string;
 };
 
 export type ReplyCandidate = {
-  phone: string;
+  customerId?: number | null;
+  phone?: string | null;
   nickname?: string | null;
   leadType?: string | null;
   assignedKeeper?: string | null;
   intendedStore?: string | null;
-};
-
-export type PendingReplyTaskStatus =
-  | 'WAITING_CUSTOMER'
-  | 'GENERATING'
-  | 'READY'
-  | 'FAILED'
-  | 'CANCELLED'
-  | 'EXPIRED';
-
-export type PendingReplyTask = {
-  taskId: string;
-  replySessionId: string;
-  status: PendingReplyTaskStatus;
-  candidates: ReplyCandidate[];
-  selectedPhone?: string | null;
-  response?: ChatResponse | null;
-  errorCode?: string | null;
-  expiresAt: string;
 };
 
 export type ProfileSuggestion = {
@@ -123,18 +115,38 @@ export type ReplySelectedPayload = {
   direction: string;
   reason: string;
   phone: string;
+  customerId?: number | null;
+  nickname?: string;
   displayPhone?: string;
+  taskId?: string;
+  replySessionId?: string;
+  replySource?: 'LLM' | 'SKILL' | 'FALLBACK';
   isFallback: boolean;
 };
 
-export type ReplySessionStatus = 'LOADING' | 'READY' | 'FAILED' | 'FALLBACK' | 'COPIED' | 'MULTIPLE';
-export type RecognizeProgressStage = 'CAPTURED' | 'UPLOADING' | 'WAITING_MODEL' | 'GENERATING' | 'DONE' | 'FAILED';
+export type RecognitionJobStatus =
+  | 'QUEUED'
+  | 'RECOGNIZING'
+  | 'READY'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'EXPIRED';
+
+export type RecognitionJobUpdate = {
+  sessionId: string;
+  jobId: string;
+  status: RecognitionJobStatus;
+  errorCode?: string | null;
+};
+
+export type ReplySessionStatus = 'LOADING' | 'READY' | 'FAILED' | 'FALLBACK' | 'COPIED' | 'CANCELLED';
+export type RecognizeProgressStage = 'CAPTURING' | 'CAPTURED' | 'UPLOADING' | 'WAITING_MODEL' | 'GENERATING' | 'DONE' | 'FAILED';
 
 export type ReplySession = {
   sessionId: string;
   status: ReplySessionStatus;
-  pendingTaskId: string;
-  pendingTaskStatus: PendingReplyTaskStatus | null;
+  recognitionJobId: string;
+  recognitionJobStatus: RecognitionJobStatus | null;
   source?: string;
   createdAt: number;
   updatedAt: number;
@@ -147,7 +159,10 @@ export type ReplySession = {
   suggestions: ReplySuggestion[];
   replySource: ReplySourceInfo | null;
   candidates: ReplyCandidate[];
+  awaitingCustomerSelection: boolean;
+  recognition: RecognitionSnapshot | null;
   currentPhone: string;
+  currentCustomerId: number | null;
   currentNickname: string;
   currentLeadType: string;
   currentScene: ReplyScene;
@@ -166,4 +181,8 @@ export type ReplySession = {
   abnormalAlert: AbnormalAlertPayload | null;
   activeHelpId: string | number | '';
   toast: string;
+};
+
+export type ArchivedReplySession = ReplySession & {
+  archivedAt: number;
 };

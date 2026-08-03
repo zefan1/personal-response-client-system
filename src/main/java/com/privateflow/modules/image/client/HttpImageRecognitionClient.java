@@ -26,6 +26,11 @@ import org.springframework.stereotype.Component;
 public class HttpImageRecognitionClient implements ImageRecognitionClient, ConfigurableImageRecognitionClient {
 
   private static final Logger log = LoggerFactory.getLogger(HttpImageRecognitionClient.class);
+  private static final int DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+  private static final int MIN_REQUEST_TIMEOUT_MS = 15_000;
+  private static final int MAX_REQUEST_TIMEOUT_MS = 60_000;
+  private static final int CONNECT_TIMEOUT_MS = 10_000;
+  private static final int MAX_TRANSIENT_ATTEMPTS = 2;
   private final HttpClient httpClient;
   private final ImageConfigProvider configProvider;
   private final ObjectMapper objectMapper;
@@ -34,7 +39,7 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient, Confi
     this.configProvider = configProvider;
     this.objectMapper = objectMapper;
     this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(3))
+        .connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS))
         .version(HttpClient.Version.HTTP_1_1)
         .build();
   }
@@ -52,16 +57,14 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient, Confi
     byte[] body = requestBody(config, jpegImage);
     HttpRequest.Builder builder = HttpRequest.newBuilder()
         .uri(URI.create(chatCompletionsUrl(config.apiBaseUrl())))
+        .timeout(Duration.ofMillis(requestTimeoutMs(config.timeoutMs())))
         .header("Content-Type", "application/json")
         .POST(HttpRequest.BodyPublishers.ofByteArray(body));
-    if (config.timeoutMs() > 0) {
-      builder.timeout(Duration.ofMillis(config.timeoutMs()));
-    }
     if (config.apiKey() != null && !config.apiKey().isBlank()) {
       builder.header("Authorization", "Bearer " + config.apiKey());
     }
     try {
-      HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+      HttpResponse<String> response = sendWithTransientRetry(builder.build());
       int status = response.statusCode();
       if (status == 401 || status == 403) {
         log.error("IMAGE_API_AUTH_FAILED status={}", status);
@@ -89,6 +92,24 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient, Confi
       Thread.currentThread().interrupt();
       throw new ImageRecognitionException(ImageErrorCodes.IMAGE_RECOGNITION_FAILED, "Image recognition request was interrupted", ex);
     }
+  }
+
+  private HttpResponse<String> sendWithTransientRetry(HttpRequest request)
+      throws IOException, InterruptedException {
+    for (int attempt = 1; attempt <= MAX_TRANSIENT_ATTEMPTS; attempt++) {
+      try {
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+      } catch (IOException ex) {
+        if (attempt == MAX_TRANSIENT_ATTEMPTS) {
+          log.error("IMAGE_API_TRANSIENT_FAILURE_EXHAUSTED attempts={} reason={}",
+              MAX_TRANSIENT_ATTEMPTS, ex.getClass().getSimpleName());
+          throw ex;
+        }
+        log.warn("IMAGE_API_TRANSIENT_FAILURE attempt={} maxAttempts={} reason={}",
+            attempt, MAX_TRANSIENT_ATTEMPTS, ex.getClass().getSimpleName());
+      }
+    }
+    throw new IllegalStateException("image recognition retry loop exhausted");
   }
 
   private byte[] requestBody(ImageConfig config, byte[] image) {
@@ -142,5 +163,14 @@ public class HttpImageRecognitionClient implements ImageRecognitionClient, Confi
 
   private ImageRecognitionException failed(String message) {
     return new ImageRecognitionException(ImageErrorCodes.IMAGE_RECOGNITION_FAILED, message);
+  }
+
+  private int requestTimeoutMs(int configuredTimeoutMs) {
+    if (configuredTimeoutMs >= MIN_REQUEST_TIMEOUT_MS && configuredTimeoutMs <= MAX_REQUEST_TIMEOUT_MS) {
+      return configuredTimeoutMs;
+    }
+    log.warn("IMAGE_API_TIMEOUT_INVALID configuredTimeoutMs={}, usingDefaultMs={}",
+        configuredTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
+    return DEFAULT_REQUEST_TIMEOUT_MS;
   }
 }

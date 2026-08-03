@@ -3,8 +3,19 @@ export type ReplySelectedPayload = {
   direction: string;
   reason: string;
   phone: string;
-  displayPhone?: string;
+  customerId?: number | null;
+  nickname?: string;
+  taskId?: string;
+  replySessionId?: string;
+  replySource?: 'LLM' | 'SKILL' | 'FALLBACK';
   isFallback: boolean;
+};
+
+export type PendingSendDecision = ReplySelectedPayload & {
+  confirmationId: string;
+  status: 'AWAITING_DECISION' | 'SUBMITTING' | 'SUBMIT_FAILED';
+  createdAt: string;
+  errorMessage: string;
 };
 
 export type ProfileSuggestion = {

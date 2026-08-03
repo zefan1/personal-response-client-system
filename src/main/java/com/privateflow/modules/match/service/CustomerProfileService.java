@@ -3,6 +3,8 @@ package com.privateflow.modules.match.service;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.service.CustomerAccessService;
+import com.privateflow.modules.communication.CommunicationArchiveRepository;
+import com.privateflow.modules.communication.CommunicationSummaryVersion;
 import com.privateflow.modules.match.CustomerMatchErrorCodes;
 import com.privateflow.modules.match.CustomerMatchException;
 import com.privateflow.modules.match.util.PhoneUtils;
@@ -25,6 +27,7 @@ public class CustomerProfileService {
   private final CustomerAccessService customerAccessService;
   private final CustomerTagFoundationRepository tagRepository;
   private final TagCandidateBuilder candidateBuilder;
+  private final CommunicationArchiveRepository communicationRepository;
 
   @Autowired
   public CustomerProfileService(
@@ -32,19 +35,36 @@ public class CustomerProfileService {
       SuggestionQueueManager suggestionQueueManager,
       CustomerAccessService customerAccessService,
       CustomerTagFoundationRepository tagRepository,
-      TagCandidateBuilder candidateBuilder) {
+      TagCandidateBuilder candidateBuilder,
+      CommunicationArchiveRepository communicationRepository) {
     this.customerQueryService = customerQueryService;
     this.suggestionQueueManager = suggestionQueueManager;
     this.customerAccessService = customerAccessService;
     this.tagRepository = tagRepository;
     this.candidateBuilder = candidateBuilder;
+    this.communicationRepository = communicationRepository;
+  }
+
+  public CustomerProfileService(
+      CustomerQueryService customerQueryService,
+      SuggestionQueueManager suggestionQueueManager,
+      CustomerAccessService customerAccessService,
+      CustomerTagFoundationRepository tagRepository,
+      TagCandidateBuilder candidateBuilder) {
+    this(
+        customerQueryService,
+        suggestionQueueManager,
+        customerAccessService,
+        tagRepository,
+        candidateBuilder,
+        null);
   }
 
   public CustomerProfileService(
       CustomerQueryService customerQueryService,
       SuggestionQueueManager suggestionQueueManager,
       CustomerAccessService customerAccessService) {
-    this(customerQueryService, suggestionQueueManager, customerAccessService, null, null);
+    this(customerQueryService, suggestionQueueManager, customerAccessService, null, null, null);
   }
 
   public CustomerProfileView getProfile(String rawPhone) {
@@ -60,16 +80,7 @@ public class CustomerProfileService {
       if (!customerAccessService.canAccess(customer)) {
         throw new CustomerMatchException(CustomerMatchErrorCodes.CUSTOMER_NOT_FOUND, "客户未找到或不在你的负责范围");
       }
-      Customer copy = copy(customer);
-      copy.setPhone(PhoneUtils.mask(customer.getPhone()));
-      TagExtension extension = loadTagExtension(customer);
-      return new CustomerProfileView(
-          copy,
-          phone,
-          suggestionQueueManager.listPending(phone),
-          extension.currentTags(),
-          extension.locks(),
-          extension.editableCategories());
+      return profileView(customer, phone);
     } catch (CustomerMatchException ex) {
       throw ex;
     } catch (RuntimeException ex) {
@@ -77,6 +88,56 @@ public class CustomerProfileService {
           CustomerMatchErrorCodes.MATCH_FAILED,
           "客户档案查询服务暂不可用",
           ex);
+    }
+  }
+
+  public CustomerProfileView getProfileById(long customerId) {
+    if (customerId <= 0) {
+      throw new CustomerMatchException(CustomerMatchErrorCodes.BAD_REQUEST, "customer id is required");
+    }
+    try {
+      Customer customer = customerQueryService.getById(customerId);
+      if (customer == null) {
+        throw new CustomerMatchException(CustomerMatchErrorCodes.CUSTOMER_NOT_FOUND, "customer not found");
+      }
+      if (!customerAccessService.canAccess(customer)) {
+        throw new CustomerMatchException(CustomerMatchErrorCodes.CUSTOMER_NOT_FOUND, "customer not found or inaccessible");
+      }
+      return profileView(customer, customer.getPhone());
+    } catch (CustomerMatchException ex) {
+      throw ex;
+    } catch (RuntimeException ex) {
+      throw new CustomerMatchException(
+          CustomerMatchErrorCodes.MATCH_FAILED,
+          "customer profile service is temporarily unavailable",
+          ex);
+    }
+  }
+
+  private CustomerProfileView profileView(Customer customer, String fullPhone) {
+    Customer copy = copy(customer);
+    copy.setPhone(PhoneUtils.mask(customer.getPhone()));
+    TagExtension extension = loadTagExtension(customer);
+    return new CustomerProfileView(
+        copy,
+        fullPhone,
+        fullPhone == null || fullPhone.isBlank() ? List.of() : suggestionQueueManager.listPending(fullPhone),
+        extension.currentTags(),
+        extension.locks(),
+        extension.editableCategories(),
+        latestCommunicationSummary(customer));
+  }
+
+  private CommunicationSummaryVersion latestCommunicationSummary(Customer customer) {
+    if (communicationRepository == null || customer == null || customer.getId() == null) {
+      return null;
+    }
+    try {
+      return communicationRepository.findSummaryVersions(customer.getId()).stream()
+          .findFirst()
+          .orElse(null);
+    } catch (RuntimeException ex) {
+      return null;
     }
   }
 
@@ -132,6 +193,11 @@ public class CustomerProfileService {
     target.setIntentLevel(source.getIntentLevel());
     target.setWorries(source.getWorries());
     target.setCustomerStage(source.getCustomerStage());
+    target.setInternalNote(source.getInternalNote());
+    target.setCustomerProfileSummary(source.getCustomerProfileSummary());
+    target.setFirstTrackingCapture(source.getFirstTrackingCapture());
+    target.setSecondTrackingCapture(source.getSecondTrackingCapture());
+    target.setThirdTrackingCapture(source.getThirdTrackingCapture());
     target.setLastFollowupAt(source.getLastFollowupAt());
     target.setFollowupNotes(source.getFollowupNotes());
     target.setNextFollowupAt(source.getNextFollowupAt());

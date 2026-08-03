@@ -5,11 +5,12 @@ import { eventBus } from '../../shared/eventBus';
 import { getAlertsByPhone } from '../abnormal-alert/alertStore';
 import type {
   AbnormalAlertPayload,
+  ArchivedReplySession,
   ChatResponse,
   CustomerSelectedPayload,
-  PendingReplyTask,
   ProfileSuggestion,
   ProfileSuggestionsPayload,
+  RecognitionJobUpdate,
   RecognizeFailurePayload,
   RecognizeProgressPayload,
   RecognizeProgressStage,
@@ -34,6 +35,7 @@ type LoadingMode = 'NONE' | 'FULL' | 'SIMPLE';
 
 export const replySuggestionState = reactive({
   sessions: [] as ReplySession[],
+  archivedSessions: [] as ArchivedReplySession[],
   activeSessionId: '',
   loadingMode: 'NONE' as LoadingMode,
   currentStageIndex: 0,
@@ -43,6 +45,8 @@ export const replySuggestionState = reactive({
   suggestions: [] as ReplySuggestion[],
   replySource: null as ChatResponse['replySource'],
   candidates: [] as ReplyCandidate[],
+  awaitingCustomerSelection: false,
+  recognition: null as ChatResponse['recognition'],
   currentPhone: '',
   currentNickname: '',
   currentLeadType: '',
@@ -82,7 +86,11 @@ let persistedStorageKey = '';
 let skipNextPersistence = false;
 
 watch(
-  () => ({ sessions: replySuggestionState.sessions, activeSessionId: replySuggestionState.activeSessionId }),
+  () => ({
+    sessions: replySuggestionState.sessions,
+    archivedSessions: replySuggestionState.archivedSessions,
+    activeSessionId: replySuggestionState.activeSessionId
+  }),
   () => {
     if (skipNextPersistence) {
       skipNextPersistence = false;
@@ -100,9 +108,18 @@ export function hydrateReplySuggestionStore(): void {
   try {
     const raw = localStorage.getItem(persistedStorageKey);
     if (!raw) return;
-    const parsed = JSON.parse(raw) as { sessions?: ReplySession[]; activeSessionId?: string };
+    const parsed = JSON.parse(raw) as {
+      sessions?: ReplySession[];
+      archivedSessions?: ArchivedReplySession[];
+      activeSessionId?: string;
+    };
     const sessions = Array.isArray(parsed.sessions) ? parsed.sessions.map(recoverSession) : [];
+    const archivedSessions = Array.isArray(parsed.archivedSessions)
+      ? parsed.archivedSessions.map(recoverArchivedSession)
+      : [];
     replySuggestionState.sessions = sessions;
+    replySuggestionState.archivedSessions = archivedSessions;
+    archivedSessions.forEach((session) => rememberDismissedSession(session.sessionId));
     replySuggestionState.activeSessionId = sessions.some((item) => item.sessionId === parsed.activeSessionId)
       ? parsed.activeSessionId ?? ''
       : sessions[0]?.sessionId ?? '';
@@ -117,10 +134,11 @@ export function startRecognizeLoading(payload: RecognizeStartPayload = {}): void
   const shouldKeepCurrentLoadingTask = Boolean(activeReplySession.value?.status === 'LOADING');
   const session = createSession(payload.sessionId ?? nextSessionId(), 'FULL', payload.source);
   if (!session) return;
+  const initialStage = payload.stage ?? (payload.source === 'CLIPBOARD_TEXT' ? 'UPLOADING' : 'CAPTURED');
   session.currentScene = 'CHAT_RECOGNIZE';
-  session.currentStageIndex = 0;
-  session.currentStageText = stageTextFor(session, 0);
-  session.progressStage = stageFor(session, 0);
+  session.currentStageIndex = stageIndexFor(session, initialStage);
+  session.currentStageText = payload.message || stageTextFor(session, session.currentStageIndex);
+  session.progressStage = initialStage;
   session.failureReason = '';
   session.status = 'LOADING';
   if (shouldKeepCurrentLoadingTask && session.sessionId !== replySuggestionState.activeSessionId) {
@@ -161,6 +179,7 @@ export function startGenerateLoading(payload: CustomerSelectedPayload): void {
   session.failureReason = '';
   session.suggestions = [];
   session.currentPhone = payload.phone ?? '';
+  session.currentCustomerId = payload.customerId ?? null;
   session.currentLeadType = payload.leadType ?? '';
   session.currentScene = payload.scene ?? 'ACTIVE_REPLY';
   session.status = 'LOADING';
@@ -168,137 +187,6 @@ export function startGenerateLoading(payload: CustomerSelectedPayload): void {
   session.source = payload.sourceFrom ?? session.source;
   session.updatedAt = Date.now();
   activateSession(session.sessionId);
-}
-
-export function startPendingTaskGeneration(payload: {
-  sessionId: string;
-  taskId: string;
-  phone: string;
-}): void {
-  if (isDismissedSession(payload.sessionId)) return;
-  const session = replySuggestionState.sessions.find((item) => item.sessionId === payload.sessionId);
-  if (!session) return;
-  stopFallbackRetry(session.sessionId);
-  session.pendingTaskId = payload.taskId;
-  session.pendingTaskStatus = 'GENERATING';
-  session.currentPhone = payload.phone;
-  session.currentScene = 'CHAT_RECOGNIZE';
-  session.currentStageText = '正在生成回复...';
-  session.progressStage = 'GENERATING';
-  session.failureReason = '';
-  session.suggestions = [];
-  session.status = 'LOADING';
-  session.loadingMode = 'SIMPLE';
-  session.updatedAt = Date.now();
-  activateSession(session.sessionId);
-}
-
-export function pauseForMultipleMatch(payload: RecognizeStartPayload & {
-  taskId?: string;
-  candidates?: ReplyCandidate[];
-  matchInfo?: { customers?: ReplyCandidate[] };
-} = {}): void {
-  if (isDismissedSession(payload.sessionId)) return;
-  const session = sessionForPayload(payload);
-  if (!session) return;
-  session.status = 'MULTIPLE';
-  session.pendingTaskId = payload.taskId ?? session.pendingTaskId;
-  session.pendingTaskStatus = payload.taskId ? 'WAITING_CUSTOMER' : session.pendingTaskStatus;
-  session.candidates = (payload.candidates ?? payload.matchInfo?.customers ?? []).slice(0, 5);
-  session.suggestions = [];
-  session.loadingMode = 'NONE';
-  session.progressStage = 'DONE';
-  session.currentStageText = '等待选择客户';
-  session.updatedAt = Date.now();
-  if (session.sessionId === replySuggestionState.activeSessionId) {
-    clearSkeletonTimer();
-  }
-  syncActiveSessionToState();
-}
-
-export function restorePendingTaskWaiting(payload: {
-  sessionId: string;
-  taskId: string;
-  candidates: ReplyCandidate[];
-}): void {
-  const session = replySuggestionState.sessions.find((item) =>
-    item.sessionId === payload.sessionId && item.pendingTaskId === payload.taskId
-  );
-  if (!session) return;
-  pauseForMultipleMatch({
-    sessionId: payload.sessionId,
-    taskId: payload.taskId,
-    candidates: payload.candidates
-  });
-}
-
-export function syncPendingReplyTaskIntoSession(task: PendingReplyTask): void {
-  if (!task?.taskId || !task.replySessionId) return;
-  const existing = replySuggestionState.sessions.find((item) => item.sessionId === task.replySessionId);
-
-  if (task.status === 'CANCELLED') {
-    if (existing) closeReplySession(existing.sessionId);
-    return;
-  }
-
-  const session = existing ?? createSession(task.replySessionId, 'NONE', 'PENDING_REPLY_TASK');
-  if (!session) return;
-  stopFallbackRetry(session.sessionId);
-  session.pendingTaskId = task.taskId;
-  session.pendingTaskStatus = task.status;
-  session.currentScene = 'CHAT_RECOGNIZE';
-  session.currentPhone = task.selectedPhone ?? session.currentPhone;
-  if (task.candidates?.length) {
-    session.candidates = task.candidates.slice(0, 5);
-  }
-  session.updatedAt = Date.now();
-
-  if (task.status === 'WAITING_CUSTOMER') {
-    session.status = 'MULTIPLE';
-    session.loadingMode = 'NONE';
-    session.progressStage = 'DONE';
-    session.currentStageText = '等待选择客户';
-    session.failureReason = '';
-    session.suggestions = [];
-  } else if (task.status === 'GENERATING') {
-    session.status = 'LOADING';
-    session.loadingMode = 'SIMPLE';
-    session.progressStage = 'GENERATING';
-    session.currentStageText = '正在生成回复';
-    session.failureReason = '';
-    session.suggestions = [];
-  } else if (task.status === 'READY') {
-    if (task.response) {
-      showChatResponse(session, task.response, 'CHAT_RECOGNIZE', { allowAutomaticFallbackRetry: false });
-    } else {
-      markSavedReplyProtocolFailure(session);
-    }
-    session.pendingTaskId = task.taskId;
-    session.pendingTaskStatus = 'READY';
-  } else if (task.status === 'FAILED') {
-    session.status = 'FAILED';
-    session.loadingMode = 'NONE';
-    session.progressStage = 'FAILED';
-    session.currentStageText = '回复生成失败，可重新生成或取消任务';
-    session.failureReason = session.currentStageText;
-    session.suggestions = [];
-    session.showRegenerateButton = true;
-  } else if (task.status === 'EXPIRED') {
-    session.status = 'FAILED';
-    session.loadingMode = 'NONE';
-    session.progressStage = 'FAILED';
-    session.currentStageText = '任务已过期，请重新识别聊天';
-    session.failureReason = session.currentStageText;
-    session.candidates = [];
-    session.suggestions = [];
-    session.showRegenerateButton = false;
-  }
-
-  if (!replySuggestionState.activeSessionId || replySuggestionState.activeSessionId === session.sessionId) {
-    activateSession(session.sessionId);
-  } else {
-    syncActiveSessionToState();
-  }
 }
 
 export function stopForImageFailure(payload: RecognizeFailurePayload = {}): void {
@@ -327,9 +215,6 @@ export function showRecognizeResult(payload: RecognizeResultPayload): void {
     && activeReplySession.value.sessionId !== session.sessionId
   );
   showChatResponse(session, response, 'CHAT_RECOGNIZE');
-  if (sourceFromPayload(payload) === 'PENDING_REPLY_TASK' && session.pendingTaskId) {
-    session.pendingTaskStatus = 'READY';
-  }
   if (!shouldKeepCurrentLoadingTask) {
     activateSession(session.sessionId);
   } else {
@@ -341,9 +226,46 @@ export async function regenerateReplies(isAutomaticRetry = false): Promise<void>
   await regenerateSessionReplies(activeReplySession.value, isAutomaticRetry);
 }
 
+export async function chooseRecognizedCustomer(customerId: number): Promise<void> {
+  const session = activeReplySession.value;
+  if (!session?.recognitionJobId || !session.awaitingCustomerSelection || !customerId) {
+    setActiveToast('当前识别任务不能选择客户，请重新识别');
+    return;
+  }
+  session.status = 'LOADING';
+  session.loadingMode = 'SIMPLE';
+  session.currentStageText = '正在读取已选客户档案并生成回复...';
+  session.failureReason = '';
+  session.updatedAt = Date.now();
+  syncActiveSessionToState();
+  try {
+    const response = await postJson<ChatResponse>(
+      `/api/v1/chat/recognition-jobs/${encodeURIComponent(session.recognitionJobId)}/select-customer`,
+      { customerId },
+      loadDesktopConfig().requestTotalTimeoutMs
+    );
+    if (!response.success || !response.data) {
+      session.status = 'READY';
+      session.loadingMode = 'NONE';
+      session.currentStageText = '请选择客户档案';
+      session.toast = response.message || '选择客户失败，请重新识别后再试';
+      syncActiveSessionToState();
+      return;
+    }
+    showChatResponse(session, response.data, 'CHAT_RECOGNIZE');
+    syncActiveSessionToState();
+  } catch {
+    session.status = 'READY';
+    session.loadingMode = 'NONE';
+    session.currentStageText = '请选择客户档案';
+    session.toast = '选择客户超时，请重新识别后再试';
+    syncActiveSessionToState();
+  }
+}
+
 async function regenerateSessionReplies(session: ReplySession | null, isAutomaticRetry = false): Promise<void> {
   const config = loadDesktopConfig();
-  if (!session?.currentPhone) {
+  if (!session || (!session.currentPhone && !session.currentCustomerId)) {
     setActiveToast('当前客户信息不足，无法换一组');
     return;
   }
@@ -357,6 +279,7 @@ async function regenerateSessionReplies(session: ReplySession | null, isAutomati
   try {
     const response = await postJson<ChatResponse>('/api/v1/chat/regenerate', {
       phone: session.currentPhone,
+      customerId: session.currentCustomerId,
       leadType: session.currentLeadType,
       scene: 'REGENERATE',
       previousSuggestions: isAutomaticRetry ? [] : session.suggestions.map((item) => item.text)
@@ -379,12 +302,21 @@ async function regenerateSessionReplies(session: ReplySession | null, isAutomati
 
 export function selectReply(suggestion: ReplySuggestion): void {
   const session = activeReplySession.value;
+  const selectedPhone = session?.currentPhone ?? '';
   const payload: ReplySelectedPayload = {
     text: suggestion.text,
     direction: suggestion.direction,
     reason: suggestion.reason,
-    phone: session?.currentPhone ?? '',
-    displayPhone: maskPhone(session?.currentPhone ?? ''),
+    phone: selectedPhone,
+    customerId: session?.currentCustomerId,
+    nickname: session?.currentNickname || undefined,
+    displayPhone: maskPhone(selectedPhone),
+    replySessionId: session?.sessionId || undefined,
+    replySource: session?.replySource?.source === 'LLM'
+      || session?.replySource?.source === 'SKILL'
+      || session?.replySource?.source === 'FALLBACK'
+      ? session.replySource.source
+      : undefined,
     isFallback: suggestion.direction === FALLBACK_DIRECTION || Boolean(session?.isFallbackMode)
   };
   eventBus.emit('reply:selected', payload);
@@ -533,59 +465,121 @@ export function closeReplySession(sessionId: string): void {
   }
 }
 
-export function removeMissingPendingReplySessions(currentTaskIds: ReadonlySet<string>): void {
-  const removableStatuses = new Set(['WAITING_CUSTOMER', 'GENERATING', 'FAILED']);
-  const missingSessionIds = replySuggestionState.sessions
-    .filter((session) => session.pendingTaskId
-      && !currentTaskIds.has(session.pendingTaskId)
-      && session.pendingTaskStatus !== null
-      && removableStatuses.has(session.pendingTaskStatus))
-    .map((session) => session.sessionId);
-  missingSessionIds.forEach(closeReplySession);
-}
-
-export function removePendingReplyTaskSession(taskId: string, sessionId: string): void {
-  const session = replySuggestionState.sessions.find((item) =>
-    item.sessionId === sessionId && item.pendingTaskId === taskId
-  );
-  if (session) {
-    closeReplySession(session.sessionId);
+export function syncRecognitionJobIntoSession(update: RecognitionJobUpdate): void {
+  const session = replySuggestionState.sessions.find((item) => item.sessionId === update.sessionId);
+  if (!session) return;
+  session.recognitionJobId = update.jobId;
+  session.recognitionJobStatus = update.status;
+  session.updatedAt = Date.now();
+  if (update.status === 'QUEUED' || update.status === 'RECOGNIZING') {
+    session.status = 'LOADING';
+    session.loadingMode = 'FULL';
+    session.progressStage = 'WAITING_MODEL';
+    session.currentStageText = update.status === 'QUEUED' ? '正在排队识图' : '正在识图并生成回复';
+    session.failureReason = '';
+  } else if (update.status === 'READY') {
+    session.status = 'LOADING';
+    session.loadingMode = 'NONE';
+    session.progressStage = 'GENERATING';
+    session.currentStageText = '正在同步回复结果';
+  } else if (update.status === 'CANCELLED') {
+    stopFallbackRetry(session.sessionId);
+    session.status = 'CANCELLED';
+    session.loadingMode = 'NONE';
+    session.progressStage = 'DONE';
+    session.currentStageText = '任务已取消';
+    session.failureReason = '';
+    session.suggestions = [];
+  } else {
+    stopFallbackRetry(session.sessionId);
+    session.status = 'FAILED';
+    session.loadingMode = 'NONE';
+    session.progressStage = 'FAILED';
+    session.currentStageText = update.status === 'EXPIRED' ? '任务已过期，请重新识别' : '识图任务处理失败';
+    session.failureReason = session.currentStageText;
+    session.suggestions = [];
+  }
+  if (session.sessionId === replySuggestionState.activeSessionId) {
+    if (session.status !== 'LOADING') {
+      clearSkeletonTimer();
+    }
+    syncActiveSessionToState();
   }
 }
 
-export function restoreAndActivatePendingReplyTask(task: PendingReplyTask): boolean {
-  if (!task?.taskId || !task.replySessionId) return false;
-  dismissedSessionIds.delete(task.replySessionId);
-  syncPendingReplyTaskIntoSession(task);
-  const restored = replySuggestionState.sessions.find((session) =>
-    session.sessionId === task.replySessionId && session.pendingTaskId === task.taskId
+export function archiveQueuedReplySessions(): ArchivedReplySession[] {
+  const queuedSessions = replySuggestionState.sessions.filter((session) =>
+    session.sessionId !== replySuggestionState.activeSessionId && isArchivableSession(session)
   );
-  if (!restored) return false;
-  activateSession(restored.sessionId);
-  return replySuggestionState.activeSessionId === restored.sessionId;
+  if (queuedSessions.length === 0) return [];
+
+  const archivedAt = Date.now();
+  const archivedSessions = queuedSessions.map((session) => ({ ...session, archivedAt }));
+  archivedSessions.forEach((session) => {
+    rememberDismissedSession(session.sessionId);
+    stopFallbackRetry(session.sessionId);
+  });
+  replySuggestionState.sessions = replySuggestionState.sessions.filter(
+    (session) => session.sessionId === replySuggestionState.activeSessionId
+  );
+  replySuggestionState.archivedSessions.unshift(...archivedSessions);
+  syncActiveSessionToState();
+  return archivedSessions;
 }
 
-export function selectCandidateForSession(sessionId: string, candidate: ReplyCandidate): void {
-  if (isDismissedSession(sessionId)) return;
-  const session = replySuggestionState.sessions.find((item) => item.sessionId === sessionId);
-  if (!session || !candidate.phone) return;
-  activateSession(sessionId);
-  eventBus.emit('candidate:preview', {
-    sessionId,
-    taskId: session.pendingTaskId,
-    candidate,
-    candidates: session.candidates.slice()
+export function clearReplyTaskQueue(): Array<{ jobId: string; sessionId: string }> {
+  const jobsToCancel = replySuggestionState.sessions
+    .filter((session) => Boolean(session.recognitionJobId)
+      && (session.recognitionJobStatus === 'QUEUED' || session.recognitionJobStatus === 'RECOGNIZING'))
+    .map((session) => ({ jobId: session.recognitionJobId, sessionId: session.sessionId }));
+
+  [...replySuggestionState.sessions, ...replySuggestionState.archivedSessions].forEach((session) => {
+    rememberDismissedSession(session.sessionId);
+    stopFallbackRetry(session.sessionId);
   });
+  replySuggestionState.sessions = [];
+  replySuggestionState.archivedSessions = [];
+  replySuggestionState.activeSessionId = '';
+  syncActiveSessionToState();
+  return jobsToCancel;
+}
+
+function isArchivableSession(session: ReplySession): boolean {
+  return session.status === 'COPIED'
+    || session.status === 'FAILED'
+    || session.status === 'CANCELLED';
+}
+
+export function restoreArchivedReplySession(sessionId: string): boolean {
+  const index = replySuggestionState.archivedSessions.findIndex((session) => session.sessionId === sessionId);
+  if (index < 0) return false;
+
+  const [archivedSession] = replySuggestionState.archivedSessions.splice(index, 1);
+  dismissedSessionIds.delete(sessionId);
+  const { archivedAt: _archivedAt, ...restoredSession } = archivedSession;
+  const existingSession = replySuggestionState.sessions.find((session) => session.sessionId === sessionId);
+  if (existingSession) {
+    activateSession(existingSession.sessionId);
+    return true;
+  }
+
+  replySuggestionState.sessions.unshift(restoredSession);
+  activateSession(restoredSession.sessionId);
+  return true;
 }
 
 export function cleanupReplySuggestionStore(): void {
   const snapshot = serializeSessions();
-  const shouldPersistSnapshot = hydrated || Boolean(persistedStorageKey) || snapshot.sessions.length > 0;
+  const shouldPersistSnapshot = hydrated
+    || Boolean(persistedStorageKey)
+    || snapshot.sessions.length > 0
+    || snapshot.archivedSessions.length > 0;
   clearSkeletonTimer();
   stopFallbackRetry();
   dismissedSessionIds.clear();
   skipNextPersistence = true;
   replySuggestionState.sessions = [];
+  replySuggestionState.archivedSessions = [];
   replySuggestionState.activeSessionId = '';
   syncActiveSessionToState();
   if (shouldPersistSnapshot) {
@@ -605,19 +599,24 @@ function storageKey(): string {
 }
 
 function persistReplySessions(): void {
-  if (!hydrated && replySuggestionState.sessions.length === 0) return;
+  if (!hydrated && replySuggestionState.sessions.length === 0 && replySuggestionState.archivedSessions.length === 0) return;
   if (!persistedStorageKey) persistedStorageKey = storageKey();
   persistSnapshot(serializeSessions());
 }
 
-function serializeSessions(): { sessions: ReplySession[]; activeSessionId: string } {
+function serializeSessions(): {
+  sessions: ReplySession[];
+  archivedSessions: ArchivedReplySession[];
+  activeSessionId: string;
+} {
   return {
     sessions: replySuggestionState.sessions,
+    archivedSessions: replySuggestionState.archivedSessions,
     activeSessionId: replySuggestionState.activeSessionId
   };
 }
 
-function persistSnapshot(snapshot: { sessions: ReplySession[]; activeSessionId: string }): void {
+function persistSnapshot(snapshot: ReturnType<typeof serializeSessions>): void {
   try {
     localStorage.setItem(persistedStorageKey || storageKey(), JSON.stringify(snapshot));
   } catch {
@@ -628,8 +627,10 @@ function persistSnapshot(snapshot: { sessions: ReplySession[]; activeSessionId: 
 function recoverSession(session: ReplySession): ReplySession {
   const recovered = {
     ...session,
-    pendingTaskId: session.pendingTaskId ?? '',
-    pendingTaskStatus: session.pendingTaskStatus ?? null
+    recognitionJobId: session.recognitionJobId ?? '',
+    recognitionJobStatus: session.recognitionJobStatus ?? null,
+    awaitingCustomerSelection: Boolean(session.awaitingCustomerSelection),
+    recognition: session.recognition ?? null
   };
   if (session.status === 'FALLBACK'
     && session.currentScene === 'CHAT_RECOGNIZE'
@@ -641,13 +642,23 @@ function recoverSession(session: ReplySession): ReplySession {
       showRegenerateButton: true
     };
   }
-  if (session.status !== 'LOADING') return recovered;
+  if (session.status !== 'LOADING' || (recovered.recognitionJobId
+    && (recovered.recognitionJobStatus === 'QUEUED' || recovered.recognitionJobStatus === 'RECOGNIZING'))) {
+    return recovered;
+  }
   return {
     ...recovered,
     status: 'FAILED',
     loadingMode: 'NONE',
     progressStage: 'FAILED',
     failureReason: '上次识别被中断，请重新识别'
+  };
+}
+
+function recoverArchivedSession(session: ArchivedReplySession): ArchivedReplySession {
+  return {
+    ...recoverSession(session),
+    archivedAt: Number.isFinite(session.archivedAt) ? session.archivedAt : Date.now()
   };
 }
 
@@ -664,9 +675,27 @@ function showChatResponse(
   session.failureReason = '';
   session.currentScene = scene;
   session.currentPhone = response.phone ?? session.currentPhone;
+  session.currentCustomerId = response.customerId ?? session.currentCustomerId;
   session.abnormalAlert = session.currentPhone ? getAlertsByPhone(session.currentPhone)[0] ?? null : null;
   session.currentNickname = response.nickname ?? session.currentNickname;
   session.currentMatchType = response.match?.matchType ?? (response.needsCustomerIdentifier ? 'NONE' : session.currentMatchType);
+  session.candidates = Array.isArray(response.match?.customers)
+    ? response.match.customers as ReplyCandidate[]
+    : [];
+  session.recognition = response.recognition ?? null;
+  session.awaitingCustomerSelection = Boolean(response.awaitingCustomerSelection);
+  if (session.awaitingCustomerSelection) {
+    session.status = 'READY';
+    session.isFallbackMode = false;
+    session.fallbackText = '';
+    session.fallbackBannerText = '';
+    session.suggestions = [];
+    session.replySource = null;
+    session.showRegenerateButton = false;
+    session.currentStageText = '请选择对应客户档案后生成回复';
+    session.updatedAt = Date.now();
+    return;
+  }
   const suggestions = response.skill?.suggestions ?? [];
   session.replySource = response.replySource ?? null;
   if (suggestions.length === 0) {
@@ -848,8 +877,8 @@ function createSession(sessionId: string, loadingMode: LoadingMode, source?: str
   const session: ReplySession = {
     sessionId,
     status: loadingMode === 'NONE' ? 'READY' : 'LOADING',
-    pendingTaskId: '',
-    pendingTaskStatus: null,
+    recognitionJobId: '',
+    recognitionJobStatus: null,
     source,
     createdAt: now,
     updatedAt: now,
@@ -861,7 +890,10 @@ function createSession(sessionId: string, loadingMode: LoadingMode, source?: str
     suggestions: [],
     replySource: null,
     candidates: [],
+    awaitingCustomerSelection: false,
+    recognition: null,
     currentPhone: '',
+    currentCustomerId: null,
     currentNickname: '',
     currentLeadType: '',
     currentScene: 'CHAT_RECOGNIZE',
@@ -909,6 +941,9 @@ function syncActiveSessionToState(): void {
   replySuggestionState.failureReason = session?.failureReason ?? '';
   replySuggestionState.suggestions = session?.suggestions ?? [];
   replySuggestionState.replySource = session?.replySource ?? null;
+  replySuggestionState.candidates = session?.candidates ?? [];
+  replySuggestionState.awaitingCustomerSelection = session?.awaitingCustomerSelection ?? false;
+  replySuggestionState.recognition = session?.recognition ?? null;
   replySuggestionState.currentPhone = session?.currentPhone ?? '';
   replySuggestionState.currentNickname = session?.currentNickname ?? '';
   replySuggestionState.currentLeadType = session?.currentLeadType ?? '';
@@ -1018,5 +1053,6 @@ function stageIndexFor(session: ReplySession, stage: RecognizeProgressStage): nu
   const stages: RecognizeProgressStage[] = session.source === 'CLIPBOARD_TEXT'
     ? ['UPLOADING', 'WAITING_MODEL', 'GENERATING']
     : ['CAPTURED', 'UPLOADING', 'WAITING_MODEL', 'GENERATING'];
+  if (stage === 'CAPTURING') return 0;
   return Math.max(0, stages.indexOf(stage));
 }

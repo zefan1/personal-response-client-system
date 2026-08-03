@@ -247,7 +247,7 @@ export function startWorkbenchCapture(): void {
 }
 
 export function openWorkbenchQuickSearch(): void {
-  eventBus.emit('quick-search:show', {});
+  eventBus.emit('template-library:show', {});
 }
 
 export function startWorkbenchBatchTemplate(): void {

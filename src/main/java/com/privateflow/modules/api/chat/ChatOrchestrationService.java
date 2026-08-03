@@ -5,6 +5,7 @@ import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.auth.AuthContext;
+import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.service.CustomerAccessService;
@@ -14,15 +15,18 @@ import com.privateflow.modules.image.Message;
 import com.privateflow.modules.image.RecognitionResult;
 import com.privateflow.modules.image.Source;
 import com.privateflow.modules.llm.LlmReplyGenerationService;
-import com.privateflow.modules.llm.LlmFollowupSuggestionInput;
-import com.privateflow.modules.llm.LlmFollowupSuggestionService;
-import com.privateflow.modules.llm.LlmSummaryInput;
-import com.privateflow.modules.llm.LlmSummaryService;
+import com.privateflow.modules.llm.FollowupAnalysisPayload;
+import com.privateflow.modules.llm.LlmFollowupAnalysisInput;
+import com.privateflow.modules.llm.LlmFollowupAnalysisService;
+import com.privateflow.modules.llm.FollowupAnalysisRetryService;
 import com.privateflow.modules.match.MatchRequest;
 import com.privateflow.modules.match.MatchResult;
 import com.privateflow.modules.match.MatchType;
+import com.privateflow.modules.match.Confidence;
 import com.privateflow.modules.profile.service.FollowupConfirmationService;
+import com.privateflow.modules.profile.service.FollowupAnalysisFieldMerger;
 import com.privateflow.modules.match.CustomerMatchService;
+import com.privateflow.modules.match.CustomerSummary;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillGatewayService;
 import com.privateflow.modules.skill.SkillRequest;
@@ -30,13 +34,16 @@ import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.ReplyTagSnapshot;
 import com.privateflow.modules.skill.Suggestion;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
+import com.privateflow.modules.supervision.SupervisionEventService;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -56,10 +63,13 @@ public class ChatOrchestrationService {
   private final AuditLogger auditLogger;
   private final SkillConfigProvider skillConfigProvider;
   private final LlmReplyGenerationService llmReplyGenerationService;
-  private final LlmFollowupSuggestionService llmFollowupSuggestionService;
-  private final LlmSummaryService llmSummaryService;
+  private final LlmFollowupAnalysisService llmFollowupAnalysisService;
+  private final FollowupAnalysisFieldMerger followupAnalysisFieldMerger;
+  private final FollowupAnalysisRetryService followupAnalysisRetryService;
   private final FollowupConfirmationService followupConfirmationService;
-  private final PendingReplyTaskService pendingReplyTaskService;
+  private final SupervisionEventService supervisionEventService;
+  private final SendConfirmationRepository sendConfirmationRepository;
+  private final RecognitionCommunicationArchiveService communicationArchiveService;
 
   public ChatOrchestrationService(
       ImageRecognitionService imageRecognitionService,
@@ -73,10 +83,13 @@ public class ChatOrchestrationService {
       AuditLogger auditLogger,
       SkillConfigProvider skillConfigProvider,
       LlmReplyGenerationService llmReplyGenerationService,
-      LlmFollowupSuggestionService llmFollowupSuggestionService,
-      LlmSummaryService llmSummaryService,
+      LlmFollowupAnalysisService llmFollowupAnalysisService,
+      FollowupAnalysisFieldMerger followupAnalysisFieldMerger,
+      FollowupAnalysisRetryService followupAnalysisRetryService,
       FollowupConfirmationService followupConfirmationService,
-      PendingReplyTaskService pendingReplyTaskService) {
+      SupervisionEventService supervisionEventService,
+      SendConfirmationRepository sendConfirmationRepository,
+      RecognitionCommunicationArchiveService communicationArchiveService) {
     this.imageRecognitionService = imageRecognitionService;
     this.customerMatchService = customerMatchService;
     this.skillGatewayService = skillGatewayService;
@@ -88,163 +101,274 @@ public class ChatOrchestrationService {
     this.auditLogger = auditLogger;
     this.skillConfigProvider = skillConfigProvider;
     this.llmReplyGenerationService = llmReplyGenerationService;
-    this.llmFollowupSuggestionService = llmFollowupSuggestionService;
-    this.llmSummaryService = llmSummaryService;
+    this.llmFollowupAnalysisService = llmFollowupAnalysisService;
+    this.followupAnalysisFieldMerger = followupAnalysisFieldMerger;
+    this.followupAnalysisRetryService = followupAnalysisRetryService;
     this.followupConfirmationService = followupConfirmationService;
-    this.pendingReplyTaskService = pendingReplyTaskService;
+    this.supervisionEventService = supervisionEventService;
+    this.sendConfirmationRepository = sendConfirmationRepository;
+    this.communicationArchiveService = communicationArchiveService;
   }
 
   public ChatResponse recognize(ChatRecognizeRequest request) {
-    if (request == null || (blank(request.imageBase64()) && blank(request.textMessage()))) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "please provide screenshot or chat text");
+    validateRecognitionRequest(request, request == null ? null : request.imageBase64());
+    RecognitionResult recognized;
+    try {
+      recognized = recognizeImage(request.imageBase64());
+    } catch (ApiException ex) {
+      recordSupervision(() -> supervisionEventService.recordRecognitionFailed(
+          request.leadType(),
+          request.sourceTable(),
+          request.replySessionId(),
+          ex.getErrorCode()), "recognition failure");
+      throw ex;
     }
-    RecognitionResult recognized = recognizeImage(request.imageBase64());
+    return recognizeResolvedConversation(request, recognized);
+  }
+
+  /**
+   * Executes a queued screenshot job under the authenticated employee captured at submission time.
+   * The image remains an in-memory byte array after the temporary store has read it; it is never
+   * serialized into a chat task, event, or audit record.
+   */
+  ChatResponse recognizeForJob(ChatRecognizeRequest request, byte[] jpegBytes, AuthUser employee) {
+    return recognizeForJob(request, jpegBytes, employee, () -> true);
+  }
+
+  ChatResponse recognizeForJob(
+      ChatRecognizeRequest request,
+      byte[] jpegBytes,
+      AuthUser employee,
+      BooleanSupplier stillActive) {
+    validateRecognitionRequest(request, jpegBytes);
+    if (employee == null || blank(employee.username())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "recognition employee is required");
+    }
+    AuthUser previous = AuthContext.current();
+    try {
+      AuthContext.set(employee);
+      RecognitionResult recognized = recognizeImage(jpegBytes);
+      if (stillActive == null || !stillActive.getAsBoolean()) {
+        return null;
+      }
+      return recognizeResolvedConversation(request, recognized, stillActive);
+    } catch (ApiException ex) {
+      if (!stillActive(stillActive)) {
+        return null;
+      }
+      recordSupervision(() -> supervisionEventService.recordRecognitionFailed(
+          request.leadType(),
+          request.sourceTable(),
+          request.replySessionId(),
+          ex.getErrorCode()), "recognition failure");
+      throw ex;
+    } finally {
+      if (previous == null) {
+        AuthContext.clear();
+      } else {
+        AuthContext.set(previous);
+      }
+    }
+  }
+
+  private ChatResponse recognizeResolvedConversation(
+      ChatRecognizeRequest request, RecognitionResult recognized) {
+    return recognizeResolvedConversation(request, recognized, () -> true);
+  }
+
+  private ChatResponse recognizeResolvedConversation(
+      ChatRecognizeRequest request, RecognitionResult recognized, BooleanSupplier stillActive) {
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     String nickname = firstNonBlank(request.customerIdentifier(), recognized == null ? null : recognized.nickname());
     String phone = recognized == null ? null : recognized.phone();
     MatchResult match = match(nickname, phone, request.leadType(), request.sourceTable());
-    String platformIdentifier = recognized == null ? null : recognized.customerIdentifier();
-    if ((isNoMatch(match) || match.matchType() == MatchType.MULTIPLE)
-        && blank(request.customerIdentifier())
-        && !blank(platformIdentifier)
-        && !platformIdentifier.equals(nickname)) {
-      match = match(platformIdentifier, phone, request.leadType(), request.sourceTable());
+    if (!stillActive(stillActive)) {
+      return null;
+    }
+    match = visibleMatch(match);
+    if (!stillActive(stillActive)) {
+      return null;
     }
     String clientMessage = buildClientMessage(request, recognized);
     List<Map<String, String>> chatContext = messages(request, recognized);
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     if (match.matchType() == MatchType.MULTIPLE) {
-      PendingReplyTaskView pendingTask = pendingReplyTaskService.createWaitingTask(new PendingReplyTaskDraft(
-          firstNonBlank(request.replySessionId(), "reply-" + UUID.randomUUID()),
-          AuthContext.username(),
-          recognized == null ? null : recognized.nickname(),
-          phone,
-          platformIdentifier,
-          request.leadType(),
-          request.sourceTable(),
-          clientMessage,
-          chatContext,
-          match.customers()));
-      return new ChatResponse(null, nickname, false, match, null, null, null, pendingTask);
+      return new ChatResponse(
+          null,
+          nickname,
+          false,
+          match,
+          null,
+          "识别到多个相似客户，请先选择对应档案",
+          null,
+          null,
+          recognized,
+          true);
     }
-    Customer customer = firstCustomer(match);
-    GeneratedReplies generated = generateSkill(Scene.CHAT_RECOGNIZE, request.leadType(), customer, phone, clientMessage, List.of(), chatContext);
-    String responsePhone = customer == null ? phone : customer.getPhone();
-    saveContext(responsePhone, generated, 0);
+    Customer customer = match.matchType() == MatchType.EXACT || match.matchType() == MatchType.FUZZY
+        ? firstCustomer(match)
+        : null;
+    if (customer == null) {
+      customer = communicationArchiveService.createRecognitionCustomer(request, recognized);
+    }
+    return completeRecognizedConversation(
+        request, recognized, match, customer, phone, clientMessage, chatContext, stillActive);
+  }
+
+  public ChatResponse resolveSelectedCustomer(
+      ChatRecognizeRequest request,
+      RecognitionResult recognized,
+      MatchResult match,
+      Long customerId) {
+    if (match == null || match.matchType() != MatchType.MULTIPLE || customerId == null || customerId <= 0) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "a selected matching customer is required");
+    }
+    boolean offered = match.customers() != null && match.customers().stream()
+        .anyMatch(candidate -> candidate != null && customerId.equals(candidate.customerId()));
+    if (!offered) {
+      throw new ApiException(ApiErrorCodes.FORBIDDEN, "selected customer is not a recognition candidate");
+    }
+    Customer selected = customerQueryService.getById(customerId);
+    if (selected == null) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "selected customer no longer exists");
+    }
+    String clientMessage = buildClientMessage(request, recognized);
+    return completeRecognizedConversation(
+        request,
+        recognized,
+        match,
+        selected,
+        recognized == null ? null : recognized.phone(),
+        clientMessage,
+        messages(request, recognized),
+        () -> true);
+  }
+
+  private ChatResponse completeRecognizedConversation(
+      ChatRecognizeRequest request,
+      RecognitionResult recognized,
+      MatchResult match,
+      Customer customer,
+      String recognizedPhone,
+      String clientMessage,
+      List<Map<String, String>> chatContext,
+      BooleanSupplier stillActive) {
+    if (customer == null) {
+      throw new IllegalStateException("recognition did not resolve a customer");
+    }
+    if (!customerAccessService.canAccess(customer)) {
+      throw new ApiException(ApiErrorCodes.FORBIDDEN, "no access to this customer");
+    }
+    if (!stillActive(stillActive)) {
+      return null;
+    }
+    communicationArchiveService.archive(request, recognized, customer, AuthContext.username());
+    if (!stillActive(stillActive)) {
+      return null;
+    }
+    recordSupervision(
+        () -> supervisionEventService.recordRecognitionProcessed(customer, null),
+        "recognition processed");
+    if (!stillActive(stillActive)) {
+      return null;
+    }
+    GeneratedReplies generated = generateSkill(
+        Scene.CHAT_RECOGNIZE,
+        request.leadType(),
+        customer,
+        recognizedPhone,
+        clientMessage,
+        List.of(),
+        chatContext);
+    if (!stillActive(stillActive)) {
+      return null;
+    }
+    String responsePhone = customer.getPhone();
+    saveContext(customer, generated, 0);
+    if (!stillActive(stillActive)) {
+      return null;
+    }
+    recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+        customer,
+        Scene.CHAT_RECOGNIZE.name(),
+        null,
+        request.replySessionId(),
+        generated.source(),
+        generated.skill()), "reply generated");
+    if (!stillActive(stillActive)) {
+      return null;
+    }
     auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", responsePhone, "chat recognize");
-    return new ChatResponse(responsePhone, nickname, match.matchType() == MatchType.NONE, match, generated.skill(), null, generated.source());
-  }
-
-  public ChatResponse confirmPendingReplyTask(String taskId, PendingReplyTaskSelectRequest request) {
-    if (request == null || blank(request.phone())) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "phone is required");
-    }
-    PendingReplyTask task = pendingReplyTaskService.claimForGeneration(
-        taskId,
-        AuthContext.username(),
-        request.phone());
-    return generatePendingReplyTask(task);
-  }
-
-  public List<PendingReplyTaskView> listPendingReplyTasks() {
-    return pendingReplyTaskService.listRecoverable(AuthContext.username());
-  }
-
-  public PendingReplyTaskView getPendingReplyTask(String taskId) {
-    return pendingReplyTaskService.getRecoverable(taskId, AuthContext.username());
-  }
-
-  public ChatResponse retryPendingReplyTask(String taskId) {
-    PendingReplyTask task = pendingReplyTaskService.claimRetry(taskId, AuthContext.username());
-    return generatePendingReplyTask(task);
-  }
-
-  public PendingReplyTaskView cancelPendingReplyTask(String taskId) {
-    return pendingReplyTaskService.cancel(taskId, AuthContext.username());
-  }
-
-  private ChatResponse generatePendingReplyTask(PendingReplyTask task) {
-    pendingReplyTaskService.beginGeneration(task.taskId());
-    try {
-      String selectedPhone = task.selectedPhone();
-      Customer customer;
-      try {
-        customer = customerQueryService.getByPhone(selectedPhone);
-      } catch (RuntimeException ex) {
-        markPendingTaskFailed(task, ex);
-        throw ex;
-      }
-      if (customer == null) {
-        pendingReplyTaskService.releaseSelection(task);
-        throw new ApiException(ApiErrorCodes.BAD_REQUEST, "customer not found");
-      }
-      boolean canAccess;
-      try {
-        canAccess = customerAccessService.canAccess(customer);
-      } catch (RuntimeException ex) {
-        markPendingTaskFailed(task, ex);
-        throw ex;
-      }
-      if (!canAccess) {
-        pendingReplyTaskService.releaseSelection(task);
-        throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权操作该客户");
-      }
-      try {
-        GeneratedReplies generated = generateSkill(
-            Scene.CHAT_RECOGNIZE,
-            task.leadType(),
-            customer,
-            customer.getPhone(),
-            task.clientMessage(),
-            List.of(),
-            task.chatContext() == null ? List.of() : task.chatContext());
-        saveContext(customer.getPhone(), generated, 0);
-        ChatResponse response = new ChatResponse(
-            customer.getPhone(),
-            customer.getNickname(),
-            false,
-            null,
-            generated.skill(),
-            null,
-            generated.source());
-        pendingReplyTaskService.markReady(task, response);
-        auditLogger.log("CALL_SKILL", AuthContext.username(), "CHAT", customer.getPhone(), "pending reply task confirmed");
-        return response;
-      } catch (RuntimeException ex) {
-        markPendingTaskFailed(task, ex);
-        throw ex;
-      }
-    } finally {
-      pendingReplyTaskService.endGeneration(task.taskId());
-    }
+    return new ChatResponse(
+        responsePhone,
+        customer.getNickname(),
+        false,
+        match,
+        generated.skill(),
+        null,
+        generated.source(),
+        customer.getId(),
+        recognized,
+        false);
   }
 
   public ChatResponse generate(GenerateRequest request) {
-    if (request == null || blank(request.phone())) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "phone is required");
+    if (request == null || (request.customerId() == null && blank(request.phone()))) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "customerId or phone is required");
     }
-    Customer customer = customerQueryService.getByPhone(request.phone());
+    Customer customer = request.customerId() != null && request.customerId() > 0
+        ? customerQueryService.getById(request.customerId())
+        : customerQueryService.getByPhone(request.phone());
     if (customer == null) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "customer not found");
     }
     Scene scene = "OPENING".equalsIgnoreCase(request.scene()) ? Scene.OPENING : Scene.ACTIVE_REPLY;
     String clientMessage = blank(request.clientMessage()) ? customer.getFollowupNotes() : request.clientMessage();
     GeneratedReplies generated = generateSkill(scene, customer.getLeadType(), customer, customer.getPhone(), clientMessage, List.of(), List.of());
-    saveContext(customer.getPhone(), generated, 0);
+    saveContext(customer, generated, 0);
+    recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+        customer,
+        scene.name(),
+        null,
+        null,
+        generated.source(),
+        generated.skill()), "reply generated");
     return new ChatResponse(customer.getPhone(), customer.getNickname(), false, null, generated.skill(), null, generated.source());
   }
 
   public ChatResponse regenerate(RegenerateRequest request) {
-    if (request == null || blank(request.phone())) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "phone is required");
+    if (request == null || (request.customerId() == null && blank(request.phone()))) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "customerId or phone is required");
     }
-    RequestContext context = contextStore.read(AuthContext.username(), request.phone()).orElse(null);
+    Customer latest = request.customerId() != null && request.customerId() > 0
+        ? customerQueryService.getById(request.customerId())
+        : customerQueryService.getByPhone(request.phone());
+    if (latest == null) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "customer not found");
+    }
+    if (!customerAccessService.canAccess(latest)) {
+      throw new ApiException(ApiErrorCodes.FORBIDDEN, "no access to this customer");
+    }
+    RequestContext context = request.customerId() != null && request.customerId() > 0
+        ? contextStore.read(AuthContext.username(), request.customerId()).orElse(null)
+        : contextStore.read(AuthContext.username(), request.phone()).orElse(null);
     if (context == null) {
-      return generate(new GenerateRequest(request.phone(), "ACTIVE_REPLY", null));
+      GeneratedReplies generated = generateSkill(
+          Scene.ACTIVE_REPLY,
+          latest.getLeadType(),
+          latest,
+          latest.getPhone(),
+          latest.getFollowupNotes(),
+          List.of(),
+          List.of());
+      saveContext(latest, generated, 0);
+      return new ChatResponse(latest.getPhone(), latest.getNickname(), false, null, generated.skill(), null, generated.source(), latest.getId(), null, false);
     }
     SkillRequest previous = context.request();
-    Customer latest = customerQueryService.getByPhone(request.phone());
-    if (latest == null) {
-      return generate(new GenerateRequest(request.phone(), "ACTIVE_REPLY", null));
-    }
     List<String> previousSuggestions = context.response() == null || context.response().suggestions() == null
         ? List.of()
         : context.response().suggestions().stream().map(s -> s.text()).toList();
@@ -261,84 +385,123 @@ public class ChatOrchestrationService {
         loadReplyTags(latest));
     GeneratedReplies generated = generateReplies(next);
     int count = context.regenerateCount() + 1;
-    contextStore.save(AuthContext.username(), request.phone(), new RequestContext(generated.request(), generated.skill(), count));
+    saveContext(latest, generated, count);
+    recordSupervision(() -> supervisionEventService.recordGeneratedReply(
+        latest,
+        Scene.REGENERATE.name(),
+        null,
+        null,
+        generated.source(),
+        generated.skill()), "reply generated");
     String warning = regenerateWarning(count);
-    return new ChatResponse(request.phone(), null, false, null, generated.skill(), warning, generated.source());
+    return new ChatResponse(latest.getPhone(), latest.getNickname(), false, null, generated.skill(), warning, generated.source(), latest.getId(), null, false);
   }
 
+  @Transactional
   public Map<String, Object> sendConfirm(SendConfirmRequest request) {
-    if (request == null || blank(request.phone()) || blank(request.sentText())) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "phone and sentText are required");
+    if (request == null || request.customerId() == null || request.customerId() <= 0 || blank(request.sentText())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "customerId and sentText are required");
     }
     Customer customer = requireSendConfirmAccess(request);
-    List<CustomerMessageSentEvent.ChatMessage> rawMessages = sendConfirmMessages(request);
-    String conversationSummary = conversationSummary(request, rawMessages);
-    CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest = request.followupSuggest() == null
-        ? llmFollowupSuggestionService.trySuggest(new LlmFollowupSuggestionInput(
-            request.phone(),
-            request.nickname(),
-            request.leadType(),
-            conversationSummary,
-            rawMessages,
-            request.sentText(),
-            request.selectedDirection(),
-            AuthContext.username())).orElse(null)
-        : request.followupSuggest();
-    if (customer != null) {
-      followupConfirmationService.record(
-          customer,
-          conversationSummary,
-          request.sentText(),
-          followupSuggest,
-          request.completeCurrentFollowup());
+    if (!blank(request.confirmationId())
+        && !sendConfirmationRepository.claim(
+            request.confirmationId().trim(),
+            AuthContext.username(),
+            String.valueOf(request.customerId()))) {
+      return Map.of("accepted", true, "duplicate", true);
     }
+    communicationArchiveService.archiveConfirmedEmployeeMessage(
+        customer, request.sentText(), AuthContext.username());
+    List<CustomerMessageSentEvent.ChatMessage> rawMessages = sendConfirmMessages(request);
+    Customer analysisCustomer = customer == null ? customerFrom(request) : customer;
+    FollowupAnalysisPayload analysis = llmFollowupAnalysisService.tryAnalyze(new LlmFollowupAnalysisInput(
+        analysisCustomer,
+        rawMessages,
+        request.sentText(),
+        request.selectedDirection(),
+        AuthContext.username())).orElse(null);
+    Map<String, Object> followupFields = analysis == null
+        ? requestFollowupFields(request)
+        : followupAnalysisFieldMerger.merge(analysisCustomer, analysis);
+    if (analysis == null && llmFollowupAnalysisService.enabled() && !blank(customer.getPhone())) {
+      followupAnalysisRetryService.enqueue(
+          request.confirmationId(),
+          customer.getPhone(),
+          rawMessages,
+          request.sentText(),
+          request.selectedDirection(),
+          AuthContext.username());
+    }
+    String conversationSummary = analysis != null && !blank(analysis.followupRecord())
+        ? analysis.followupRecord()
+        : nvl(request.conversationSummary());
+    CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest = followupSuggest(followupFields);
+    followupConfirmationService.recordAnalysis(customer, followupFields, true);
     eventPublisher.publishEvent(new CustomerMessageSentEvent(
-        request.phone(),
-        request.nickname(),
-        request.isNewCustomer(),
-        request.sourceTable(),
-        request.leadType(),
+        customer.getPhone(),
+        customer.getNickname(),
+        customer.getSourceRowId() == null || customer.getSourceRowId().isBlank(),
+        customer.getSourceTable(),
+        customer.getLeadType(),
         conversationSummary,
         rawMessages,
         request.sentText(),
         request.selectedDirection(),
         followupSuggest,
         request.completeCurrentFollowup(),
-        AuthContext.username()));
-    auditLogger.log("SEND_CONFIRM", AuthContext.username(), "CUSTOMER", request.phone(), "message sent");
-    return Map.of("accepted", true);
+        followupFields,
+        AuthContext.username(),
+        customer.getId()));
+    auditLogger.log("SEND_CONFIRM", AuthContext.username(), "CUSTOMER", String.valueOf(customer.getId()), "message sent");
+    return Map.of("accepted", true, "duplicate", false);
   }
 
-  private String conversationSummary(SendConfirmRequest request, List<CustomerMessageSentEvent.ChatMessage> rawMessages) {
+  private Customer customerFrom(SendConfirmRequest request) {
+    Customer customer = new Customer();
+    customer.setPhone(request.phone());
+    customer.setNickname(request.nickname());
+    customer.setLeadType(request.leadType());
+    customer.setSourceTable(request.sourceTable());
+    return customer;
+  }
+
+  private Map<String, Object> requestFollowupFields(SendConfirmRequest request) {
+    Map<String, Object> fields = new java.util.LinkedHashMap<>();
     if (!blank(request.conversationSummary())) {
-      return request.conversationSummary();
+      fields.put("followupNotes", request.conversationSummary().trim());
     }
-    return llmSummaryService.trySummarize(new LlmSummaryInput(
-        request.phone(),
-        request.nickname(),
-        request.leadType(),
-        rawMessages,
-        request.sentText(),
-        request.selectedDirection(),
-        AuthContext.username()))
-        .orElseGet(() -> customerMessageSummary(rawMessages));
+    if (request.followupSuggest() != null && !blank(request.followupSuggest().nextFollowupAt())) {
+      fields.put("nextFollowupAt", request.followupSuggest().nextFollowupAt());
+      fields.put("nextFollowupDir", request.followupSuggest().nextFollowupDir());
+    } else if (request.completeCurrentFollowup()) {
+      fields.put("nextFollowupAt", null);
+      fields.put("nextFollowupDir", null);
+    }
+    return fields;
+  }
+
+  private CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest(Map<String, Object> fields) {
+    String nextAt = asString(fields == null ? null : fields.get("nextFollowupAt"));
+    String nextDirection = asString(fields == null ? null : fields.get("nextFollowupDir"));
+    if (blank(nextAt) || blank(nextDirection)) {
+      return null;
+    }
+    return new CustomerMessageSentEvent.FollowupSuggestPayload(nextAt, nextDirection);
+  }
+
+  private String asString(Object value) {
+    return value == null ? null : value.toString();
   }
 
   private Customer requireSendConfirmAccess(SendConfirmRequest request) {
-    Customer customer = customerQueryService.getByPhone(request.phone());
+    Customer customer = customerQueryService.getById(request.customerId());
     if (customer != null) {
       if (!customerAccessService.canAccess(customer)) {
         throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权操作该客户");
       }
       return customer;
     }
-    if (!request.isNewCustomer()) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "客户不存在");
-    }
-    if (contextStore.read(AuthContext.username(), request.phone()).isEmpty()) {
-      throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权创建该客户记录");
-    }
-    return null;
+    throw new ApiException(ApiErrorCodes.BAD_REQUEST, "customer not found");
   }
 
   private String customerMessageSummary(List<CustomerMessageSentEvent.ChatMessage> rawMessages) {
@@ -359,13 +522,31 @@ public class ChatOrchestrationService {
       return null;
     }
     try {
-      return imageRecognitionService.recognize(Base64.getDecoder().decode(imageBase64), Source.BUTTON_CLICK);
+      return recognizeImage(Base64.getDecoder().decode(imageBase64));
+    } catch (ApiException ex) {
+      throw ex;
     } catch (IllegalArgumentException ex) {
       throw new ApiException("30-10002", "图片格式不支持，请重新截图或使用 PNG/JPG");
     } catch (ImageRecognitionException ex) {
       throw new ApiException(ex.getErrorCode(), ex.getMessage());
     } catch (RuntimeException ex) {
       throw new ApiException("30-10001", "图片识别失败，请使用文字通道后重新生成回复");
+    }
+  }
+
+  private RecognitionResult recognizeImage(byte[] imageBytes) {
+    try {
+      return imageRecognitionService.recognize(imageBytes, Source.BUTTON_CLICK);
+    } catch (ImageRecognitionException ex) {
+      throw new ApiException(ex.getErrorCode(), ex.getMessage());
+    } catch (RuntimeException ex) {
+      throw new ApiException("30-10001", "图片识别失败，请使用文字通道后重新生成回复");
+    }
+  }
+
+  private void validateRecognitionRequest(ChatRecognizeRequest request, Object imagePayload) {
+    if (request == null || (imagePayload == null && blank(request.textMessage()))) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "please provide screenshot or chat text");
     }
   }
 
@@ -407,6 +588,50 @@ public class ChatOrchestrationService {
 
   private boolean isNoMatch(MatchResult result) {
     return result == null || result.matchType() == MatchType.NONE;
+  }
+
+  private MatchResult visibleMatch(MatchResult match) {
+    if (match == null) {
+      return MatchResult.none();
+    }
+    if (match.matchType() != MatchType.MULTIPLE || match.customers() == null) {
+      return match;
+    }
+    List<CustomerSummary> accessibleCandidates = match.customers().stream()
+        .filter(java.util.Objects::nonNull)
+        .filter(this::canAccessCandidate)
+        .toList();
+    if (accessibleCandidates.isEmpty()) {
+      return MatchResult.none();
+    }
+    if (accessibleCandidates.size() == 1) {
+      return new MatchResult(MatchType.FUZZY, accessibleCandidates, 1);
+    }
+    return new MatchResult(MatchType.MULTIPLE, accessibleCandidates, accessibleCandidates.size());
+  }
+
+  private MatchResult rememberedMatch(Customer customer) {
+    return new MatchResult(
+        MatchType.EXACT,
+        List.of(new CustomerSummary(
+            customer.getPhone(),
+            customer.getPhone(),
+            customer.getNickname(),
+            customer.getSourceChannel(),
+            customer.getLeadType(),
+            customer.getAssignedKeeper(),
+            customer.getLastFollowupAt(),
+            customer.getIntendedStore(),
+            Confidence.HIGH,
+            customer.getId())),
+        1);
+  }
+
+  private boolean canAccessCandidate(CustomerSummary candidate) {
+    Customer customer = candidate.customerId() == null
+        ? customerQueryService.getByPhone(candidate.phoneFull())
+        : customerQueryService.getById(candidate.customerId());
+    return customer != null && customerAccessService.canAccess(customer);
   }
 
   private ChatReplySource replySourceForSkill(SkillResponse skill) {
@@ -465,17 +690,25 @@ public class ChatOrchestrationService {
     }
   }
 
-  private void saveContext(String phone, GeneratedReplies generated, int regenerateCount) {
-    if (!blank(phone)) {
+  private void saveContext(Customer customer, GeneratedReplies generated, int regenerateCount) {
+    if (customer != null && customer.getId() != null && customer.getId() > 0) {
       contextStore.save(
           AuthContext.username(),
-          phone,
+          customer.getId(),
+          new RequestContext(generated.request(), generated.skill(), regenerateCount));
+    } else if (customer != null && !blank(customer.getPhone())) {
+      contextStore.save(
+          AuthContext.username(),
+          customer.getPhone(),
           new RequestContext(generated.request(), generated.skill(), regenerateCount));
     }
   }
 
   private List<CustomerMessageSentEvent.ChatMessage> sendConfirmMessages(SendConfirmRequest request) {
-    List<CustomerMessageSentEvent.ChatMessage> storedMessages = contextStore.read(AuthContext.username(), request.phone())
+    Optional<RequestContext> context = request.customerId() != null && request.customerId() > 0
+        ? contextStore.read(AuthContext.username(), request.customerId())
+        : contextStore.read(AuthContext.username(), request.phone());
+    List<CustomerMessageSentEvent.ChatMessage> storedMessages = context
         .map(RequestContext::request)
         .map(SkillRequest::chatContext)
         .orElse(List.of()).stream()
@@ -508,7 +741,10 @@ public class ChatOrchestrationService {
     if (match == null || match.customers() == null || match.customers().isEmpty()) {
       return null;
     }
-    return customerQueryService.getByPhone(match.customers().get(0).phone());
+    CustomerSummary candidate = match.customers().get(0);
+    return candidate.customerId() == null
+        ? customerQueryService.getByPhone(candidate.phoneFull())
+        : customerQueryService.getById(candidate.customerId());
   }
 
   private String buildClientMessage(ChatRecognizeRequest request, RecognitionResult recognized) {
@@ -558,19 +794,18 @@ public class ChatOrchestrationService {
     return value == null || value.isBlank();
   }
 
-  private String pendingTaskErrorCode(RuntimeException ex) {
-    if (ex instanceof ApiException apiException && !blank(apiException.getErrorCode())) {
-      return apiException.getErrorCode();
-    }
-    return ApiErrorCodes.INTERNAL_ERROR;
+  private boolean stillActive(BooleanSupplier stillActive) {
+    return stillActive != null && stillActive.getAsBoolean();
   }
 
-  private void markPendingTaskFailed(PendingReplyTask task, RuntimeException originalFailure) {
+  private void recordSupervision(Runnable record, String event) {
+    if (supervisionEventService == null) {
+      return;
+    }
     try {
-      pendingReplyTaskService.markFailed(task, pendingTaskErrorCode(originalFailure));
-    } catch (RuntimeException markFailedFailure) {
-      originalFailure.addSuppressed(markFailedFailure);
-      log.warn("Could not mark pending reply task {} as failed", task.taskId(), markFailedFailure);
+      record.run();
+    } catch (RuntimeException ex) {
+      log.warn("Supervision event recording skipped, event={}", event);
     }
   }
 

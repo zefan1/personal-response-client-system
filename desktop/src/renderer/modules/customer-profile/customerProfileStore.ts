@@ -17,10 +17,7 @@ import {
   handleCustomerProfileLoaded,
   ignoreStageSuggestion
 } from '../stage-suggestion/stageSuggestionHandler';
-import { removePendingReplyTask } from '../reply-suggestions/pendingReplyTaskStore';
-import { restorePendingTaskWaiting } from '../reply-suggestions/replySuggestionStore';
 import type { SaveProfileInput } from '../save-to-table/types';
-import type { ChatResponse } from '../reply-suggestions/types';
 import type {
   AbnormalAlertPayload,
   Customer,
@@ -30,7 +27,6 @@ import type {
   CustomerSearchResult,
   CustomerSummary,
   ProfileSuggestion,
-  RecognizeMultiplePayload,
   SourceFrom,
   StageSuggestPayload
 } from './types';
@@ -56,16 +52,6 @@ export const customerProfileState = reactive({
   searchTotal: 0,
   searchTruncated: false,
   searchMessage: '',
-  candidateVisible: false,
-  candidates: [] as CustomerSummary[],
-  candidateSessionId: '',
-  candidateTaskId: '',
-  candidateReplySessionId: '',
-  candidatePreviewPhone: '',
-  candidatePreviewReady: false,
-  candidatePreviewing: false,
-  candidateConfirming: false,
-  candidateError: '',
   profileLoading: false,
   profile: null as CustomerProfileView | null,
   fromCache: false,
@@ -99,8 +85,6 @@ let searchTimer: number | null = null;
 let searchAbort: AbortController | null = null;
 let profileAbort: AbortController | null = null;
 let tableSyncTimer: number | null = null;
-const confirmingCandidateTaskIds = new Set<string>();
-
 cleanupExpiredPendingSaves();
 
 export function scheduleSearch(keyword: string): void {
@@ -152,7 +136,7 @@ export async function searchCustomers(keyword: string): Promise<void> {
       customerProfileState.searchMessage = '未找到客户，请检查搜索词或确认客户已登记';
     } else if (total === 1 && customers[0]) {
       customerProfileState.searchResults = [];
-      await openProfile(summaryPhone(customers[0]), 'SEARCH');
+      await openProfile(customers[0].customerId || summaryPhone(customers[0]), 'SEARCH');
     } else {
       customerProfileState.searchResults = customers.slice(0, limit);
     }
@@ -164,16 +148,22 @@ export async function searchCustomers(keyword: string): Promise<void> {
 }
 
 export async function openProfile(
-  phone: string,
+  phoneOrCustomerId: string | number,
   sourceFrom: SourceFrom,
   sessionId = '',
   options: { emitCustomerSelected?: boolean; recoverPendingSave?: boolean } = {}
 ): Promise<boolean> {
-  if (!phone) {
+  const customerId = typeof phoneOrCustomerId === 'number' ? phoneOrCustomerId : null;
+  const phone = typeof phoneOrCustomerId === 'string' ? phoneOrCustomerId.trim() : '';
+  if (customerId !== null && (!Number.isFinite(customerId) || customerId <= 0)) {
     return false;
   }
-  customerProfileState.candidatePreviewReady = false;
-  if (!isSamePhone(phone, currentProfilePhone())) {
+  if (!phone) {
+    if (customerId === null) {
+      return false;
+    }
+  }
+  if (customerId === null && !isSamePhone(phone, currentProfilePhone())) {
     clearTableSyncStatus();
   }
   clearSearchResults();
@@ -182,16 +172,19 @@ export async function openProfile(
   customerProfileState.profileLoading = true;
   if (sessionId) {
     customerProfileState.activeReplySessionId = sessionId;
-  } else if (sourceFrom !== 'CANDIDATE_LIST') {
+  } else {
     customerProfileState.activeReplySessionId = '';
   }
   customerProfileState.toast = '';
   try {
-    const cached = loadCachedCustomer(phone);
+    const cached = customerId === null ? loadCachedCustomer(phone) : null;
     if (cached) {
       renderProfile(cached.fullProfile, true, false, cached.cachedAt);
     }
-    const response = await getJson<CustomerProfileView>(`/api/v1/customers/${encodeURIComponent(phone)}`, PROFILE_TIMEOUT_MS, profileAbort.signal);
+    const path = customerId === null
+      ? `/api/v1/customers/${encodeURIComponent(phone)}`
+      : `/api/v1/customers/by-id/${customerId}`;
+    const response = await getJson<CustomerProfileView>(path, PROFILE_TIMEOUT_MS, profileAbort.signal);
     if (!response.success || !response.data) {
       if (response.errorCode === '40-10002') {
         customerProfileState.toast = '该客户档案已被删除，正在返回';
@@ -213,7 +206,7 @@ export async function openProfile(
     }
     return true;
   } catch {
-    const cached = loadCachedCustomer(phone);
+    const cached = customerId === null ? loadCachedCustomer(phone) : null;
     if (cached) {
       renderProfile(cached.fullProfile, true, true, cached.cachedAt);
     } else {
@@ -225,151 +218,23 @@ export async function openProfile(
   }
 }
 
-export function showCandidates(payload: RecognizeMultiplePayload): void {
-  const candidates = payload.candidates ?? payload.matchInfo?.customers ?? [];
-  customerProfileState.candidateVisible = true;
-  customerProfileState.candidates = candidates.slice(0, 5);
-  customerProfileState.candidateSessionId = payload.sessionId ?? '';
-  customerProfileState.candidateTaskId = payload.taskId ?? '';
-  customerProfileState.candidateReplySessionId = payload.sessionId ?? '';
-  customerProfileState.candidatePreviewPhone = '';
-  customerProfileState.candidatePreviewReady = false;
-  customerProfileState.candidateConfirming = confirmingCandidateTaskIds.has(customerProfileState.candidateTaskId);
-  customerProfileState.candidateError = '';
-}
-
-export async function previewCandidate(candidate: CustomerSummary): Promise<void> {
-  const phone = candidateFullPhone(candidate);
-  if (!phone) {
-    customerProfileState.candidatePreviewReady = false;
-    customerProfileState.candidatePreviewPhone = '';
-    customerProfileState.candidateVisible = true;
-    customerProfileState.candidateError = '候选客户缺少完整手机号，无法确认';
-    return;
-  }
-  if (customerProfileState.candidatePreviewing || customerProfileState.candidateConfirming) return;
-  customerProfileState.candidatePreviewing = true;
-  customerProfileState.candidateVisible = false;
-  customerProfileState.candidatePreviewPhone = phone;
-  customerProfileState.candidatePreviewReady = false;
-  customerProfileState.candidateError = '';
-  try {
-    const loaded = await openProfile(phone, 'CANDIDATE_LIST', customerProfileState.candidateReplySessionId, {
-      emitCustomerSelected: false,
-      recoverPendingSave: false
-    });
-    if (loaded && isSameFullPhone(currentProfilePhone(), phone)) {
-      customerProfileState.candidatePreviewReady = true;
-    } else {
-      customerProfileState.candidatePreviewPhone = '';
-      customerProfileState.candidateVisible = true;
-      customerProfileState.candidateError = loaded ? '返回的客户档案不匹配，请重新选择' : '客户档案加载失败，请重试';
-    }
-  } finally {
-    customerProfileState.candidatePreviewing = false;
-  }
-}
-
-export function returnToCandidates(): void {
-  if (!customerProfileState.candidates.length || customerProfileState.candidateConfirming) return;
-  customerProfileState.candidateVisible = true;
-  customerProfileState.candidatePreviewPhone = '';
-  customerProfileState.candidatePreviewReady = false;
-  customerProfileState.candidateError = '';
-}
-
-export async function confirmPreviewedCandidate(): Promise<void> {
-  const taskId = customerProfileState.candidateTaskId;
-  const sessionId = customerProfileState.candidateReplySessionId;
-  const phone = customerProfileState.candidatePreviewPhone;
-  if (
-    !taskId
-    || !sessionId
-    || !phone
-    || !customerProfileState.candidatePreviewReady
-    || !isSameFullPhone(currentProfilePhone(), phone)
-    || customerProfileState.candidateConfirming
-  ) {
-    customerProfileState.candidatePreviewReady = false;
-    return;
-  }
-
-  const task = {
-    taskId,
-    sessionId,
-    phone,
-    candidates: customerProfileState.candidates.map((candidate) => ({ ...candidate }))
-  };
-  confirmingCandidateTaskIds.add(taskId);
-  customerProfileState.candidateConfirming = true;
-  customerProfileState.candidateError = '';
-  eventBus.emit('reply-task:generating', { sessionId, taskId, phone });
-  try {
-    const response = await postJson<ChatResponse>(
-      `/api/v1/chat/reply-tasks/${encodeURIComponent(taskId)}/confirm`,
-      { phone }
-    );
-    if (!response.success || !response.data) {
-      restoreCandidateTaskAfterFailure(task, response.message ?? '确认失败，请重试');
-      return;
-    }
-    eventBus.emit('recognize:result', {
-      sessionId,
-      source: 'PENDING_REPLY_TASK',
-      response: response.data
-    });
-    clearCandidateTask(taskId);
-  } catch (error) {
-    restoreCandidateTaskAfterFailure(task, error instanceof Error ? error.message : '确认失败，请重试');
-  } finally {
-    confirmingCandidateTaskIds.delete(taskId);
-    customerProfileState.candidateConfirming = confirmingCandidateTaskIds.has(customerProfileState.candidateTaskId);
-  }
-}
-
-export async function cancelCandidateTask(): Promise<void> {
-  const taskId = customerProfileState.candidateTaskId;
-  const sessionId = customerProfileState.candidateReplySessionId;
-  if (!taskId) {
-    clearCandidateTask();
-    return;
-  }
-  if (customerProfileState.candidateConfirming) return;
-  customerProfileState.candidateConfirming = true;
-  customerProfileState.candidateError = '';
-  try {
-    const response = await postJson(`/api/v1/chat/reply-tasks/${encodeURIComponent(taskId)}/cancel`, {});
-    if (!response.success) {
-      customerProfileState.candidateError = response.message ?? '取消失败，请重试';
-      return;
-    }
-    removePendingReplyTask(taskId, sessionId);
-    clearCandidateTask();
-  } catch (error) {
-    customerProfileState.candidateError = error instanceof Error ? error.message : '取消失败，请重试';
-  } finally {
-    customerProfileState.candidateConfirming = false;
-  }
-}
-
-export function chooseCandidate(candidate: CustomerSummary): void {
-  void previewCandidate(candidate);
-}
-
-export function dismissCandidates(): void {
-  void cancelCandidateTask();
+export function currentProfileCustomerId(): number | null {
+  const id = customerProfileState.profile?.customer?.id;
+  return typeof id === 'number' && id > 0 ? id : null;
 }
 
 export async function generateReplyFromProfile(): Promise<void> {
   const customer = customerProfileState.profile?.customer;
   const phone = currentProfilePhone();
-  if (!customer || !phone || customerProfileState.generating) {
+  const customerId = currentProfileCustomerId();
+  if (!customer || (!phone && !customerId) || customerProfileState.generating) {
     return;
   }
   customerProfileState.generating = true;
   eventBus.emit('customer:selected', {
     ...(customerProfileState.activeReplySessionId ? { sessionId: customerProfileState.activeReplySessionId } : {}),
     phone,
+    customerId,
     scene: 'ACTIVE_REPLY',
     leadType: customer.leadType ?? '',
     sourceFrom: 'PROFILE_CARD'
@@ -377,6 +242,7 @@ export async function generateReplyFromProfile(): Promise<void> {
   try {
     const response = await postJson('/api/v1/chat/generate', {
       phone,
+      customerId,
       scene: 'ACTIVE_REPLY',
       clientMessage: ''
     });
@@ -558,9 +424,12 @@ export function handleStageUpdated(payload: { phone?: string; newStage?: string 
   customerProfileState.suggestions = customerProfileState.suggestions.filter((item) => item.fieldName !== 'customerStage');
 }
 
-export function handleSendConfirmed(payload: { phone?: string }): void {
+export function handleSendConfirmed(payload: { phone?: string; customerId?: number | null }): void {
   const currentPhone = currentProfilePhone();
-  if (payload.phone && currentPhone && payload.phone.endsWith(currentPhone.slice(-4))) {
+  const currentId = currentProfileCustomerId();
+  if (payload.customerId && currentId === payload.customerId) {
+    void openProfile(payload.customerId, 'PROFILE_CARD');
+  } else if (payload.phone && currentPhone && payload.phone.endsWith(currentPhone.slice(-4))) {
     void openProfile(currentPhone, 'PROFILE_CARD');
   }
 }
@@ -673,8 +542,6 @@ export function cleanupCustomerProfileStore(): void {
     window.clearTimeout(tableSyncTimer);
     tableSyncTimer = null;
   }
-  confirmingCandidateTaskIds.clear();
-  customerProfileState.candidateConfirming = false;
   cleanupSaveToTableService();
 }
 
@@ -708,31 +575,6 @@ export async function skipTableSync(): Promise<void> {
   }
 }
 
-function clearCandidateTask(expectedTaskId = ''): void {
-  if (expectedTaskId && customerProfileState.candidateTaskId !== expectedTaskId) return;
-  customerProfileState.candidateVisible = false;
-  customerProfileState.candidates = [];
-  customerProfileState.candidateSessionId = '';
-  customerProfileState.candidateTaskId = '';
-  customerProfileState.candidateReplySessionId = '';
-  customerProfileState.candidatePreviewPhone = '';
-  customerProfileState.candidatePreviewReady = false;
-  customerProfileState.candidatePreviewing = false;
-  customerProfileState.candidateError = '';
-}
-
-function restoreCandidateTaskAfterFailure(
-  task: { taskId: string; sessionId: string; phone: string; candidates: CustomerSummary[] },
-  message: string
-): void {
-  restorePendingTaskWaiting(task);
-  if (customerProfileState.candidateTaskId !== task.taskId) return;
-  customerProfileState.candidateVisible = true;
-  customerProfileState.candidatePreviewPhone = '';
-  customerProfileState.candidatePreviewReady = false;
-  customerProfileState.candidateError = message;
-}
-
 function renderProfile(profile: CustomerProfileView, fromCache: boolean, offline: boolean, cachedAt: string): void {
   customerProfileState.profile = profile;
   const phone = profilePhone(profile);
@@ -757,6 +599,7 @@ function emitCustomerSelected(customer: Customer, sourceFrom: SourceFrom, sessio
   eventBus.emit('customer:selected', {
     ...(sessionId ? { sessionId } : {}),
     phone,
+    customerId: customer.id ?? null,
     scene: sourceFrom === 'PROFILE_CARD' ? 'ACTIVE_REPLY' : 'CHAT_RECOGNIZE',
     leadType: customer.leadType ?? '',
     sourceFrom
@@ -899,29 +742,12 @@ function summaryPhone(customer: CustomerSummary): string {
   return customer.phoneFull || customer.phone;
 }
 
-function candidateFullPhone(customer: CustomerSummary): string {
-  return normalizeFullPhone(customer.phoneFull) || normalizeFullPhone(customer.phone);
-}
-
-function normalizeFullPhone(value?: string | null): string {
-  if (!value || /[*xX]/.test(value)) return '';
-  const digits = value.replace(/\D/g, '');
-  const normalized = digits.length === 13 && digits.startsWith('86') ? digits.slice(2) : digits;
-  return /^\d{11}$/.test(normalized) ? normalized : '';
-}
-
-function isSameFullPhone(left: string, right: string): boolean {
-  const normalizedLeft = normalizeFullPhone(left);
-  const normalizedRight = normalizeFullPhone(right);
-  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
-}
-
 function customerPhone(customer: Customer): string {
   return customer.phoneFull || customerProfileState.profile?.phoneFull || customer.phone;
 }
 
 function profilePhone(profile: CustomerProfileView): string {
-  return profile.phoneFull || profile.customer.phoneFull || profile.customer.phone;
+  return profile.phoneFull || profile.customer.phoneFull || profile.customer.phone || '';
 }
 
 function currentProfilePhone(): string {

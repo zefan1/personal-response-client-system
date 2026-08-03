@@ -19,15 +19,19 @@ public class PendingTableWriteRepository {
   }
 
   public void enqueue(String phone, TableWriteActionType actionType, String payload, LocalDateTime nextRetryAt, String errorMsg) {
+    enqueue(null, phone, actionType, payload, nextRetryAt, errorMsg);
+  }
+
+  public void enqueue(Long customerId, String phone, TableWriteActionType actionType, String payload, LocalDateTime nextRetryAt, String errorMsg) {
     jdbcTemplate.update("""
-        INSERT INTO pending_table_writes (phone, action_type, payload, retry_count, status, next_retry_at, error_msg)
-        VALUES (?, ?, ?, 0, 'PENDING', ?, ?)
-        """, phone, actionType.name(), payload, Timestamp.valueOf(nextRetryAt), trim(errorMsg));
+        INSERT INTO pending_table_writes (customer_id, phone, action_type, payload, retry_count, status, next_retry_at, error_msg)
+        VALUES (?, ?, ?, ?, 0, 'PENDING', ?, ?)
+        """, customerId, phone, actionType.name(), payload, Timestamp.valueOf(nextRetryAt), trim(errorMsg));
   }
 
   public List<PendingTableWrite> due(int limit) {
     return jdbcTemplate.query("""
-        SELECT id, phone, action_type, payload, retry_count, status, next_retry_at, error_msg
+        SELECT id, customer_id, phone, action_type, payload, retry_count, status, next_retry_at, error_msg
         FROM pending_table_writes
         WHERE status = 'PENDING' AND next_retry_at <= NOW()
         ORDER BY next_retry_at ASC
@@ -35,6 +39,8 @@ public class PendingTableWriteRepository {
         """, (rs, rowNum) -> {
           PendingTableWrite item = new PendingTableWrite();
           item.setId(rs.getLong("id"));
+          long customerId = rs.getLong("customer_id");
+          item.setCustomerId(rs.wasNull() ? null : customerId);
           item.setPhone(rs.getString("phone"));
           item.setActionType(TableWriteActionType.valueOf(rs.getString("action_type")));
           item.setPayload(rs.getString("payload"));

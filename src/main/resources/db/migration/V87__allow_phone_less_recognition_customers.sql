@@ -1,0 +1,2 @@
+ALTER TABLE customers
+  MODIFY phone VARCHAR(20) NULL;

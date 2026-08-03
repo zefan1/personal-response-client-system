@@ -9,6 +9,7 @@ import com.privateflow.modules.api.ai.PromptVersionService;
 import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.security.SecretCipher;
 import com.privateflow.modules.api.ws.WsPushService;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,6 +62,17 @@ class ConfigAdminServiceTest {
     insertConfig("desktop.clipboard_screenshot_confirm_prompt_s", "10");
     insertConfig("chat.pending_reply_ttl_hours", "24");
     insertConfig("chat.pending_reply_generating_timeout_s", "120");
+    insertConfig("supervision.record_retention_days", "180");
+    insertConfig("supervision.technical_log_retention_days", "30");
+    insertConfig("supervision.processing_sla_minutes", "1440");
+    insertConfig("supervision.conversion_target_stages_json", "[]");
+    insertConfig("chat.expired_reply_task_retention_days", "3");
+    insertConfig("chat.unfinished_task_cap", "20");
+    insertConfig("chat.recent_task_display_cap", "30");
+    insertConfig("chat.recognition_concurrency", "4");
+    insertConfig("chat.recognition_temp_root", "active");
+    insertConfig("chat.recognition_temp_ttl_seconds", "600");
+    insertConfig("chat.recognition_temp_max_total_bytes", "104857600");
     secretCipher = new SecretCipher("test-secret-key");
     service = new ConfigAdminService(
         jdbcTemplate,
@@ -157,6 +169,17 @@ class ConfigAdminServiceTest {
   }
 
   @Test
+  void imageTimeoutRejectsValuesThatAreTooShortForTheVisionModel() {
+    insertConfig("image.timeout_ms", "5000");
+    service.update("image.timeout_ms", Map.of("value", "15000"));
+    assertThat(service.get("image.timeout_ms").get("value")).isEqualTo("15000");
+
+    assertThatThrownBy(() -> service.update("image.timeout_ms", Map.of("value", "14999")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("image.timeout_ms range is 15000-60000");
+  }
+
+  @Test
   void versionStorageConfigValidatesPathAndPublicBaseUrl() {
     service.update("version.storage.root", Map.of("value", "D:/pda-releases"));
     service.update("version.storage.public_base_url", Map.of("value", "https://cdn.example.com/desktop-releases"));
@@ -214,6 +237,77 @@ class ConfigAdminServiceTest {
     assertThatThrownBy(() -> service.update("chat.pending_reply_generating_timeout_s", Map.of("value", "601")))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("chat.pending_reply_generating_timeout_s range is 30-600");
+  }
+
+  @Test
+  void supervisionGovernanceAndReplyQueueConfigsValidateExactRanges() {
+    assertValidRange("supervision.record_retention_days", 30, 730);
+    assertValidRange("supervision.technical_log_retention_days", 7, 180);
+    assertValidRange("supervision.processing_sla_minutes", 15, 10080);
+    assertValidRange("chat.expired_reply_task_retention_days", 1, 14);
+    assertValidRange("chat.unfinished_task_cap", 10, 50);
+    assertValidRange("chat.recent_task_display_cap", 20, 100);
+    assertValidRange("chat.recognition_concurrency", 1, 16);
+    assertValidRange("chat.recognition_temp_ttl_seconds", 60, 600);
+    assertValidRange("chat.recognition_temp_max_total_bytes", 10485760, 524288000);
+
+    service.update("chat.recognition_temp_root", Map.of("value", "active-v2"));
+    assertThatThrownBy(() -> service.update("chat.recognition_temp_root", Map.of("value", "/")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("chat.recognition_temp_root must be a controlled relative directory");
+  }
+
+  @Test
+  void recognitionTemporaryDirectoryMustBeAControlledRelativeSubdirectory() {
+    service.update("chat.recognition_temp_root", Map.of("value", "active-jobs"));
+
+    assertThatThrownBy(() -> service.update(
+        "chat.recognition_temp_root", Map.of("value", "../../outside")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("controlled relative directory");
+    assertThatThrownBy(() -> service.update(
+        "chat.recognition_temp_root", Map.of("value", ".")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("controlled relative directory");
+    assertThatThrownBy(() -> service.update(
+        "chat.recognition_temp_root",
+        Map.of("value", java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "outside").toString())))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("controlled relative directory");
+  }
+
+  @Test
+  void supervisionConversionTargetStagesRequiresJsonArray() {
+    service.update("supervision.conversion_target_stages_json", Map.of("value", "[]"));
+    service.update("supervision.conversion_target_stages_json", Map.of("value", "[\"FOLLOW_UP\",\"PAID\"]"));
+
+    assertThatThrownBy(() -> service.update(
+        "supervision.conversion_target_stages_json", Map.of("value", "{\"stage\":\"PAID\"}")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("supervision.conversion_target_stages_json must be JSON array");
+    assertThatThrownBy(() -> service.update(
+        "supervision.conversion_target_stages_json", Map.of("value", "not-json")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("supervision.conversion_target_stages_json must be JSON array");
+    for (String invalid : List.of("[1]", "[null]", "[\" \"]", "[\"PAID\",\"PAID\"]", "[\" PAID \",\"PAID\"]")) {
+      assertThatThrownBy(() -> service.update(
+          "supervision.conversion_target_stages_json", Map.of("value", invalid)))
+          .isInstanceOf(ApiException.class)
+          .hasMessageContaining("supervision.conversion_target_stages_json must be JSON array");
+    }
+  }
+
+  private void assertValidRange(String key, int minimum, int maximum) {
+    service.update(key, Map.of("value", String.valueOf(minimum)));
+    service.update(key, Map.of("value", String.valueOf(maximum)));
+
+    String range = key + " range is " + minimum + "-" + maximum;
+    assertThatThrownBy(() -> service.update(key, Map.of("value", String.valueOf(minimum - 1))))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining(range);
+    assertThatThrownBy(() -> service.update(key, Map.of("value", String.valueOf(maximum + 1))))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining(range);
   }
 
   private void insertConfig(String key, String value) {

@@ -45,6 +45,11 @@ class WecomSmartSheetApiClientTest {
   private static final String GET_RECORDS_PATH = "/cgi-bin/wedoc/smartsheet/get_records";
   private static final String ADD_RECORDS_PATH = "/cgi-bin/wedoc/smartsheet/add_records";
   private static final String UPDATE_RECORDS_PATH = "/cgi-bin/wedoc/smartsheet/update_records";
+  private static final String CREATE_DOC_PATH = "/cgi-bin/wedoc/create_doc";
+  private static final String GET_SHEET_PATH = "/cgi-bin/wedoc/smartsheet/get_sheet";
+  private static final String GET_VIEWS_PATH = "/cgi-bin/wedoc/smartsheet/get_views";
+  private static final String UPDATE_FIELDS_PATH = "/cgi-bin/wedoc/smartsheet/update_fields";
+  private static final String ADD_FIELDS_PATH = "/cgi-bin/wedoc/smartsheet/add_fields";
   private static final String COMPLETE_SUCCESS = "{\"errcode\":0,\"errmsg\":\"ok\",\"total\":1,"
       + "\"fields\":[{\"field_id\":\"f_name\",\"title\":\"Name\",\"type\":\"text\"}],"
       + "\"has_more\":true,\"next\":\"cursor-1\",\"records\":[{\"record_id\":\"rec-1\","
@@ -56,7 +61,12 @@ class WecomSmartSheetApiClientTest {
         new OperationFixture("get_fields", GET_FIELDS_PATH),
         new OperationFixture("get_records", GET_RECORDS_PATH),
         new OperationFixture("add_records", ADD_RECORDS_PATH),
-        new OperationFixture("update_records", UPDATE_RECORDS_PATH))
+        new OperationFixture("update_records", UPDATE_RECORDS_PATH),
+        new OperationFixture("create_doc", CREATE_DOC_PATH),
+        new OperationFixture("get_sheet", GET_SHEET_PATH),
+        new OperationFixture("get_views", GET_VIEWS_PATH),
+        new OperationFixture("update_fields", UPDATE_FIELDS_PATH),
+        new OperationFixture("add_fields", ADD_FIELDS_PATH))
         .map(operation -> DynamicTest.dynamicTest(operation.name(), () -> {
           try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
             server.respond(operation.path(), 200, COMPLETE_SUCCESS);
@@ -76,6 +86,24 @@ class WecomSmartSheetApiClientTest {
             assertThat(result.path("records").get(0).path("record_id").asText()).isEqualTo("rec-1");
           }
         }));
+  }
+
+  @Test
+  void provisioningCallsNeedOnlyApplicationCredentials() throws Exception {
+    try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
+      server.respond(CREATE_DOC_PATH, 200,
+          "{\"errcode\":0,\"errmsg\":\"ok\",\"docid\":\"doc-1\",\"url\":\"https://doc.example/1\"}");
+      WecomSmartSheetConfig credentialsOnly = new WecomSmartSheetConfig(
+          server.baseUrl(), "corp-1", "app-secret-value", "", "", "", "", "", ZoneId.of("Asia/Shanghai"));
+      WecomSmartSheetApiClient client = new WecomSmartSheetApiClient(
+          new ObjectMapper(), credentialsOnly, tokens("token-one"));
+
+      var result = client.postWithApplicationCredentials(
+          "create_doc", Map.of("doc_type", 10, "doc_name", "API acceptance"), Duration.ofSeconds(2));
+
+      assertThat(result.path("docid").asText()).isEqualTo("doc-1");
+      assertThat(server.lastJson().path("doc_type").intValue()).isEqualTo(10);
+    }
   }
 
   @Test

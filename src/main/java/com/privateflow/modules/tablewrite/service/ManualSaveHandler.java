@@ -17,10 +17,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ManualSaveHandler {
+
+  private static final Logger log = LoggerFactory.getLogger(ManualSaveHandler.class);
 
   private final WecomTableClient tableClient;
   private final TableConfigProvider configProvider;
@@ -110,7 +114,10 @@ public class ManualSaveHandler {
           new ArrayList<>(fields.keySet()),
           exchange.filteredFields(),
           exchange.unmatched().size());
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException failure) {
+      log.warn(
+          "manual table save failed for configured source reference, failureType={}",
+          failure.getClass().getSimpleName());
       throw new TableWriteException(TableWriteErrorCodes.TABLE_WRITE_FAILED, "table write failed");
     }
   }

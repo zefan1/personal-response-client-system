@@ -72,6 +72,11 @@ public class CustomerQueryServiceImpl implements CustomerQueryService {
   }
 
   @Override
+  public Customer getById(long customerId) {
+    return customerId <= 0 ? null : customerRepository.findById(customerId).orElse(null);
+  }
+
+  @Override
   public List<Customer> searchByNickname(String nickname) {
     return searchByNickname(nickname, matchMaxCandidates);
   }

@@ -2,9 +2,17 @@ import { reactive } from 'vue';
 import { postJson } from '../../shared/apiClient';
 import { writeClipboardText as writeBridgeClipboardText } from '../../shared/desktopBridge';
 import { eventBus } from '../../shared/eventBus';
-import type { ProfileSuggestion, ReplySelectedPayload, SuggestionShowPayload } from './types';
+import type {
+  PendingSendDecision,
+  ProfileSuggestion,
+  ReplySelectedPayload,
+  SuggestionShowPayload
+} from './types';
+
+const PENDING_SEND_STORAGE_KEY = 'copy_backfill_pending_send';
 
 export const copyBackfillState = reactive({
+  pendingSendDecision: restorePendingSendDecision(),
   suggestionToastVisible: false,
   suggestionToastCollapsed: false,
   suggestionToastPhone: '',
@@ -12,33 +20,89 @@ export const copyBackfillState = reactive({
   toast: ''
 });
 
-let pendingSendConfirm: AbortController | null = null;
-
 export async function handleReplySelected(payload: ReplySelectedPayload): Promise<void> {
+  if (copyBackfillState.pendingSendDecision) {
+    return;
+  }
   if (!payload.text.trim()) {
     copyBackfillState.toast = '复制失败，请重试';
     return;
   }
 
-  abortPendingSendConfirm();
   const clipboardWritten = await writeClipboardText(payload.text);
   if (!clipboardWritten) {
     copyBackfillState.toast = '复制失败，请重试';
     return;
   }
   copyBackfillState.toast = '已复制到剪贴板，请粘贴到微信发送';
+  copyBackfillState.pendingSendDecision = {
+    ...payload,
+    confirmationId: crypto.randomUUID(),
+    status: 'AWAITING_DECISION',
+    createdAt: new Date().toISOString(),
+    errorMessage: ''
+  };
+  persistPendingSendDecision();
 
-  if (!payload.phone) {
+  if (!payload.phone || !payload.replySource) {
     return;
   }
 
   const controller = new AbortController();
-  pendingSendConfirm = controller;
-  void sendConfirm(payload, controller).finally(() => {
-    if (pendingSendConfirm === controller) {
-      pendingSendConfirm = null;
+  void recordAiUsage(payload, controller);
+}
+
+export function discardPendingSendDecision(): void {
+  copyBackfillState.pendingSendDecision = null;
+  localStorage.removeItem(PENDING_SEND_STORAGE_KEY);
+  copyBackfillState.toast = '已标记为未发送，不更新客户表格';
+}
+
+export async function confirmPendingSendDecision(): Promise<boolean> {
+  const pending = copyBackfillState.pendingSendDecision;
+  if (!pending) {
+    return false;
+  }
+  if (!pending.customerId || pending.customerId <= 0) {
+    pending.status = 'AWAITING_DECISION';
+    pending.errorMessage = '当前回复没有对应的客户档案，请重新识别聊天';
+    persistPendingSendDecision();
+    return false;
+  }
+  pending.status = 'SUBMITTING';
+  pending.errorMessage = '';
+  persistPendingSendDecision();
+  try {
+    const response = await postJson<{ accepted?: boolean }>('/api/v1/chat/send-confirm', {
+      confirmationId: pending.confirmationId,
+      customerId: pending.customerId,
+      phone: pending.phone,
+      nickname: pending.nickname ?? '',
+      conversationSummary: '',
+      isNewCustomer: false,
+      sentText: pending.text,
+      selectedDirection: pending.isFallback ? 'SYSTEM_FALLBACK' : pending.direction
+    });
+    if (!response.success || response.data?.accepted !== true) {
+      throw new Error(response.message ?? response.errorCode ?? '确认提交失败');
     }
-  });
+    const phone = pending.phone;
+    copyBackfillState.pendingSendDecision = null;
+    localStorage.removeItem(PENDING_SEND_STORAGE_KEY);
+    copyBackfillState.toast = '已确认发送，客户表格正在更新';
+    if (!pending.phone) {
+      copyBackfillState.toast = '已确认发送，聊天已归档；表格因缺少唯一字段暂未同步';
+    }
+    eventBus.emit('reply:send-confirmed', { phone, customerId: pending.customerId });
+    return true;
+  } catch (error) {
+    pending.status = 'SUBMIT_FAILED';
+    pending.errorMessage = error instanceof Error && error.message
+      ? error.message
+      : '确认失败，请检查网络后重试';
+    persistPendingSendDecision();
+    return false;
+  }
 }
 
 export function handleSuggestionShow(payload: SuggestionShowPayload): void {
@@ -95,7 +159,6 @@ export async function resolveToastSuggestion(action: 'CONFIRM' | 'REJECT', sugge
 }
 
 export function cleanupCopyBackfillStore(): void {
-  abortPendingSendConfirm();
   copyBackfillState.suggestionToastVisible = false;
   copyBackfillState.suggestionToastCollapsed = false;
   copyBackfillState.suggestionToastPhone = '';
@@ -108,30 +171,58 @@ async function writeClipboardText(text: string): Promise<boolean> {
   return result.success;
 }
 
-async function sendConfirm(payload: ReplySelectedPayload, controller: AbortController): Promise<void> {
+async function recordAiUsage(payload: ReplySelectedPayload, controller: AbortController): Promise<void> {
   try {
-    const response = await postJson('/api/v1/chat/send-confirm', {
+    const response = await postJson('/api/v1/chat/ai-usage', {
       phone: payload.phone,
-      conversationSummary: '',
-      isNewCustomer: false,
-      sentText: payload.text,
-      selectedDirection: payload.isFallback ? 'SYSTEM_FALLBACK' : payload.direction
+      taskId: payload.taskId ?? null,
+      replySessionId: payload.replySessionId ?? null,
+      replySource: payload.replySource,
+      copiedText: payload.text
     }, undefined, controller.signal);
     if (!response.success) {
-      throw new Error(response.message ?? response.errorCode ?? 'send confirm failed');
+      throw new Error(response.message ?? response.errorCode ?? 'AI usage record failed');
     }
-    copyBackfillState.toast = '已复制并记录发送，档案正在刷新';
-    eventBus.emit('reply:send-confirmed', { phone: payload.phone });
   } catch {
     if (!controller.signal.aborted) {
-      copyBackfillState.toast = '已复制，但发送记录失败，请稍后刷新档案确认';
+      copyBackfillState.toast = '已复制，但 AI 使用记录未同步，不影响正常跟进';
     }
   }
 }
 
-function abortPendingSendConfirm(): void {
-  if (pendingSendConfirm) {
-    pendingSendConfirm.abort();
-    pendingSendConfirm = null;
+function persistPendingSendDecision(): void {
+  if (copyBackfillState.pendingSendDecision) {
+    localStorage.setItem(PENDING_SEND_STORAGE_KEY, JSON.stringify(copyBackfillState.pendingSendDecision));
+  }
+}
+
+function restorePendingSendDecision(): PendingSendDecision | null {
+  const raw = localStorage.getItem(PENDING_SEND_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<PendingSendDecision>;
+    if (!parsed.confirmationId || !parsed.text || !parsed.direction || typeof parsed.phone !== 'string'
+      || !parsed.createdAt || typeof parsed.isFallback !== 'boolean') {
+      throw new Error('invalid pending send decision');
+    }
+    const restored: PendingSendDecision = {
+      ...parsed,
+      confirmationId: parsed.confirmationId,
+      text: parsed.text,
+      direction: parsed.direction,
+      reason: parsed.reason ?? '',
+      phone: parsed.phone,
+      isFallback: parsed.isFallback,
+      status: parsed.status === 'SUBMIT_FAILED' ? 'SUBMIT_FAILED' : 'AWAITING_DECISION',
+      createdAt: parsed.createdAt,
+      errorMessage: parsed.status === 'SUBMIT_FAILED' ? parsed.errorMessage ?? '' : ''
+    };
+    localStorage.setItem(PENDING_SEND_STORAGE_KEY, JSON.stringify(restored));
+    return restored;
+  } catch {
+    localStorage.removeItem(PENDING_SEND_STORAGE_KEY);
+    return null;
   }
 }

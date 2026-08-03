@@ -71,4 +71,38 @@ class QueueRetryManagerTest {
     verify(client).createRow("table_a", Map.of("tag_column", "URINE_LEAKAGE"), Duration.ofMillis(5000));
     verify(repository).markResolved(7L);
   }
+
+  @Test
+  void retryLinksCreatedRowToPhoneLessRecognitionCustomerByCustomerId() throws Exception {
+    PendingTableWriteRepository repository = mock(PendingTableWriteRepository.class);
+    WecomTableClient client = mock(WecomTableClient.class);
+    TableConfigProvider config = mock(TableConfigProvider.class);
+    TableFieldMappingResolver mapping = mock(TableFieldMappingResolver.class);
+    TagExchangeService exchange = mock(TagExchangeService.class);
+    NewCustomerRowCreator creator = mock(NewCustomerRowCreator.class);
+    PendingTableWrite item = new PendingTableWrite();
+    item.setId(8L);
+    item.setCustomerId(42L);
+    item.setActionType(TableWriteActionType.INSERT);
+    item.setRetryCount(0);
+    item.setPayload(new ObjectMapper().writeValueAsString(new PendingWritePayload(
+        "table_a", null, Map.of("nickname", "匿名客户"))));
+    item.setNextRetryAt(LocalDateTime.now());
+    when(repository.due(100)).thenReturn(List.of(item));
+    when(repository.countStaleFailed(1)).thenReturn(0);
+    when(config.get()).thenReturn(new TableConfig("", "", 5000, 3, 30, 1, "ADMIN", 50, 500));
+    TagExchangeResult accepted = new TagExchangeResult(Map.of("nickname", "匿名客户"), List.of(), List.of());
+    when(exchange.prepareOutbound(eq(TagExchangeSourceType.TABLE_WRITE), eq("8"), any(Map.class)))
+        .thenReturn(accepted);
+    when(mapping.toSourceFields("table_a", accepted.acceptedFields())).thenReturn(accepted.acceptedFields());
+    when(client.createRow(eq("table_a"), eq(accepted.acceptedFields()), any(Duration.class))).thenReturn("row-42");
+
+    QueueRetryManager manager = new QueueRetryManager(
+        repository, client, config, new ObjectMapper(), mock(CustomerQueryService.class), creator, mapping, exchange);
+
+    manager.retryDueWrites();
+
+    verify(creator).insertCustomerAfterQueuedCreate(42L, null, "table_a", "row-42", accepted.acceptedFields());
+    verify(repository).markResolved(8L);
+  }
 }

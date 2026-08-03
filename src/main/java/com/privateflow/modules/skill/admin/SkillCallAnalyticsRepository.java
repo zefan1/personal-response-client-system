@@ -2,6 +2,7 @@ package com.privateflow.modules.skill.admin;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.time.LocalDateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -54,6 +55,13 @@ public class SkillCallAnalyticsRepository {
             0.0),
         args.toArray());
     return new SkillCallAnalytics(summary == null ? new SkillCallAnalytics.Summary(0, 0.0, 0, 0.0) : summary, details);
+  }
+
+  public int deleteBefore(LocalDateTime cutoff) {
+    if (cutoff == null) {
+      throw new IllegalArgumentException("Skill call cleanup cutoff is required");
+    }
+    return jdbcTemplate.update("DELETE FROM skill_call_logs WHERE created_at < ?", cutoff);
   }
 
   private String buildWhere(int days, String scene, String leadType, List<Object> args) {

@@ -57,13 +57,20 @@ public final class WecomSmartSheetConfig {
 
   public void requireConfigured() {
     List<String> missing = new ArrayList<>();
-    require(missing, corpId, "WECOM_CORP_ID");
-    require(missing, appSecret, "WECOM_APP_SECRET");
+    addMissingApplicationCredentials(missing);
     require(missing, documentId, "WECOM_SMARTSHEET_DOC_ID");
     require(missing, sheetId, "WECOM_SMARTSHEET_SHEET_ID");
     require(missing, viewId, "WECOM_SMARTSHEET_VIEW_ID");
     require(missing, sourceTable, "WECOM_SMARTSHEET_SOURCE_TABLE");
     require(missing, uniqueFieldTitle, "WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE");
+    if (!missing.isEmpty()) {
+      throw new IllegalStateException("Missing required environment variables: " + String.join(", ", missing));
+    }
+  }
+
+  public void requireApplicationCredentials() {
+    List<String> missing = new ArrayList<>();
+    addMissingApplicationCredentials(missing);
     if (!missing.isEmpty()) {
       throw new IllegalStateException("Missing required environment variables: " + String.join(", ", missing));
     }
@@ -119,6 +126,11 @@ public final class WecomSmartSheetConfig {
     if (value.isBlank()) {
       missing.add(environmentVariable);
     }
+  }
+
+  private void addMissingApplicationCredentials(List<String> missing) {
+    require(missing, corpId, "WECOM_CORP_ID");
+    require(missing, appSecret, "WECOM_APP_SECRET");
   }
 
   private static String normalizedBaseUrl(String value) {

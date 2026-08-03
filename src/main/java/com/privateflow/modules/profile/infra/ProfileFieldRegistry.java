@@ -39,6 +39,11 @@ public class ProfileFieldRegistry {
     register("intentLevel", "intent_level", String.class);
     register("worries", "worries", String.class);
     register("customerStage", "customer_stage", String.class);
+    register("internalNote", "internal_note", String.class);
+    register("customerProfileSummary", "customer_profile_summary", String.class);
+    register("firstTrackingCapture", "first_tracking_capture", String.class);
+    register("secondTrackingCapture", "second_tracking_capture", String.class);
+    register("thirdTrackingCapture", "third_tracking_capture", String.class);
     register("lastFollowupAt", "last_followup_at", LocalDateTime.class);
     register("followupNotes", "followup_notes", String.class);
     register("nextFollowupAt", "next_followup_at", LocalDateTime.class);

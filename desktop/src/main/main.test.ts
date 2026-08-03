@@ -19,4 +19,8 @@ describe('Electron main process startup', () => {
     expect(source.indexOf(identityCall)).toBeGreaterThanOrEqual(0);
     expect(source.indexOf(identityCall)).toBeLessThan(source.indexOf('app.whenReady()'));
   });
+
+  it('smoke checks the unified speech-library sidebar action', () => {
+    expect(source).toContain("actionLabels.join('|') !== '识别|话术库|批量'");
+  });
 });

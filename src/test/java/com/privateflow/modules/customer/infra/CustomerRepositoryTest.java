@@ -33,7 +33,7 @@ class CustomerRepositoryTest {
     jdbcTemplate.execute("""
         CREATE TABLE customers (
           id BIGINT AUTO_INCREMENT PRIMARY KEY,
-          phone VARCHAR(20) NOT NULL,
+          phone VARCHAR(20),
           nickname VARCHAR(100), source_channel VARCHAR(50), lead_type VARCHAR(20),
           personality_type VARCHAR(50), assigned_keeper VARCHAR(50), intended_store VARCHAR(100),
           intended_project VARCHAR(100), purchased_project VARCHAR(200), postpartum_months DECIMAL(4,1),
@@ -42,6 +42,8 @@ class CustomerRepositoryTest {
           diastasis_recti VARCHAR(50), urine_leakage VARCHAR(100), pubic_lumbago VARCHAR(100),
           prev_repair_exp VARCHAR(500), postpartum_check VARCHAR(200), exercise_habits VARCHAR(200),
           intent_level VARCHAR(10), worries VARCHAR(500), customer_stage VARCHAR(50),
+          internal_note TEXT, customer_profile_summary TEXT,
+          first_tracking_capture TEXT, second_tracking_capture TEXT, third_tracking_capture TEXT,
           last_followup_at DATETIME, followup_notes TEXT, next_followup_at DATETIME, next_followup_dir VARCHAR(200),
           appointment_date DATE, appointment_store VARCHAR(100), appointment_item VARCHAR(100), arrived VARCHAR(10),
           source_table VARCHAR(100), source_row_id VARCHAR(100), synced_at DATETIME, version INT NOT NULL DEFAULT 0,
@@ -71,6 +73,25 @@ class CustomerRepositoryTest {
   }
 
   @Test
+  void createsRecognitionCustomerWithoutPhoneAndReturnsItsDatabaseId() {
+    Customer first = new Customer();
+    first.setNickname("截图客户");
+    first.setLeadType("PENDING");
+
+    Customer second = new Customer();
+    second.setNickname("截图客户");
+    second.setLeadType("PENDING");
+
+    Customer firstSaved = repository.createRecognitionCustomer(first);
+    Customer secondSaved = repository.createRecognitionCustomer(second);
+
+    assertThat(firstSaved.getId()).isNotNull();
+    assertThat(secondSaved.getId()).isNotNull().isNotEqualTo(firstSaved.getId());
+    assertThat(firstSaved.getPhone()).isNull();
+    assertThat(repository.findById(firstSaved.getId())).isPresent();
+  }
+
+  @Test
   void keywordSearchMatchesNicknameButNotFollowupNotes() {
     jdbcTemplate.update("""
         INSERT INTO customers (phone, nickname, followup_notes, version)
@@ -84,6 +105,18 @@ class CustomerRepositoryTest {
     List<Customer> customers = repository.searchByKeyword("周", 10);
 
     assertThat(customers).extracting(Customer::getNickname).containsExactly("周雅婷");
+  }
+
+  @Test
+  void keywordSearchIncludesRecognitionCustomerWithoutPhone() {
+    jdbcTemplate.update("""
+        INSERT INTO customers (phone, nickname, version)
+        VALUES (NULL, '少花', 0)
+        """);
+
+    assertThat(repository.searchByKeyword("少花", 10))
+        .extracting(Customer::getNickname)
+        .containsExactly("少花");
   }
 
   @Test
@@ -125,5 +158,25 @@ class CustomerRepositoryTest {
         exchange,
         TagExchangeSourceType.EXTERNAL_SYNC,
         "22");
+  }
+
+  @Test
+  void upsertAndReadKeepInternalProfileAndTrackingFields() {
+    Customer customer = new Customer();
+    customer.setPhone("13800000001");
+    customer.setInternalNote("客户重视安全感，先说明评估流程");
+    customer.setCustomerProfileSummary("产后6个月，顺产，关注腹直肌和腰痛");
+    customer.setFirstTrackingCapture("首次关注恢复周期");
+    customer.setSecondTrackingCapture("明确周一上午可联系");
+    customer.setThirdTrackingCapture("希望先了解门店评估流程");
+
+    assertThat(repository.upsert(customer)).isTrue();
+
+    Customer saved = repository.findByPhone("13800000001").orElseThrow();
+    assertThat(saved.getInternalNote()).isEqualTo("客户重视安全感，先说明评估流程");
+    assertThat(saved.getCustomerProfileSummary()).isEqualTo("产后6个月，顺产，关注腹直肌和腰痛");
+    assertThat(saved.getFirstTrackingCapture()).isEqualTo("首次关注恢复周期");
+    assertThat(saved.getSecondTrackingCapture()).isEqualTo("明确周一上午可联系");
+    assertThat(saved.getThirdTrackingCapture()).isEqualTo("希望先了解门店评估流程");
   }
 }

@@ -78,6 +78,7 @@ describe('ChatRecognitionPanel', () => {
   });
 
   it('captures from the rendered button and emits recognize events after a successful screenshot request', async () => {
+    mocks.postJson.mockResolvedValueOnce({ success: true, data: recognitionJob('job-button', response('EXACT')) });
     const { app, host, eventBus } = await mountPanel();
     const events: Array<{ event: string; payload: unknown }> = [];
     eventBus.on('recognize:start', (payload) => events.push({ event: 'recognize:start', payload }));
@@ -90,17 +91,39 @@ describe('ChatRecognitionPanel', () => {
     expect(mocks.connectWsMessageBus).toHaveBeenCalled();
     expect(mocks.captureScreenshot).toHaveBeenCalled();
     await waitForPostJson();
-    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/recognize', {
+    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/recognition-jobs', {
       imageBase64: 'button-image',
       textMessage: undefined,
       customerIdentifier: undefined,
-      replySessionId: expect.stringMatching(/^reply-/),
-      source: 'BUTTON_CLICK'
+      replySessionId: expect.stringMatching(/^reply-/)
     }, 0);
     expect(events[0]).toMatchObject({ event: 'recognize:start', payload: { source: 'BUTTON_CLICK' } });
     expect(events[1]).toMatchObject({ event: 'recognize:result', payload: { source: 'BUTTON_CLICK', response: response('EXACT') } });
     expect((events[0].payload as { sessionId?: string }).sessionId).toBeTruthy();
     expect((events[1].payload as { sessionId?: string }).sessionId).toBe((events[0].payload as { sessionId?: string }).sessionId);
+    app.unmount();
+  });
+
+  it('shows capture progress immediately while the desktop screenshot is still pending', async () => {
+    let finishCapture: ((result: { success: true; imageBase64: string }) => void) | undefined;
+    mocks.captureScreenshot.mockImplementationOnce(() => new Promise((resolve) => {
+      finishCapture = resolve;
+    }));
+    const { app, host, eventBus } = await mountPanel();
+    const events: Array<{ stage?: string; message?: string }> = [];
+    eventBus.on('recognize:start', (payload) => events.push(payload as { stage?: string; message?: string }));
+
+    (host.querySelector('.toolbar .primary') as HTMLButtonElement | null)?.click();
+    await flushUi();
+
+    expect(events).toContainEqual(expect.objectContaining({
+      stage: 'CAPTURING',
+      message: '正在截取当前聊天'
+    }));
+    expect(mocks.postJson).not.toHaveBeenCalled();
+
+    finishCapture?.({ success: true, imageBase64: 'button-image' });
+    await waitForPostJson();
     app.unmount();
   });
 
@@ -116,6 +139,23 @@ describe('ChatRecognitionPanel', () => {
     await flushUi();
 
     expect(host.textContent).toContain('当前窗口未显示可识别的主聊天会话');
+    expect(mocks.postJson).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it('ends the capture session when the desktop screenshot bridge throws', async () => {
+    mocks.captureScreenshot.mockRejectedValueOnce(new Error('ipc unavailable'));
+    const { app, host, eventBus } = await mountPanel();
+    const failures: Array<{ sessionId?: string; message?: string }> = [];
+    eventBus.on('recognize:image-failed', (payload) => failures.push(payload as { sessionId?: string; message?: string }));
+
+    (host.querySelector('.toolbar .primary') as HTMLButtonElement | null)?.click();
+    await flushUi();
+
+    expect(failures).toContainEqual(expect.objectContaining({
+      sessionId: expect.stringMatching(/^reply-/),
+      message: '屏幕截图失败，请重试'
+    }));
     expect(mocks.postJson).not.toHaveBeenCalled();
     app.unmount();
   });
@@ -206,4 +246,8 @@ function response(matchType: 'EXACT' | 'MULTIPLE') {
       suggestions: [{ text: 'hello', direction: 'NEXT_STEP', reason: 'reason' }]
     }
   };
+}
+
+function recognitionJob(jobId: string, reply: ReturnType<typeof response>) {
+  return { jobId, status: 'READY' as const, response: reply };
 }

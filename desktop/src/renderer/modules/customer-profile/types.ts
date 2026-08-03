@@ -1,8 +1,9 @@
 export type LeadType = 'TUAN_GOU' | 'XIAN_SUO' | 'PENDING' | string;
 export type MatchType = 'EXACT' | 'FUZZY' | 'MULTIPLE' | 'NONE';
-export type SourceFrom = 'SEARCH' | 'CANDIDATE_LIST' | 'FOLLOWUP_LIST' | 'NEW_LEAD' | 'PROFILE_CARD' | 'CANDIDATE_DISMISSED' | 'DASHBOARD';
+export type SourceFrom = 'SEARCH' | 'FOLLOWUP_LIST' | 'NEW_LEAD' | 'PROFILE_CARD' | 'DASHBOARD';
 
 export type CustomerSummary = {
+  customerId?: number | null;
   phone: string;
   phoneFull?: string | null;
   nickname?: string | null;
@@ -15,6 +16,7 @@ export type CustomerSummary = {
 };
 
 export type Customer = {
+  id?: number | null;
   phone: string;
   phoneFull?: string | null;
   nickname?: string | null;
@@ -42,6 +44,11 @@ export type Customer = {
   intentLevel?: string | null;
   worries?: string | null;
   customerStage?: string | null;
+  internalNote?: string | null;
+  customerProfileSummary?: string | null;
+  firstTrackingCapture?: string | null;
+  secondTrackingCapture?: string | null;
+  thirdTrackingCapture?: string | null;
   lastFollowupAt?: string | null;
   followupNotes?: string | null;
   nextFollowupAt?: string | null;
@@ -54,6 +61,8 @@ export type Customer = {
   sourceRowId?: string | null;
   syncedAt?: string | null;
   version?: number | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 export type ProfileSuggestion = {
@@ -79,6 +88,14 @@ export type ProfileSuggestion = {
 export type CustomerProfileView = {
   customer: Customer;
   phoneFull?: string | null;
+  latestCommunicationSummary?: {
+    id: number;
+    customerId: number;
+    versionNo: number;
+    summaryText: string;
+    lastMessageId: number;
+    generatedAt: string;
+  } | null;
   pendingSuggestions?: ProfileSuggestion[];
   currentTags?: CustomerTag[];
   tagLocks?: CustomerTagLock[];

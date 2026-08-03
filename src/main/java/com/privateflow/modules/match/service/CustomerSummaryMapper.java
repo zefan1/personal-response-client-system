@@ -19,6 +19,7 @@ public class CustomerSummaryMapper {
         customer.getAssignedKeeper(),
         customer.getLastFollowupAt(),
         customer.getIntendedStore(),
-        confidence);
+        confidence,
+        customer.getId());
   }
 }

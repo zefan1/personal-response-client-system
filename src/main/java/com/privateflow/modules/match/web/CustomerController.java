@@ -80,6 +80,11 @@ public class CustomerController {
     return ApiResponse.ok(customerProfileService.getProfile(phone));
   }
 
+  @GetMapping("/by-id/{customerId}")
+  public ApiResponse<CustomerProfileView> profileById(@PathVariable("customerId") long customerId) {
+    return ApiResponse.ok(customerProfileService.getProfileById(customerId));
+  }
+
   @PostMapping("/batch")
   public ApiResponse<CustomerBatchResponse> batch(@RequestBody CustomerBatchRequest request) {
     if (request == null || request.phones() == null || request.phones().isEmpty()) {

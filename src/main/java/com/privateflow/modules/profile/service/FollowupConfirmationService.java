@@ -28,7 +28,9 @@ public class FollowupConfirmationService {
     }
     Map<String, Object> fields = new LinkedHashMap<>();
     fields.put("lastFollowupAt", LocalDateTime.now());
-    fields.put("followupNotes", firstNonBlank(conversationSummary, sentText));
+    if (!blank(conversationSummary)) {
+      fields.put("followupNotes", conversationSummary);
+    }
     if (suggestion != null && !blank(suggestion.nextFollowupAt())) {
       fields.put("nextFollowupAt", suggestion.nextFollowupAt());
       fields.put("nextFollowupDir", suggestion.nextFollowupDir());
@@ -36,11 +38,30 @@ public class FollowupConfirmationService {
       fields.put("nextFollowupAt", null);
       fields.put("nextFollowupDir", null);
     }
-    profileWriter.write(customer.getPhone(), fields, customer.getVersion(), true);
+    writeCustomer(customer, fields);
   }
 
-  private String firstNonBlank(String first, String second) {
-    return blank(first) ? (second == null ? "" : second) : first;
+  public void recordAnalysis(Customer customer, Map<String, ?> analysisFields, boolean touchFollowupTime) {
+    if (customer == null) {
+      return;
+    }
+    Map<String, Object> fields = new LinkedHashMap<>();
+    if (analysisFields != null) {
+      analysisFields.forEach(fields::put);
+    }
+    fields.remove("lastFollowupAt");
+    if (touchFollowupTime) {
+      fields.put("lastFollowupAt", LocalDateTime.now());
+    }
+    writeCustomer(customer, fields);
+  }
+
+  private void writeCustomer(Customer customer, Map<String, Object> fields) {
+    if (!blank(customer.getPhone())) {
+      profileWriter.write(customer.getPhone(), fields, customer.getVersion(), true);
+      return;
+    }
+    profileWriter.writeByCustomerId(customer.getId(), fields, customer.getVersion(), true);
   }
 
   private boolean blank(String value) {

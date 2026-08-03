@@ -8,11 +8,9 @@ const apiMocks = vi.hoisted(() => ({
   postJson: vi.fn()
 }));
 
-const pendingReplyTaskMocks = vi.hoisted(() => ({
-  refresh: vi.fn(async () => undefined),
-  resetForSessionChange: vi.fn(),
-  initializeOpenListener: vi.fn(() => () => undefined),
-  count: { __v_isRef: true, value: 0 }
+const communicationMocks = vi.hoisted(() => ({
+  open: vi.fn(async () => undefined),
+  loadPending: vi.fn(async () => undefined)
 }));
 
 vi.mock('./shared/apiClient', () => ({
@@ -20,11 +18,8 @@ vi.mock('./shared/apiClient', () => ({
   postJson: apiMocks.postJson
 }));
 
-vi.mock('./modules/reply-suggestions/pendingReplyTaskStore', () => ({
-  refreshPendingReplyTasks: pendingReplyTaskMocks.refresh,
-  resetPendingReplyTasksForSessionChange: pendingReplyTaskMocks.resetForSessionChange,
-  initializePendingReplyTaskOpenListener: pendingReplyTaskMocks.initializeOpenListener,
-  pendingReplyTaskCount: pendingReplyTaskMocks.count
+vi.mock('./modules/communication-history/communicationHistoryStore', () => ({
+  openCommunicationHistory: communicationMocks.open
 }));
 
 vi.mock('./modules/abnormal-alert/alertStore', () => ({
@@ -69,6 +64,22 @@ vi.mock('./modules/chat-recognition/ChatRecognitionPanel.vue', () => ({ default:
 vi.mock('./modules/followup-list/FollowupListPanel.vue', () => ({ default: { template: '<section class="followup-panel">跟进列表内容</section>' } }));
 vi.mock('./modules/customer-profile/CustomerProfilePanel.vue', () => ({ default: { template: '<section class="customer-panel">客户档案内容</section>' } }));
 vi.mock('./modules/reply-suggestions/ReplySuggestionPanel.vue', () => ({ default: { template: '<section class="reply-panel">回复助手内容</section>' } }));
+vi.mock('./modules/communication-history/CommunicationHistoryPanel.vue', () => ({
+  default: { template: '<section class="communication-history-panel">聊天记录内容</section>' }
+}));
+vi.mock('./modules/reply-suggestions/ReplyTaskSidebar.vue', () => ({
+  default: {
+    emits: ['open-all'],
+    template: '<section class="reply-task-sidebar">回复任务<button data-testid="open-reply-task-drawer" @click="$emit(\'open-all\')">更多</button></section>'
+  }
+}));
+vi.mock('./modules/reply-suggestions/ReplyTaskDrawer.vue', () => ({
+  default: {
+    props: ['open'],
+    emits: ['clear'],
+    template: '<section v-if="open" class="reply-task-drawer">回复任务列表<button data-testid="clear-reply-tasks" @click="$emit(\'clear\')">清空队列</button></section>'
+  }
+}));
 vi.mock('./modules/abnormal-alert/AlertBell.vue', () => ({ default: { template: '<div class="alert-bell-wrap"></div>' } }));
 vi.mock('./modules/batch-template/BatchTemplateOverlay.vue', () => ({ default: { template: '<div class="batch-template-overlay"></div>' } }));
 vi.mock('./modules/copy-backfill/CopyBackfillAgent.vue', () => ({ default: { template: '<div class="copy-backfill-agent"></div>' } }));
@@ -76,6 +87,8 @@ vi.mock('./modules/help-mode/HelpModeAgent.vue', () => ({ default: { template: '
 vi.mock('./modules/new-lead-toast/NewLeadToastAgent.vue', () => ({ default: { template: '<div class="new-lead-toast-agent"></div>' } }));
 vi.mock('./modules/offline/OfflineStatusBar.vue', () => ({ default: { template: '<div class="offline-status-bar"></div>' } }));
 vi.mock('./modules/quick-search/QuickSearchOverlay.vue', () => ({ default: { template: '<div class="quick-search-overlay"></div>' } }));
+vi.mock('./modules/templates/TemplateLibraryOverlay.vue', () => ({ default: { template: '<div class="template-library-overlay"></div>' } }));
+vi.mock('./modules/templates/PersonalTemplateEditor.vue', () => ({ default: { template: '<div class="personal-template-editor"></div>' } }));
 vi.mock('./shared/desktopBridge', () => ({
   captureScreenshot: vi.fn(async () => ({ success: true, imageBase64: 'capture-image' })),
   openAdminConsole: vi.fn(async () => ({ success: true })),
@@ -83,6 +96,9 @@ vi.mock('./shared/desktopBridge', () => ({
   toggleAlwaysOnTop: vi.fn(async () => ({ success: true, alwaysOnTop: true }))
 }));
 vi.mock('./modules/chat-recognition/recognitionStore', () => ({
+  beginScreenshotRecognition: vi.fn(() => 'capture-session'),
+  cancelRecognitionJob: vi.fn(async () => undefined),
+  failScreenshotRecognition: vi.fn(),
   recognitionState: { isRecognizePending: false },
   triggerRecognize: vi.fn(async () => undefined)
 }));
@@ -205,7 +221,8 @@ describe('App route shell', () => {
     expect([...host.querySelectorAll('.desktop-nav-button .nav-label')].map((item) => item.textContent)).toEqual([
       '工作台',
       '客户档案',
-      '回复助手'
+      '回复助手',
+      '聊天记录'
     ]);
     expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('工作台');
     expect(host.querySelectorAll('.desktop-sidebar-actions button').length).toBe(2);
@@ -216,6 +233,66 @@ describe('App route shell', () => {
     expect(host.textContent).toContain('有效至 2026-08-01');
 
     app.unmount();
+  });
+
+  it('places the compact reply task area between batch actions and the admin entry', async () => {
+    installDesktopBridge();
+    const { app, host } = await mountAppWithToken('#/desktop');
+    const batchButton = [...host.querySelectorAll('.sidebar-quick-button')]
+      .find((button) => button.textContent?.includes('批量')) as HTMLElement | undefined;
+    const replyTasks = host.querySelector('.reply-task-sidebar') as HTMLElement;
+    const adminButton = host.querySelector('.desktop-sidebar-actions button') as HTMLElement | null;
+
+    expect(batchButton).toBeTruthy();
+    expect(replyTasks).toBeTruthy();
+    expect(adminButton).toBeTruthy();
+    if (!batchButton || !replyTasks || !adminButton) throw new Error('desktop sidebar controls are missing');
+    expect(batchButton.compareDocumentPosition(replyTasks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(replyTasks.compareDocumentPosition(adminButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    app.unmount();
+  });
+
+  it('clears the local reply queue and cancels tasks still being recognized', async () => {
+    installDesktopBridge();
+    const replies = await import('./modules/reply-suggestions/replySuggestionStore');
+    const recognition = await import('./modules/chat-recognition/recognitionStore');
+    replies.cleanupReplySuggestionStore();
+    replies.hydrateReplySuggestionStore();
+    replies.startRecognizeLoading({ sessionId: 'reply-running', source: 'BUTTON_CLICK' });
+    replies.syncRecognitionJobIntoSession({
+      sessionId: 'reply-running',
+      jobId: 'job-running',
+      status: 'RECOGNIZING'
+    });
+
+    const { app, host } = await mountAppWithToken('#/desktop');
+    try {
+      (host.querySelector('[data-testid="open-reply-task-drawer"]') as HTMLButtonElement).click();
+      await flushUi();
+      (host.querySelector('[data-testid="clear-reply-tasks"]') as HTMLButtonElement).click();
+      await flushUi();
+
+      expect(replies.replySuggestionState.sessions).toEqual([]);
+      expect(replies.replySuggestionState.archivedSessions).toEqual([]);
+      expect(recognition.cancelRecognitionJob).toHaveBeenCalledWith('job-running', 'reply-running');
+    } finally {
+      app.unmount();
+      replies.cleanupReplySuggestionStore();
+    }
+  });
+
+  it('opens the personal template library from the sidebar instead of the legacy quick-search flow', async () => {
+    installDesktopBridge();
+    const { eventBus } = await import('./shared/eventBus');
+    const openings: unknown[] = [];
+    eventBus.on('template-library:show', (payload) => openings.push(payload));
+    const { app, host } = await mountAppWithToken('#/desktop');
+
+    (host.querySelectorAll('.sidebar-quick-button').item(1) as HTMLButtonElement).click();
+    await flushUi();
+
+    app.unmount();
+    expect(openings).toEqual([undefined]);
   });
 
   it('hides the Skill status chip when no subscription expiry is configured', async () => {
@@ -273,7 +350,6 @@ describe('App route shell', () => {
       refreshToken: 'refresh-a',
       accountUsername: 'admin'
     });
-    pendingReplyTaskMocks.refresh.mockClear();
     apiMocks.postJson.mockImplementation(async (path: string) => path === '/api/v1/auth/refresh'
       ? {
           success: true,
@@ -301,8 +377,6 @@ describe('App route shell', () => {
       refreshToken: 'refresh-a',
       accountUsername: 'admin'
     });
-    expect(pendingReplyTaskMocks.refresh).toHaveBeenCalledTimes(1);
-
     app.unmount();
   });
 
@@ -338,12 +412,10 @@ describe('App route shell', () => {
       refreshToken: 'refresh-b',
       accountUsername: 'admin'
     });
-    expect(pendingReplyTaskMocks.refresh).toHaveBeenCalledTimes(1);
-
     app.unmount();
   });
 
-  it('restores pending reply tasks once after a successful login', async () => {
+  it('opens the desktop after a successful login', async () => {
     installDesktopBridge();
     apiMocks.postJson.mockResolvedValueOnce({
       success: true,
@@ -367,29 +439,28 @@ describe('App route shell', () => {
     await flushUi();
     await flushUi();
 
-    expect(pendingReplyTaskMocks.refresh).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('.desktop-shell')).toBeTruthy();
     app.unmount();
   });
 
-  it('restores pending reply tasks once for an existing valid session', async () => {
+  it('opens the desktop for an existing valid session', async () => {
     installDesktopBridge();
 
-    const { app } = await mountAppWithToken('#/desktop', {
+    const { app, host } = await mountAppWithToken('#/desktop', {
       accessToken: unsignedJwt({ exp: Math.floor(Date.now() / 1000) + 7200, role: 'ADMIN' })
     });
     await flushUi();
 
-    expect(pendingReplyTaskMocks.refresh).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('.desktop-shell')).toBeTruthy();
     app.unmount();
   });
 
-  it('does not restore pending reply tasks while logged out', async () => {
+  it('does not open the desktop while logged out', async () => {
     installDesktopBridge();
 
     const { app, host } = await mountAppWithToken('#/desktop', { accessToken: '' });
 
     expect(host.querySelector('.login-shell')).toBeTruthy();
-    expect(pendingReplyTaskMocks.refresh).not.toHaveBeenCalled();
     app.unmount();
   });
 
@@ -403,9 +474,7 @@ describe('App route shell', () => {
 
     const logoutButton = [...host.querySelectorAll('.desktop-sidebar-actions button')]
       .find((button) => button.textContent?.trim() === '退出') as HTMLButtonElement;
-    pendingReplyTaskMocks.resetForSessionChange.mockClear();
     logoutButton.click();
-    const immediateResetCalls = pendingReplyTaskMocks.resetForSessionChange.mock.calls.length;
     await flushUi();
     await flushUi();
 
@@ -420,7 +489,6 @@ describe('App route shell', () => {
     });
 
     app.unmount();
-    expect(immediateResetCalls).toBe(1);
   });
 
   it('does not let an old account refresh overwrite a logged-out or newly logged-in account', async () => {
@@ -452,7 +520,6 @@ describe('App route shell', () => {
       refreshToken: 'refresh-a',
       accountUsername: 'account-a'
     });
-    pendingReplyTaskMocks.refresh.mockClear();
 
     eventBus.emit('auth:expired', { message: 'expired A' });
     await flushUi();
@@ -506,7 +573,6 @@ describe('App route shell', () => {
       refreshToken: 'refreshed-refresh-b',
       accountUsername: 'account-b'
     });
-    expect(pendingReplyTaskMocks.refresh).toHaveBeenCalledTimes(2);
     expect(host.querySelector('.login-shell')).toBeFalsy();
     app.unmount();
   });
@@ -529,9 +595,9 @@ describe('App route shell', () => {
       import('./modules/customer-profile/customerProfileStore')
     ]);
     const openedTabs: unknown[] = [];
-    const quickSearchEvents: unknown[] = [];
+    const templateLibraryEvents: unknown[] = [];
     eventBus.on('followup:switch-tab', (payload) => openedTabs.push(payload));
-    eventBus.on('quick-search:show', (payload) => quickSearchEvents.push(payload));
+    eventBus.on('template-library:show', (payload) => templateLibraryEvents.push(payload));
     installDesktopBridge();
     const { app, host } = await mountAppWithToken('#/desktop');
     const navButtons = [...host.querySelectorAll('.desktop-nav-button')] as HTMLButtonElement[];
@@ -545,7 +611,7 @@ describe('App route shell', () => {
     const actionButtons = [...host.querySelectorAll('.sidebar-quick-actions button')] as HTMLButtonElement[];
     expect([...host.querySelectorAll('.sidebar-quick-actions .action-label')].map((item) => item.textContent)).toEqual([
       '识别',
-      '模板',
+      '话术库',
       '批量'
     ]);
     const recognizeButton = actionButtons[0];
@@ -553,7 +619,7 @@ describe('App route shell', () => {
     recognizeButton?.click();
     await flushUi();
     expect(captureScreenshot).toHaveBeenCalled();
-    expect(triggerRecognize).toHaveBeenCalledWith('BUTTON_CLICK', { imageBase64: 'capture-image' });
+    expect(triggerRecognize).toHaveBeenCalledWith('BUTTON_CLICK', { imageBase64: 'capture-image' }, 'capture-session');
     expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement | null)?.textContent).toBe('回复助手');
 
     navButtons[0].click();
@@ -595,7 +661,7 @@ describe('App route shell', () => {
 
     actionButtons[1].click();
     await flushUi();
-    expect(quickSearchEvents.at(-1)).toMatchObject({
+    expect(templateLibraryEvents.at(-1)).toMatchObject({
       phone: '18800002222',
       nickname: '今日待跟进客户',
       reminderType: 'DUE_TODAY',
@@ -619,7 +685,7 @@ describe('App route shell', () => {
 
     actionButtons[1].click();
     await flushUi();
-    expect(quickSearchEvents.at(-1)).toEqual(undefined);
+    expect(templateLibraryEvents.at(-1)).toEqual(undefined);
 
     (host.querySelector('.task-queue-drawer .icon-close-button') as HTMLButtonElement | null)?.click();
 
@@ -632,6 +698,25 @@ describe('App route shell', () => {
     expect(window.location.hash).toBe('#/desktop');
     expect(host.querySelector('.desktop-sidebar')).toBeTruthy();
 
+    app.unmount();
+  });
+
+  it('opens communication history from a profile', async () => {
+    const { eventBus } = await import('./shared/eventBus');
+    installDesktopBridge();
+    const { app, host } = await mountAppWithToken('#/desktop');
+
+    eventBus.emit('communication:open', { phone: '18800001111', view: 'summaries' });
+    await flushUi();
+
+    expect(communicationMocks.open).toHaveBeenCalledWith('18800001111', 'summaries');
+    expect((host.querySelector('.communication-history-panel') as HTMLElement).style.display).not.toBe('none');
+    expect((host.querySelector('.desktop-nav-button.active .nav-label') as HTMLElement).textContent)
+      .toBe('聊天记录');
+
+    eventBus.emit('communication:return-profile', { phone: '18800001111' });
+    await flushUi();
+    expect((host.querySelector('.customer-panel') as HTMLElement).style.display).not.toBe('none');
     app.unmount();
   });
 

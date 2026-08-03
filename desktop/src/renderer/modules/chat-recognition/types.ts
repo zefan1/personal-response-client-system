@@ -1,5 +1,3 @@
-import type { PendingReplyTask } from '../reply-suggestions/types';
-
 export type RecognizeSource = 'BUTTON_CLICK' | 'CLIPBOARD_SCREENSHOT' | 'CLIPBOARD_TEXT';
 export type ImageServiceStatus = 'UP' | 'DOWN' | 'UNKNOWN';
 
@@ -25,7 +23,25 @@ export type ChatRecognizeResponse = {
     followupSuggest?: unknown;
   } | null;
   warning?: string | null;
-  pendingTask?: PendingReplyTask | null;
+  customerId?: number | null;
+};
+
+export type RecognitionJobStatus =
+  | 'QUEUED'
+  | 'RECOGNIZING'
+  | 'READY'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'EXPIRED';
+
+export type RecognitionJobResponse = {
+  jobId: string;
+  replySessionId?: string | null;
+  status: RecognitionJobStatus;
+  errorCode?: string | null;
+  response?: ChatRecognizeResponse | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 export type RecognizeEventPayload = {

@@ -212,7 +212,7 @@ async function runRendererSmoke(window: BrowserWindow) {
           await waitForSelector('.reply-panel');
           const navLabels = [...document.querySelectorAll('.desktop-nav-button .nav-label')]
             .map((item) => item.textContent.trim());
-          if (navLabels.join('|') !== '工作台|客户档案|回复助手') {
+          if (navLabels.join('|') !== '工作台|客户档案|回复助手|聊天记录') {
             throw new Error('desktop nav labels mismatch: ' + navLabels.join('|'));
           }
           if (document.querySelector('.global-recognize-button')) {
@@ -224,9 +224,38 @@ async function runRendererSmoke(window: BrowserWindow) {
           const actionButtons = [...document.querySelectorAll('.sidebar-quick-actions button')];
           const actionLabels = [...document.querySelectorAll('.sidebar-quick-actions .action-label')]
             .map((item) => item.textContent.trim());
-          if (actionLabels.join('|') !== '识别|模板|批量') {
+          if (actionLabels.join('|') !== '识别|话术库|批量') {
             throw new Error('sidebar quick actions mismatch: ' + actionLabels.join('|'));
           }
+          const replyTaskSidebar = await waitForSelector('.reply-task-sidebar');
+          if (!(document.querySelector('.sidebar-quick-actions').compareDocumentPosition(replyTaskSidebar)
+            & Node.DOCUMENT_POSITION_FOLLOWING)) {
+            throw new Error('reply task sidebar is not below quick actions');
+          }
+          const adminShortcut = findButton('后台');
+          if (!adminShortcut || !(replyTaskSidebar.compareDocumentPosition(adminShortcut)
+            & Node.DOCUMENT_POSITION_FOLLOWING)) {
+            throw new Error('reply task sidebar is not before the admin shortcut');
+          }
+          const replyTaskMore = replyTaskSidebar.querySelector('[data-testid="open-reply-task-drawer"]');
+          if (!replyTaskMore) {
+            throw new Error('reply task full-list entry is missing');
+          }
+          replyTaskMore.click();
+          const replyTaskDrawer = await waitForSelector('.reply-task-drawer-backdrop');
+          assertVisibleButtonContentFits('.reply-task-drawer', '420px reply task drawer');
+          window.resizeTo(360, 560);
+          await delay(250);
+          assertVisibleButtonContentFits('.reply-task-drawer', '360px reply task drawer');
+          window.resizeTo(420, 760);
+          await delay(250);
+          const closeReplyTaskDrawer = [...replyTaskDrawer.querySelectorAll('button')]
+            .find((button) => (button.getAttribute('aria-label') || '').includes('关闭回复任务列表'));
+          closeReplyTaskDrawer?.click();
+          await waitForCondition(
+            () => !document.querySelector('.reply-task-drawer-backdrop'),
+            'reply task drawer closed'
+          );
           if (document.documentElement.scrollWidth > window.innerWidth + 1) {
             throw new Error('desktop has horizontal overflow');
           }
@@ -352,33 +381,20 @@ async function runRendererSmoke(window: BrowserWindow) {
           }
           assertReplyCurrentTaskLayout();
           actionButtons[1].click();
-          const quickInput = await waitForSelector('.quick-search-overlay .quick-search-input');
-          const quickDrawer = await waitForSelector('.quick-search-box');
-          if (quickDrawer.getAttribute('aria-label') !== '模板') {
-            throw new Error('quick-search drawer label mismatch: ' + quickDrawer.getAttribute('aria-label'));
+          const templateLibrary = await waitForSelector('.template-library-overlay');
+          const speechFlow = await waitForSelector('[data-testid="template-library-flow"]');
+          if (!speechFlow) {
+            throw new Error('speech library flow is missing');
           }
-          setValue(quickInput, 'smoke');
-          await delay(350);
-          const quickFilters = [...document.querySelectorAll('.quick-search-overlay .quick-filter button')];
-          if (quickFilters.length < 4) {
-            throw new Error('quick-search filter count mismatch: ' + quickFilters.length);
+          const speechFilters = [...templateLibrary.querySelectorAll('.template-library-filters button')];
+          if (speechFilters.length !== 5) {
+            throw new Error('speech library filter count mismatch: ' + speechFilters.length);
           }
-          for (const [index, filter] of quickFilters.entries()) {
-            filter.click();
-            await delay(50);
-            const currentFilters = [...document.querySelectorAll('.quick-search-overlay .quick-filter button')];
-            if (!currentFilters[index]?.classList.contains('active')) {
-              throw new Error('quick-search filter did not become active');
-            }
-          }
-          await delay(3200);
-          if (!document.querySelector('.quick-search-overlay')) {
-            throw new Error('quick-search drawer auto closed unexpectedly');
-          }
-          const closeQuickSearch = [...document.querySelectorAll('.quick-search-box button')]
-            .find((button) => (button.getAttribute('aria-label') || '').includes('关闭模板'));
-          closeQuickSearch?.click();
-          await waitForCondition(() => !document.querySelector('.quick-search-overlay'), 'quick-search drawer closed by icon');
+          assertVisibleButtonContentFits('.template-library-shell', '420px template library');
+          const closeTemplateLibrary = [...templateLibrary.querySelectorAll('button')]
+            .find((button) => (button.getAttribute('aria-label') || '').includes('关闭话术库'));
+          closeTemplateLibrary?.click();
+          await waitForCondition(() => !document.querySelector('.template-library-overlay'), 'template library closed');
           return true;
         };
         const hasLoginForm = () => Boolean(inputByLabel('API 地址') && inputByLabel('账号') && inputByLabel('密码'));

@@ -14,6 +14,28 @@ vi.mock('../../shared/desktopBridge', () => ({
 
 type CopyBackfillModule = typeof import('./copyBackfillStore');
 
+function installMemoryLocalStorage(): void {
+  const store = new Map<string, string>();
+  const storage = {
+    getItem: vi.fn((key: string) => store.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      store.set(key, String(value));
+    }),
+    removeItem: vi.fn((key: string) => {
+      store.delete(key);
+    }),
+    clear: vi.fn(() => {
+      store.clear();
+    })
+  };
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: storage,
+    configurable: true
+  });
+}
+
+installMemoryLocalStorage();
+
 async function freshStore(): Promise<CopyBackfillModule> {
   vi.resetModules();
   postJsonMock.mockReset();
@@ -25,12 +47,14 @@ describe('copyBackfillStore', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-03T12:00:00Z'));
+    localStorage.clear();
   });
 
   afterEach(async () => {
     const store = await import('./copyBackfillStore');
     store.cleanupCopyBackfillStore();
     vi.useRealTimers();
+    localStorage.clear();
     postJsonMock.mockReset();
     writeClipboardTextMock.mockReset();
   });
@@ -45,7 +69,7 @@ describe('copyBackfillStore', () => {
     expect(store.copyBackfillState.toast).toBeTruthy();
   });
 
-  it('copies selected reply text, sends confirmation, and refreshes the active profile', async () => {
+  it('opens a persisted send decision after copy without confirming that it was sent', async () => {
     const store = await freshStore();
     const { eventBus } = await import('../../shared/eventBus');
     const confirmed: unknown[] = [];
@@ -53,22 +77,142 @@ describe('copyBackfillStore', () => {
     writeClipboardTextMock.mockResolvedValue({ success: true });
     postJsonMock.mockResolvedValue({ success: true, data: {} });
 
-    await store.handleReplySelected(reply({ text: 'hello', direction: 'NEXT_STEP', isFallback: true }));
+    await store.handleReplySelected(reply({
+      text: 'hello',
+      direction: 'NEXT_STEP',
+      isFallback: true,
+      replySource: 'FALLBACK'
+    }));
     await vi.runAllTimersAsync();
 
     expect(writeClipboardTextMock).toHaveBeenCalledWith('hello');
-    expect(store.copyBackfillState.toast).toBe('已复制并记录发送，档案正在刷新');
-    expect(confirmed).toEqual([{ phone: '18800001111' }]);
-    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/send-confirm', {
+    expect(confirmed).toEqual([]);
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/ai-usage', {
       phone: '18800001111',
-      conversationSummary: '',
-      isNewCustomer: false,
-      sentText: 'hello',
-      selectedDirection: 'SYSTEM_FALLBACK'
+      taskId: 'task-1',
+      replySessionId: 'reply-session-1',
+      replySource: 'FALLBACK',
+      copiedText: 'hello'
     }, undefined, expect.any(AbortSignal));
+    expect(postJsonMock.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/send-confirm');
+    expect(store.copyBackfillState.pendingSendDecision).toMatchObject({
+      text: 'hello',
+      phone: '18800001111',
+      direction: 'NEXT_STEP',
+      replySessionId: 'reply-session-1',
+      status: 'AWAITING_DECISION'
+    });
+    expect(JSON.parse(localStorage.getItem('copy_backfill_pending_send') ?? 'null')).toMatchObject({
+      text: 'hello',
+      phone: '18800001111',
+      status: 'AWAITING_DECISION',
+      confirmationId: expect.any(String)
+    });
   });
 
-  it('does not send confirmation when clipboard write fails or phone is missing', async () => {
+  it('unlocks without updating when the employee chooses not sent', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+
+    await store.handleReplySelected(reply({ text: 'not sent' }));
+    store.discardPendingSendDecision();
+
+    expect(store.copyBackfillState.pendingSendDecision).toBeNull();
+    expect(localStorage.getItem('copy_backfill_pending_send')).toBeNull();
+    expect(postJsonMock.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/send-confirm');
+  });
+
+  it('unlocks only after send confirmation is accepted', async () => {
+    const store = await freshStore();
+    const { eventBus } = await import('../../shared/eventBus');
+    const confirmed: unknown[] = [];
+    eventBus.on('reply:send-confirmed', (payload) => confirmed.push(payload));
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+    postJsonMock.mockImplementation(async (path: string) => path === '/api/v1/chat/send-confirm'
+      ? { success: true, data: { accepted: true } }
+      : { success: true, data: {} });
+    await store.handleReplySelected(reply({ text: 'sent reply', nickname: 'Alice' }));
+    const confirmationId = store.copyBackfillState.pendingSendDecision?.confirmationId;
+
+    const accepted = await store.confirmPendingSendDecision();
+
+    expect(accepted).toBe(true);
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/send-confirm', {
+      confirmationId,
+      customerId: 7,
+      phone: '18800001111',
+      nickname: 'Alice',
+      conversationSummary: '',
+      isNewCustomer: false,
+      sentText: 'sent reply',
+      selectedDirection: 'NEXT_STEP'
+    });
+    expect(store.copyBackfillState.pendingSendDecision).toBeNull();
+    expect(localStorage.getItem('copy_backfill_pending_send')).toBeNull();
+    expect(confirmed).toEqual([{ phone: '18800001111', customerId: 7 }]);
+  });
+
+  it('keeps the gate locked when send confirmation fails so it can be retried', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+    postJsonMock.mockImplementation(async (path: string) => path === '/api/v1/chat/send-confirm'
+      ? { success: false, errorCode: 'NETWORK_ERROR', message: 'offline', data: null }
+      : { success: true, data: {} });
+    await store.handleReplySelected(reply({ text: 'retry me' }));
+
+    const accepted = await store.confirmPendingSendDecision();
+
+    expect(accepted).toBe(false);
+    expect(store.copyBackfillState.pendingSendDecision).toMatchObject({
+      text: 'retry me',
+      status: 'SUBMIT_FAILED',
+      errorMessage: 'offline'
+    });
+    expect(localStorage.getItem('copy_backfill_pending_send')).not.toBeNull();
+  });
+
+  it('does not submit a send confirmation without the customer created during recognition', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+    await store.handleReplySelected(reply({ customerId: null, phone: '', nickname: 'Only nickname' }));
+
+    const accepted = await store.confirmPendingSendDecision();
+
+    expect(accepted).toBe(false);
+    expect(postJsonMock.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/send-confirm');
+    expect(store.copyBackfillState.pendingSendDecision).toMatchObject({
+      phone: '',
+      status: 'AWAITING_DECISION',
+      errorMessage: '当前回复没有对应的客户档案，请重新识别聊天'
+    });
+  });
+
+  it('restores an interrupted pending decision after restart as retryable', async () => {
+    localStorage.setItem('copy_backfill_pending_send', JSON.stringify({
+      confirmationId: 'confirm-restart-1',
+      text: 'already copied',
+      direction: 'NEXT_STEP',
+      reason: 'reason',
+      phone: '18800001111',
+      nickname: 'Alice',
+      replySessionId: 'reply-session-restart',
+      isFallback: false,
+      status: 'SUBMITTING',
+      createdAt: '2026-07-03T11:59:00.000Z',
+      errorMessage: ''
+    }));
+
+    const store = await freshStore();
+
+    expect(store.copyBackfillState.pendingSendDecision).toMatchObject({
+      confirmationId: 'confirm-restart-1',
+      text: 'already copied',
+      status: 'AWAITING_DECISION',
+      errorMessage: ''
+    });
+  });
+
+  it('does not record AI usage when clipboard write fails or phone is missing', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValueOnce({ success: false, error: 'denied' });
 
@@ -85,7 +229,7 @@ describe('copyBackfillStore', () => {
     expect(store.copyBackfillState.toast).toBe('已复制到剪贴板，请粘贴到微信发送');
   });
 
-  it('keeps copied text usable when send-confirm fails and surfaces the degraded state', async () => {
+  it('keeps copied text usable when AI usage recording fails and surfaces the degraded state', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
     postJsonMock.mockResolvedValue({ success: false, errorCode: 'BAD_REQUEST', message: 'phone and sentText are required' });
@@ -94,23 +238,23 @@ describe('copyBackfillStore', () => {
     await vi.runAllTimersAsync();
 
     expect(writeClipboardTextMock).toHaveBeenCalledWith('hello');
-    expect(store.copyBackfillState.toast).toBe('已复制，但发送记录失败，请稍后刷新档案确认');
+    expect(store.copyBackfillState.toast).toBe('已复制，但 AI 使用记录未同步，不影响正常跟进');
   });
 
-  it('uses the full phone for send-confirm even when a masked display phone is present', async () => {
+  it('uses the recognized phone for AI usage', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
     postJsonMock.mockResolvedValue({ success: true, data: {} });
 
-    await store.handleReplySelected(reply({ phone: '18800001111', displayPhone: '****1111' }));
+    await store.handleReplySelected(reply({ phone: '18800001111' }));
     await vi.runAllTimersAsync();
 
-    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/send-confirm', expect.objectContaining({
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/ai-usage', expect.objectContaining({
       phone: '18800001111'
     }), undefined, expect.any(AbortSignal));
   });
 
-  it('aborts the previous pending send-confirm when a newer reply is selected', async () => {
+  it('does not cancel in-flight AI usage recording when the component unmounts', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
     const signals: AbortSignal[] = [];
@@ -120,11 +264,43 @@ describe('copyBackfillStore', () => {
     });
 
     await store.handleReplySelected(reply({ text: 'first' }));
-    await store.handleReplySelected(reply({ text: 'second' }));
+    store.cleanupCopyBackfillStore();
 
-    expect(signals).toHaveLength(2);
-    expect(signals[0].aborted).toBe(true);
-    expect(signals[1].aborted).toBe(false);
+    expect(postJsonMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/chat/ai-usage']);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].aborted).toBe(false);
+  });
+
+  it('does not let a second copied reply overwrite the unresolved send decision', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+
+    await store.handleReplySelected(reply({ text: 'first pending reply' }));
+    const confirmationId = store.copyBackfillState.pendingSendDecision?.confirmationId;
+    await store.handleReplySelected(reply({ text: 'second reply must wait' }));
+
+    expect(writeClipboardTextMock).toHaveBeenCalledTimes(1);
+    expect(store.copyBackfillState.pendingSendDecision).toMatchObject({
+      confirmationId,
+      text: 'first pending reply'
+    });
+  });
+
+  it('keeps a pending send decision locked across component unmount and remount', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+
+    await store.handleReplySelected(reply({ text: 'still waiting for confirmation' }));
+    const confirmationId = store.copyBackfillState.pendingSendDecision?.confirmationId;
+
+    store.cleanupCopyBackfillStore();
+
+    expect(store.copyBackfillState.pendingSendDecision).toMatchObject({
+      confirmationId,
+      text: 'still waiting for confirmation',
+      status: 'AWAITING_DECISION'
+    });
+    expect(localStorage.getItem('copy_backfill_pending_send')).not.toBeNull();
   });
 
   it('stores incoming suggestions collapsed until the inline panel expands them', async () => {
@@ -201,9 +377,13 @@ function reply(patch: Partial<ReplySelectedPayload>): ReplySelectedPayload {
     direction: 'NEXT_STEP',
     reason: 'reason',
     phone: '18800001111',
+    customerId: 7,
+    taskId: 'task-1',
+    replySessionId: 'reply-session-1',
+    replySource: 'SKILL',
     isFallback: false,
     ...patch
-  };
+  } as ReplySelectedPayload;
 }
 
 function suggestion(suggestionId: number, patch: Partial<ProfileSuggestion> = {}): ProfileSuggestion {

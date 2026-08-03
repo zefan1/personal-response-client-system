@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
 class ExistingCustomerUpdaterTest {
 
   @Test
-  void followupFieldsIncludeConfirmedSummaryAndFollowupTime() {
+  void followupFieldsIncludeConfirmedSummaryWithoutRecentFollowupTime() {
     ExistingCustomerUpdater updater = new ExistingCustomerUpdater(
         mock(WecomTableClient.class),
         mock(TableConfigProvider.class),
@@ -37,8 +37,52 @@ class ExistingCustomerUpdaterTest {
         false));
 
     assertThat(fields).containsEntry("followupNotes", "发送模板《到店提醒》：明天见");
-    assertThat(fields.get("lastFollowupAt")).isInstanceOf(String.class);
-    assertThat(fields).doesNotContainKeys("nextFollowupAt", "nextFollowupDir");
+    assertThat(fields).doesNotContainKeys("lastFollowupAt", "nextFollowupAt", "nextFollowupDir");
+  }
+
+  @Test
+  void followupFieldsNeverUseTheCustomerFacingReplyWhenConversationSummaryIsBlank() {
+    ExistingCustomerUpdater updater = new ExistingCustomerUpdater(
+        mock(WecomTableClient.class),
+        mock(TableConfigProvider.class),
+        mock(TableFieldMappingResolver.class));
+    CustomerMessageSentEvent event = new CustomerMessageSentEvent(
+        "13800000000",
+        "Alice",
+        false,
+        "table_a",
+        "LEAD",
+        " ",
+        List.of(),
+        "实际发送给客户的话术",
+        "NEXT",
+        null,
+        false,
+        "keeper");
+
+    Map<String, Object> fields = updater.followupFields(event);
+
+    assertThat(fields).doesNotContainKey("followupNotes");
+  }
+
+  @Test
+  void followupFieldsUseTheSharedStructuredAnalysisWithoutRecentFollowupTime() {
+    ExistingCustomerUpdater updater = new ExistingCustomerUpdater(
+        mock(WecomTableClient.class),
+        mock(TableConfigProvider.class),
+        mock(TableFieldMappingResolver.class));
+    Map<String, Object> analysisFields = Map.of(
+        "internalNote", "先说明评估流程",
+        "customerProfileSummary", "产后6个月，关注腹直肌",
+        "followupNotes", "2026-08-01：约定周一联系",
+        "secondTrackingCapture", "周一上午可联系");
+    CustomerMessageSentEvent event = new CustomerMessageSentEvent(
+        "13800000000", "Alice", false, "table_a", "LEAD", "", List.of(), "员工回复",
+        "NEXT", null, false, analysisFields, "keeper");
+
+    Map<String, Object> fields = updater.followupFields(event);
+
+    assertThat(fields).containsAllEntriesOf(analysisFields).doesNotContainKey("lastFollowupAt");
   }
 
   @Test

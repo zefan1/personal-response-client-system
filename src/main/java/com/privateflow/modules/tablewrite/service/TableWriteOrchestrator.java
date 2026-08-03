@@ -1,10 +1,13 @@
 package com.privateflow.modules.tablewrite.service;
 
 import com.privateflow.common.events.CustomerMessageSentEvent;
+import com.privateflow.common.events.CustomerFollowupAnalysisCompletedEvent;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.tablewrite.PendingWritePayload;
 import com.privateflow.modules.tablewrite.TableWriteActionType;
+import com.privateflow.modules.tablewrite.TableWriteException;
+import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,12 +38,14 @@ public class TableWriteOrchestrator {
   @Async("tableWriteExecutor")
   @EventListener
   public void onCustomerMessageSent(CustomerMessageSentEvent event) {
-    if (event.phone() == null || event.phone().isBlank()) {
-      log.warn("skip table write event without phone");
+    Customer customer = event.customerId() != null && event.customerId() > 0
+        ? customerQueryService.getById(event.customerId())
+        : customerQueryService.getByPhone(event.phone());
+    if (customer == null) {
+      log.warn("skip table write event for missing customer id={}", event.customerId());
       return;
     }
-    Customer customer = customerQueryService.getByPhone(event.phone());
-    boolean shouldCreate = customer == null || event.isNewCustomer();
+    boolean shouldCreate = customer.getSourceRowId() == null || customer.getSourceRowId().isBlank();
     try {
       if (shouldCreate) {
         withOneImmediateRetry(() -> newCustomerRowCreator.create(event));
@@ -48,7 +53,34 @@ public class TableWriteOrchestrator {
         withOneImmediateRetry(() -> existingCustomerUpdater.update(customer, event));
       }
     } catch (RuntimeException ex) {
+      if (ex instanceof TableWriteException tableWriteException
+          && TableWriteErrorCodes.TABLE_WRITE_BLOCKED.equals(tableWriteException.getErrorCode())) {
+        log.warn("skip smart table write because required unique value is unavailable, customerId={}", event.customerId());
+        return;
+      }
       enqueueFallback(event, customer, shouldCreate, ex);
+    }
+  }
+
+  @Async("tableWriteExecutor")
+  @EventListener
+  public void onFollowupAnalysisCompleted(CustomerFollowupAnalysisCompletedEvent event) {
+    if (event == null || event.phone() == null || event.phone().isBlank()) {
+      return;
+    }
+    Customer customer = customerQueryService.getByPhone(event.phone());
+    if (customer == null) {
+      return;
+    }
+    Map<String, Object> fields = event.fields() == null ? Map.of() : event.fields();
+    try {
+      withOneImmediateRetry(() -> existingCustomerUpdater.updateFields(customer, fields));
+    } catch (RuntimeException ex) {
+      queueManager.enqueue(
+          event.phone(),
+          TableWriteActionType.UPDATE,
+          new PendingWritePayload(customer.getSourceTable(), customer.getSourceRowId(), fields),
+          ex.getMessage());
     }
   }
 
@@ -63,13 +95,17 @@ public class TableWriteOrchestrator {
       Map<String, Object> fields = existingCustomerUpdater.followupFields(event);
       payload = new PendingWritePayload(sourceTable, sourceRowId, fields);
     }
-    queueManager.enqueue(event.phone(), actionType, payload, ex.getMessage());
+    queueManager.enqueue(event.customerId(), event.phone(), actionType, payload, ex.getMessage());
   }
 
   private void withOneImmediateRetry(Runnable action) {
     try {
       action.run();
     } catch (RuntimeException first) {
+      if (first instanceof TableWriteException tableWriteException
+          && TableWriteErrorCodes.TABLE_WRITE_BLOCKED.equals(tableWriteException.getErrorCode())) {
+        throw tableWriteException;
+      }
       sleepOneSecond();
       action.run();
     }

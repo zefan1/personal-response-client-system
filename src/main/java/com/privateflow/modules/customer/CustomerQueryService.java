@@ -5,6 +5,8 @@ import java.util.List;
 public interface CustomerQueryService {
   Customer getByPhone(String phone);
 
+  Customer getById(long customerId);
+
   List<Customer> searchByNickname(String nickname);
 
   List<Customer> searchByNickname(String nickname, int limit);

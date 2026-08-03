@@ -92,7 +92,7 @@ const apiData: Record<string, unknown> = {
     'skill.alert_failure_duration_minutes': '15',
     'profile.extract_timeout_ms': '8000',
     'image.model': 'qwen3-vl-plus',
-    'image.timeout_ms': '5000',
+    'image.timeout_ms': '15000',
     'image.max_size_bytes': '5242880',
     'image.max_dimension_px': '1920',
     'image.compress_quality': '85',
@@ -146,7 +146,15 @@ const apiData: Record<string, unknown> = {
     'datasource.mapping_version_max': '50',
     'datasource.import_max_rows': '5000',
     'datasource.manual_sync_timeout_s': '60',
-    'datasource.sync_status_refresh_s': '30'
+    'datasource.sync_status_refresh_s': '30',
+    'supervision.record_retention_days': '180',
+    'supervision.technical_log_retention_days': '30',
+    'supervision.processing_sla_minutes': '1440',
+    'supervision.conversion_target_stages_json': '["已成交"]',
+    'chat.expired_reply_task_retention_days': '3',
+    'chat.unfinished_task_cap': '20',
+    'chat.recent_task_display_cap': '30',
+    'chat.recognition_concurrency': '4'
   },
   '/admin/api/v1/datasources': {
     items: [{ id: 10, name: '企微客资表', sheetId: 'sheet-a', sourceTable: 'leads', enabled: true }]
@@ -213,6 +221,28 @@ const apiData: Record<string, unknown> = {
     size: 20,
     totalPages: 2
   },
+  '/admin/api/v1/template-promotion-candidates': [
+    {
+      id: 42,
+      ownerUsername: 'keeper-a',
+      originalAiReply: 'Original AI reply',
+      editedTitle: 'Edited opening',
+      editedBody: 'Employee adjusted body',
+      metadata: { channelCode: 'wecom', scene: 'new-lead', leadType: 'LEAD', labels: ['warm'] },
+      personalTemplateUsageCount: 3,
+      createdAt: '2026-07-24T13:00:00'
+    },
+    {
+      id: 43,
+      ownerUsername: 'keeper-b',
+      originalAiReply: 'Second original reply',
+      editedTitle: 'Second opening',
+      editedBody: 'Second body',
+      metadata: { labels: [] },
+      personalTemplateUsageCount: 0,
+      createdAt: '2026-07-24T13:01:00'
+    }
+  ],
   '/admin/api/v1/accounts': {
     list: [
       { id: 30, displayName: '管理员', phone: '18800000000', role: 'ADMIN', isEnabled: true, permissions: ['TAG_MANAGEMENT'], lastLoginAt: '2026-07-03T09:00:00Z' },
@@ -437,6 +467,28 @@ const apiData: Record<string, unknown> = {
     ],
     targetTypes: [{ type: 'notice', label: '公告' }]
   },
+  '/admin/api/v1/supervision/metadata': {
+    operators: ['alice'],
+    channels: ['WECHAT'],
+    leadSources: ['ads-form'],
+    customerStages: ['跟进中', '已成交'],
+    eventTypes: ['REPLY_COPIED']
+  },
+  '/admin/api/v1/supervision/metrics': {
+    metrics: {
+      AI_USAGE_RATE: { numerator: 2, denominator: 4, rate: 0.5, numeratorLabel: '已复制客户', denominatorLabel: '已生成客户', conversionTargetConfigured: true },
+      AI_COVERAGE: { numerator: 3, denominator: 5, rate: 0.6, numeratorLabel: 'AI 已处理客户', denominatorLabel: '进入待处理客户', conversionTargetConfigured: true },
+      PROCESSING_EFFICIENCY: { numerator: 4, denominator: 5, rate: 0.8, numeratorLabel: 'SLA 内处理客户', denominatorLabel: '进入待处理客户', conversionTargetConfigured: true },
+      EMPLOYEE_CONVERSION: { numerator: 1, denominator: 4, rate: 0.25, numeratorLabel: '目标阶段客户', denominatorLabel: '归属客户', conversionTargetConfigured: true },
+      AI_REPLY_CONVERSION: { numerator: 1, denominator: 2, rate: 0.5, numeratorLabel: '目标阶段 AI 客户', denominatorLabel: '已复制 AI 回复客户', conversionTargetConfigured: true }
+    }
+  },
+  '/admin/api/v1/supervision/events': {
+    items: [{ id: 91, eventType: 'REPLY_COPIED', operatorUsername: 'alice', customerPhoneMasked: '138****0001', channelCode: 'WECHAT', leadSource: 'ads-form', replySource: 'LLM', replyPreview: '您好，已为您整理可选方案。', occurredAt: '2026-07-03T09:00:00Z' }],
+    total: 1,
+    page: 1,
+    pageSize: 20
+  },
   '/admin/api/v1/health': {
     status: 'OK',
     refreshIntervalS: 45,
@@ -494,7 +546,7 @@ function findSubnavButton(host: HTMLElement, text: string): HTMLButtonElement {
   const buttons = [...host.querySelectorAll('.ops-admin-subnav-button')] as HTMLButtonElement[];
   const button = buttons.find((item) => item.textContent?.includes(text));
   if (!button && buttons.length >= 6) {
-    return buttons[5];
+    return buttons.find((item) => item.textContent?.includes('跟进规则')) ?? buttons[5];
   }
   expect(button).toBeTruthy();
   return button as HTMLButtonElement;
@@ -570,10 +622,13 @@ describe('AdminConsole product surface', () => {
       '配置中心',
       '客户数据对接',
       '速搜内容管理',
+      '可推广模板',
       '账号与权限',
       '跟进规则引擎配置',
       '客户标签与分层',
       '运营分析看板',
+      '主管监督记录',
+      '数据保留与任务设置',
       '版本管理',
       '系统公告',
       '操作审计日志',
@@ -736,9 +791,14 @@ describe('AdminConsole product surface', () => {
     findButton(host, '保存识图参数').click();
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/image.model', { value: 'qwen3-vl-plus' });
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/image.timeout_ms', { value: '15000' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/image.max_size_bytes', { value: '5242880' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/image.compress_quality', { value: '85' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/desktop.clipboard_screenshot_confirm_prompt_s', { value: '10' });
+    const imageTimeoutInput = [...host.querySelectorAll('label')]
+      .find((label) => label.textContent?.includes('识图超时'))
+      ?.querySelector('input') as HTMLInputElement | null;
+    expect(imageTimeoutInput?.min).toBe('15000');
 
     findButton(host, '保存回复生成').click();
     await flushSave();
@@ -1971,6 +2031,116 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
+  it('lets an administrator review template candidates and publish or decline them', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '可推广模板').click();
+    await flushUi();
+    await flushUi();
+
+    expect(mainText(host)).toContain('keeper-a');
+    expect([...host.querySelectorAll('.template-candidate-copy textarea')].map((item) => (item as HTMLTextAreaElement).value))
+      .toContain('Original AI reply');
+    expect([...host.querySelectorAll('.template-candidate-copy textarea')].map((item) => (item as HTMLTextAreaElement).value))
+      .toContain('Employee adjusted body');
+    expect(mainText(host)).toContain('已用 3 次');
+    const title = host.querySelector('[data-testid="candidate-title-42"]') as HTMLInputElement;
+    setInputValue(title, 'Published team opening');
+    (host.querySelector('[data-testid="candidate-publish-42"]') as HTMLButtonElement).click();
+    await flushUi();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/template-promotion-candidates/42/publish', expect.objectContaining({
+      title: 'Published team opening'
+    }));
+
+    (host.querySelector('[data-testid="candidate-not-publish-43"]') as HTMLButtonElement).click();
+    await flushUi();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/template-promotion-candidates/43/not-publish', {});
+    app.unmount();
+  });
+
+  it('loads supervisor metrics and saves governance settings from the administrator console', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '主管监督记录').click();
+    await flushSave();
+    await flushSave();
+
+    expect(mainText(host)).toContain('AI 使用率');
+    expect(mainText(host)).toContain('已复制客户');
+    expect(mainText(host)).toContain('转换目标已配置');
+    expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringContaining('/admin/api/v1/supervision/metrics'));
+    expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringContaining('/admin/api/v1/supervision/events'));
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/supervision/metadata');
+    const eventTypeSelect = controlByLabel<HTMLSelectElement>(host, '事件类型');
+    expect([...eventTypeSelect.options].map((option) => option.value)).toEqual(['', 'REPLY_COPIED']);
+
+    findSubnavButton(host, '数据保留与任务设置').click();
+    await flushSave();
+    const retentionInput = controlByLabel<HTMLInputElement>(host, '主管监督记录保留天数');
+    setInputValue(retentionInput, '200');
+    findButton(host, '保存治理设置').click();
+    await flushSave();
+
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/supervision.record_retention_days', { value: '200' });
+    expect(mainText(host)).toContain('转换目标阶段');
+    app.unmount();
+  });
+
+  it('does not render incomplete supervisor metric payloads as misleading cards', async () => {
+    apiMocks.getJson.mockImplementation(async (path: string) => {
+      const basePath = path.split('?')[0];
+      const data = basePath === '/admin/api/v1/supervision/metrics'
+        ? {
+          metrics: {
+            AI_USAGE_RATE: metricPayload({ numerator: null }),
+            AI_COVERAGE: metricPayload({ denominator: '' }),
+            PROCESSING_EFFICIENCY: metricPayload({ rate: '0.5' }),
+            EMPLOYEE_CONVERSION: metricPayload({ numerator: '2' }),
+            AI_REPLY_CONVERSION: metricPayload({ denominator: false })
+          }
+        }
+        : apiData[path] ?? apiData[basePath] ?? { items: [] };
+      return { success: true, data, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '主管监督记录').click();
+    await flushSave();
+
+    expect(mainText(host)).toContain('暂无监督指标数据');
+    expect(host.querySelectorAll('.ops-supervision-metric')).toHaveLength(0);
+    expect(mainText(host)).not.toContain('NaN');
+    app.unmount();
+  });
+
+  it('reloads current governance settings and reports partial-save risk when one update fails', async () => {
+    const { app, host } = await mountConsole();
+    findSubnavButton(host, '数据保留与任务设置').click();
+    await flushSave();
+    apiMocks.getJson.mockClear();
+    apiMocks.putJson.mockImplementation(async (path: string) => path.endsWith('technical_log_retention_days')
+      ? { success: false, data: null, errorCode: '70-10001', message: 'range invalid' }
+      : { success: true, data: {}, errorCode: null, message: null });
+
+    findButton(host, '保存治理设置').click();
+    await flushSave();
+    await flushSave();
+
+    expect(mainText(host)).toContain('保存未完全成功，当前生效设置已重新加载');
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/configs');
+    app.unmount();
+  });
+
+  it('does not display supervisor pages or request supervisor endpoints for tag-only managers', async () => {
+    const { app, host } = await mountConsole({ accountName: '组长', tagManagementOnly: true });
+    await flushSave();
+
+    expect(mainText(host)).not.toContain('主管监督记录');
+    expect(mainText(host)).not.toContain('数据保留与任务设置');
+    expect(apiMocks.getJson.mock.calls.map((call) => String(call[0])).every((path) => !path.startsWith('/admin/api/v1/supervision/'))).toBe(true);
+    app.unmount();
+  });
+
   it('uploads a desktop version package and fills the version form', async () => {
     apiMocks.postForm.mockResolvedValueOnce({ success: true, data: { downloadUrl: '/downloads/app.exe', fileSize: 2048 }, errorCode: null, message: null });
     const { app, host } = await mountConsole();
@@ -2142,3 +2312,15 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 });
+
+function metricPayload(patch: Record<string, unknown>): Record<string, unknown> {
+  return {
+    numerator: 2,
+    denominator: 4,
+    rate: 0.5,
+    numeratorLabel: '已复制客户',
+    denominatorLabel: '已生成客户',
+    conversionTargetConfigured: true,
+    ...patch
+  };
+}

@@ -33,6 +33,11 @@ public class Customer {
   private String intentLevel;
   private String worries;
   private String customerStage;
+  private String internalNote;
+  private String customerProfileSummary;
+  private String firstTrackingCapture;
+  private String secondTrackingCapture;
+  private String thirdTrackingCapture;
   private LocalDateTime lastFollowupAt;
   private String followupNotes;
   private LocalDateTime nextFollowupAt;
@@ -102,6 +107,16 @@ public class Customer {
   public void setWorries(String worries) { this.worries = worries; }
   public String getCustomerStage() { return customerStage; }
   public void setCustomerStage(String customerStage) { this.customerStage = customerStage; }
+  public String getInternalNote() { return internalNote; }
+  public void setInternalNote(String internalNote) { this.internalNote = internalNote; }
+  public String getCustomerProfileSummary() { return customerProfileSummary; }
+  public void setCustomerProfileSummary(String customerProfileSummary) { this.customerProfileSummary = customerProfileSummary; }
+  public String getFirstTrackingCapture() { return firstTrackingCapture; }
+  public void setFirstTrackingCapture(String firstTrackingCapture) { this.firstTrackingCapture = firstTrackingCapture; }
+  public String getSecondTrackingCapture() { return secondTrackingCapture; }
+  public void setSecondTrackingCapture(String secondTrackingCapture) { this.secondTrackingCapture = secondTrackingCapture; }
+  public String getThirdTrackingCapture() { return thirdTrackingCapture; }
+  public void setThirdTrackingCapture(String thirdTrackingCapture) { this.thirdTrackingCapture = thirdTrackingCapture; }
   public LocalDateTime getLastFollowupAt() { return lastFollowupAt; }
   public void setLastFollowupAt(LocalDateTime lastFollowupAt) { this.lastFollowupAt = lastFollowupAt; }
   public String getFollowupNotes() { return followupNotes; }

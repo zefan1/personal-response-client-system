@@ -41,6 +41,18 @@ class WecomSmartSheetConfigTest {
   }
 
   @Test
+  void applicationCredentialsCanBeValidatedBeforeATargetDocumentExists() {
+    WecomSmartSheetConfig config = new WecomSmartSheetConfig(
+        "https://not-leaked.example", " corp-1 ", " app-secret-value ", "", "", "", "", "",
+        ZoneId.of("Asia/Shanghai"));
+
+    config.requireApplicationCredentials();
+
+    assertThat(config.corpId()).isEqualTo("corp-1");
+    assertThat(config.appSecret()).isEqualTo("app-secret-value");
+  }
+
+  @Test
   void differentDocumentOrSourceTableIsRejectedBeforeApiCall() {
     WecomSmartSheetConfig config = configured();
 

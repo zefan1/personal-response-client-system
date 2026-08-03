@@ -28,6 +28,8 @@ import { eventBus } from '../../shared/eventBus';
 import { connectWsMessageBus } from '../../shared/wsMessageBus';
 import {
   handleImageServiceStatus,
+  beginScreenshotRecognition,
+  failScreenshotRecognition,
   openTextMode,
   recognitionState as state,
   recognizeClipboardImage,
@@ -60,12 +62,22 @@ onBeforeUnmount(() => {
 });
 
 async function captureFromWindow() {
-  const result = await captureScreenshot();
+  const sessionId = beginScreenshotRecognition('BUTTON_CLICK');
+  if (!sessionId) return;
+  const result = await captureScreenshot().catch(() => ({
+    success: false,
+    error: 'CAPTURE_FAILED',
+    imageBase64: undefined,
+    message: '屏幕截图失败，请重试'
+  }));
   if (!result.success || !result.imageBase64) {
-    state.toast = result.message ?? '屏幕截图失败，请确认系统允许桌面端录屏后重试';
+    failScreenshotRecognition(
+      sessionId,
+      result.message ?? '屏幕截图失败，请确认系统允许桌面端录屏后重试'
+    );
     return;
   }
-  await triggerRecognize('BUTTON_CLICK', { imageBase64: result.imageBase64 });
+  await triggerRecognize('BUTTON_CLICK', { imageBase64: result.imageBase64 }, sessionId);
 }
 
 async function submitText() {

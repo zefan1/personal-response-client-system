@@ -84,4 +84,24 @@ class CustomerSearchServiceTest {
     assertThat(result.total()).isEqualTo(1);
     assertThat(result.customers()).extracting("phoneFull").containsExactly("18800001111");
   }
+  @Test
+  void searchReturnsAccessibleRecognitionCustomerWithoutPhone() {
+    CustomerQueryService queryService = Mockito.mock(CustomerQueryService.class);
+    CustomerAccessService accessService = Mockito.mock(CustomerAccessService.class);
+    CustomerSearchService service = new CustomerSearchService(queryService, new CustomerSummaryMapper(), accessService);
+    Customer customer = new Customer();
+    customer.setId(56L);
+    customer.setNickname("少花");
+    customer.setLeadType("PENDING");
+
+    when(queryService.searchByKeyword("少花", 10)).thenReturn(List.of(customer));
+    when(accessService.canAccess(customer)).thenReturn(true);
+
+    CustomerSearchResult result = service.search("少花", 10);
+
+    assertThat(result.total()).isEqualTo(1);
+    assertThat(result.customers().get(0).nickname()).isEqualTo("少花");
+    assertThat(result.customers().get(0).phoneFull()).isNull();
+    assertThat(result.customers().get(0).customerId()).isEqualTo(56L);
+  }
 }

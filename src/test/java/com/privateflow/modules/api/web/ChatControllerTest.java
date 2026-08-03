@@ -10,19 +10,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.Role;
+import com.privateflow.modules.api.auth.AuthContext;
+import com.privateflow.modules.api.auth.AuthUser;
+import com.privateflow.modules.api.chat.AiUsageRequest;
 import com.privateflow.modules.api.chat.ChatOrchestrationService;
 import com.privateflow.modules.api.chat.ChatReplySource;
 import com.privateflow.modules.api.chat.ChatRecognizeRequest;
 import com.privateflow.modules.api.chat.ChatResponse;
+import com.privateflow.modules.api.chat.RecognitionJobService;
+import com.privateflow.modules.api.chat.RecognitionJobStatus;
+import com.privateflow.modules.api.chat.RecognitionJobView;
 import com.privateflow.modules.api.chat.GenerateRequest;
-import com.privateflow.modules.api.chat.PendingReplyTaskSelectRequest;
-import com.privateflow.modules.api.chat.PendingReplyTaskStatus;
-import com.privateflow.modules.api.chat.PendingReplyTaskView;
 import com.privateflow.modules.api.chat.RegenerateRequest;
 import com.privateflow.modules.api.chat.SendConfirmRequest;
 import com.privateflow.modules.skill.SkillResponse;
 import com.privateflow.modules.skill.Suggestion;
-import java.time.LocalDateTime;
+import com.privateflow.modules.supervision.SupervisionConfig;
+import com.privateflow.modules.supervision.SupervisionEventService;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,13 +41,23 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class ChatControllerTest {
 
   private ChatOrchestrationService service;
+  private SupervisionEventService supervisionEventService;
+  private RecognitionJobService recognitionJobService;
+  private SupervisionConfig supervisionConfig;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     service = org.mockito.Mockito.mock(ChatOrchestrationService.class);
+    supervisionEventService = org.mockito.Mockito.mock(SupervisionEventService.class);
+    recognitionJobService = org.mockito.Mockito.mock(RecognitionJobService.class);
+    supervisionConfig = org.mockito.Mockito.mock(SupervisionConfig.class);
     mockMvc = MockMvcBuilders
-        .standaloneSetup(new ChatController(service))
+        .standaloneSetup(new ChatController(
+            service,
+            supervisionEventService,
+            recognitionJobService,
+            supervisionConfig))
         .setControllerAdvice(new GlobalApiExceptionHandler())
         .build();
   }
@@ -64,6 +80,73 @@ class ChatControllerTest {
     org.junit.jupiter.api.Assertions.assertEquals("hello", captor.getValue().textMessage());
     org.junit.jupiter.api.Assertions.assertEquals("Alice", captor.getValue().customerIdentifier());
     org.junit.jupiter.api.Assertions.assertEquals(1, captor.getValue().rawMessages().size());
+  }
+
+  @Test
+  void recognitionJobEndpointsSubmitPollAndCancelOnlyTheCallerJob() throws Exception {
+    AuthUser caller = new AuthUser("SYSTEM", "System", Role.KEEPER, null);
+    AuthContext.set(caller);
+    RecognitionJobView submitted = recognitionJob(RecognitionJobStatus.QUEUED);
+    RecognitionJobView ready = recognitionJob(RecognitionJobStatus.READY);
+    RecognitionJobView cancelled = recognitionJob(RecognitionJobStatus.CANCELLED);
+    when(recognitionJobService.submit(org.mockito.ArgumentMatchers.eq(caller), any()))
+        .thenReturn(submitted);
+    when(recognitionJobService.getOwned("job-1", "SYSTEM")).thenReturn(ready);
+    when(recognitionJobService.cancelOwned("job-1", "SYSTEM")).thenReturn(cancelled);
+
+    try {
+      mockMvc.perform(post("/api/v1/chat/recognition-jobs")
+              .contentType(MediaType.APPLICATION_JSON)
+              .content("{\"imageBase64\":\"c2NyZWVuc2hvdA==\",\"replySessionId\":\"reply-1\"}"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.jobId").value("job-1"))
+          .andExpect(jsonPath("$.data.status").value("QUEUED"));
+
+      mockMvc.perform(get("/api/v1/chat/recognition-jobs/job-1"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.status").value("READY"));
+
+      mockMvc.perform(post("/api/v1/chat/recognition-jobs/job-1/cancel"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+
+      verify(recognitionJobService).submit(org.mockito.ArgumentMatchers.eq(caller), any());
+      verify(recognitionJobService).getOwned("job-1", "SYSTEM");
+      verify(recognitionJobService).cancelOwned("job-1", "SYSTEM");
+    } finally {
+      AuthContext.clear();
+    }
+  }
+
+  @Test
+  void recognitionJobCustomerSelectionContinuesOnlyTheCallersWaitingTask() throws Exception {
+    AuthUser caller = new AuthUser("SYSTEM", "System", Role.KEEPER, null);
+    AuthContext.set(caller);
+    when(recognitionJobService.selectCustomer("job-1", "SYSTEM", 42L))
+        .thenReturn(response("13800000000", "Alice", false));
+
+    try {
+      mockMvc.perform(post("/api/v1/chat/recognition-jobs/job-1/select-customer")
+              .contentType(MediaType.APPLICATION_JSON)
+              .content("{\"customerId\":42}"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.phone").value("13800000000"));
+
+      verify(recognitionJobService).selectCustomer("job-1", "SYSTEM", 42L);
+    } finally {
+      AuthContext.clear();
+    }
+  }
+
+  @Test
+  void taskRuntimeConfigIsReadOnlyAndDoesNotExposeAnEmployeeConfigurationMutation() throws Exception {
+    when(supervisionConfig.unfinishedTaskCap()).thenReturn(20);
+    when(supervisionConfig.recentTaskDisplayCap()).thenReturn(30);
+
+    mockMvc.perform(get("/api/v1/chat/task-runtime-config"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.unfinishedTaskCap").value(20))
+        .andExpect(jsonPath("$.data.recentTaskDisplayCap").value(30));
   }
 
   @Test
@@ -110,91 +193,36 @@ class ChatControllerTest {
 
     mockMvc.perform(post("/api/v1/chat/send-confirm")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"phone\":\"13800000000\",\"nickname\":\"Alice\",\"isNewCustomer\":false,\"sourceTable\":\"crm\",\"leadType\":\"TUAN_GOU\",\"sentText\":\"Reply A\",\"selectedDirection\":\"comfort\",\"rawMessages\":[{\"role\":\"staff\",\"text\":\"Reply A\",\"timestamp\":\"12:01\"}]}"))
+            .content("{\"confirmationId\":\"confirm-1\",\"phone\":\"13800000000\",\"nickname\":\"Alice\",\"isNewCustomer\":false,\"sourceTable\":\"crm\",\"leadType\":\"TUAN_GOU\",\"sentText\":\"Reply A\",\"selectedDirection\":\"comfort\",\"rawMessages\":[{\"role\":\"staff\",\"text\":\"Reply A\",\"timestamp\":\"12:01\"}]}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.accepted").value(true));
 
     ArgumentCaptor<SendConfirmRequest> captor = ArgumentCaptor.forClass(SendConfirmRequest.class);
     verify(service).sendConfirm(captor.capture());
     org.junit.jupiter.api.Assertions.assertEquals("Reply A", captor.getValue().sentText());
+    org.junit.jupiter.api.Assertions.assertEquals("confirm-1", captor.getValue().confirmationId());
     org.junit.jupiter.api.Assertions.assertEquals("comfort", captor.getValue().selectedDirection());
   }
 
   @Test
-  void listReplyTasksReturnsRecoverableTasks() throws Exception {
-    when(service.listPendingReplyTasks()).thenReturn(List.of(pendingTask(
-        PendingReplyTaskStatus.WAITING_CUSTOMER,
-        null)));
+  void aiUsageRecordsCopiedReplyWithoutCallingSendConfirmFlow() throws Exception {
+    when(supervisionEventService.recordAiUsage(any())).thenReturn(Map.of(
+        "recorded", true,
+        "semantic", "COPIED_AI_REPLY"));
 
-    mockMvc.perform(get("/api/v1/chat/reply-tasks"))
+    mockMvc.perform(post("/api/v1/chat/ai-usage")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"phone\":\"18800001111\",\"taskId\":\"task-1\",\"replySessionId\":\"reply-session-1\",\"replySource\":\"LLM\",\"copiedText\":\"Reply A\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.data[0].taskId").value("task-1"))
-        .andExpect(jsonPath("$.data[0].replySessionId").value("reply-session-1"))
-        .andExpect(jsonPath("$.data[0].status").value("WAITING_CUSTOMER"));
+        .andExpect(jsonPath("$.data.recorded").value(true))
+        .andExpect(jsonPath("$.data.semantic").value("COPIED_AI_REPLY"));
 
-    verify(service).listPendingReplyTasks();
-  }
-
-  @Test
-  void getReplyTaskReturnsTheSavedReadyResponse() throws Exception {
-    ChatResponse savedResponse = response("18800001111", "Alice", false);
-    when(service.getPendingReplyTask("task-1")).thenReturn(pendingTask(
-        PendingReplyTaskStatus.READY,
-        savedResponse));
-
-    mockMvc.perform(get("/api/v1/chat/reply-tasks/task-1"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("READY"))
-        .andExpect(jsonPath("$.data.response.phone").value("18800001111"))
-        .andExpect(jsonPath("$.data.response.skill.suggestions[0].text").value("Reply A"));
-
-    verify(service).getPendingReplyTask("task-1");
-  }
-
-  @Test
-  void confirmReplyTaskBindsSelectedPhoneAndReturnsGeneratedResponse() throws Exception {
-    when(service.confirmPendingReplyTask(org.mockito.ArgumentMatchers.eq("task-1"), any()))
-        .thenReturn(response("18800002222", "Bob", false));
-
-    mockMvc.perform(post("/api/v1/chat/reply-tasks/task-1/confirm")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"phone\":\"18800002222\"}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.phone").value("18800002222"))
-        .andExpect(jsonPath("$.data.skill.suggestions[0].text").value("Reply A"));
-
-    ArgumentCaptor<PendingReplyTaskSelectRequest> captor =
-        ArgumentCaptor.forClass(PendingReplyTaskSelectRequest.class);
-    verify(service).confirmPendingReplyTask(org.mockito.ArgumentMatchers.eq("task-1"), captor.capture());
-    org.junit.jupiter.api.Assertions.assertEquals("18800002222", captor.getValue().phone());
-  }
-
-  @Test
-  void retryReplyTaskReturnsGeneratedResponse() throws Exception {
-    when(service.retryPendingReplyTask("task-1"))
-        .thenReturn(response("18800001111", "Alice", false));
-
-    mockMvc.perform(post("/api/v1/chat/reply-tasks/task-1/retry"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.phone").value("18800001111"))
-        .andExpect(jsonPath("$.data.skill.suggestions[0].text").value("Reply A"));
-
-    verify(service).retryPendingReplyTask("task-1");
-  }
-
-  @Test
-  void cancelReplyTaskReturnsCancelledTask() throws Exception {
-    when(service.cancelPendingReplyTask("task-1")).thenReturn(pendingTask(
-        PendingReplyTaskStatus.CANCELLED,
-        null));
-
-    mockMvc.perform(post("/api/v1/chat/reply-tasks/task-1/cancel"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.taskId").value("task-1"))
-        .andExpect(jsonPath("$.data.status").value("CANCELLED"));
-
-    verify(service).cancelPendingReplyTask("task-1");
+    ArgumentCaptor<AiUsageRequest> captor = ArgumentCaptor.forClass(AiUsageRequest.class);
+    verify(supervisionEventService).recordAiUsage(captor.capture());
+    org.junit.jupiter.api.Assertions.assertEquals("Reply A", captor.getValue().copiedText());
+    org.junit.jupiter.api.Assertions.assertEquals("LLM", captor.getValue().replySource());
+    org.mockito.Mockito.verifyNoInteractions(service);
   }
 
   @Test
@@ -233,15 +261,14 @@ class ChatControllerTest {
         ChatReplySource.skill());
   }
 
-  private PendingReplyTaskView pendingTask(PendingReplyTaskStatus status, ChatResponse savedResponse) {
-    return new PendingReplyTaskView(
-        "task-1",
-        "reply-session-1",
+  private RecognitionJobView recognitionJob(RecognitionJobStatus status) {
+    return new RecognitionJobView(
+        "job-1",
+        "reply-1",
         status,
-        List.of(),
-        status == PendingReplyTaskStatus.WAITING_CUSTOMER ? null : "18800001111",
-        savedResponse,
         null,
-        LocalDateTime.of(2026, 7, 23, 10, 0));
+        status == RecognitionJobStatus.READY ? response("18800001111", "Alice", false) : null,
+        Instant.parse("2026-07-24T10:00:00Z"),
+        Instant.parse("2026-07-24T10:00:00Z"));
   }
 }

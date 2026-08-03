@@ -27,6 +27,8 @@ import com.privateflow.modules.tablewrite.client.WecomTableClient;
 import com.privateflow.modules.tablewrite.config.TableConfig;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import com.privateflow.modules.tablewrite.infra.TableFieldMappingResolver;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +36,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.slf4j.LoggerFactory;
 
 class ManualSaveHandlerTest {
 
@@ -286,6 +289,44 @@ class ManualSaveHandlerTest {
         .doesNotContain(serverTable, serverRowId, privateFieldValue, originalFailure);
     assertThat(error.getCause()).isNull();
     assertThat(error.getSuppressed()).isEmpty();
+  }
+
+  @Test
+  void manualSaveDiagnosticLogDoesNotExposeDownstreamExceptionDetails() {
+    String privateValue = "private-customer-value";
+    Map<String, Object> requestFields = Map.of("ordinary", privateValue);
+    when(mappingResolver.toInternalFields("table_a", requestFields)).thenReturn(requestFields);
+    TagExchangeResult exchange = new TagExchangeResult(requestFields, List.of(), List.of());
+    when(exchangeService.prepareOutbound(
+        TagExchangeSourceType.TABLE_WRITE, "row-1", requestFields)).thenReturn(exchange);
+    when(mappingResolver.mergeSourceFields(
+        "table_a", requestFields, exchange.acceptedFields(), exchange.filteredFields()))
+        .thenReturn(requestFields);
+    doThrow(new RuntimeException("row-1 " + privateValue)).when(tableClient).updateRow(
+        "table_a", "row-1", requestFields, Duration.ofMillis(5000));
+    ch.qos.logback.classic.Logger logger =
+        (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(ManualSaveHandler.class);
+    ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    logger.addAppender(appender);
+
+    try {
+      assertThrows(
+          TableWriteException.class,
+          () -> handler.save(
+              "13800000000",
+              new ManualSaveRequest("table_a", "row-1", requestFields)));
+    } finally {
+      logger.detachAppender(appender);
+      appender.stop();
+    }
+
+    assertThat(appender.list).hasSize(1);
+    ILoggingEvent event = appender.list.get(0);
+    assertThat(event.getFormattedMessage())
+        .contains("failureType=RuntimeException")
+        .doesNotContain("row-1", privateValue);
+    assertThat(event.getThrowableProxy()).isNull();
   }
 
   @Test

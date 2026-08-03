@@ -151,6 +151,11 @@ public class CustomerCacheManager {
     put(map, "intentLevel", c.getIntentLevel());
     put(map, "worries", c.getWorries());
     put(map, "customerStage", c.getCustomerStage());
+    put(map, "internalNote", c.getInternalNote());
+    put(map, "customerProfileSummary", c.getCustomerProfileSummary());
+    put(map, "firstTrackingCapture", c.getFirstTrackingCapture());
+    put(map, "secondTrackingCapture", c.getSecondTrackingCapture());
+    put(map, "thirdTrackingCapture", c.getThirdTrackingCapture());
     put(map, "lastFollowupAt", c.getLastFollowupAt());
     put(map, "followupNotes", c.getFollowupNotes());
     put(map, "nextFollowupAt", c.getNextFollowupAt());
@@ -195,6 +200,11 @@ public class CustomerCacheManager {
     c.setIntentLevel(str(raw.get("intentLevel")));
     c.setWorries(str(raw.get("worries")));
     c.setCustomerStage(str(raw.get("customerStage")));
+    c.setInternalNote(str(raw.get("internalNote")));
+    c.setCustomerProfileSummary(str(raw.get("customerProfileSummary")));
+    c.setFirstTrackingCapture(str(raw.get("firstTrackingCapture")));
+    c.setSecondTrackingCapture(str(raw.get("secondTrackingCapture")));
+    c.setThirdTrackingCapture(str(raw.get("thirdTrackingCapture")));
     c.setLastFollowupAt(parseDateTime(raw.get("lastFollowupAt")));
     c.setFollowupNotes(str(raw.get("followupNotes")));
     c.setNextFollowupAt(parseDateTime(raw.get("nextFollowupAt")));

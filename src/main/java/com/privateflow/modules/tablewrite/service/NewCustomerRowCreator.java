@@ -63,6 +63,11 @@ public class NewCustomerRowCreator {
   }
 
   public void create(CustomerMessageSentEvent event) {
+    if (event == null || event.phone() == null || event.phone().isBlank()) {
+      throw new TableWriteException(
+          TableWriteErrorCodes.TABLE_WRITE_BLOCKED,
+          "smart table create is blocked because the configured unique field has no phone value");
+    }
     Map<String, Object> internal = newCustomerFields(event);
     String sourceTable = resolveSourceTable(event.sourceTable());
     TagExchangeResult exchange = exchangeService == null
@@ -76,17 +81,16 @@ public class NewCustomerRowCreator {
         sourceTable,
         sourceFields,
         Duration.ofMillis(configProvider.get().writeTimeoutMs()));
+    if (event.customerId() != null && event.customerId() > 0) {
+      customerRepository.linkTableRow(event.customerId(), sourceTable, rowId);
+      eventPublisher.publishEvent(new ProfileUpdatedEvent(event.phone(), List.copyOf(internal.keySet())));
+      return;
+    }
     Customer customer = new Customer();
     customer.setPhone(event.phone());
     customer.setNickname(event.nickname());
     customer.setLeadType(LeadTypes.normalize(event.leadType()));
-    customer.setCustomerStage("待联系");
-    customer.setFollowupNotes(event.conversationSummary());
-    if (event.followupSuggest() != null) {
-      customer.setNextFollowupDir(event.followupSuggest().nextFollowupDir());
-    } else {
-      customer.setNextFollowupDir(event.selectedDirection());
-    }
+    applyAnalysisFields(customer, internal);
     customer.setSourceTable(sourceTable);
     customer.setSourceRowId(rowId);
     customer.setSyncedAt(LocalDateTime.now());
@@ -103,8 +107,17 @@ public class NewCustomerRowCreator {
     fields.put("phone", event.phone());
     fields.put("nickname", event.nickname());
     fields.put("leadType", LeadTypes.normalize(event.leadType()));
+    fields.entrySet().removeIf(entry -> entry.getValue() == null
+        || (entry.getValue() instanceof String value && value.isBlank()));
     fields.put("customerStage", "待联系");
-    fields.put("followupNotes", event.conversationSummary());
+    if (event.followupFields() != null && !event.followupFields().isEmpty()) {
+      fields.putAll(event.followupFields());
+      fields.remove("lastFollowupAt");
+      return fields;
+    }
+    if (event.conversationSummary() != null && !event.conversationSummary().isBlank()) {
+      fields.put("followupNotes", event.conversationSummary());
+    }
     fields.put("nextFollowupDir", event.selectedDirection());
     if (event.followupSuggest() != null) {
       fields.put("nextFollowupDir", event.followupSuggest().nextFollowupDir());
@@ -114,13 +127,25 @@ public class NewCustomerRowCreator {
   }
 
   public void insertCustomerAfterQueuedCreate(String phone, String sourceTable, String rowId, Map<String, Object> fields) {
+    insertCustomerAfterQueuedCreate(null, phone, sourceTable, rowId, fields);
+  }
+
+  public void insertCustomerAfterQueuedCreate(
+      Long customerId,
+      String phone,
+      String sourceTable,
+      String rowId,
+      Map<String, Object> fields) {
+    if (customerId != null && customerId > 0) {
+      customerRepository.linkTableRow(customerId, sourceTable, rowId);
+      eventPublisher.publishEvent(new ProfileUpdatedEvent(phone, List.copyOf(fields.keySet())));
+      return;
+    }
     Customer customer = new Customer();
     customer.setPhone(phone);
     customer.setNickname(asString(fields.get("nickname")));
     customer.setLeadType(LeadTypes.normalize(asString(fields.get("leadType"))));
-    customer.setCustomerStage(asString(fields.getOrDefault("customerStage", "待联系")));
-    customer.setFollowupNotes(asString(fields.get("followupNotes")));
-    customer.setNextFollowupDir(asString(fields.get("nextFollowupDir")));
+    applyAnalysisFields(customer, fields);
     customer.setSourceTable(sourceTable);
     customer.setSourceRowId(rowId);
     customer.setSyncedAt(LocalDateTime.now());
@@ -143,5 +168,30 @@ public class NewCustomerRowCreator {
 
   private String asString(Object value) {
     return value == null ? null : value.toString();
+  }
+
+  private void applyAnalysisFields(Customer customer, Map<String, Object> fields) {
+    customer.setCustomerStage(asString(fields.getOrDefault("customerStage", "待联系")));
+    customer.setBodyConcerns(asString(fields.get("bodyConcerns")));
+    customer.setInternalNote(asString(fields.get("internalNote")));
+    customer.setCustomerProfileSummary(asString(fields.get("customerProfileSummary")));
+    customer.setFollowupNotes(asString(fields.get("followupNotes")));
+    customer.setNextFollowupAt(asDateTime(fields.get("nextFollowupAt")));
+    customer.setNextFollowupDir(asString(fields.get("nextFollowupDir")));
+    customer.setFirstTrackingCapture(asString(fields.get("firstTrackingCapture")));
+    customer.setSecondTrackingCapture(asString(fields.get("secondTrackingCapture")));
+    customer.setThirdTrackingCapture(asString(fields.get("thirdTrackingCapture")));
+  }
+
+  private LocalDateTime asDateTime(Object value) {
+    String text = asString(value);
+    if (text == null || text.isBlank()) {
+      return null;
+    }
+    try {
+      return LocalDateTime.parse(text.trim().replace(" ", "T"));
+    } catch (RuntimeException ex) {
+      return null;
+    }
   }
 }

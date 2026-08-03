@@ -10,6 +10,27 @@ DB_USER="${SMOKE_DB_USER:-pda_smoke}"
 DB_PASSWORD="${SMOKE_DB_PASSWORD:-pda_smoke_pwd}"
 PORT="${SMOKE_PORT:-8080}"
 
+required_wecom_variables=(
+  WECOM_CORP_ID
+  WECOM_APP_SECRET
+  WECOM_SMARTSHEET_DOC_ID
+  WECOM_SMARTSHEET_SHEET_ID
+  WECOM_SMARTSHEET_VIEW_ID
+  WECOM_SMARTSHEET_SOURCE_TABLE
+  WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE
+)
+missing_wecom_variables=()
+for variable_name in "${required_wecom_variables[@]}"; do
+  variable_value="${!variable_name:-}"
+  if [[ -z "${variable_value//[[:space:]]/}" ]]; then
+    missing_wecom_variables+=("$variable_name")
+  fi
+done
+if (( ${#missing_wecom_variables[@]} > 0 )); then
+  echo "backend_start_missing_wecom_configuration variables=${missing_wecom_variables[*]}"
+  exit 2
+fi
+
 mkdir -p "$LOG_DIR"
 
 if [[ -f "$PID_FILE" ]]; then
@@ -21,20 +42,22 @@ if [[ -f "$PID_FILE" ]]; then
 fi
 
 if curl -fsS "http://127.0.0.1:${PORT}/api/v1/auth/config" >/tmp/pda_auth_config.json 2>/tmp/pda_curl_err; then
-  echo "backend_already_running pid=unknown url=http://127.0.0.1:${PORT} mock_external=unknown"
+  echo "backend_port_in_use_unverified pid=unknown url=http://127.0.0.1:${PORT}"
   echo "auth_config=$(cat /tmp/pda_auth_config.json)"
-  exit 0
+  exit 1
 fi
 
 sudo service mariadb start >/dev/null 2>&1 || sudo /etc/init.d/mariadb start >/dev/null 2>&1
 sudo service redis-server start >/dev/null 2>&1 || sudo /etc/init.d/redis-server start >/dev/null 2>&1
 
-mysql -uroot <<SQL
+if ! MYSQL_PWD="$DB_PASSWORD" mysql -u"$DB_USER" -Nse "USE \`${DB_NAME}\`; SELECT 1" >/dev/null 2>&1; then
+  mysql -uroot <<SQL
 CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
 GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
 FLUSH PRIVILEGES;
 SQL
+fi
 
 cd "$ROOT_DIR"
 rm -f "$LOG_FILE"

@@ -10,8 +10,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
@@ -27,12 +25,17 @@ public class WecomSmartSheetApiClient {
       "get_fields", "/cgi-bin/wedoc/smartsheet/get_fields",
       "get_records", "/cgi-bin/wedoc/smartsheet/get_records",
       "add_records", "/cgi-bin/wedoc/smartsheet/add_records",
-      "update_records", "/cgi-bin/wedoc/smartsheet/update_records");
+      "update_records", "/cgi-bin/wedoc/smartsheet/update_records",
+      "create_doc", "/cgi-bin/wedoc/create_doc",
+      "get_sheet", "/cgi-bin/wedoc/smartsheet/get_sheet",
+      "get_views", "/cgi-bin/wedoc/smartsheet/get_views",
+      "update_fields", "/cgi-bin/wedoc/smartsheet/update_fields",
+      "add_fields", "/cgi-bin/wedoc/smartsheet/add_fields");
 
   private final ObjectMapper objectMapper;
   private final WecomSmartSheetConfig config;
   private final WecomAccessTokenProvider tokenProvider;
-  private final HttpClient httpClient;
+  private final WecomHttpTransport httpTransport;
   private final LongSupplier ticker;
 
   @Autowired
@@ -40,10 +43,7 @@ public class WecomSmartSheetApiClient {
       ObjectMapper objectMapper,
       WecomSmartSheetConfig config,
       WecomAccessTokenProvider tokenProvider) {
-    this(objectMapper, config, tokenProvider, HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(3))
-        .version(HttpClient.Version.HTTP_1_1)
-        .build(), System::nanoTime);
+    this(objectMapper, config, tokenProvider, new WecomUrlConnectionTransport(), System::nanoTime);
   }
 
   WecomSmartSheetApiClient(
@@ -51,7 +51,7 @@ public class WecomSmartSheetApiClient {
       WecomSmartSheetConfig config,
       WecomAccessTokenProvider tokenProvider,
       HttpClient httpClient) {
-    this(objectMapper, config, tokenProvider, httpClient, System::nanoTime);
+    this(objectMapper, config, tokenProvider, WecomHttpTransport.from(httpClient), System::nanoTime);
   }
 
   WecomSmartSheetApiClient(
@@ -60,14 +60,31 @@ public class WecomSmartSheetApiClient {
       WecomAccessTokenProvider tokenProvider,
       HttpClient httpClient,
       LongSupplier ticker) {
+    this(objectMapper, config, tokenProvider, WecomHttpTransport.from(httpClient), ticker);
+  }
+
+  private WecomSmartSheetApiClient(
+      ObjectMapper objectMapper,
+      WecomSmartSheetConfig config,
+      WecomAccessTokenProvider tokenProvider,
+      WecomHttpTransport httpTransport,
+      LongSupplier ticker) {
     this.objectMapper = objectMapper;
     this.config = config;
     this.tokenProvider = tokenProvider;
-    this.httpClient = httpClient;
+    this.httpTransport = httpTransport;
     this.ticker = ticker;
   }
 
   public JsonNode post(String operation, Object body, Duration timeout) {
+    return post(operation, body, timeout, true);
+  }
+
+  public JsonNode postWithApplicationCredentials(String operation, Object body, Duration timeout) {
+    return post(operation, body, timeout, false);
+  }
+
+  private JsonNode post(String operation, Object body, Duration timeout, boolean requireTargetConfiguration) {
     if (operation == null) {
       throw failure(SAFE_OPERATION, "unsupported operation");
     }
@@ -80,7 +97,11 @@ public class WecomSmartSheetApiClient {
     }
     WecomRequestDeadline deadline = WecomRequestDeadline.start(timeout, operation, ticker);
     try {
-      config.requireConfigured();
+      if (requireTargetConfiguration) {
+        config.requireConfigured();
+      } else {
+        config.requireApplicationCredentials();
+      }
     } catch (IllegalStateException ex) {
       throw failure(operation, ex.getMessage());
     } catch (RuntimeException ex) {
@@ -133,16 +154,15 @@ public class WecomSmartSheetApiClient {
   }
 
   private Response send(String operation, String path, String token, String json, Duration timeout) {
-    HttpResponse<String> response;
+    WecomHttpResponse response;
     try {
       URI uri = URI.create(config.apiBaseUrl() + path + "?access_token=" + encode(token));
-      HttpRequest request = HttpRequest.newBuilder()
-          .uri(uri)
-          .timeout(timeout)
-          .header("Content-Type", "application/json")
-          .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
-          .build();
-      response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+      response = httpTransport.send(
+          uri,
+          "POST",
+          Map.of("Content-Type", "application/json"),
+          json.getBytes(StandardCharsets.UTF_8),
+          timeout);
     } catch (IOException ex) {
       throw failure(operation, "network request failed");
     } catch (InterruptedException ex) {

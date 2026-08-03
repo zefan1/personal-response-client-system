@@ -37,6 +37,11 @@ public class CustomerRowMapper implements RowMapper<Customer> {
     customer.setIntentLevel(rs.getString("intent_level"));
     customer.setWorries(rs.getString("worries"));
     customer.setCustomerStage(rs.getString("customer_stage"));
+    customer.setInternalNote(rs.getString("internal_note"));
+    customer.setCustomerProfileSummary(rs.getString("customer_profile_summary"));
+    customer.setFirstTrackingCapture(rs.getString("first_tracking_capture"));
+    customer.setSecondTrackingCapture(rs.getString("second_tracking_capture"));
+    customer.setThirdTrackingCapture(rs.getString("third_tracking_capture"));
     customer.setLastFollowupAt(rs.getTimestamp("last_followup_at") == null ? null : rs.getTimestamp("last_followup_at").toLocalDateTime());
     customer.setFollowupNotes(rs.getString("followup_notes"));
     customer.setNextFollowupAt(rs.getTimestamp("next_followup_at") == null ? null : rs.getTimestamp("next_followup_at").toLocalDateTime());

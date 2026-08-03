@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { eventBus } from './eventBus';
 
 class FakeWebSocket {
+  static CONNECTING = 0;
   static OPEN = 1;
   static instances: FakeWebSocket[] = [];
 
@@ -16,6 +17,7 @@ class FakeWebSocket {
   }
 
   send = vi.fn();
+  close = vi.fn();
 }
 
 function installConfig(): void {
@@ -39,6 +41,11 @@ function installConfig(): void {
 
 describe('wsMessageBus', () => {
   afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    void import('./wsMessageBus').then(({ disconnectWsMessageBus }) => disconnectWsMessageBus());
     FakeWebSocket.instances.splice(0);
     vi.unstubAllGlobals();
   });
@@ -62,5 +69,29 @@ describe('wsMessageBus', () => {
     expect(expired).toEqual([{ message: '密码已重置，请使用新密码重新登录' }]);
     dispose();
     socket.onclose?.();
+  });
+
+  it('reconnects after the current socket closes without creating duplicate connections', async () => {
+    vi.useFakeTimers();
+    installConfig();
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const { connectWsMessageBus } = await import('./wsMessageBus');
+
+    connectWsMessageBus();
+    connectWsMessageBus();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    const firstSocket = FakeWebSocket.instances[0];
+    firstSocket.readyState = 3;
+    firstSocket.onclose?.();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    const secondSocket = FakeWebSocket.instances[1];
+    secondSocket.onopen?.();
+    connectWsMessageBus();
+    expect(FakeWebSocket.instances).toHaveLength(2);
   });
 });

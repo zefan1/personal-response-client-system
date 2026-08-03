@@ -48,7 +48,9 @@ public class CustomerSearchService {
       }
       List<CustomerSummary> summaries = customers.stream()
           .filter(customerAccessService::canAccess)
-          .filter(customer -> PhoneUtils.isValid(customer.getPhone()))
+          .filter(customer -> customer.getPhone() == null
+              || customer.getPhone().isBlank()
+              || PhoneUtils.isValid(customer.getPhone()))
           .map(customer -> summaryMapper.toSummary(customer, null))
           .toList();
       return new CustomerSearchResult(summaries, summaries.size());

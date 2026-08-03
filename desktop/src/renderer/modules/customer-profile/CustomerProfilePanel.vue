@@ -34,7 +34,7 @@
       <p v-if="!state.searchLoading">可换手机号后四位或昵称再试</p>
     </div>
     <div v-if="state.searchResults.length" class="search-results">
-      <button v-for="customer in state.searchResults" :key="customer.phoneFull || customer.phone" class="result-row" @click="openProfile(customer.phoneFull || customer.phone, 'SEARCH')">
+      <button v-for="customer in state.searchResults" :key="customer.customerId || customer.phoneFull || customer.phone" class="result-row" @click="openProfile(customer.customerId || customer.phoneFull || customer.phone, 'SEARCH')">
         <span class="result-identity">
           <strong class="result-nickname">{{ customer.nickname || '-' }}</strong>
           <span class="result-phone">{{ maskPhone(customer.phone) }}</span>
@@ -46,33 +46,6 @@
         </span>
       </button>
       <p v-if="state.searchTruncated" class="hint">还有更多结果，建议用手机号精确搜索</p>
-    </div>
-
-    <div v-if="state.candidateVisible" class="modal-backdrop">
-      <section class="candidate-modal">
-        <header class="panel-header">
-          <div>
-            <h2>选择客户</h2>
-            <p>匹配到多个候选，请选中一个继续</p>
-          </div>
-          <button class="icon-close-button" type="button" aria-label="取消候选客户任务" title="取消候选客户任务" :disabled="state.candidateConfirming" @click="cancelCandidateTask">
-            <span aria-hidden="true">×</span>
-          </button>
-        </header>
-        <button v-for="candidate in state.candidates" :key="candidate.phone" class="result-row" :disabled="state.candidatePreviewing || state.candidateConfirming" @click="previewCandidate(candidate)">
-          <span class="result-identity">
-            <strong class="result-nickname">{{ candidate.nickname || '-' }}</strong>
-            <span class="result-phone">{{ maskPhone(candidate.phone) }}</span>
-          </span>
-          <span class="result-meta">
-            <span>{{ candidate.sourceChannel || '-' }}</span>
-            <span>{{ formatSearchDate(candidate.lastFollowupAt) }}</span>
-            <span>{{ candidate.intendedStore || '-' }}</span>
-          </span>
-          <span>查看档案</span>
-        </button>
-        <p v-if="state.candidateError" class="toast">{{ state.candidateError }}</p>
-      </section>
     </div>
 
     <p v-if="state.offline || state.fromCache" class="banner">
@@ -88,19 +61,37 @@
     </p>
 
     <article v-if="state.profile" class="profile-card">
-      <div v-if="state.candidatePreviewPhone" class="profile-actions candidate-preview-actions">
-        <button class="secondary small" type="button" :disabled="state.candidatePreviewing || state.candidateConfirming" @click="returnToCandidates">
-          返回候选客户
-        </button>
-        <button v-if="state.candidatePreviewReady" class="primary small candidate-confirm-action" type="button" :disabled="state.candidatePreviewing || state.candidateConfirming || state.profileLoading" @click="confirmPreviewedCandidate">
-          {{ state.candidateConfirming ? '确认中...' : '确认是此客户' }}
-        </button>
-      </div>
-      <p v-if="state.candidateError && state.candidatePreviewPhone" class="toast">{{ state.candidateError }}</p>
+      <section class="communication-summary-panel" aria-label="最新客户沟通汇总">
+        <div class="communication-summary-heading">
+          <div>
+            <strong>最新客户沟通汇总</strong>
+            <span>更新时间：{{ formatDate(state.profile.latestCommunicationSummary?.generatedAt) }}</span>
+          </div>
+          <div class="communication-summary-actions">
+            <button
+              class="secondary small communication-summary-history"
+              type="button"
+              @click="openCommunication('summaries')"
+            >查看历史汇总</button>
+            <button
+              class="secondary small communication-message-history"
+              type="button"
+              @click="openCommunication('messages')"
+            >查看聊天记录</button>
+          </div>
+        </div>
+        <p>{{ state.profile.latestCommunicationSummary?.summaryText || customer.customerProfileSummary || '暂无沟通汇总' }}</p>
+      </section>
       <p v-if="state.editMode" class="profile-edit-banner">正在编辑档案，保存后会自动刷新最新资料。</p>
       <div class="profile-summary">
         <div>
-          <strong>{{ customer.nickname || '-' }}</strong>
+          <template v-if="state.editMode">
+            <label class="profile-nickname-editor">
+              微信昵称
+              <input v-model="state.editFields.nickname" placeholder="添加好友后看到的微信昵称" />
+            </label>
+          </template>
+          <strong v-else>{{ customer.nickname || '-' }}</strong>
           <button
             class="secondary profile-copy-nickname"
             type="button"
@@ -112,7 +103,7 @@
           <span>{{ leadTypeLabel(customer.leadType) }}</span>
           <span>{{ customer.customerStage || '-' }}</span>
         </div>
-        <div v-if="!state.candidatePreviewPhone" class="profile-actions">
+        <div class="profile-actions">
           <button class="primary small" :disabled="state.generating || !customer.phone" @click="generateReplyFromProfile">
             {{ state.generating ? '生成中...' : '生成回复' }}
           </button>
@@ -240,9 +231,7 @@ import {
   beginTagEdit,
   cancelTagEdit,
   cancelEditMode,
-  cancelCandidateTask,
   cleanupCustomerProfileStore,
-  confirmPreviewedCandidate,
   confirmTableSync,
   copyCustomerNickname,
   customerProfileState as state,
@@ -253,15 +242,13 @@ import {
   handleSendConfirmed,
   handleStageUpdated,
   openProfile,
-  previewCandidate,
+  currentProfileCustomerId,
   resolveProfileSuggestion,
-  returnToCandidates,
   saveCustomerTags,
   saveProfileEdits,
   scheduleSearch,
   searchImmediately,
   skipTableSync,
-  showCandidates,
   updateCustomerTagLock
 } from './customerProfileStore';
 import type {
@@ -270,7 +257,6 @@ import type {
   CustomerTagCategory,
   CustomerTagsUpdatedPayload,
   ProfileSuggestion,
-  RecognizeMultiplePayload,
   SourceFrom,
   StageSuggestPayload
 } from './types';
@@ -310,13 +296,11 @@ let skipNextInput = false;
 
 onMounted(() => {
   disposers.push(eventBus.on<CustomerSelectedPayload>('customer:selected', openSelectedCustomerProfile));
-  disposers.push(eventBus.on<RecognizeMultiplePayload>('recognize:multiple', showCandidates));
-  disposers.push(eventBus.on<CandidatePreviewPayload>('candidate:preview', previewCandidateFromQueue));
   disposers.push(eventBus.on<{ phone?: string; suggestions?: ProfileSuggestion[] }>('suggestion:show', appendProfileSuggestions));
   disposers.push(eventBus.on<StageSuggestPayload>('stage:suggest', appendStageSuggestion));
   disposers.push(eventBus.on<AbnormalAlertPayload>('abnormal:alert', handleProfileAbnormalAlert));
   disposers.push(eventBus.on<{ phone?: string; newStage?: string }>('stage:updated', handleStageUpdated));
-  disposers.push(eventBus.on<{ phone?: string }>('reply:send-confirmed', handleSendConfirmed));
+  disposers.push(eventBus.on<{ phone?: string; customerId?: number | null }>('reply:send-confirmed', handleSendConfirmed));
   disposers.push(eventBus.on<CustomerTagsUpdatedPayload>('CUSTOMER_TAGS_UPDATED', handleCustomerTagsUpdated));
 });
 
@@ -343,29 +327,46 @@ function onInput() {
 
 function refreshCurrent() {
   const phone = state.profile?.phoneFull || customer.value.phoneFull || customer.value.phone;
-  if (phone) {
+  const customerId = currentProfileCustomerId();
+  if (customerId) {
+    void openProfile(customerId, 'PROFILE_CARD');
+  } else if (phone) {
     void openProfile(phone, 'PROFILE_CARD');
   }
 }
 
+function openCommunication(view: 'messages' | 'summaries'): void {
+  const phone = state.profile?.phoneFull || customer.value.phoneFull || customer.value.phone;
+  const customerId = currentProfileCustomerId();
+  if (!phone && !customerId) {
+    return;
+  }
+  eventBus.emit('communication:open', { view, phone: phone || undefined, customerId: customerId || undefined });
+}
+
 type CustomerSelectedPayload = {
   phone?: string;
+  customerId?: number | null;
   sourceFrom?: SourceFrom;
   sessionId?: string;
 };
 
 function openSelectedCustomerProfile(payload: CustomerSelectedPayload) {
   const phone = payload.phone?.trim();
-  if (!phone) {
+  const customerId = payload.customerId && payload.customerId > 0 ? payload.customerId : null;
+  if (!phone && !customerId) {
     return;
   }
   if (!shouldOpenProfileFromSelectedEvent(payload.sourceFrom)) {
     return;
   }
-  if (state.profileLoading && (state.profile?.phoneFull || state.profile?.customer.phoneFull || state.profile?.customer.phone) === phone) {
+  if (state.profileLoading && customerId && state.profile?.customer?.id === customerId) {
     return;
   }
-  void openProfile(phone, payload.sourceFrom ?? 'PROFILE_CARD', payload.sessionId ?? '');
+  if (state.profileLoading && phone && (state.profile?.phoneFull || state.profile?.customer.phoneFull || state.profile?.customer.phone) === phone) {
+    return;
+  }
+  void openProfile(customerId ?? phone ?? '', payload.sourceFrom ?? 'PROFILE_CARD', payload.sessionId ?? '');
 }
 
 function shouldOpenProfileFromSelectedEvent(sourceFrom?: SourceFrom): boolean {
@@ -399,22 +400,6 @@ function maskPhone(phone: string): string {
 function formatDate(value?: string | null): string {
   if (!value) return '-';
   return value.replace('T', ' ').slice(0, 16);
-}
-
-type CandidatePreviewPayload = {
-  sessionId?: string;
-  taskId?: string;
-  candidate: import('./types').CustomerSummary;
-  candidates?: import('./types').CustomerSummary[];
-};
-
-function previewCandidateFromQueue(payload: CandidatePreviewPayload): void {
-  showCandidates({
-    sessionId: payload.sessionId,
-    taskId: payload.taskId,
-    candidates: payload.candidates ?? [payload.candidate]
-  });
-  void previewCandidate(payload.candidate);
 }
 
 function formatSearchDate(value?: string | null): string {

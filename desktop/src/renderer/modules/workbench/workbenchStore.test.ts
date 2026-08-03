@@ -242,7 +242,7 @@ describe('workbenchStore', () => {
     eventBus.on('customer:selected', (payload) => seen.push({ event: 'customer:selected', payload }));
     eventBus.on('followup:switch-tab', (payload) => seen.push({ event: 'followup:switch-tab', payload }));
     eventBus.on('workbench:capture-chat', (payload) => seen.push({ event: 'workbench:capture-chat', payload }));
-    eventBus.on('quick-search:show', (payload) => seen.push({ event: 'quick-search:show', payload }));
+    eventBus.on('template-library:show', (payload) => seen.push({ event: 'template-library:show', payload }));
 
     workbench.workbenchState.followups = [
       followup({ phone: '1', reminderType: 'OVERDUE' }),
@@ -260,7 +260,7 @@ describe('workbenchStore', () => {
       { event: 'followup:switch-tab', payload: { tab: 'DUE_TODAY' } },
       { event: 'followup:switch-tab', payload: { tab: 'NEW_LEAD' } },
       { event: 'workbench:capture-chat', payload: {} },
-      { event: 'quick-search:show', payload: {} },
+      { event: 'template-library:show', payload: {} },
       { event: 'followup:switch-tab', payload: { tab: 'DUE_TODAY' } }
     ]);
     expect(workbench.workbenchState.toast).toContain('待办队列');

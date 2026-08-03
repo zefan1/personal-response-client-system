@@ -9,8 +9,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -19,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.LongSupplier;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -28,10 +27,11 @@ public class WecomAccessTokenProvider {
   private static final String OPERATION = "gettoken";
   private static final Duration EARLY_REFRESH = Duration.ofMinutes(5);
   private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
+  private static final int MAX_NETWORK_ATTEMPTS = 4;
 
   private final ObjectMapper objectMapper;
   private final WecomSmartSheetConfig config;
-  private final HttpClient httpClient;
+  private final WecomHttpTransport httpTransport;
   private final Clock clock;
   private final LongSupplier ticker;
   private final AtomicReference<Token> cachedToken = new AtomicReference<>();
@@ -39,9 +39,13 @@ public class WecomAccessTokenProvider {
 
   @Autowired
   public WecomAccessTokenProvider(ObjectMapper objectMapper, WecomSmartSheetConfig config) {
-    this(objectMapper, config, HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(3))
-        .build(), Clock.systemUTC(), System::nanoTime);
+    this(objectMapper, config, new WecomUrlConnectionTransport(), Clock.systemUTC(), System::nanoTime);
+  }
+
+  static HttpClient defaultHttpClient() {
+    return HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(10))
+        .build();
   }
 
   WecomAccessTokenProvider(
@@ -49,7 +53,7 @@ public class WecomAccessTokenProvider {
       WecomSmartSheetConfig config,
       HttpClient httpClient,
       Clock clock) {
-    this(objectMapper, config, httpClient, clock, System::nanoTime);
+    this(objectMapper, config, WecomHttpTransport.from(httpClient), clock, System::nanoTime);
   }
 
   WecomAccessTokenProvider(
@@ -58,9 +62,18 @@ public class WecomAccessTokenProvider {
       HttpClient httpClient,
       Clock clock,
       LongSupplier ticker) {
+    this(objectMapper, config, WecomHttpTransport.from(httpClient), clock, ticker);
+  }
+
+  private WecomAccessTokenProvider(
+      ObjectMapper objectMapper,
+      WecomSmartSheetConfig config,
+      WecomHttpTransport httpTransport,
+      Clock clock,
+      LongSupplier ticker) {
     this.objectMapper = objectMapper;
     this.config = config;
-    this.httpClient = httpClient;
+    this.httpTransport = httpTransport;
     this.clock = clock;
     this.ticker = ticker;
   }
@@ -117,21 +130,27 @@ public class WecomAccessTokenProvider {
   }
 
   private Token requestToken(WecomRequestDeadline deadline) {
-    config.requireConfigured();
-    HttpResponse<String> response;
-    try {
-      response = httpClient.send(HttpRequest.newBuilder()
-          .uri(tokenUri())
-          .timeout(deadline.remaining())
-          .GET()
-          .build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    } catch (IOException ex) {
-      throw new WecomSmartSheetException(OPERATION, "network request failed", ex);
-    } catch (InterruptedException ex) {
-      Thread.currentThread().interrupt();
-      throw new WecomSmartSheetException(OPERATION, "request interrupted", ex);
-    } catch (IllegalArgumentException ex) {
-      throw new WecomSmartSheetException(OPERATION, "request configuration was invalid", ex);
+    config.requireApplicationCredentials();
+    WecomHttpResponse response = null;
+    for (int attempt = 1; attempt <= MAX_NETWORK_ATTEMPTS; attempt++) {
+      try {
+        response = httpTransport.send(
+            tokenUri(), "GET", Map.of(), new byte[0], deadline.remaining());
+        break;
+      } catch (IOException ex) {
+        if (attempt == MAX_NETWORK_ATTEMPTS) {
+          throw new WecomSmartSheetException(OPERATION, "network request failed", ex);
+        }
+        deadline.remaining();
+      } catch (InterruptedException ex) {
+        Thread.currentThread().interrupt();
+        throw new WecomSmartSheetException(OPERATION, "request interrupted", ex);
+      } catch (IllegalArgumentException ex) {
+        throw new WecomSmartSheetException(OPERATION, "request configuration was invalid", ex);
+      }
+    }
+    if (response == null) {
+      throw new WecomSmartSheetException(OPERATION, "network request failed", null);
     }
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
       throw new WecomSmartSheetException(OPERATION, "HTTP status " + response.statusCode(), null);

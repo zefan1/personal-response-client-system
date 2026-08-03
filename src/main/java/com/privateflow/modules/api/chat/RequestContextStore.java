@@ -21,16 +21,34 @@ public class RequestContextStore {
   }
 
   public void save(String username, String phone, RequestContext context) {
+    saveValue(key(username, phone), context);
+  }
+
+  public void save(String username, long customerId, RequestContext context) {
+    if (customerId > 0) {
+      saveValue(customerKey(username, customerId), context);
+    }
+  }
+
+  private void saveValue(String redisKey, RequestContext context) {
     try {
-      redisTemplate.opsForValue().set(key(username, phone), objectMapper.writeValueAsString(context), Duration.ofSeconds(configProvider.get().requestContextTtlS()));
+      redisTemplate.opsForValue().set(redisKey, objectMapper.writeValueAsString(context), Duration.ofSeconds(configProvider.get().requestContextTtlS()));
     } catch (Exception ex) {
       // Redis context cache degrades open.
     }
   }
 
   public Optional<RequestContext> read(String username, String phone) {
+    return readValue(key(username, phone));
+  }
+
+  public Optional<RequestContext> read(String username, long customerId) {
+    return customerId > 0 ? readValue(customerKey(username, customerId)) : Optional.empty();
+  }
+
+  private Optional<RequestContext> readValue(String redisKey) {
     try {
-      String raw = redisTemplate.opsForValue().get(key(username, phone));
+      String raw = redisTemplate.opsForValue().get(redisKey);
       return raw == null ? Optional.empty() : Optional.of(objectMapper.readValue(raw, RequestContext.class));
     } catch (Exception ex) {
       return Optional.empty();
@@ -39,5 +57,9 @@ public class RequestContextStore {
 
   private String key(String username, String phone) {
     return "request:" + username + ":" + phone;
+  }
+
+  private String customerKey(String username, long customerId) {
+    return "request:" + username + ":customer:" + customerId;
   }
 }

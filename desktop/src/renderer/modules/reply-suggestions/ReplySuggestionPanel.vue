@@ -7,7 +7,6 @@
       </div>
       <div class="reply-header-actions">
         <span class="status-pill">{{ sceneLabel(state.currentScene) }}</span>
-        <button class="primary small" type="button" @click="requestGlobalRecognize">识别聊天</button>
         <button class="secondary small" type="button" @click="toggleTextMode">
           {{ recognitionFallbackState.isTwoBoxMode ? '收起文字' : '文字通道' }}
         </button>
@@ -23,11 +22,12 @@
             {{ replySourceLabel(state.replySource.source, state.replySource.label) }}
           </span>
         </div>
-        <button class="primary small" @click="selectReply(primarySuggestion)">复制</button>
+        <button class="primary small reply-primary-copy" @click="selectReply(primarySuggestion)">复制</button>
       </div>
       <p class="reply-text">{{ primarySuggestion.text }}</p>
       <p class="reason">{{ primarySuggestion.reason || '推荐理由暂缺' }}</p>
       <div class="reply-actions reply-primary-actions">
+        <button data-testid="save-reply-template" class="secondary small" type="button" @click="openTemplateEditor(primarySuggestion)">保存为模板</button>
         <button
           v-if="state.showRegenerateButton"
           class="secondary small"
@@ -52,7 +52,10 @@
       <article v-for="(suggestion, index) in secondarySuggestions" :key="`${suggestion.direction}-${index + 1}`" class="reply-card reply-alt-card">
         <div class="card-head">
           <span class="direction">{{ directionLabel(suggestion.direction) }}</span>
-          <button class="primary small" @click="selectReply(suggestion)">复制</button>
+          <div class="reply-card-head-actions">
+            <button class="secondary small" type="button" @click="openTemplateEditor(suggestion)">保存为模板</button>
+            <button class="primary small" type="button" @click="selectReply(suggestion)">复制</button>
+          </div>
         </div>
         <p class="reply-text">{{ suggestion.text }}</p>
         <p class="reason">{{ suggestion.reason || '推荐理由暂缺' }}</p>
@@ -98,77 +101,6 @@
         <button class="secondary small" type="button" @click="cancelRemoveSession">取消</button>
         <button class="secondary small danger" type="button" @click="confirmRemoveSession(activeSession.sessionId)">移除</button>
       </div>
-    </section>
-
-    <section v-if="state.sessions.length" class="reply-task-queue" aria-label="待处理队列">
-      <div class="section-inline-head compact">
-        <div>
-          <h3>待处理队列</h3>
-          <p class="hint-text">{{ queueSummary }}</p>
-        </div>
-      </div>
-
-      <div v-if="queuedSessions.length" class="reply-task-list">
-        <article
-          v-for="session in queuedSessions"
-          :key="session.sessionId"
-          class="reply-task-row"
-          :class="sessionStatusClass(session)"
-          @click="activateSession(session.sessionId)"
-        >
-          <div class="reply-task-copy">
-            <strong>{{ sessionLabel(session) }}</strong>
-            <div class="reply-task-meta">
-              <time class="reply-task-time" :datetime="sessionIsoTime(session)">{{ sessionTimeText(session) }}</time>
-              <span class="reply-task-message">{{ queueRowText(session) }}</span>
-            </div>
-          </div>
-          <span class="reply-task-badge">{{ sessionStatusLabel(session.status) }}</span>
-          <span v-if="session.replySource" class="reply-source-pill compact" :class="replySourceClass(session.replySource.source)" :title="session.replySource.detail || replySourceLabel(session.replySource.source)">
-            {{ replySourceLabel(session.replySource.source, session.replySource.label) }}
-          </span>
-          <div class="reply-task-actions" @click.stop>
-            <button v-if="canCopySession(session)" class="primary small" type="button" @click="copySessionReply(session)">
-              复制
-            </button>
-            <button v-if="session.status === 'LOADING'" class="secondary small" type="button" @click="openTextChannel(session.sessionId)">
-              文字
-            </button>
-            <button v-if="session.status === 'FAILED'" class="secondary small" type="button" @click="retryRecognize(session.sessionId)">
-              重试
-            </button>
-            <button v-if="session.status === 'FAILED'" class="secondary small" type="button" @click="openTextChannel(session.sessionId)">
-              文字
-            </button>
-            <button
-              class="icon-close-button"
-              type="button"
-              :aria-label="`移除${sessionLabel(session)}`"
-              :title="`移除${sessionLabel(session)}`"
-              @click="requestRemoveSession(session.sessionId)"
-            >
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
-          <div v-if="pendingRemovalSessionId === session.sessionId" class="reply-task-remove-confirm" @click.stop>
-            <span>移除这条任务？</span>
-            <button class="secondary small" type="button" @click="cancelRemoveSession">取消</button>
-            <button class="secondary small danger" type="button" @click="confirmRemoveSession(session.sessionId)">移除</button>
-          </div>
-          <div v-if="session.status === 'MULTIPLE' && session.candidates.length" class="reply-candidate-actions" @click.stop>
-            <button
-              v-for="candidate in session.candidates"
-              :key="`${session.sessionId}-${candidate.phone}`"
-              class="secondary small"
-              type="button"
-              @click="selectCandidateForSession(session.sessionId, candidate)"
-            >
-              查看档案 · {{ candidateLabel(candidate) }}
-            </button>
-          </div>
-        </article>
-      </div>
-      <p v-else class="reply-queue-empty">当前任务已在上方展示，暂无其他待处理任务。</p>
     </section>
 
     <section class="reply-detail-panel" aria-label="当前任务详情">
@@ -227,37 +159,52 @@
       <template v-else>
         <p v-if="state.isFallbackMode" class="fallback-banner">{{ state.fallbackBannerText }}</p>
 
+        <section v-if="activeSession?.awaitingCustomerSelection" class="recognized-chat-result" aria-label="识别结果与客户选择">
+          <div class="recognized-result-head">
+            <div>
+              <h3>识别结果</h3>
+              <p>请确认聊天内容后，选择对应的历史客户档案。</p>
+            </div>
+            <span>{{ activeSession.recognition?.platform || 'UNKNOWN' }}</span>
+          </div>
+          <dl class="recognized-identity">
+            <div>
+              <dt>识别昵称</dt>
+              <dd>{{ activeSession.recognition?.nickname || activeSession.currentNickname || '-' }}</dd>
+            </div>
+          </dl>
+          <ol v-if="activeSession.recognition?.messages?.length" class="recognized-message-list">
+            <li v-for="(message, index) in activeSession.recognition.messages" :key="`${message.role}-${index}`">
+              <strong>{{ message.role || 'UNKNOWN' }}</strong>
+              <span>{{ message.text || '-' }}</span>
+            </li>
+          </ol>
+          <p v-else class="hint-text">未识别到可展示的对话文字，请重新识别当前聊天。</p>
+          <div class="recognized-choice-head">
+            <h3>选择客户档案</h3>
+            <span>选择后才会归档并生成回复</span>
+          </div>
+          <div class="recognized-customer-choices">
+            <button
+              v-for="candidate in activeSession.candidates"
+              :key="candidate.customerId ?? `${candidate.nickname}-${candidate.phone}`"
+              class="recognized-customer-choice"
+              type="button"
+              :disabled="!candidate.customerId"
+              @click="chooseCustomer(candidate.customerId)"
+            >
+              <strong>{{ candidateLabel(candidate) }}</strong>
+              <span>{{ candidate.intendedStore || '未登记意向门店' }}</span>
+            </button>
+          </div>
+        </section>
+
         <div v-if="activeSession?.status === 'FAILED'" class="reply-failure-state">
           <strong>{{ state.failureReason || '识别失败' }}</strong>
           <p>可以重新截取当前聊天，或改用文字通道粘贴客户标识和聊天内容。</p>
           <div>
             <button class="primary small" type="button" @click="retryRecognize(activeSession.sessionId)">重试识别</button>
             <button class="secondary small" type="button" @click="openTextChannel(activeSession.sessionId)">改用文字通道</button>
-            <button
-              class="icon-close-button"
-              type="button"
-              :aria-label="`移除${sessionLabel(activeSession)}`"
-              :title="`移除${sessionLabel(activeSession)}`"
-              @click="requestRemoveSession(activeSession.sessionId)"
-            >
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
-        </div>
-
-        <div v-else-if="activeSession?.status === 'MULTIPLE'" class="reply-multiple-state">
-          <strong>请选择对应客户</strong>
-          <p>识别到了多个可能客户，选择后会继续生成回复。</p>
-          <div class="reply-candidate-actions">
-            <button
-              v-for="candidate in activeSession.candidates"
-              :key="`${activeSession.sessionId}-${candidate.phone}`"
-              class="secondary small"
-              type="button"
-              @click="selectCandidateForSession(activeSession.sessionId, candidate)"
-            >
-              查看档案 · {{ candidateLabel(candidate) }}
-            </button>
             <button
               class="icon-close-button"
               type="button"
@@ -305,6 +252,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { resumeRecognitionJobPolling } from '../chat-recognition/recognitionStore';
 import { eventBus } from '../../shared/eventBus';
 import {
   closeTextMode,
@@ -323,6 +271,7 @@ import type { SuggestionShowPayload } from '../copy-backfill/types';
 import {
   activateSession,
   activeReplySession,
+  chooseRecognizedCustomer,
   cleanupReplySuggestionStore,
   closeReplySession,
   handleAbnormalAlert,
@@ -331,30 +280,30 @@ import {
   handleHelpTimeout,
   handleProfileSuggestions,
   hydrateReplySuggestionStore,
-  pauseForMultipleMatch,
   regenerateReplies,
   replySuggestionState as state,
   requestLeaderHelp,
-  selectCandidateForSession,
   selectReply,
   showRecognizeResult,
   startGenerateLoading,
-  startPendingTaskGeneration,
   startRecognizeLoading,
   stopForFailure,
   stopForImageFailure,
   stopForTimeout,
+  syncRecognitionJobIntoSession,
   updateRecognizeProgress
 } from './replySuggestionStore';
 import type {
   AbnormalAlertPayload,
   CustomerSelectedPayload,
   ProfileSuggestionsPayload,
+  RecognitionJobUpdate,
   RecognizeFailurePayload,
   RecognizeProgressPayload,
   RecognizeResultPayload,
   ReplyCandidate,
   ReplyScene,
+  ReplySuggestion,
   ReplySourceInfo,
   ReplySession,
   ReplySessionStatus
@@ -370,16 +319,9 @@ const copySuggestionItems = computed(() => copyBackfillState.suggestionToastSugg
 const pendingCopySuggestionCount = computed(() => copySuggestionItems.value.filter((item) => !item.resolved).length);
 const activeSession = computed(() => activeReplySession.value);
 const pendingRemovalSessionId = ref('');
-const queuedSessions = computed(() => state.sessions.filter((session) => session.sessionId !== state.activeSessionId));
 const primarySuggestion = computed(() => state.suggestions[0] ?? null);
 const secondarySuggestions = computed(() => state.suggestions.slice(1));
-const queueSummary = computed(() => {
-  const loadingCount = queuedSessions.value.filter((session) => session.status === 'LOADING').length;
-  const readyCount = queuedSessions.value.filter((session) => session.status === 'READY' || session.status === 'FALLBACK').length;
-  const failedCount = queuedSessions.value.filter((session) => session.status === 'FAILED').length;
-  return `${queuedSessions.value.length} 个其他任务 · ${readyCount} 个可复制 · ${loadingCount} 个处理中 · ${failedCount} 个失败`;
-});
-const activeTaskText = computed(() => activeSession.value ? queueRowText(activeSession.value) : '等待识别聊天');
+const activeTaskText = computed(() => activeSession.value ? activeTaskSummary(activeSession.value) : '等待识别聊天');
 const copySuggestionSummary = computed(() => {
   const firstPending = copySuggestionItems.value.find((item) => !item.resolved) ?? copySuggestionItems.value[0];
   if (!firstPending) {
@@ -394,15 +336,23 @@ const disposers: Array<() => void> = [];
 
 onMounted(() => {
   hydrateReplySuggestionStore();
+  state.sessions
+    .filter((session) => session.recognitionJobId
+      && (session.recognitionJobStatus === 'QUEUED' || session.recognitionJobStatus === 'RECOGNIZING'))
+    .forEach((session) => resumeRecognitionJobPolling(
+      session.recognitionJobId,
+      session.sessionId,
+      session.source === 'CLIPBOARD_SCREENSHOT' || session.source === 'CLIPBOARD_TEXT'
+        ? session.source
+        : 'BUTTON_CLICK'));
   disposers.push(eventBus.on('recognize:start', startRecognizeLoading));
+  disposers.push(eventBus.on<RecognitionJobUpdate>('recognize:job', syncRecognitionJobIntoSession));
   disposers.push(eventBus.on<RecognizeProgressPayload>('recognize:progress', updateRecognizeProgress));
   disposers.push(eventBus.on<RecognizeResultPayload>('recognize:result', showRecognizeResult));
-  disposers.push(eventBus.on('recognize:multiple', pauseForMultipleMatch));
   disposers.push(eventBus.on<RecognizeFailurePayload>('recognize:image-failed', stopForImageFailure));
   disposers.push(eventBus.on<RecognizeFailurePayload>('recognize:failed', stopForFailure));
   disposers.push(eventBus.on<RecognizeFailurePayload>('recognize:timeout', stopForTimeout));
   disposers.push(eventBus.on<CustomerSelectedPayload>('customer:selected', startGenerateLoading));
-  disposers.push(eventBus.on<{ sessionId: string; taskId: string; phone: string }>('reply-task:generating', startPendingTaskGeneration));
   disposers.push(eventBus.on<{ phone?: string; reason?: string }>('help:timeout', handleHelpTimeout));
   disposers.push(eventBus.on<{ helpId?: string | number; phone?: string }>('help:pending', handleHelpPending));
   disposers.push(eventBus.on<{ helpId?: string | number; phone?: string }>('help:resolved', handleHelpResolved));
@@ -474,6 +424,13 @@ function retryRecognize(sessionId?: string): void {
   requestGlobalRecognize();
 }
 
+function chooseCustomer(customerId?: number | null): void {
+  if (!customerId) {
+    return;
+  }
+  void chooseRecognizedCustomer(customerId);
+}
+
 function requestRemoveSession(sessionId: string): void {
   pendingRemovalSessionId.value = pendingRemovalSessionId.value === sessionId ? '' : sessionId;
 }
@@ -483,6 +440,14 @@ function cancelRemoveSession(): void {
 }
 
 function confirmRemoveSession(sessionId: string): void {
+  const session = state.sessions.find((item) => item.sessionId === sessionId);
+  if (session?.recognitionJobId
+    && (session.recognitionJobStatus === 'QUEUED' || session.recognitionJobStatus === 'RECOGNIZING')) {
+    eventBus.emit('recognition-job:cancel', {
+      jobId: session.recognitionJobId,
+      sessionId: session.sessionId
+    });
+  }
   closeReplySession(sessionId);
   if (pendingRemovalSessionId.value === sessionId) {
     pendingRemovalSessionId.value = '';
@@ -511,7 +476,7 @@ function sessionLabel(session: ReplySession): string {
 }
 
 function candidateLabel(candidate: ReplyCandidate): string {
-  return `${candidate.nickname || maskPhoneForView(candidate.phone)} · ${leadTypeLabel(candidate.leadType)}`;
+  return `${candidate.nickname || maskPhoneForView(candidate.phone || '')} · ${leadTypeLabel(candidate.leadType)}`;
 }
 
 function leadTypeLabel(value?: string | null): string {
@@ -557,31 +522,33 @@ function sessionStatusLabel(status: ReplySessionStatus): string {
   if (status === 'FAILED') return '失败';
   if (status === 'FALLBACK') return '降级';
   if (status === 'COPIED') return '已复制';
-  if (status === 'MULTIPLE') return '待选择';
   return status;
 }
 
-function queueRowText(session: ReplySession): string {
+function activeTaskSummary(session: ReplySession): string {
   if (session.status === 'FAILED') {
     return session.failureReason || session.currentStageText || '识别失败';
   }
   if (session.status === 'READY') {
-    return session.suggestions[0]?.text || '回复已生成，可直接复制';
+    return '回复已生成，可直接复制';
   }
   if (session.status === 'COPIED') {
-    return session.suggestions[0]?.text || '已复制回复';
+    return '已复制回复';
   }
   if (session.status === 'FALLBACK') {
-    return session.fallbackBannerText || session.suggestions[0]?.text || '已生成降级回复';
+    return session.fallbackBannerText || '已生成降级回复';
   }
-  if (session.status === 'MULTIPLE') {
-    return session.candidates.length ? '匹配到多个客户，请选择一个继续' : '匹配到多个客户，请到客户档案选择';
+  if (session.status === 'CANCELLED') {
+    return '任务已取消';
   }
   return session.currentStageText || '正在处理';
 }
 
 function sessionTimeText(session: ReplySession): string {
-  const timestamp = session.updatedAt || session.createdAt;
+  return relativeTimeText(session.updatedAt || session.createdAt);
+}
+
+function relativeTimeText(timestamp: number): string {
   const elapsedMs = Math.max(0, Date.now() - timestamp);
   const elapsedMinutes = Math.floor(elapsedMs / 60000);
   if (elapsedMinutes < 1) {
@@ -607,6 +574,19 @@ function sessionStatusClass(session: ReplySession): string {
 
 function canCopySession(session: ReplySession): boolean {
   return (session.status === 'READY' || session.status === 'FALLBACK' || session.status === 'COPIED') && session.suggestions.length > 0;
+}
+
+function openTemplateEditor(suggestion: ReplySuggestion): void {
+  const session = activeSession.value;
+  eventBus.emit('template-editor:show', {
+    body: suggestion.text,
+    originalAiReply: suggestion.text,
+    sourceReplySessionId: session?.sessionId || null,
+    metadata: {
+      leadType: session?.currentLeadType || null,
+      labels: []
+    }
+  });
 }
 
 function toggleCopySuggestions(): void {

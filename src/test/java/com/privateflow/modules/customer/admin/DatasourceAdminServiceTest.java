@@ -198,7 +198,9 @@ class DatasourceAdminServiceTest {
     List<CustomerFieldDto> fields = (List<CustomerFieldDto>) result.get("fields");
 
     assertThat(fields).extracting(CustomerFieldDto::label)
-        .contains("客户昵称", "意向等级", "下次跟进时间", "预约项目", "是否到店", "分配管家");
+        .contains(
+            "客户昵称", "意向等级", "下次跟进时间", "预约项目", "是否到店", "分配管家",
+            "备注", "客户B档案", "第一次追踪捕捉", "第二次追踪捕捉", "第三次追踪捕捉");
     assertThat(fields).allSatisfy(field -> assertThat(field.label()).doesNotMatch("^[A-Za-z][A-Za-z0-9]*$"));
   }
 

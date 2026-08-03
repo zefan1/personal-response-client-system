@@ -11,7 +11,6 @@ import com.privateflow.modules.tags.TagExchangeResult;
 import com.privateflow.modules.tags.TagExchangeService;
 import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,10 +44,18 @@ public class ExistingCustomerUpdater {
   }
 
   public void update(Customer customer, CustomerMessageSentEvent event) {
+    updateFields(customer, followupFields(event));
+  }
+
+  public void updateFields(Customer customer, Map<String, Object> requestedFields) {
     if (blank(customer.getSourceTable()) || blank(customer.getSourceRowId())) {
       throw new TableWriteException(TableWriteErrorCodes.TABLE_WRITE_FAILED, "customer source table or row id is missing");
     }
-    Map<String, Object> fields = followupFields(event);
+    Map<String, Object> fields = new LinkedHashMap<>();
+    if (requestedFields != null) {
+      fields.putAll(requestedFields);
+    }
+    fields.remove("lastFollowupAt");
     TagExchangeResult exchange = exchangeService == null
         ? new TagExchangeResult(fields, java.util.List.of(), java.util.List.of())
         : exchangeService.prepareOutbound(
@@ -68,8 +75,14 @@ public class ExistingCustomerUpdater {
 
   public Map<String, Object> followupFields(CustomerMessageSentEvent event) {
     Map<String, Object> fields = new LinkedHashMap<>();
-    fields.put("followupNotes", event.conversationSummary());
-    fields.put("lastFollowupAt", LocalDateTime.now().toString());
+    if (event.followupFields() != null && !event.followupFields().isEmpty()) {
+      fields.putAll(event.followupFields());
+      fields.remove("lastFollowupAt");
+      return fields;
+    }
+    if (!blank(event.conversationSummary())) {
+      fields.put("followupNotes", event.conversationSummary());
+    }
     if (event.followupSuggest() != null && !blank(event.followupSuggest().nextFollowupAt())) {
       fields.put("nextFollowupDir", event.followupSuggest().nextFollowupDir());
       fields.put("nextFollowupAt", event.followupSuggest().nextFollowupAt());

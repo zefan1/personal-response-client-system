@@ -88,9 +88,10 @@ public class QueueRetryManager {
             continue;
           }
           String rowId = tableClient.createRow(remote.sourceTable(), remote.fields(), Duration.ofMillis(config.writeTimeoutMs()));
-          newCustomerRowCreator.insertCustomerAfterQueuedCreate(item.getPhone(), remote.sourceTable(), rowId, exchange.acceptedFields());
+          newCustomerRowCreator.insertCustomerAfterQueuedCreate(
+              item.getCustomerId(), item.getPhone(), remote.sourceTable(), rowId, exchange.acceptedFields());
         } else {
-          PendingWritePayload resolved = resolveExistingRow(item.getPhone(), payload);
+          PendingWritePayload resolved = resolveExistingRow(item.getCustomerId(), item.getPhone(), payload);
           MapPayload remote = remotePayload(resolved, exchange);
           if (remote.fields().isEmpty()) {
             repository.markResolved(item.getId());
@@ -114,11 +115,13 @@ public class QueueRetryManager {
     }
   }
 
-  private PendingWritePayload resolveExistingRow(String phone, PendingWritePayload payload) {
+  private PendingWritePayload resolveExistingRow(Long customerId, String phone, PendingWritePayload payload) {
     if (!blank(payload.sourceTable()) && !blank(payload.sourceRowId())) {
       return payload;
     }
-    Customer customer = customerQueryService.getByPhone(phone);
+    Customer customer = customerId != null && customerId > 0
+        ? customerQueryService.getById(customerId)
+        : customerQueryService.getByPhone(phone);
     if (customer == null || blank(customer.getSourceTable()) || blank(customer.getSourceRowId())) {
       throw new IllegalStateException("customer source table or row id is still missing");
     }

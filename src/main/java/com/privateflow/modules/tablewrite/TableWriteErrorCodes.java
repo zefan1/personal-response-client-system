@@ -6,6 +6,7 @@ public final class TableWriteErrorCodes {
   public static final String TABLE_WRITE_QUEUE_FULL = "70-10002";
   public static final String CONFIG_MISSING = "70-10003";
   public static final String BAD_REQUEST = "80-10001";
+  public static final String TABLE_WRITE_BLOCKED = "70-10004";
 
   private TableWriteErrorCodes() {
   }

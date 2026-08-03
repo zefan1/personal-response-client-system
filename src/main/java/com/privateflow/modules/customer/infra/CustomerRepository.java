@@ -7,6 +7,7 @@ import com.privateflow.modules.tags.LegacyCustomerTagSynchronizer;
 import com.privateflow.modules.tags.TagExchangeResult;
 import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.sql.Date;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -15,6 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,9 +46,50 @@ public class CustomerRepository {
     return customers.stream().findFirst();
   }
 
+  @Transactional
+  public Customer createRecognitionCustomer(Customer customer) {
+    if (customer == null) {
+      throw new IllegalArgumentException("customer is required");
+    }
+    KeyHolder keyHolder = new GeneratedKeyHolder();
+    jdbcTemplate.update(connection -> {
+      var statement = connection.prepareStatement("""
+          INSERT INTO customers (phone, nickname, source_channel, lead_type, customer_stage, source_table)
+          VALUES (?, ?, ?, ?, ?, ?)
+          """, Statement.RETURN_GENERATED_KEYS);
+      statement.setString(1, blankToNull(customer.getPhone()));
+      statement.setString(2, blankToNull(customer.getNickname()));
+      statement.setString(3, blankToNull(customer.getSourceChannel()));
+      statement.setString(4, LeadTypes.normalize(customer.getLeadType()));
+      statement.setString(5, blankToNull(customer.getCustomerStage()));
+      statement.setString(6, blankToNull(customer.getSourceTable()));
+      return statement;
+    }, keyHolder);
+    Map<String, Object> keys = keyHolder.getKeys();
+    Number key = keys != null && keys.get("id") instanceof Number id ? id : keyHolder.getKey();
+    if (key == null) {
+      throw new IllegalStateException("recognition customer insert did not return an id");
+    }
+    return findById(key.longValue())
+        .orElseThrow(() -> new IllegalStateException("recognition customer insert failed"));
+  }
+
+  public void linkTableRow(long customerId, String sourceTable, String sourceRowId) {
+    if (customerId <= 0 || blankToNull(sourceTable) == null || blankToNull(sourceRowId) == null) {
+      throw new IllegalArgumentException("customer id, source table, and source row id are required");
+    }
+    int updated = jdbcTemplate.update("""
+        UPDATE customers SET source_table = ?, source_row_id = ?, synced_at = ?, version = version + 1
+        WHERE id = ?
+        """, sourceTable.trim(), sourceRowId.trim(), Timestamp.valueOf(LocalDateTime.now()), customerId);
+    if (updated != 1) {
+      throw new IllegalStateException("customer table row link failed");
+    }
+  }
+
   public List<Customer> searchByNickname(String nickname, int limit) {
     return jdbcTemplate.query(
-        "SELECT * FROM customers WHERE phone NOT LIKE '%*%' AND nickname LIKE CONCAT('%', ?, '%') ORDER BY last_followup_at DESC LIMIT ?",
+        "SELECT * FROM customers WHERE (phone IS NULL OR phone NOT LIKE '%*%') AND nickname LIKE CONCAT('%', ?, '%') ORDER BY last_followup_at DESC LIMIT ?",
         ROW_MAPPER,
         nickname,
         limit);
@@ -57,7 +101,7 @@ public class CustomerRepository {
     List<Object> args = new ArrayList<>();
     StringBuilder sql = new StringBuilder("""
         SELECT * FROM customers
-        WHERE phone NOT LIKE '%*%'
+        WHERE (phone IS NULL OR phone NOT LIKE '%*%')
           AND (
              nickname LIKE CONCAT('%', ?, '%')
         """);
@@ -113,10 +157,12 @@ public class CustomerRepository {
           delivery_method, breastfeeding, lochia_period, pregnancy_weight, current_weight,
           body_concerns, diastasis_recti, urine_leakage, pubic_lumbago, prev_repair_exp,
           postpartum_check, exercise_habits, intent_level, worries, customer_stage,
+          internal_note, customer_profile_summary, first_tracking_capture,
+          second_tracking_capture, third_tracking_capture,
           last_followup_at, followup_notes, next_followup_at, next_followup_dir,
           appointment_date, appointment_store, appointment_item, arrived, source_table,
           source_row_id, synced_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON DUPLICATE KEY UPDATE
           nickname=VALUES(nickname), source_channel=VALUES(source_channel), lead_type=VALUES(lead_type),
           personality_type=VALUES(personality_type), assigned_keeper=VALUES(assigned_keeper),
@@ -129,6 +175,10 @@ public class CustomerRepository {
           pubic_lumbago=VALUES(pubic_lumbago), prev_repair_exp=VALUES(prev_repair_exp),
           postpartum_check=VALUES(postpartum_check), exercise_habits=VALUES(exercise_habits),
           intent_level=VALUES(intent_level), worries=VALUES(worries), customer_stage=VALUES(customer_stage),
+          internal_note=VALUES(internal_note), customer_profile_summary=VALUES(customer_profile_summary),
+          first_tracking_capture=VALUES(first_tracking_capture),
+          second_tracking_capture=VALUES(second_tracking_capture),
+          third_tracking_capture=VALUES(third_tracking_capture),
           last_followup_at=VALUES(last_followup_at), followup_notes=VALUES(followup_notes),
           next_followup_at=VALUES(next_followup_at), next_followup_dir=VALUES(next_followup_dir),
           appointment_date=VALUES(appointment_date), appointment_store=VALUES(appointment_store),
@@ -161,6 +211,11 @@ public class CustomerRepository {
         customer.getIntentLevel(),
         customer.getWorries(),
         customer.getCustomerStage(),
+        customer.getInternalNote(),
+        customer.getCustomerProfileSummary(),
+        customer.getFirstTrackingCapture(),
+        customer.getSecondTrackingCapture(),
+        customer.getThirdTrackingCapture(),
         customer.getLastFollowupAt() == null ? null : Timestamp.valueOf(customer.getLastFollowupAt()),
         customer.getFollowupNotes(),
         customer.getNextFollowupAt() == null ? null : Timestamp.valueOf(customer.getNextFollowupAt()),
@@ -199,6 +254,10 @@ public class CustomerRepository {
         limit);
     batch.forEach(consumer::accept);
     return batch.size();
+  }
+
+  private String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value.trim();
   }
 
   @FunctionalInterface
