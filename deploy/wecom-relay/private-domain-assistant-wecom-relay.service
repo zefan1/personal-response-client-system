@@ -1,0 +1,22 @@
+[Unit]
+Description=Private Domain Assistant WeCom fixed-egress relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pda-relay
+Group=pda-relay
+WorkingDirectory=/opt/private-domain-assistant/wecom-relay
+EnvironmentFile=/etc/private-domain-assistant/wecom-relay.env
+ExecStart=/usr/bin/python3 /opt/private-domain-assistant/wecom-relay/wecom_relay.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/private-domain-assistant/wecom-relay
+
+[Install]
+WantedBy=multi-user.target

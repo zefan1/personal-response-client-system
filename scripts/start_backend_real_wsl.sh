@@ -9,16 +9,27 @@ DB_NAME="${SMOKE_DB_NAME:-private_domain_assistant_smoke}"
 DB_USER="${SMOKE_DB_USER:-pda_smoke}"
 DB_PASSWORD="${SMOKE_DB_PASSWORD:-pda_smoke_pwd}"
 PORT="${SMOKE_PORT:-8080}"
+WECOM_TRANSPORT_MODE="${WECOM_TRANSPORT_MODE:-DIRECT}"
 
 required_wecom_variables=(
-  WECOM_CORP_ID
-  WECOM_APP_SECRET
   WECOM_SMARTSHEET_DOC_ID
   WECOM_SMARTSHEET_SHEET_ID
   WECOM_SMARTSHEET_VIEW_ID
   WECOM_SMARTSHEET_SOURCE_TABLE
   WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE
 )
+case "$WECOM_TRANSPORT_MODE" in
+  DIRECT)
+    required_wecom_variables+=(WECOM_CORP_ID WECOM_APP_SECRET)
+    ;;
+  RELAY)
+    required_wecom_variables+=(WECOM_RELAY_BASE_URL WECOM_RELAY_KEY_ID WECOM_RELAY_SECRET)
+    ;;
+  *)
+    echo "backend_start_invalid_wecom_transport_mode"
+    exit 2
+    ;;
+esac
 missing_wecom_variables=()
 for variable_name in "${required_wecom_variables[@]}"; do
   variable_value="${!variable_name:-}"
@@ -67,6 +78,10 @@ SPRING_DATASOURCE_USERNAME="$DB_USER" \
 SPRING_DATASOURCE_PASSWORD="$DB_PASSWORD" \
 MOCK_EXTERNALS=false \
 SERVER_PORT="$PORT" \
+WECOM_TRANSPORT_MODE="$WECOM_TRANSPORT_MODE" \
+WECOM_RELAY_BASE_URL="${WECOM_RELAY_BASE_URL:-}" \
+WECOM_RELAY_KEY_ID="${WECOM_RELAY_KEY_ID:-}" \
+WECOM_RELAY_SECRET="${WECOM_RELAY_SECRET:-}" \
 MAVEN_OPTS="-Dstyle.color=never" \
 nohup mvn -Dstyle.color=never org.springframework.boot:spring-boot-maven-plugin:3.3.7:run >"$LOG_FILE" 2>&1 &
 echo "$!" > "$PID_FILE"
