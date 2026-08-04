@@ -6,30 +6,12 @@
         <span>{{ sessionLabel }}</span>
       </div>
       <nav class="ops-admin-nav-groups" aria-label="运营后台模块">
-        <section v-for="group in navGroups" :key="group.key" class="ops-admin-nav-group">
-          <button
-            class="ops-admin-group-button"
-            :class="{ active: activeSection.groupKey === group.key }"
-            type="button"
-            @click="selectSection(group.defaultKey)"
-          >
-            <span>{{ group.title }}</span>
-            <small>{{ group.subtitle }}</small>
-          </button>
-          <div class="ops-admin-subnav">
-            <button
-              v-for="section in group.pages"
-              :key="section.key"
-              class="ops-admin-subnav-button"
-              :class="{ active: activeSectionKey === section.key }"
-              type="button"
-              @click="selectSection(section.key)"
-            >
-              <span>{{ section.module }}</span>
-              <small>{{ section.title }}</small>
-            </button>
-          </div>
-        </section>
+        <AdminNavigation
+          :groups="navGroups"
+          :active-section="activeSection"
+          :active-section-key="activeSectionKey"
+          @select="selectSection"
+        />
       </nav>
       <div class="ops-admin-sidebar-actions">
         <button class="secondary small" type="button" @click="$emit('logout')">退出</button>
@@ -2179,6 +2161,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import AdminNavigation from './AdminNavigation.vue';
 import {
   deleteJson as requestDeleteJson,
   getBlob as requestGetBlob,

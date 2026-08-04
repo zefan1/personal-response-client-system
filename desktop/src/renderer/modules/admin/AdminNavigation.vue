@@ -15,6 +15,7 @@
           :key="section.key"
           class="ops-admin-subnav-button"
           :class="{ active: activeSectionKey === section.key }"
+          :aria-current="activeSectionKey === section.key ? 'page' : undefined"
           type="button"
           @click="$emit('select', section.key)"
         >

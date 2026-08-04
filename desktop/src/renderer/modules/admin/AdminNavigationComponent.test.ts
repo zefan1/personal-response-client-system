@@ -29,6 +29,7 @@ describe('AdminNavigation', () => {
     const { host } = mountNavigation((key) => selected.push(key));
 
     expect(host.querySelector('.ops-admin-subnav-button.active')?.textContent).toContain('skill-scenes');
+    expect(host.querySelector('.ops-admin-subnav-button.active')?.getAttribute('aria-current')).toBe('page');
 
     host.querySelectorAll<HTMLButtonElement>('.ops-admin-subnav-button')[1].click();
     await nextTick();
