@@ -37,6 +37,21 @@ public class CustomerFilterValidator {
         && filter.updatedFrom().isAfter(filter.updatedTo())) {
       throw badRequest("updatedFrom must not be after updatedTo");
     }
+    if (filter.appointmentFrom() != null
+        && filter.appointmentTo() != null
+        && filter.appointmentFrom().isAfter(filter.appointmentTo())) {
+      throw badRequest("appointmentFrom must not be after appointmentTo");
+    }
+    if (filter.lastFollowupFrom() != null
+        && filter.lastFollowupTo() != null
+        && filter.lastFollowupFrom().isAfter(filter.lastFollowupTo())) {
+      throw badRequest("lastFollowupFrom must not be after lastFollowupTo");
+    }
+    if (filter.nextFollowupFrom() != null
+        && filter.nextFollowupTo() != null
+        && filter.nextFollowupFrom().isAfter(filter.nextFollowupTo())) {
+      throw badRequest("nextFollowupFrom must not be after nextFollowupTo");
+    }
     if (filter.pageSize() > 50) {
       throw badRequest("pageSize must be between 1 and 50");
     }
@@ -49,8 +64,15 @@ public class CustomerFilterValidator {
         normalizeList(filter.intendedStores()),
         normalizeList(filter.intendedProjects()),
         normalizeList(filter.customerStages()),
+        normalizeList(filter.arrivedValues()),
         filter.updatedFrom(),
         filter.updatedTo(),
+        filter.appointmentFrom(),
+        filter.appointmentTo(),
+        filter.lastFollowupFrom(),
+        filter.lastFollowupTo(),
+        filter.nextFollowupFrom(),
+        filter.nextFollowupTo(),
         tagGroups,
         filter.tagGroupLogic() == null ? TagGroupLogic.AND : filter.tagGroupLogic(),
         filter.sortBy() == null ? CustomerSortField.UPDATED_AT : filter.sortBy(),

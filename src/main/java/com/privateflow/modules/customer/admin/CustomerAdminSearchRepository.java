@@ -57,11 +57,48 @@ public class CustomerAdminSearchRepository {
     return loadRows(queryBuilder.build(safeFilter, accessScope), limit, 0);
   }
 
+  public CustomerFilterOptions filterOptions(CustomerAccessScope accessScope) {
+    CustomerAccessScope scope = accessScope == null ? CustomerAccessScope.all() : accessScope;
+    return new CustomerFilterOptions(
+        distinctValues("source_channel", scope),
+        distinctValues("lead_type", scope),
+        distinctValues("assigned_keeper", scope),
+        distinctValues("intended_store", scope),
+        distinctValues("intended_project", scope),
+        distinctValues("customer_stage", scope),
+        distinctValues("arrived", scope));
+  }
+
   public CustomerAdminSearchPage search(String keyword, int page, int size) {
     return search(new CustomerFilter(
         keyword, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
         null, null, List.of(), TagGroupLogic.AND, CustomerSortField.UPDATED_AT,
         SortDirection.DESC, page, size), CustomerAccessScope.all());
+  }
+
+  private List<String> distinctValues(String column, CustomerAccessScope scope) {
+    if (!scope.unrestricted() && scope.permittedKeepers().isEmpty()) {
+      return List.of();
+    }
+    StringBuilder sql = new StringBuilder("SELECT DISTINCT c.")
+        .append(column)
+        .append(" FROM customers c WHERE c.")
+        .append(column)
+        .append(" IS NOT NULL AND TRIM(c.")
+        .append(column)
+        .append(") <> ''");
+    List<Object> args = new ArrayList<>();
+    if (!scope.unrestricted()) {
+      sql.append(" AND c.assigned_keeper IN (")
+          .append(String.join(", ", java.util.Collections.nCopies(scope.permittedKeepers().size(), "?")))
+          .append(")");
+      args.addAll(scope.permittedKeepers());
+    }
+    if (scope.excludeUnassigned()) {
+      sql.append(" AND c.assigned_keeper IS NOT NULL AND TRIM(c.assigned_keeper) <> ''");
+    }
+    sql.append(" ORDER BY c.").append(column);
+    return jdbcTemplate.queryForList(sql.toString(), String.class, args.toArray());
   }
 
   private long count(CustomerQuerySpec query) {

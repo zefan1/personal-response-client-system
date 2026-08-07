@@ -122,7 +122,7 @@ public class TagAnalyticsRepository {
         FROM customers c
         JOIN tag_analysis_runs r ON r.customer_id = c.id
         JOIN tag_analysis_results ar ON ar.analysis_run_id = r.id
-        """ + spec.whereClause() + """
+        """ + spec.whereClause() + " " + """
           AND r.finished_at >= ? AND r.finished_at <= ?
           AND (r.status <> 'COMPLETED' OR ar.validation_status = 'REJECTED' OR ar.requested_action = 'NONE')
         """, Long.class, eventArgs(spec, window.from(), window.to()));
@@ -172,7 +172,7 @@ public class TagAnalyticsRepository {
 
   private long countCustomers(CustomerQuerySpec spec, String condition) {
     Long count = jdbcTemplate.queryForObject(
-        "SELECT COUNT(DISTINCT c.id) FROM customers c " + spec.whereClause() + condition,
+        "SELECT COUNT(DISTINCT c.id) FROM customers c " + spec.whereClause() + " " + condition,
         Long.class,
         spec.args().toArray());
     return count == null ? 0L : count;
@@ -191,7 +191,7 @@ public class TagAnalyticsRepository {
     args.add(window.to());
     args.add(status);
     Long count = jdbcTemplate.queryForObject(
-        "SELECT COUNT(DISTINCT c.id) FROM customers c " + spec.whereClause() + condition,
+        "SELECT COUNT(DISTINCT c.id) FROM customers c " + spec.whereClause() + " " + condition,
         Long.class,
         args.toArray());
     return count == null ? 0L : count;
@@ -203,7 +203,7 @@ public class TagAnalyticsRepository {
         FROM customers c
         JOIN tag_analysis_runs r ON r.customer_id = c.id
         JOIN tag_analysis_results ar ON ar.analysis_run_id = r.id
-        """ + spec.whereClause() + """
+        """ + spec.whereClause() + " " + """
           AND r.id = (SELECT MAX(r2.id) FROM tag_analysis_runs r2 WHERE r2.customer_id = c.id)
           AND r.finished_at >= ? AND r.finished_at <= ? AND r.status = ?
         """;
@@ -223,7 +223,7 @@ public class TagAnalyticsRepository {
         FROM customers c
         JOIN tag_analysis_runs r ON r.customer_id = c.id
         JOIN tag_analysis_results ar ON ar.analysis_run_id = r.id
-        """ + spec.whereClause() + """
+        """ + spec.whereClause() + " " + """
           AND r.id = (SELECT MAX(r2.id) FROM tag_analysis_runs r2 WHERE r2.customer_id = c.id)
           AND r.finished_at >= ? AND r.finished_at <= ? AND r.status = ?
         ORDER BY r.finished_at DESC, r.id DESC, ar.id ASC
@@ -311,7 +311,7 @@ public class TagAnalyticsRepository {
     return jdbcTemplate.query("""
         SELECT tc.id, tc.category_key, tc.category_name,
                COUNT(*) AS assignment_count, COUNT(DISTINCT c.id) AS customer_count
-        """ + CURRENT_TAG_FROM + spec.whereClause() + """
+        """ + CURRENT_TAG_FROM + spec.whereClause() + " " + """
         GROUP BY tc.id, tc.category_key, tc.category_name
         ORDER BY assignment_count DESC, tc.category_name ASC, tc.id ASC
         """, (rs, rowNum) -> new TagAnalyticsResponse.CategoryRow(
@@ -328,7 +328,7 @@ public class TagAnalyticsRepository {
         SELECT tc.id AS category_id, tc.category_key, tc.category_name,
                tv.id AS value_id, tv.tag_value, tv.display_name,
                COUNT(*) AS assignment_count, COUNT(DISTINCT c.id) AS customer_count
-        """ + CURRENT_TAG_FROM + spec.whereClause() + """
+        """ + CURRENT_TAG_FROM + spec.whereClause() + " " + """
         GROUP BY tc.id, tc.category_key, tc.category_name,
                  tv.id, tv.tag_value, tv.display_name
         ORDER BY assignment_count DESC, tc.category_name ASC, tv.display_name ASC, tv.id ASC
@@ -348,7 +348,7 @@ public class TagAnalyticsRepository {
     return jdbcTemplate.query("""
         SELECT COALESCE(NULLIF(TRIM(c.intended_store), ''), 'UNASSIGNED_STORE') AS dimension_key,
                COUNT(*) AS assignment_count, COUNT(DISTINCT c.id) AS customer_count
-        """ + CURRENT_TAG_FROM + spec.whereClause() + """
+        """ + CURRENT_TAG_FROM + spec.whereClause() + " " + """
         GROUP BY COALESCE(NULLIF(TRIM(c.intended_store), ''), 'UNASSIGNED_STORE')
         ORDER BY assignment_count DESC, dimension_key ASC
         """, (rs, rowNum) -> {
@@ -372,7 +372,7 @@ public class TagAnalyticsRepository {
          AND employee.is_enabled = 1
         LEFT JOIN accounts leader
           ON leader.id = employee.leader_id AND leader.is_enabled = 1
-        """ + spec.whereClause() + """
+        """ + spec.whereClause() + " " + """
         GROUP BY leader.id, COALESCE(leader.display_name, '未归属团队')
         ORDER BY assignment_count DESC, team_label ASC
         """, (rs, rowNum) -> {
@@ -397,7 +397,7 @@ public class TagAnalyticsRepository {
         LEFT JOIN accounts employee
           ON COALESCE(employee.phone, employee.username) = c.assigned_keeper
          AND employee.is_enabled = 1
-        """ + spec.whereClause() + """
+        """ + spec.whereClause() + " " + """
         GROUP BY CASE WHEN employee.id IS NULL THEN 'UNASSIGNED_EMPLOYEE'
                       ELSE COALESCE(employee.phone, employee.username) END,
                  CASE WHEN employee.id IS NULL THEN '未分配员工'

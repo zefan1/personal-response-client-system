@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveAdminConsoleUrl } from './adminConsoleUrl.js';
 import {
   captureForegroundWindow,
   resolveDisplayIdFromPhysicalPoint,
@@ -1031,23 +1032,12 @@ function registerAdminOpenExternal() {
 }
 
 function adminConsoleUrl(requestedUrl?: string): string {
-  const configured = process.env.PDA_ADMIN_CONSOLE_URL;
-  const base = requestedUrl && requestedUrl.trim()
-    ? requestedUrl.trim()
-    : configured && configured.trim()
-    ? configured.trim()
-    : process.env.VITE_DEV_SERVER_URL
-      ? `${process.env.VITE_DEV_SERVER_URL}/#/admin`
-      : '';
-  if (!base) {
-    throw new Error('PDA_ADMIN_CONSOLE_URL is required to open admin console in packaged builds');
-  }
-  const url = new URL(base);
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Admin console URL must use http or https');
-  }
-  url.hash = '#/admin';
-  return url.toString();
+  return resolveAdminConsoleUrl({
+    requestedUrl,
+    configuredUrl: process.env.PDA_ADMIN_CONSOLE_URL,
+    devServerUrl: process.env.VITE_DEV_SERVER_URL,
+    isDev
+  });
 }
 
 function isAllowedAdminConsoleUrl(rawUrl: string): boolean {

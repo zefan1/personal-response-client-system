@@ -5,6 +5,8 @@ import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.match.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -14,6 +16,8 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 @RestControllerAdvice
 public class GlobalApiExceptionHandler {
+
+  private static final Logger log = LoggerFactory.getLogger(GlobalApiExceptionHandler.class);
 
   @ExceptionHandler(ApiException.class)
   public ResponseEntity<ApiResponse<Void>> handleApi(ApiException ex) {
@@ -50,6 +54,7 @@ public class GlobalApiExceptionHandler {
 
   @ExceptionHandler(Exception.class)
   public ResponseEntity<ApiResponse<Void>> handleAny(Exception ex) {
+    log.error("Unhandled API exception", ex);
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
         .body(ApiResponse.error(ApiErrorCodes.INTERNAL_ERROR, "system internal error"));
   }

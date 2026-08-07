@@ -29,14 +29,16 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class DatasourceAdminControllerTest {
 
   private DatasourceAdminService service;
+  private SmartSheetConnectionService smartSheetConnectionService;
   private MockMvc mockMvc;
   private ObjectMapper objectMapper;
 
   @BeforeEach
   void setUp() {
     service = org.mockito.Mockito.mock(DatasourceAdminService.class);
+    smartSheetConnectionService = org.mockito.Mockito.mock(SmartSheetConnectionService.class);
     mockMvc = MockMvcBuilders
-        .standaloneSetup(new DatasourceAdminController(service))
+        .standaloneSetup(new DatasourceAdminController(service, smartSheetConnectionService))
         .setControllerAdvice(new GlobalApiExceptionHandler())
         .build();
     objectMapper = new ObjectMapper();
@@ -84,6 +86,27 @@ class DatasourceAdminControllerTest {
     verify(service).toggle(8L, false);
     verify(service).replace(eq(8L), any());
     verify(service).delete(8L);
+  }
+
+  @Test
+  void smartSheetConnectionDelegatesToTheVerificationService() throws Exception {
+    String documentUrl = "https://doc.weixin.qq.com/smartsheet/doc-api-owned";
+    when(smartSheetConnectionService.verifyAndSave(any())).thenReturn(new SmartSheetConnectionResult(
+        true,
+        "客户资料表",
+        "doc-api-owned",
+        "sheet-api-owned",
+        "view-api-owned",
+        documentUrl));
+
+    mockMvc.perform(post("/admin/api/v1/datasources/smart-sheet-connection")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"documentUrl\":\"" + documentUrl + "\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.connected").value(true))
+        .andExpect(jsonPath("$.data.tableName").value("客户资料表"));
+
+    verify(smartSheetConnectionService).verifyAndSave(new SmartSheetConnectionRequest(documentUrl));
   }
 
   @Test

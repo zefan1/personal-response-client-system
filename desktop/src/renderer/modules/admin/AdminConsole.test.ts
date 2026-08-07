@@ -132,6 +132,7 @@ const apiData: Record<string, unknown> = {
     'system.jwt_refresh_token_ttl_s': '2592000',
     'skill.subscription_expire_at': '',
     'table.api_base_url': 'https://table.example.com',
+    'table.document_url': 'https://doc.weixin.qq.com/smartsheet/doc-api-owned',
     'table.api_key': '****4321',
     'table.write_timeout_ms': '10000',
     'table.retry_max_count': '5',
@@ -183,6 +184,15 @@ const apiData: Record<string, unknown> = {
     page: 1,
     size: 20,
     totalPages: 1
+  },
+  '/admin/api/v1/customers/filter-options': {
+    sourceChannels: ['企微', '抖音'],
+    leadTypes: ['TUAN_GOU', 'XIAN_SUO'],
+    assignedKeepers: ['18800000001', '18800000002'],
+    intendedStores: ['万江店', '南城店'],
+    intendedProjects: ['产后修复', '盆底修复'],
+    customerStages: ['PENDING', '跟进中'],
+    arrivedValues: ['是', '否']
   },
   '/admin/api/v1/datasources/10/mappings': {
     mappings: [
@@ -498,7 +508,7 @@ const apiData: Record<string, unknown> = {
       redis: { status: 'UP', duration: 'PT1M' },
       skill: { status: 'UP', duration: 'PT1M' },
       imageRecognition: { status: 'UP', duration: 'PT1M' },
-      wecomTable: { status: 'UP', duration: 'PT1M' }
+      wecomTable: { status: 'DOWN', duration: 'PT1M', detail: { pendingCount: 0, staleFailedCount: 1 } }
     },
     recentAlerts: [{ id: 90, alertType: 'IMAGE_DOWN', level: 'WARN', status: 'OPEN', message: '识图异常', occurredAt: '2026-07-03T09:00:00Z', detail: '{"lastError":"timeout"}' }]
   }
@@ -536,7 +546,8 @@ function findButton(host: HTMLElement, text: string): HTMLButtonElement {
     if (primaryAction && host.querySelector('.ops-rule-card')) return primaryAction;
   }
   if (!button && host.querySelector('select.customer-tag-logic-select')) {
-    return host.querySelector('.customer-search-filter button') as HTMLButtonElement;
+    const customerSearch = host.querySelector('.customer-filter-actions .primary') as HTMLButtonElement | null;
+    if (customerSearch) return customerSearch;
   }
   expect(button).toBeTruthy();
   return button as HTMLButtonElement;
@@ -637,10 +648,10 @@ describe('AdminConsole product surface', () => {
     expect(host.textContent).toContain('Skill 场景绑定');
     expect(host.textContent).toContain('开场白助手');
     expect(host.textContent).toContain('聊天识别');
-    expect(host.textContent).not.toContain('Prompt 与规则');
+    expect(host.textContent).not.toContain('提示词与规则');
     findSubnavButton(host, '配置中心').click();
     await flushSave();
-    expect(mainText(host)).toContain('Prompt 与规则');
+    expect(mainText(host)).toContain('提示词与规则');
     expect(host.textContent).toContain('本地模拟模式');
     expect(host.querySelector('.admin-read-panel')).toBeFalsy();
     expect(host.querySelector('.admin-action-panel')).toBeFalsy();
@@ -765,29 +776,50 @@ describe('AdminConsole product surface', () => {
 
     findSubnavButton(host, '配置中心').click();
     await flushSave();
-    expect(mainText(host)).toContain('LLM 思考环境');
+    expect(mainText(host)).toContain('LLM 模型环境');
     expect(mainText(host)).toContain('LLM 主模型');
     expect(mainText(host)).toContain('gpt-4.1-mini');
-    expect(mainText(host)).toContain('LLM 回复生成');
-    expect(mainText(host)).toContain('LLM 档案提取');
-    expect(mainText(host)).toContain('LLM 跟进建议');
-    expect(mainText(host)).toContain('LLM 异常识别');
-    expect(mainText(host)).toContain('LLM 总结补位');
+    expect(mainText(host)).toContain('系统内置工作任务');
+    expect(mainText(host)).toContain('回复生成');
+    expect(mainText(host)).toContain('档案提取');
+    expect(mainText(host)).toContain('跟进建议');
+    expect(mainText(host)).toContain('异常识别');
+    expect(mainText(host)).toContain('总结补位');
+    expect(mainText(host)).not.toContain('LLM 场景路由');
+
+    findButton(host, '展开高级运行配置').click();
+    await flushUi();
+    findButton(host, '模型分工与调用统计').click();
+    await flushUi();
+    findButton(host, '编辑提示词与规则').click();
+    await flushUi();
     expect(mainText(host)).toContain('LLM 场景路由');
     expect(mainText(host)).toContain('回复生成');
     expect(mainText(host)).toContain('LLM 调用统计');
     expect(mainText(host)).toContain('66.7%');
     expect(mainText(host)).toContain('识图提示词');
     expect(mainText(host)).toContain('换一组次数上限');
-    expect(mainText(host)).toContain('企微表格网关');
-    expect(mainText(host)).toContain('数据同步策略');
+    expect(mainText(host)).toContain('企业微信连接方式');
+    expect(mainText(host)).not.toContain('数据同步策略');
+    expect(mainText(host)).not.toContain('温度覆盖');
+    expect(mainText(host)).not.toContain('队列提醒阈值');
 
+    findButton(host, '展开服务器部署配置').click();
+    await flushUi();
+    expect(mainText(host)).toContain('表格连接服务地址');
+    expect(mainText(host)).toContain('等待写入超过多少条时提醒');
+    expect(mainText(host)).toContain('等待写入达到多少条时暂停新增');
+
+    findButton(host, 'Skill 运行保护').click();
+    await flushUi();
     findButton(host, '保存 Skill 参数').click();
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/skill.timeout_ms', { value: '10000' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/skill.circuit_breaker_failure_rate', { value: '0.5' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/profile.extract_timeout_ms', { value: '8000' });
 
+    findButton(host, '识图运行限制').click();
+    await flushUi();
     findButton(host, '保存识图参数').click();
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/image.model', { value: 'qwen3-vl-plus' });
@@ -800,53 +832,88 @@ describe('AdminConsole product surface', () => {
       ?.querySelector('input') as HTMLInputElement | null;
     expect(imageTimeoutInput?.min).toBe('15000');
 
-    findButton(host, '保存回复生成').click();
+    const capabilityPanel = host.querySelector('.ops-llm-capability-panel') as HTMLElement;
+    const openCapabilityConfig = async (name: string) => {
+      const row = [...capabilityPanel.querySelectorAll('.ops-llm-capability-row')]
+        .find((item) => item.textContent?.includes(name)) as HTMLElement;
+      findButton(row, '配置').click();
+      await flushUi();
+      return host.querySelector('.ops-llm-capability-modal') as HTMLElement;
+    };
+
+    let capabilityModal = await openCapabilityConfig('回复生成');
+    findButton(capabilityModal, '保存回复生成').click();
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.reply_generation.enabled', { value: 'false' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.reply_generation.fallback_to_skill', { value: 'true' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.reply_generation.max_tokens', { value: '900' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.reply_generation.system_prompt', { value: '生成三条可直接发送的回复建议' });
 
-    findButton(host, '保存档案提取').click();
+    findButton(capabilityModal, '关闭').click();
+    await flushUi();
+    capabilityModal = await openCapabilityConfig('档案提取');
+    findButton(capabilityModal, '保存档案提取').click();
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.profile_extraction.enabled', { value: 'false' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.profile_extraction.fallback_to_skill', { value: 'true' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.profile_extraction.max_tokens', { value: '700' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.profile_extraction.system_prompt', { value: '提取客户档案更新建议' });
 
-    findButton(host, '保存跟进建议').click();
+    findButton(capabilityModal, '关闭').click();
+    await flushUi();
+    capabilityModal = await openCapabilityConfig('跟进建议');
+    findButton(capabilityModal, '保存跟进建议').click();
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.followup_suggestion.enabled', { value: 'false' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.followup_suggestion.max_tokens', { value: '500' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.followup_suggestion.system_prompt', { value: '生成下次跟进建议' });
 
-    findButton(host, '保存异常识别').click();
+    findButton(capabilityModal, '关闭').click();
+    await flushUi();
+    capabilityModal = await openCapabilityConfig('异常识别');
+    findButton(capabilityModal, '保存异常识别').click();
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.abnormal_detection.enabled', { value: 'false' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.abnormal_detection.max_tokens', { value: '500' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.abnormal_detection.system_prompt', { value: '识别客户不满和流失风险' });
 
-    findButton(host, '保存总结补位').click();
+    findButton(capabilityModal, '关闭').click();
+    await flushUi();
+    capabilityModal = await openCapabilityConfig('总结补位');
+    findButton(capabilityModal, '保存总结补位').click();
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.summary.enabled', { value: 'false' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.summary.max_tokens', { value: '500' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.summary.system_prompt', { value: '生成会话摘要' });
 
-    findButton(host, '保存表格参数').click();
+    findButton(capabilityModal, '关闭').click();
+    await flushUi();
+
+    findButton(host, '保存服务器部署配置').click();
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/table.api_base_url', { value: 'https://table.example.com' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/table.retry_max_count', { value: '5' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/table.queue_alert_threshold', { value: '1000' });
     expect(apiMocks.putJson).not.toHaveBeenCalledWith('/admin/api/v1/configs/table.api_key', expect.anything());
+
+    const relayUrlInput = host.querySelector('input[aria-label="企业微信服务器转发地址"]') as HTMLInputElement;
+    setInputValue(relayUrlInput, 'https://wecom-relay.example.com');
+    findButton(host, '保存企业微信连接').click();
+    await flushSave();
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/wecom.relay_base_url', { value: 'https://wecom-relay.example.com' });
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/wecom.connection_mode', { value: 'RELAY' });
     const beforeTableKeySaveCalls = apiMocks.putJson.mock.calls.length;
 
-    const tableKeyInput = host.querySelector('input[aria-label="企微表格网关 API Key"]') as HTMLInputElement;
+    const tableKeyInput = host.querySelector('input[aria-label="企微表格网关 API 密钥"]') as HTMLInputElement;
     setInputValue(tableKeyInput, 'new-table-secret');
     await flushUi();
-    findButton(host, '保存表格参数').click();
+    findButton(host, '保存服务器部署配置').click();
     await flushSave();
     expect(apiMocks.putJson.mock.calls.slice(beforeTableKeySaveCalls)).toContainEqual(['/admin/api/v1/configs/table.api_key', { value: 'new-table-secret' }]);
 
+    const advancedGroups = host.querySelector('.ops-advanced-config-groups') as HTMLElement;
+    findButton(advancedGroups, '数据同步').click();
+    await flushUi();
     findButton(host, '保存同步策略').click();
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/cache.sync_cron', { value: '0 */30 * * * *' });
@@ -860,6 +927,246 @@ describe('AdminConsole product surface', () => {
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/skill.system_prompt_red_lines', { value: JSON.stringify(['不得承诺疗效']) });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/image.recognition_prompt', { value: '识别昵称、手机号和聊天内容' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/skill.regenerate_max_count', { value: '3' });
+
+    app.unmount();
+  });
+
+  it('groups image and LLM environments and keeps profile testing in an on-demand modal', async () => {
+    apiMocks.postJson.mockImplementation(async (path: string) => path === '/admin/api/v1/llm-environments/5/test'
+      ? {
+          success: true,
+          data: {
+            success: true,
+            elapsedMs: 118,
+            result: { scene: 'PROFILE_EXTRACTION', model: 'qwen-plus', protocol: 'OPENAI_COMPATIBLE', profileAnalysis: { profileUpdates: { fields: {} }, tagDecisions: [] } }
+          },
+          errorCode: null,
+          message: null
+        }
+      : { success: true, data: {}, errorCode: null, message: null });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '配置中心').click();
+    await flushSave();
+
+    expect(host.querySelector('.configuration-center-layout')).toBeTruthy();
+    expect(host.querySelector('.configuration-models-row')).toBeTruthy();
+    expect(host.querySelector('.image-environment-panel')?.textContent).toContain('识图模型环境');
+    expect([...host.querySelectorAll('button')].some((button) => button.textContent?.includes('管理不同 Skill'))).toBe(false);
+    const llmPanel = host.querySelector('.llm-environment-panel') as HTMLElement;
+    expect(llmPanel).toBeTruthy();
+    expect(llmPanel.textContent).toContain('后台测试');
+    expect(llmPanel.querySelector('textarea')).toBeFalsy();
+
+    const backupCard = [...llmPanel.querySelectorAll('.ops-env-card')]
+      .find((card) => card.textContent?.includes('LLM 备用')) as HTMLElement;
+    findButton(backupCard, '后台测试').click();
+    await flushUi();
+
+    const modal = host.querySelector('.ops-profile-test-modal') as HTMLElement;
+    expect(modal).toBeTruthy();
+    expect(modal.textContent).toContain('不会写入客户档案');
+    const leadTypeSelect = modal.querySelector('select') as HTMLSelectElement;
+    const messageInput = modal.querySelector('textarea') as HTMLTextAreaElement;
+    setInputValue(leadTypeSelect, 'TUAN_GOU');
+    setInputValue(messageInput, '客户明确说想改善核心力量');
+    await flushUi();
+    findButton(modal, '开始测试').click();
+    await flushSave();
+
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/llm-environments/5/test', {
+      scene: 'PROFILE_EXTRACTION',
+      leadType: 'TUAN_GOU',
+      testMessage: '客户明确说想改善核心力量'
+    });
+    expect(modal.textContent).toContain('测试结果');
+    app.unmount();
+  });
+
+  it('keeps built-in LLM tasks compact and expands advanced configuration only on demand', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '配置中心').click();
+    await flushSave();
+
+    const capabilityPanel = host.querySelector('.ops-llm-capability-panel') as HTMLElement;
+    expect(capabilityPanel).toBeTruthy();
+    expect(capabilityPanel.textContent).toContain('系统内置工作任务');
+    expect(capabilityPanel.querySelectorAll('.ops-llm-capability-row')).toHaveLength(5);
+    expect(capabilityPanel.querySelectorAll('input.ops-switch')).toHaveLength(5);
+    expect(capabilityPanel.querySelector('textarea')).toBeFalsy();
+
+    const replyRow = [...capabilityPanel.querySelectorAll('.ops-llm-capability-row')]
+      .find((row) => row.textContent?.includes('回复生成')) as HTMLElement;
+    const replySwitch = replyRow.querySelector('input.ops-switch') as HTMLInputElement;
+    replySwitch.checked = true;
+    replySwitch.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushSave();
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/llm.reply_generation.enabled', { value: 'true' });
+
+    findButton(replyRow, '配置').click();
+    await flushUi();
+    const capabilityModal = host.querySelector('.ops-llm-capability-modal') as HTMLElement;
+    expect(capabilityModal).toBeTruthy();
+    expect(capabilityModal.textContent).toContain('回答变化程度');
+    expect(capabilityModal.textContent).toContain('回答长度');
+    expect(capabilityModal.textContent).toContain('给模型的任务说明');
+    expect(capabilityModal.textContent).not.toContain('You extract structured');
+    findButton(capabilityModal, '查看高级任务说明').click();
+    await flushUi();
+    expect(capabilityModal.querySelector('textarea')).toBeTruthy();
+
+    findButton(capabilityModal, '关闭').click();
+    await flushUi();
+    expect(host.querySelector('.ops-llm-capability-modal')).toBeFalsy();
+
+    expect(mainText(host)).toContain('企业微信连接方式');
+    expect(mainText(host)).toContain('连接企业微信智能表格');
+    const connectionPanels = [...host.querySelectorAll('.configuration-connection-panel')] as HTMLElement[];
+    expect(connectionPanels).toHaveLength(2);
+    expect(connectionPanels.every((panel) => !panel.classList.contains('wide'))).toBe(true);
+    expect(mainText(host)).not.toContain('Skill 运行参数');
+    expect(mainText(host)).not.toContain('识图运行参数');
+    expect(mainText(host)).not.toContain('LLM 场景路由');
+    expect(mainText(host)).not.toContain('数据同步策略');
+
+    findButton(host, '展开高级运行配置').click();
+    await flushUi();
+    expect(mainText(host)).toContain('模型分工与调用统计');
+    expect(mainText(host)).toContain('Skill 服务环境');
+    expect(mainText(host)).toContain('Skill 运行保护');
+    expect(mainText(host)).toContain('识图运行限制');
+    expect(mainText(host)).toContain('数据同步');
+    expect(mainText(host)).not.toContain('Skill 运行参数');
+    expect(mainText(host)).not.toContain('识图运行参数');
+    expect(mainText(host)).not.toContain('LLM 场景路由');
+
+    findButton(host, '模型分工与调用统计').click();
+    await flushUi();
+    expect(mainText(host)).toContain('LLM 场景路由');
+    expect(mainText(host)).toContain('LLM 调用统计');
+    expect(mainText(host)).not.toContain('Skill 运行参数');
+
+    findButton(host, '识图运行限制').click();
+    await flushUi();
+    expect(mainText(host)).toContain('识图运行参数');
+    expect(mainText(host)).not.toContain('LLM 场景路由');
+    expect(mainText(host)).not.toContain('LLM 调用统计');
+
+    expect(mainText(host)).not.toContain('输出格式模板');
+    findButton(host, '编辑提示词与规则').click();
+    await flushUi();
+    expect(mainText(host)).toContain('输出格式模板');
+
+    app.unmount();
+  });
+
+  it('shows beginner instructions, verified Smart Sheet linking, and progressive technical settings', async () => {
+    apiMocks.postJson.mockImplementation(async (path: string) => path === '/admin/api/v1/datasources/smart-sheet-connection'
+      ? {
+          success: true,
+          data: {
+            connected: true,
+            tableName: '客户资料表',
+            documentId: 'doc-api-owned',
+            sheetId: 'sheet-api-owned',
+            viewId: 'view-api-owned',
+            documentUrl: 'https://doc.weixin.qq.com/smartsheet/doc-api-owned'
+          },
+          errorCode: null,
+          message: null
+        }
+      : { success: true, data: apiData[path] ?? {}, errorCode: null, message: null });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '配置中心').click();
+    await flushSave();
+
+    expect(mainText(host)).not.toContain('管理不同 Skill');
+    expect(mainText(host)).not.toContain('新增环境');
+    expect([...host.querySelectorAll('button')].filter((button) => button.textContent?.trim() === '新建').length).toBeGreaterThanOrEqual(2);
+
+    const taskRows = [...host.querySelectorAll('.ops-llm-capability-row')] as HTMLElement[];
+    expect(taskRows).toHaveLength(5);
+    expect(taskRows.every((row) => row.querySelector('.ops-capability-test-slot'))).toBe(true);
+
+    expect(mainText(host)).toContain('连接企业微信智能表格');
+    expect(mainText(host)).toContain('打开目标表格，复制浏览器地址栏里的完整链接');
+    expect(mainText(host)).toContain('必须是本系统通过企业微信 API 创建并纳入管理的智能表格');
+    expect(mainText(host)).toContain('你在企微中手动新建的智能表格不能连接');
+
+    const smartSheetInput = host.querySelector('input[aria-label="企业微信智能表格链接"]') as HTMLInputElement;
+    expect(smartSheetInput.value).toBe('https://doc.weixin.qq.com/smartsheet/doc-api-owned');
+    expect(host.querySelector('input[aria-label="企微表格网关 API 密钥"]')).toBeFalsy();
+    setInputValue(smartSheetInput, 'https://doc.weixin.qq.com/smartsheet/doc-api-owned');
+    findButton(host, '检测并保存').click();
+    await flushSave();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/datasources/smart-sheet-connection', {
+      documentUrl: 'https://doc.weixin.qq.com/smartsheet/doc-api-owned'
+    });
+    expect(mainText(host)).toContain('已连接：客户资料表');
+
+    findButton(host, '展开服务器部署配置').click();
+    await flushUi();
+    expect(host.querySelector('input[aria-label="企微表格网关 API 密钥"]')).toBeTruthy();
+
+    expect(mainText(host)).not.toContain('自动同步 Cron');
+    expect(mainText(host)).not.toContain('客户缓存 TTL');
+    findButton(host, '展开高级运行配置').click();
+    await flushUi();
+    const advancedGroups = host.querySelector('.ops-advanced-config-groups') as HTMLElement;
+    findButton(advancedGroups, '数据同步').click();
+    await flushUi();
+    expect(mainText(host)).toContain('自动同步时间规则');
+    expect(mainText(host)).toContain('一次最多导入多少行');
+    expect(mainText(host)).not.toContain('同步多久没响应算失败');
+    findButton(host, '同步异常时再调整').click();
+    await flushUi();
+    expect(mainText(host)).toContain('同步多久没响应算失败');
+
+    findButton(advancedGroups, '识图运行限制').click();
+    await flushUi();
+    const imageSelect = host.querySelector('select[aria-label="使用哪个识图模型"]') as HTMLSelectElement;
+    expect(imageSelect).toBeTruthy();
+    expect([...imageSelect.options].map((option) => option.textContent)).toContain('识图生产');
+
+    findButton(host, '编辑提示词与规则').click();
+    await flushUi();
+    const promptEditor = host.querySelector('.configuration-prompt-editor') as HTMLElement;
+    expect(promptEditor.textContent).toContain('每行一条，按回车换行，不使用分号');
+    expect(promptEditor.textContent).toContain('已有默认内容时通常无需修改');
+
+    app.unmount();
+  });
+
+  it('uses readable fallbacks for broken environment names and an empty image selector state', async () => {
+    apiMocks.getJson.mockImplementation(async (path: string) => {
+      const basePath = path.split('?')[0];
+      if (basePath === '/admin/api/v1/skill-environments') {
+        return { success: true, data: { items: [{ id: 1, envName: '??.top ????', baseUrl: 'https://skill.example.com', active: true }] }, errorCode: null, message: null };
+      }
+      if (basePath === '/admin/api/v1/image-environments') {
+        return { success: true, data: { items: [] }, errorCode: null, message: null };
+      }
+      if (basePath === '/admin/api/v1/llm-environments') {
+        return { success: true, data: { items: [{ id: 4, envName: '??????', model: 'qwen3-vl-plus', baseUrl: 'https://llm.example.com', active: true }] }, errorCode: null, message: null };
+      }
+      return { success: true, data: apiData[path] ?? apiData[basePath] ?? { items: [] }, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '配置中心').click();
+    await flushSave();
+    expect(mainText(host)).not.toContain('??');
+    expect(mainText(host)).toContain('qwen3-vl-plus');
+
+    findButton(host, '展开高级运行配置').click();
+    await flushUi();
+    findButton(host, '识图运行限制').click();
+    await flushUi();
+    const imageSelect = host.querySelector('select[aria-label="使用哪个识图模型"]') as HTMLSelectElement;
+    expect(imageSelect.disabled).toBe(true);
+    expect([...imageSelect.options].map((option) => option.textContent)).toEqual(['未配置']);
 
     app.unmount();
   });
@@ -904,14 +1211,13 @@ describe('AdminConsole product surface', () => {
     findSubnavButton(host, '配置中心').click();
     await flushSave();
 
-    const llmPanel = [...host.querySelectorAll('.ops-panel')]
-      .find((panel) => panel.textContent?.includes('LLM 思考环境')) as HTMLElement;
+    const llmPanel = host.querySelector('.llm-environment-panel') as HTMLElement;
     expect(llmPanel).toBeTruthy();
-    findButton(llmPanel, '新增环境').click();
+    findButton(llmPanel, '新建').click();
     await flushSave();
 
     const drawer = host.querySelector('.ops-drawer') as HTMLElement;
-    expect(drawer.textContent).toContain('LLM 思考环境');
+    expect(drawer.textContent).toContain('LLM 模型环境');
     const textInputs = [...drawer.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
     const passwordInput = drawer.querySelector('input[type="password"]') as HTMLInputElement;
     const numberInputs = [...drawer.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
@@ -946,13 +1252,17 @@ describe('AdminConsole product surface', () => {
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/llm-environments/5/activate', {});
 
-    const leadTypeSelect = llmPanel.querySelector('select') as HTMLSelectElement;
-    const profileMessage = llmPanel.querySelector('textarea') as HTMLTextAreaElement;
+    findButton(backupCard, '后台测试').click();
+    await flushUi();
+    const profileModal = host.querySelector('.ops-profile-test-modal') as HTMLElement;
+    const leadTypeSelect = profileModal.querySelector('select') as HTMLSelectElement;
+    const profileMessage = profileModal.querySelector('textarea') as HTMLTextAreaElement;
     expect(leadTypeSelect).toBeTruthy();
     expect(profileMessage).toBeTruthy();
     setInputValue(leadTypeSelect, 'TUAN_GOU');
     setInputValue(profileMessage, '客户明确说想改善核心力量');
-    findButton(backupCard, '测试档案分析').click();
+    await flushUi();
+    findButton(profileModal, '开始测试').click();
     await flushSave();
     expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/llm-environments/5/test', {
       scene: 'PROFILE_EXTRACTION',
@@ -986,12 +1296,16 @@ describe('AdminConsole product surface', () => {
 
     findSubnavButton(host, '配置中心').click();
     await flushSave();
-    const llmPanel = [...host.querySelectorAll('.ops-panel')]
-      .find((panel) => panel.textContent?.includes('LLM 思考环境')) as HTMLElement;
+    const llmPanel = host.querySelector('.llm-environment-panel') as HTMLElement;
     const backupCard = [...llmPanel.querySelectorAll('.ops-env-card')]
       .find((card) => card.textContent?.includes('LLM 备用')) as HTMLElement;
 
-    findButton(backupCard, '测试档案分析').click();
+    findButton(backupCard, '后台测试').click();
+    await flushUi();
+    const profileModal = host.querySelector('.ops-profile-test-modal') as HTMLElement;
+    setInputValue(profileModal.querySelector('textarea') as HTMLTextAreaElement, '客户明确说想改善核心力量');
+    await flushUi();
+    findButton(profileModal, '开始测试').click();
     await flushSave();
 
     expect(mainText(host)).toContain('模型返回缺少 tag_decisions');
@@ -1005,6 +1319,10 @@ describe('AdminConsole product surface', () => {
 
     findSubnavButton(host, '配置中心').click();
     await flushSave();
+    findButton(host, '展开高级运行配置').click();
+    await flushUi();
+    findButton(host, '模型分工与调用统计').click();
+    await flushUi();
 
     const routePanel = [...host.querySelectorAll('.ops-panel')]
       .find((panel) => panel.textContent?.includes('LLM 场景路由')) as HTMLElement;
@@ -1055,6 +1373,10 @@ describe('AdminConsole product surface', () => {
 
     findSubnavButton(host, '配置中心').click();
     await flushUi();
+    findButton(host, '展开高级运行配置').click();
+    await flushUi();
+    findButton(host, '识图运行限制').click();
+    await flushUi();
 
     const promptInput = [...host.querySelectorAll('label')]
       .find((label) => label.textContent?.includes('截图确认提示停留'))
@@ -1077,6 +1399,10 @@ describe('AdminConsole product surface', () => {
     const { app, host } = await mountConsole();
 
     findSubnavButton(host, '配置中心').click();
+    await flushUi();
+    findButton(host, '展开高级运行配置').click();
+    await flushUi();
+    findButton(host, 'Skill 服务环境').click();
     await flushUi();
 
     const activeEnv = [...host.querySelectorAll('.ops-env-card')].find((card) => card.textContent?.includes('生产环境')) as HTMLElement;
@@ -1172,6 +1498,8 @@ describe('AdminConsole product surface', () => {
 
     findSubnavButton(host, '配置中心').click();
     await flushSave();
+    findButton(host, '编辑提示词与规则').click();
+    await flushUi();
     findButton(host, '保存配置').click();
     await flushSave();
 
@@ -1245,9 +1573,14 @@ describe('AdminConsole product surface', () => {
     await flushUi();
 
     expect(mainText(host)).toContain('客户查询');
+    findButton(host, '展开筛选').click();
+    await flushUi();
+    expect(mainText(host)).toContain('基本条件');
+    expect(mainText(host)).toContain('业务归属');
+    expect(mainText(host)).toContain('时间与到店');
     expect(mainText(host)).toContain('王女士');
     const searchInput = [...host.querySelectorAll('input')]
-      .find((input) => input.getAttribute('placeholder')?.includes('1111')) as HTMLInputElement;
+      .find((input) => input.getAttribute('placeholder')?.includes('昵称')) as HTMLInputElement;
     setInputValue(searchInput, '1111');
     findButton(host, '查询客户').click();
     await flushUi();
@@ -1260,8 +1593,15 @@ describe('AdminConsole product surface', () => {
       intendedStores: [],
       intendedProjects: [],
       customerStages: [],
+      arrivedValues: [],
       updatedFrom: null,
       updatedTo: null,
+      appointmentFrom: null,
+      appointmentTo: null,
+      lastFollowupFrom: null,
+      lastFollowupTo: null,
+      nextFollowupFrom: null,
+      nextFollowupTo: null,
       tagGroups: [],
       tagGroupLogic: 'AND',
       sortBy: 'UPDATED_AT',
@@ -1285,6 +1625,8 @@ describe('AdminConsole product surface', () => {
 
     findSubnavButton(host, '客户数据对接').click();
     await flushUi();
+    await flushUi();
+    findButton(host, '展开筛选').click();
     await flushUi();
     findButton(host, '导出当前查询').click();
     await flushUi();
@@ -1340,11 +1682,20 @@ describe('AdminConsole product surface', () => {
     await flushUi();
     await flushUi();
 
-    const tagSelect = host.querySelector('select.customer-tag-category-select') as HTMLSelectElement;
-    expect(tagSelect).toBeTruthy();
-    expect(tagSelect.multiple).toBe(true);
-    [...tagSelect.options].forEach((option) => { option.selected = option.value === '701' || option.value === '702'; });
-    tagSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(host.querySelector('.customer-filter-body')).toBeNull();
+    (host.querySelector('.customer-filter-section-head') as HTMLElement).click();
+    await flushUi();
+
+    const tagPicker = host.querySelector('.customer-tag-picker-trigger') as HTMLButtonElement;
+    expect(tagPicker).toBeTruthy();
+    tagPicker.click();
+    await flushUi();
+    const tagOptions = host.querySelector('.customer-tag-picker-options') as HTMLElement;
+    expect(tagOptions).toBeTruthy();
+    [...tagOptions.querySelectorAll('.customer-tag-picker-option')].forEach((option) => {
+      (option as HTMLButtonElement).click();
+    });
+    findButton(host, '完成').click();
     const matchSelect = host.querySelector('select.customer-tag-match-select') as HTMLSelectElement;
     setInputValue(matchSelect, 'ALL');
     const logicSelect = host.querySelector('select.customer-tag-logic-select') as HTMLSelectElement;
@@ -1356,6 +1707,81 @@ describe('AdminConsole product surface', () => {
       tagGroupLogic: 'AND',
       tagGroups: [{ categoryId: 70, valueIds: [701, 702], match: 'ALL' }]
     }));
+    expect(host.querySelector('.customer-filter-body')).toBeNull();
+    expect(mainText(host)).toContain('展开筛选');
+
+    app.unmount();
+  });
+
+  it('uses focused layouts for customer search and follow-up rules without changing their controls', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户数据对接').click();
+    await flushUi();
+    await flushUi();
+    expect(host.querySelector('.ops-customer-query-summary')).toBeTruthy();
+    expect(host.querySelector('section.ops-customer-query-filters')).toBeTruthy();
+    expect(host.querySelector('.customer-filter-body')).toBeNull();
+    expect(mainText(host)).toContain('展开筛选');
+
+    findSubnavButton(host, '跟进规则引擎配置').click();
+    await flushUi();
+    expect(host.querySelector('.ops-rule-list')).toBeTruthy();
+    expect(host.querySelector('.ops-rule-row')).toBeTruthy();
+
+    findSubnavButton(host, '操作审计日志').click();
+    await flushUi();
+    expect(host.querySelector('.ops-audit-action-grid')).toBeTruthy();
+
+    app.unmount();
+  });
+
+  it('makes advanced customer filters selectable and keeps audit logs above optional action filters', async () => {
+    apiMocks.getJson.mockImplementation(async (path: string) => {
+      if (path.startsWith('/admin/api/v1/tags/categories')) {
+        return {
+          success: true,
+          data: {
+            items: [{
+              id: 70,
+              categoryKey: 'body_concerns',
+              categoryName: '身体关注',
+              selectionMode: 'MULTI',
+              useForFilter: true,
+              isEnabled: true,
+              mergedIntoId: null,
+              values: [
+                { id: 701, displayName: '腰痛', isEnabled: true, mergedIntoId: null },
+                { id: 702, displayName: '漏尿', isEnabled: true, mergedIntoId: null }
+              ]
+            }],
+            total: 1,
+            page: 1,
+            size: 100,
+            totalPages: 1
+          },
+          errorCode: null,
+          message: null
+        };
+      }
+      return { success: true, data: apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] }, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户数据对接').click();
+    await flushUi();
+    await flushUi();
+    findButton(host, '展开筛选').click();
+    await flushUi();
+    expect(host.querySelector('.customer-tag-picker-trigger')).toBeTruthy();
+    expect(host.querySelector('.ops-tag-chip-list')).toBeNull();
+
+    findSubnavButton(host, '操作审计日志').click();
+    await flushUi();
+    const auditFilters = host.querySelector('details.ops-audit-filters') as HTMLDetailsElement;
+    expect(auditFilters).toBeTruthy();
+    expect(auditFilters.open).toBe(false);
+    expect(host.querySelector('.ops-audit-action-grid')).toBeTruthy();
 
     app.unmount();
   });
@@ -1410,6 +1836,60 @@ describe('AdminConsole product surface', () => {
     findButton(host, '下一页').click();
     await flushUi();
     expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringMatching(/\/admin\/api\/v1\/quick-search\/items\?.*enabled=false.*page=2.*size=20/));
+
+    app.unmount();
+  });
+
+  it('only offers image upload actions for image quick-search content', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '速搜内容管理').click();
+    await flushUi();
+
+    const cards = [...host.querySelectorAll('.ops-content-card')];
+    const nonImageCard = cards.find((card) => !card.textContent?.includes('图片素材')) as HTMLElement;
+    expect(nonImageCard).toBeTruthy();
+    expect(nonImageCard.querySelector('.file-button')).toBeNull();
+
+    app.unmount();
+  });
+
+  it('opens quick-search editing in a centered modal without changing other drawers', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '速搜内容管理').click();
+    await flushUi();
+    findButton(host, '新增内容').click();
+    await flushUi();
+
+    expect(host.querySelector('.ops-drawer.ops-modal-form')).toBeTruthy();
+
+    app.unmount();
+  });
+
+  it('shows image upload only after choosing the image quick-search type', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '速搜内容管理').click();
+    await flushUi();
+    findButton(host, '新增内容').click();
+    await flushUi();
+
+    const drawer = host.querySelector('.ops-modal-form') as HTMLElement;
+    expect(drawer.querySelector('.ops-quick-search-image-field')).toBeNull();
+    const contentType = drawer.querySelector('select') as HTMLSelectElement;
+    setInputValue(contentType, 'IMAGE');
+    await flushUi();
+    expect(drawer.querySelector('.ops-quick-search-image-field input[type="file"]')).toBeTruthy();
+    expect(drawer.textContent).toContain('仅图文素材需要图片');
+    apiMocks.postForm.mockResolvedValueOnce({ success: true, data: { imageUrl: '/uploads/quick-search-demo.png' }, errorCode: null, message: null });
+    const fileInput = drawer.querySelector('.ops-quick-search-image-field input[type="file"]') as HTMLInputElement;
+    const file = new File(['image'], 'quick-search.png', { type: 'image/png' });
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushUi();
+    expect(apiMocks.postForm).toHaveBeenCalledWith('/admin/api/v1/upload/image', expect.any(FormData));
+    expect(drawer.querySelector('.ops-quick-search-image-field img')?.getAttribute('src')).toBe('/uploads/quick-search-demo.png');
 
     app.unmount();
   });
@@ -1533,7 +2013,8 @@ describe('AdminConsole product surface', () => {
     expect(mainText(host)).toContain('系统健康');
     expect(mainText(host)).toContain('数据库');
     expect(mainText(host)).toContain('自动刷新 45 秒');
-    expect(mainText(host)).toContain('IMAGE_DOWN');
+    expect(mainText(host)).toContain('识图服务不可用');
+    expect(mainText(host)).toContain('写入队列中有 1 条过期失败记录');
 
     app.unmount();
   });
@@ -2083,6 +2564,13 @@ describe('AdminConsole product surface', () => {
 
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/supervision.record_retention_days', { value: '200' });
     expect(mainText(host)).toContain('转换目标阶段');
+    expect((host.querySelector('[data-testid="conversion-target-stages"]') as HTMLElement).textContent).toContain('已成交');
+    const targetStagePicker = host.querySelector('[data-testid="conversion-stage-picker"]') as HTMLSelectElement;
+    setInputValue(targetStagePicker, '跟进中');
+    await flushSave();
+    findButton(host, '添加目标阶段').click();
+    await flushSave();
+    expect((host.querySelector('[data-testid="conversion-target-stages"]') as HTMLElement).textContent).toContain('跟进中');
     app.unmount();
   });
 
@@ -2166,6 +2654,40 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
+  it('explains governance validation errors with the business field name', async () => {
+    const { app, host } = await mountConsole();
+    findSubnavButton(host, '数据保留与任务设置').click();
+    await flushSave();
+
+    setInputValue(controlByLabel<HTMLInputElement>(host, '最近任务显示上限'), '101');
+    findButton(host, '保存治理设置').click();
+    await flushSave();
+
+    expect(mainText(host)).toContain('最近任务显示上限只能填写 20 至 100 条。');
+    expect(mainText(host)).not.toContain('chat.recent_task_display_cap');
+    app.unmount();
+  });
+
+  it('renders the analytics overview from live response data as a visual dashboard', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '运营分析看板').click();
+    await flushSave();
+    await flushSave();
+
+    const visualDashboard = host.querySelector('.ops-analytics-visual-dashboard') as HTMLElement;
+    expect(visualDashboard).toBeTruthy();
+    expect(visualDashboard.textContent).toContain('18');
+    expect(visualDashboard.textContent).toContain('98%');
+    expect(visualDashboard.querySelector('.ops-analytics-trend')).toBeTruthy();
+    expect(visualDashboard.querySelectorAll('.ops-analytics-ring')).toHaveLength(3);
+    expect(visualDashboard.querySelector('.ops-analytics-funnel')).toBeTruthy();
+    expect(visualDashboard.querySelector('.ops-analytics-ranking')).toBeTruthy();
+    expect(visualDashboard.textContent).toContain('开场话术');
+
+    app.unmount();
+  });
+
   it('loads, renders and filters tag analytics independently', async () => {
     const { app, host } = await mountConsole();
 
@@ -2191,6 +2713,27 @@ describe('AdminConsole product surface', () => {
         granularity: 'DAY'
       })
     );
+    app.unmount();
+  });
+
+  it('keeps tag analytics filters and account permissions in their focused operational layouts', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '运营分析看板').click();
+    await flushSave();
+    await flushSave();
+
+    expect(host.querySelector('details.ops-tag-analytics-filters')).toBeTruthy();
+    expect(host.querySelector('.ops-tag-analytics-core-summary')).toBeTruthy();
+    expect(mainText(host)).toContain('标签覆盖率');
+
+    findSubnavButton(host, '账号与权限').click();
+    await flushUi();
+
+    expect(host.querySelector('.ops-account-summary')).toBeTruthy();
+    expect(host.querySelector('.ops-role-badge')).toBeTruthy();
+    expect(mainText(host)).toContain('标签管理权限');
+
     app.unmount();
   });
 

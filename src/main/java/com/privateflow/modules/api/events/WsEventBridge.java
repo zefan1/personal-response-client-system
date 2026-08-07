@@ -54,7 +54,12 @@ public class WsEventBridge {
         "lastErrorMsg", event.lastErrorMsg() == null ? "" : event.lastErrorMsg(),
         "timestamp", event.timestamp().toString())));
     if ("DOWN".equalsIgnoreCase(event.status())) {
-      alertRepository.activate("IMAGE_SERVICE_DOWN", "WARN", event.lastErrorMsg(), "C", event.toString());
+      alertRepository.activate(
+          "IMAGE_SERVICE_DOWN",
+          "WARN",
+          "识图服务暂时不可用，请检查服务配置和网络连接。",
+          "识图服务",
+          "识图服务连续失败 " + event.failedCount() + " 次，需由技术人员检查服务日志和连接配置。");
     } else if ("UP".equalsIgnoreCase(event.status())) {
       alertRepository.resolve("IMAGE_SERVICE_DOWN");
     }

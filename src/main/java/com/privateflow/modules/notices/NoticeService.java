@@ -140,6 +140,7 @@ public class NoticeService {
       throw new ApiException(ApiErrorCodes.VERSION_STATUS_INVALID, "只有已停止公告可以删除");
     }
     repository.delete(id);
+    auditLogger.log("DELETE_NOTICE", AuthContext.username(), "system_notices", existing.noticeId(), existing.title());
   }
 
   public List<Map<String, Object>> active() {

@@ -53,6 +53,8 @@ class ConfigAdminServiceTest {
     insertConfig("table.api_base_url", "");
     insertConfig("table.retry_max_count", "5");
     insertConfig("table.alert_notify_target", "ADMIN");
+    insertConfig("wecom.connection_mode", "RELAY");
+    insertConfig("wecom.relay_base_url", "");
     insertConfig("skill.circuit_breaker_failure_rate", "0.5");
     insertConfig("image.compress_quality", "85");
     insertConfig("cache.sync_cron", "0 */30 * * * *");
@@ -169,6 +171,20 @@ class ConfigAdminServiceTest {
   }
 
   @Test
+  void wecomConnectionModeOnlyAcceptsDirectOrRelayAndRelayAddressMustBeHttp() {
+    service.update("wecom.connection_mode", Map.of("value", "DIRECT"));
+    service.update("wecom.connection_mode", Map.of("value", "RELAY"));
+    service.update("wecom.relay_base_url", Map.of("value", "https://relay.example.com"));
+
+    assertThatThrownBy(() -> service.update("wecom.connection_mode", Map.of("value", "AUTO")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("wecom.connection_mode must be DIRECT or RELAY");
+    assertThatThrownBy(() -> service.update("wecom.relay_base_url", Map.of("value", "relay.example.com")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("wecom.relay_base_url must be a valid URL");
+  }
+
+  @Test
   void imageTimeoutRejectsValuesThatAreTooShortForTheVisionModel() {
     insertConfig("image.timeout_ms", "5000");
     service.update("image.timeout_ms", Map.of("value", "15000"));
@@ -258,6 +274,15 @@ class ConfigAdminServiceTest {
   }
 
   @Test
+  void governanceRangeErrorsExplainTheBusinessSettingInsteadOfItsInternalKey() {
+    assertThatThrownBy(() -> service.update(
+        "chat.recent_task_display_cap", Map.of("value", "101")))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("最近任务显示上限只能填写 20 至 100 条")
+        .hasMessageNotContaining("chat.recent_task_display_cap");
+  }
+
+  @Test
   void recognitionTemporaryDirectoryMustBeAControlledRelativeSubdirectory() {
     service.update("chat.recognition_temp_root", Map.of("value", "active-jobs"));
 
@@ -301,7 +326,9 @@ class ConfigAdminServiceTest {
     service.update(key, Map.of("value", String.valueOf(minimum)));
     service.update(key, Map.of("value", String.valueOf(maximum)));
 
-    String range = key + " range is " + minimum + "-" + maximum;
+    String range = "chat.recent_task_display_cap".equals(key)
+        ? "最近任务显示上限只能填写 " + minimum + " 至 " + maximum + " 条"
+        : key + " range is " + minimum + "-" + maximum;
     assertThatThrownBy(() -> service.update(key, Map.of("value", String.valueOf(minimum - 1))))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining(range);

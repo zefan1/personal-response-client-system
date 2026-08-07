@@ -2,6 +2,7 @@ package com.privateflow.modules.customer.admin;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -73,5 +74,32 @@ class CustomerFilterQueryBuilderTest {
         "企微", "抖音", "XIAN_SUO", "万江店", "待联系", from, to,
         7L, 101L, 102L, 8L, 201L, 202L, 2);
     assertThat(spec.orderClause()).isEqualTo("c.nickname ASC, c.id ASC");
+  }
+
+  @Test
+  void supportsAppointmentFollowupAndArrivalFilters() {
+    LocalDate appointmentFrom = LocalDate.of(2026, 8, 1);
+    LocalDate appointmentTo = LocalDate.of(2026, 8, 31);
+    LocalDateTime lastFrom = LocalDateTime.of(2026, 7, 1, 0, 0);
+    LocalDateTime lastTo = LocalDateTime.of(2026, 7, 31, 23, 59);
+    LocalDateTime nextFrom = LocalDateTime.of(2026, 8, 1, 0, 0);
+    LocalDateTime nextTo = LocalDateTime.of(2026, 8, 15, 23, 59);
+    CustomerFilter filter = new CustomerFilter(
+        "", List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of("是"),
+        null, null, appointmentFrom, appointmentTo, lastFrom, lastTo, nextFrom, nextTo,
+        List.of(), TagGroupLogic.AND, CustomerSortField.UPDATED_AT, SortDirection.DESC, 1, 20);
+
+    CustomerQuerySpec spec = builder.build(filter, CustomerAccessScope.all());
+
+    assertThat(spec.whereClause())
+        .contains("c.arrived IN (?)")
+        .contains("c.appointment_date >= ?")
+        .contains("c.appointment_date <= ?")
+        .contains("c.last_followup_at >= ?")
+        .contains("c.last_followup_at <= ?")
+        .contains("c.next_followup_at >= ?")
+        .contains("c.next_followup_at <= ?");
+    assertThat(spec.args()).containsSubsequence(
+        "是", appointmentFrom, appointmentTo, lastFrom, lastTo, nextFrom, nextTo);
   }
 }

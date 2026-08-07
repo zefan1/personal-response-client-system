@@ -20,6 +20,7 @@ public class CustomerFilterQueryBuilder {
     appendIn(where, args, "c.intended_store", safeFilter.intendedStores());
     appendIn(where, args, "c.intended_project", safeFilter.intendedProjects());
     appendIn(where, args, "c.customer_stage", safeFilter.customerStages());
+    appendIn(where, args, "c.arrived", safeFilter.arrivedValues());
     if (safeFilter.updatedFrom() != null) {
       where.append(" AND c.updated_at >= ?");
       args.add(safeFilter.updatedFrom());
@@ -28,6 +29,9 @@ public class CustomerFilterQueryBuilder {
       where.append(" AND c.updated_at <= ?");
       args.add(safeFilter.updatedTo());
     }
+    appendDateRange(where, args, "c.appointment_date", safeFilter.appointmentFrom(), safeFilter.appointmentTo());
+    appendDateTimeRange(where, args, "c.last_followup_at", safeFilter.lastFollowupFrom(), safeFilter.lastFollowupTo());
+    appendDateTimeRange(where, args, "c.next_followup_at", safeFilter.nextFollowupFrom(), safeFilter.nextFollowupTo());
     appendTagGroups(where, args, safeFilter);
     appendAccessScope(where, args, safeScope);
 
@@ -91,6 +95,38 @@ public class CustomerFilterQueryBuilder {
         .append(placeholders(values.size()))
         .append(")");
     args.addAll(values);
+  }
+
+  private void appendDateRange(
+      StringBuilder where,
+      List<Object> args,
+      String column,
+      java.time.LocalDate from,
+      java.time.LocalDate to) {
+    if (from != null) {
+      where.append(" AND ").append(column).append(" >= ?");
+      args.add(from);
+    }
+    if (to != null) {
+      where.append(" AND ").append(column).append(" <= ?");
+      args.add(to);
+    }
+  }
+
+  private void appendDateTimeRange(
+      StringBuilder where,
+      List<Object> args,
+      String column,
+      java.time.LocalDateTime from,
+      java.time.LocalDateTime to) {
+    if (from != null) {
+      where.append(" AND ").append(column).append(" >= ?");
+      args.add(from);
+    }
+    if (to != null) {
+      where.append(" AND ").append(column).append(" <= ?");
+      args.add(to);
+    }
   }
 
   private void appendTagGroups(

@@ -13,9 +13,19 @@ const communicationMocks = vi.hoisted(() => ({
   loadPending: vi.fn(async () => undefined)
 }));
 
+const wsMocks = vi.hoisted(() => ({
+  connect: vi.fn(),
+  disconnect: vi.fn()
+}));
+
 vi.mock('./shared/apiClient', () => ({
   getJson: apiMocks.getJson,
   postJson: apiMocks.postJson
+}));
+
+vi.mock('./shared/wsMessageBus', () => ({
+  connectWsMessageBus: wsMocks.connect,
+  disconnectWsMessageBus: wsMocks.disconnect
 }));
 
 vi.mock('./modules/communication-history/communicationHistoryStore', () => ({
@@ -717,6 +727,15 @@ describe('App route shell', () => {
     eventBus.emit('communication:return-profile', { phone: '18800001111' });
     await flushUi();
     expect((host.querySelector('.customer-panel') as HTMLElement).style.display).not.toBe('none');
+    app.unmount();
+  });
+
+  it('connects the session message channel as soon as an authenticated desktop starts', async () => {
+    installDesktopBridge();
+    const { app } = await mountAppWithToken('#/desktop');
+
+    expect(wsMocks.connect).toHaveBeenCalledTimes(1);
+
     app.unmount();
   });
 

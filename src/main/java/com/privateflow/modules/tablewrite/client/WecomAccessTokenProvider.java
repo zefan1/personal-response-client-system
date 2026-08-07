@@ -35,6 +35,7 @@ public class WecomAccessTokenProvider {
   private final Clock clock;
   private final LongSupplier ticker;
   private final AtomicReference<Token> cachedToken = new AtomicReference<>();
+  private final AtomicReference<String> cachedEndpoint = new AtomicReference<>();
   private final ReentrantLock refreshLock = new ReentrantLock();
 
   @Autowired
@@ -84,8 +85,9 @@ public class WecomAccessTokenProvider {
 
   public String get(Duration timeout) {
     WecomRequestDeadline deadline = WecomRequestDeadline.start(timeout, OPERATION, ticker);
+    String endpoint = config.apiBaseUrl();
     Token current = cachedToken.get();
-    if (isUsable(current)) {
+    if (endpoint.equals(cachedEndpoint.get()) && isUsable(current)) {
       return current.value();
     }
     boolean locked = false;
@@ -93,12 +95,13 @@ public class WecomAccessTokenProvider {
       locked = tryRefreshLock(deadline);
       deadline.remaining();
       current = cachedToken.get();
-      if (isUsable(current)) {
+      if (endpoint.equals(cachedEndpoint.get()) && isUsable(current)) {
         return current.value();
       }
-      Token refreshed = requestToken(deadline);
+      Token refreshed = requestToken(deadline, endpoint);
       deadline.remaining();
       cachedToken.set(refreshed);
+      cachedEndpoint.set(endpoint);
       return refreshed.value();
     } finally {
       if (locked) {
@@ -111,6 +114,7 @@ public class WecomAccessTokenProvider {
     Token current = cachedToken.get();
     while (current != null && current.value().equals(rejectedToken)) {
       if (cachedToken.compareAndSet(current, null)) {
+        cachedEndpoint.set(null);
         return;
       }
       current = cachedToken.get();
@@ -129,13 +133,13 @@ public class WecomAccessTokenProvider {
     }
   }
 
-  private Token requestToken(WecomRequestDeadline deadline) {
+  private Token requestToken(WecomRequestDeadline deadline, String endpoint) {
     config.requireApplicationCredentials();
     WecomHttpResponse response = null;
     for (int attempt = 1; attempt <= MAX_NETWORK_ATTEMPTS; attempt++) {
       try {
         response = httpTransport.send(
-            tokenUri(), "GET", Map.of(), new byte[0], deadline.remaining());
+            tokenUri(endpoint), "GET", Map.of(), new byte[0], deadline.remaining());
         break;
       } catch (IOException ex) {
         if (attempt == MAX_NETWORK_ATTEMPTS) {
@@ -193,8 +197,8 @@ public class WecomAccessTokenProvider {
     return new Token(token, clock.instant().plusSeconds(cacheSeconds));
   }
 
-  private URI tokenUri() {
-    return URI.create(config.apiBaseUrl() + "/cgi-bin/gettoken?corpid=" + encode(config.corpId())
+  private URI tokenUri(String endpoint) {
+    return URI.create(endpoint + "/cgi-bin/gettoken?corpid=" + encode(config.corpId())
         + "&corpsecret=" + encode(config.appSecret()));
   }
 

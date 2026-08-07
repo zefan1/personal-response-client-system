@@ -19,6 +19,7 @@ public final class WecomSmartSheetConfig {
   private final String sourceTable;
   private final String uniqueFieldTitle;
   private final ZoneId zoneId;
+  private final WecomApiEndpointProvider endpointProvider;
 
   @Autowired
   public WecomSmartSheetConfig(
@@ -29,7 +30,21 @@ public final class WecomSmartSheetConfig {
       @Value("${WECOM_SMARTSHEET_SHEET_ID:}") String sheetId,
       @Value("${WECOM_SMARTSHEET_VIEW_ID:}") String viewId,
       @Value("${WECOM_SMARTSHEET_SOURCE_TABLE:}") String sourceTable,
-      @Value("${WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE:}") String uniqueFieldTitle) {
+      @Value("${WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE:}") String uniqueFieldTitle,
+      WecomApiEndpointProvider endpointProvider) {
+    this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle,
+        ZoneId.of("Asia/Shanghai"), endpointProvider);
+  }
+
+  public WecomSmartSheetConfig(
+      String apiBaseUrl,
+      String corpId,
+      String appSecret,
+      String documentId,
+      String sheetId,
+      String viewId,
+      String sourceTable,
+      String uniqueFieldTitle) {
     this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle,
         ZoneId.of("Asia/Shanghai"));
   }
@@ -44,6 +59,20 @@ public final class WecomSmartSheetConfig {
       String sourceTable,
       String uniqueFieldTitle,
       ZoneId zoneId) {
+    this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle, zoneId, null);
+  }
+
+  WecomSmartSheetConfig(
+      String apiBaseUrl,
+      String corpId,
+      String appSecret,
+      String documentId,
+      String sheetId,
+      String viewId,
+      String sourceTable,
+      String uniqueFieldTitle,
+      ZoneId zoneId,
+      WecomApiEndpointProvider endpointProvider) {
     this.apiBaseUrl = normalizedBaseUrl(apiBaseUrl);
     this.corpId = trimmed(corpId);
     this.appSecret = trimmed(appSecret);
@@ -53,6 +82,7 @@ public final class WecomSmartSheetConfig {
     this.sourceTable = trimmed(sourceTable);
     this.uniqueFieldTitle = trimmed(uniqueFieldTitle);
     this.zoneId = zoneId;
+    this.endpointProvider = endpointProvider;
   }
 
   public void requireConfigured() {
@@ -87,7 +117,7 @@ public final class WecomSmartSheetConfig {
   }
 
   public String apiBaseUrl() {
-    return apiBaseUrl;
+    return endpointProvider == null ? apiBaseUrl : endpointProvider.currentBaseUrl(apiBaseUrl);
   }
 
   public String corpId() {

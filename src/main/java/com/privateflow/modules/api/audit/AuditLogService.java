@@ -26,7 +26,7 @@ public class AuditLogService {
       "CALL_SKILL", "COPY_REPLY", "SEND_MESSAGE", "BATCH_TEMPLATE",
       "UPDATE_PROFILE", "UPDATE_STAGE", "UPDATE_TAG", "SAVE_TO_TABLE",
       "ASK_FOR_HELP", "RESOLVE_HELP", "UPDATE_CONFIG",
-      "CREATE_NOTICE", "STOP_NOTICE", "PUBLISH_NOTICE",
+      "CREATE_NOTICE", "STOP_NOTICE", "DELETE_NOTICE", "PUBLISH_NOTICE",
       "VERSION_PUBLISH", "VERSION_REVOKE",
       "DATASOURCE_CREATE", "DATASOURCE_UPDATE", "DATASOURCE_DELETE", "DATASOURCE_TOGGLE",
       "DATASOURCE_REPLACE_SHEET", "DATASOURCE_MAPPING_SAVE", "DATASOURCE_MAPPING_RESTORE",
@@ -235,6 +235,7 @@ public class AuditLogService {
         case "BATCH_TEMPLATE" -> "批量模板 " + value(detail, "templateName", "template") + " 发送 " + value(detail, "count", "total") + " 条";
         case "CREATE_NOTICE" -> "创建公告：" + value(detail, "title", "noticeTitle");
         case "STOP_NOTICE" -> "停止公告：" + value(detail, "title", "noticeTitle");
+        case "DELETE_NOTICE" -> "删除公告：" + value(detail, "title", "noticeTitle");
         case "PUBLISH_NOTICE" -> "发布公告：" + value(detail, "title", "noticeTitle");
         case "VERSION_PUBLISH" -> "发布版本 " + value(detail, "version", "targetId") + " (" + value(detail, "platform", "targetType") + ")";
         case "VERSION_REVOKE" -> "撤回版本 " + value(detail, "version", "targetId") + " (" + value(detail, "platform", "targetType") + ")";
@@ -286,6 +287,7 @@ public class AuditLogService {
       case "UPDATE_CONFIG" -> "修改系统配置";
       case "CREATE_NOTICE" -> "创建公告";
       case "STOP_NOTICE" -> "停止公告";
+      case "DELETE_NOTICE" -> "删除公告";
       case "PUBLISH_NOTICE" -> "发布公告";
       case "VERSION_PUBLISH" -> "发布版本";
       case "VERSION_REVOKE" -> "撤回版本";
@@ -323,7 +325,7 @@ public class AuditLogService {
       case "UPDATE_PROFILE", "UPDATE_STAGE", "UPDATE_TAG", "SAVE_TO_TABLE" -> "客户操作";
       case "ASK_FOR_HELP", "RESOLVE_HELP" -> "求助操作";
       case "UPDATE_CONFIG" -> "配置操作";
-      case "CREATE_NOTICE", "STOP_NOTICE", "PUBLISH_NOTICE" -> "公告操作";
+      case "CREATE_NOTICE", "STOP_NOTICE", "DELETE_NOTICE", "PUBLISH_NOTICE" -> "公告操作";
       case "VERSION_PUBLISH", "VERSION_REVOKE" -> "版本操作";
       case "DATASOURCE_CREATE", "DATASOURCE_UPDATE", "DATASOURCE_DELETE", "DATASOURCE_TOGGLE",
           "DATASOURCE_REPLACE_SHEET", "DATASOURCE_MAPPING_SAVE", "DATASOURCE_MAPPING_RESTORE",

@@ -97,28 +97,28 @@ public class SupervisionMetricsService {
     Map<String, SupervisionMetric> metrics = new LinkedHashMap<>();
     metrics.put("AI_USAGE_RATE", SupervisionMetric.of(
         repository.aiUsageRate(query),
-        "AI copied customers",
-        "AI generated customers",
+        "已复制 AI 回复的客户",
+        "AI 已生成回复的客户",
         true));
     metrics.put("AI_COVERAGE", SupervisionMetric.of(
         repository.aiCoverage(query),
-        "Customers with AI replies",
-        "Customers processed by recognition",
+        "已使用 AI 回复的客户",
+        "已完成识别处理的客户",
         true));
     metrics.put("PROCESSING_EFFICIENCY", SupervisionMetric.of(
         repository.processingEfficiency(query, settings.processingSlaMinutes()),
-        "Customers handled within SLA",
-        "Customers processed by recognition",
+        "在服务时限内处理的客户",
+        "已完成识别处理的客户",
         true));
     metrics.put("EMPLOYEE_CONVERSION", SupervisionMetric.of(
         repository.employeeConversion(query, settings.conversionTargetStages()),
-        "Assigned customers from the selected period currently at configured target stages",
-        "Assigned customers from the selected period",
+        "所选期间分配且当前处于目标阶段的客户",
+        "所选期间分配的客户",
         targetConfigured));
     metrics.put("AI_REPLY_CONVERSION", SupervisionMetric.of(
         repository.aiReplyConversion(query, settings.conversionTargetStages()),
-        "AI copied customers currently at configured target stages",
-        "AI copied customers",
+        "已复制 AI 回复且当前处于目标阶段的客户",
+        "已复制 AI 回复的客户",
         targetConfigured));
     return Map.copyOf(metrics);
   }

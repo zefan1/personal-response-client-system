@@ -81,4 +81,27 @@ describe('templateLibraryStore', () => {
     expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/templates/team/77/use', {});
     expect(mocks.postJson).not.toHaveBeenCalledWith('/api/v1/chat/send-confirm', expect.anything());
   });
+
+  it('refreshes an open template library when an administrator changes quick-search content', async () => {
+    const store = await import('./templateLibraryStore');
+    let shortcutTitle = '停用前话术';
+    mocks.getJson.mockImplementation((path: string) => Promise.resolve({
+      success: true,
+      data: path.endsWith('/personal')
+        ? []
+        : path.endsWith('/team')
+          ? []
+          : [{ id: 99, title: shortcutTitle, content: '话术内容', contentType: 'TEMPLATE', shortcutCode: 'KS01', leadType: 'GENERAL', sortOrder: 1, isEnabled: true }],
+      errorCode: null,
+      message: null
+    }));
+    await store.openTemplateLibrary();
+    shortcutTitle = '更新后话术';
+
+    store.handleTemplateLibraryConfigRefresh({ configKeys: ['quick_search'] });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.templateLibraryState.shortcuts.map((item) => item.title)).toEqual(['更新后话术']);
+  });
 });

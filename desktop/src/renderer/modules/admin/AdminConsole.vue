@@ -42,7 +42,11 @@
         </article>
       </section>
 
-      <section v-if="activeSection.groupKey === 'config-center'" class="ops-admin-layout">
+      <section
+        v-if="activeSection.groupKey === 'config-center'"
+        class="ops-admin-layout"
+        :class="{ 'configuration-center-layout': activeSection.key === 'configuration-center', 'configuration-models-row': activeSection.key === 'configuration-center' }"
+      >
         <article v-if="activeSection.key === 'skill-scenes'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
@@ -134,7 +138,7 @@
           <p v-else class="ops-empty">还没有测试结果。先在上方列表选择一条绑定测试。</p>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel">
+        <article v-if="activeSection.key === 'configuration-center' && advancedConfigurationExpanded && activeAdvancedConfiguration === 'skillEnvironment'" class="ops-panel wide skill-environment-panel configuration-advanced-content">
           <div class="ops-panel-head">
             <div>
               <h2>Skill 环境</h2>
@@ -144,9 +148,9 @@
           </div>
           <div v-for="env in skillEnvironments" :key="env.id" class="ops-env-card">
             <div>
-              <strong>{{ env.envName }}</strong>
+              <strong>{{ environmentDisplayName(env, `Skill 环境 #${env.id}`) }}</strong>
               <span>{{ env.baseUrl }}</span>
-              <small>Key 后四位：{{ env.apiKeyLast4 || '未返回' }}</small>
+              <small>密钥后四位：{{ env.apiKeyLast4 || '未返回' }}</small>
             </div>
             <div class="ops-row-actions">
               <button class="secondary small" type="button" :disabled="isActiveEnvironment(env)" @click="confirmActivateEnvironment('skill', env)">
@@ -159,17 +163,17 @@
           <p v-if="!skillEnvironments.length" class="ops-empty">暂无 Skill 环境，请先新增。</p>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel">
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel image-environment-panel">
           <div class="ops-panel-head">
             <div>
-              <h2>识图环境</h2>
-              <p>保存后可测试连接，测试不计入生产统计。</p>
+              <h2>识图模型环境</h2>
+              <p>可配置多个模型，但当前只启用一个全局模型；现有测试只验证连接。</p>
             </div>
-            <button class="secondary small" type="button" @click="openForm('imageEnv')">新增环境</button>
+            <button class="secondary small" type="button" @click="openForm('imageEnv')">新建</button>
           </div>
           <div v-for="env in imageEnvironments" :key="env.id" class="ops-env-card">
             <div>
-              <strong>{{ env.envName }}</strong>
+              <strong>{{ environmentDisplayName(env, `识图环境 #${env.id}`) }}</strong>
               <span>{{ env.baseUrl }}</span>
               <small>{{ imageTestLabel(env) }}</small>
             </div>
@@ -185,44 +189,56 @@
           <p v-if="!imageEnvironments.length" class="ops-empty">暂无识图环境，请先新增。</p>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel configuration-connection-panel wecom-connection-panel">
           <div class="ops-panel-head">
             <div>
-              <h2>配置顺序</h2>
-              <p>先配置 Skill、识图、LLM 环境并测试连接，再按场景开启回复生成、档案提取、跟进建议等开关；真实 Key 未配置前建议保持生产开关关闭。</p>
+              <h2>企业微信连接方式</h2>
+              <p>决定本服务器访问企业微信官方接口时，经过你的服务器转发还是直接访问企业微信。</p>
             </div>
+            <button class="primary small" type="button" :disabled="loading" @click="saveWecomConnectionSettings">保存企业微信连接</button>
           </div>
-          <div class="ops-chip-list">
-            <span class="ops-chip">1. 环境与 API Key</span>
-            <span class="ops-chip">2. 测试连接</span>
-            <span class="ops-chip">3. 场景路由</span>
-            <span class="ops-chip">4. 开启业务能力</span>
+          <div class="ops-form-grid">
+            <div class="ops-form-span-2">
+              <div class="ops-segmented" role="radiogroup" aria-label="企业微信连接方式">
+                <button type="button" :class="{ active: wecomConnectionDraft.mode === 'RELAY' }" role="radio" :aria-checked="wecomConnectionDraft.mode === 'RELAY'" @click="wecomConnectionDraft.mode = 'RELAY'">服务器转发</button>
+                <button type="button" :class="{ active: wecomConnectionDraft.mode === 'DIRECT' }" role="radio" :aria-checked="wecomConnectionDraft.mode === 'DIRECT'" @click="wecomConnectionDraft.mode = 'DIRECT'">直接连接企业微信</button>
+              </div>
+              <small v-if="wecomConnectionDraft.mode === 'RELAY'">服务器先请求下方转发地址，再由转发服务访问企业微信。保存后不会自动切到直连。</small>
+              <small v-else>服务器直接请求企业微信官方地址 https://qyapi.weixin.qq.com，不会自动切到转发。</small>
+            </div>
+            <label v-if="wecomConnectionDraft.mode === 'RELAY'" class="ops-form-span-2">
+              服务器转发地址
+              <input v-model="wecomConnectionDraft.relayBaseUrl" type="url" aria-label="企业微信服务器转发地址" placeholder="https://wecom-relay.example.com" />
+              <small>必须填写可由本服务器访问的完整地址。首次保存前的空值会继续使用启动时的地址，避免影响现有连接。</small>
+            </label>
           </div>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel">
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide configuration-steps-panel">
           <div class="ops-panel-head">
             <div>
-              <h2>LLM 思考环境</h2>
-              <p>用于后续接入独立推理、总结和回复优化，可配置多个供应商轮流测试。</p>
+              <h2>配置步骤</h2>
+              <p>先准备并测试模型，再开启需要的业务任务；除档案提取外，其余任务都要到工作台触发一次才能完成验收。</p>
             </div>
-            <button class="secondary small" type="button" @click="openForm('llmEnv')">新增环境</button>
           </div>
-          <div class="ops-form-grid">
-            <label>
-              <span class="ops-label-title">测试线索类型</span>
-              <select v-model="llmProfileTestLeadType">
-                <option v-for="option in LLM_PROFILE_LEAD_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
-              </select>
-            </label>
-            <label class="ops-form-span-2">
-              <span class="ops-label-title">档案分析测试消息</span>
-              <textarea v-model="llmProfileTestMessage" rows="4" placeholder="输入客户真实原话"></textarea>
-            </label>
+          <div class="ops-chip-list">
+            <span class="ops-chip">1. 准备模型</span>
+            <span class="ops-chip">2. 做可用测试</span>
+            <span class="ops-chip">3. 启用并到工作台验收</span>
+          </div>
+        </article>
+
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel llm-environment-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h2>LLM 模型环境</h2>
+              <p>可配置多个模型，启用其中一个作为默认使用；需要分工时再配置场景路由。</p>
+            </div>
+            <button class="secondary small" type="button" @click="openForm('llmEnv')">新建</button>
           </div>
           <div v-for="env in llmEnvironments" :key="env.id" class="ops-env-card">
             <div>
-              <strong>{{ env.envName }}</strong>
+              <strong>{{ environmentDisplayName(env, `LLM 环境 #${env.id}`) }}</strong>
               <span>{{ env.baseUrl }}</span>
               <small>{{ llmEnvironmentLabel(env) }}</small>
             </div>
@@ -231,7 +247,7 @@
                 {{ isActiveEnvironment(env) ? '当前使用' : '启用' }}
               </button>
               <button class="secondary small" type="button" @click="openForm('llmEnv', env)">编辑</button>
-              <button class="secondary small" type="button" :disabled="loading || !llmProfileTestMessage.trim()" @click="testLlmEnvironment(env)">测试档案分析</button>
+              <button class="secondary small" type="button" @click="openLlmProfileTest(env)">后台测试</button>
               <button class="secondary small danger" type="button" :disabled="!canDeleteEnvironment('llm', env)" @click="confirmDeleteEnvironment('llm', env)">删除</button>
             </div>
           </div>
@@ -258,175 +274,140 @@
           </div>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide ops-llm-capability-panel">
           <div class="ops-panel-head">
             <div>
-              <h2>LLM 回复生成</h2>
-              <p>控制回复建议是否优先走 LLM，并保留 Skill 回落，未配置真实模型前建议保持关闭。</p>
+              <h2>系统内置工作任务</h2>
+              <p>这些是项目已经写好的业务流程。开关决定是否调用 LLM，“配置”用于调整模型输出规则。</p>
             </div>
-            <button class="primary small" type="button" :disabled="loading" @click="saveLlmReplySettings">保存回复生成</button>
           </div>
-          <div class="ops-form-grid">
-            <label>
-              启用 LLM 回复生成
-              <input v-model="llmReplyDraft.enabled" type="checkbox" />
-            </label>
-            <label>
-              失败时回落 Skill
-              <input v-model="llmReplyDraft.fallbackToSkill" type="checkbox" />
-            </label>
-            <label>
-              温度覆盖
-              <input v-model="llmReplyDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用环境默认值" />
-            </label>
-            <label>
-              最大 Tokens
-              <input v-model.number="llmReplyDraft.maxTokens" type="number" min="1" max="32000" />
-            </label>
-            <label class="ops-form-span-2">
-              系统 Prompt
-              <textarea v-model="llmReplyDraft.systemPrompt" rows="8" placeholder="填写回复建议 LLM 的系统提示词"></textarea>
-            </label>
+          <div class="ops-llm-capability-list">
+            <div class="ops-llm-capability-row">
+              <div>
+                <strong>回复生成</strong>
+                <span>为员工生成可直接发送给客户的回复建议。</span>
+              </div>
+              <span class="ops-capability-test-slot ops-capability-test-boundary">需工作台验收</span>
+              <span class="ops-capability-status" :class="llmReplyDraft.enabled ? 'ok-text' : 'muted-text'">{{ llmReplyDraft.enabled ? '已启用' : '未启用' }}</span>
+              <label class="ops-inline-switch">
+                <span>启用回复生成</span>
+                <input :checked="llmReplyDraft.enabled" class="ops-switch" type="checkbox" :disabled="loading" @change="saveLlmCapabilityEnabled('reply', $event)" />
+              </label>
+              <button class="secondary small ops-capability-config-action" type="button" @click="openLlmCapabilityConfig('reply')">配置</button>
+            </div>
+            <div class="ops-llm-capability-row">
+              <div>
+                <strong>档案提取</strong>
+                <span>从对话中给出客户资料更新建议，结果仍需人工确认。</span>
+              </div>
+              <span class="ops-capability-test-slot"><button class="secondary small ops-capability-test-action" type="button" :disabled="!defaultLlmEnvironment" @click="openDefaultLlmProfileTest">后台测试</button></span>
+              <span class="ops-capability-status" :class="llmProfileDraft.enabled ? 'ok-text' : 'muted-text'">{{ llmProfileDraft.enabled ? '已启用' : '未启用' }}</span>
+              <label class="ops-inline-switch">
+                <span>启用档案提取</span>
+                <input :checked="llmProfileDraft.enabled" class="ops-switch" type="checkbox" :disabled="loading" @change="saveLlmCapabilityEnabled('profile', $event)" />
+              </label>
+              <button class="secondary small ops-capability-config-action" type="button" @click="openLlmCapabilityConfig('profile')">配置</button>
+            </div>
+            <div class="ops-llm-capability-row">
+              <div>
+                <strong>跟进建议</strong>
+                <span>客户没有下一步计划时，补充建议时间和方向。</span>
+              </div>
+              <span class="ops-capability-test-slot ops-capability-test-boundary">需工作台验收</span>
+              <span class="ops-capability-status" :class="llmFollowupDraft.enabled ? 'ok-text' : 'muted-text'">{{ llmFollowupDraft.enabled ? '已启用' : '未启用' }}</span>
+              <label class="ops-inline-switch">
+                <span>启用跟进建议</span>
+                <input :checked="llmFollowupDraft.enabled" class="ops-switch" type="checkbox" :disabled="loading" @change="saveLlmCapabilityEnabled('followup', $event)" />
+              </label>
+              <button class="secondary small ops-capability-config-action" type="button" @click="openLlmCapabilityConfig('followup')">配置</button>
+            </div>
+            <div class="ops-llm-capability-row">
+              <div>
+                <strong>异常识别</strong>
+                <span>识别明确投诉、退款或流失风险并发送提醒。</span>
+              </div>
+              <span class="ops-capability-test-slot ops-capability-test-boundary">需工作台验收</span>
+              <span class="ops-capability-status" :class="llmAbnormalDraft.enabled ? 'ok-text' : 'muted-text'">{{ llmAbnormalDraft.enabled ? '已启用' : '未启用' }}</span>
+              <label class="ops-inline-switch">
+                <span>启用异常识别</span>
+                <input :checked="llmAbnormalDraft.enabled" class="ops-switch" type="checkbox" :disabled="loading" @change="saveLlmCapabilityEnabled('abnormal', $event)" />
+              </label>
+              <button class="secondary small ops-capability-config-action" type="button" @click="openLlmCapabilityConfig('abnormal')">配置</button>
+            </div>
+            <div class="ops-llm-capability-row">
+              <div>
+                <strong>总结补位</strong>
+                <span>缺少摘要时生成供客户档案和表格使用的跟进备注。</span>
+              </div>
+              <span class="ops-capability-test-slot ops-capability-test-boundary">需工作台验收</span>
+              <span class="ops-capability-status" :class="llmSummaryDraft.enabled ? 'ok-text' : 'muted-text'">{{ llmSummaryDraft.enabled ? '已启用' : '未启用' }}</span>
+              <label class="ops-inline-switch">
+                <span>启用总结补位</span>
+                <input :checked="llmSummaryDraft.enabled" class="ops-switch" type="checkbox" :disabled="loading" @change="saveLlmCapabilityEnabled('summary', $event)" />
+              </label>
+              <button class="secondary small ops-capability-config-action" type="button" @click="openLlmCapabilityConfig('summary')">配置</button>
+            </div>
           </div>
-          <div class="ops-detail-box">
-            <strong>当前策略</strong>
-            <p>{{ llmReplyDraft.enabled ? 'LLM 优先生成回复建议' : '继续使用 Skill 生成回复建议' }}；{{ llmReplyDraft.fallbackToSkill ? 'LLM 异常时自动回落 Skill' : 'LLM 异常时直接走降级提示' }}。</p>
+          <div class="ops-capability-acceptance-flow" aria-label="工作台验收步骤">
+            <span><strong>1. 后台启用</strong>保存需要使用的任务</span>
+            <span><strong>2. 工作台触发</strong>使用专用测试客户消息</span>
+            <span><strong>3. 验收结果</strong>确认内容和失败回落是否符合预期</span>
           </div>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
-          <div class="ops-panel-head">
-            <div>
-              <h2>LLM 档案提取</h2>
-              <p>控制发送确认后的资料更新建议是否优先走 LLM，默认关闭并保留 Skill 回落。</p>
-            </div>
-            <button class="primary small" type="button" :disabled="loading" @click="saveLlmProfileSettings">保存档案提取</button>
-          </div>
-          <div class="ops-form-grid">
-            <label>
-              启用 LLM 档案提取
-              <input v-model="llmProfileDraft.enabled" type="checkbox" />
-            </label>
-            <label>
-              失败时回落 Skill
-              <input v-model="llmProfileDraft.fallbackToSkill" type="checkbox" />
-            </label>
-            <label>
-              温度覆盖
-              <input v-model="llmProfileDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用环境默认值" />
-            </label>
-            <label>
-              最大 Tokens
-              <input v-model.number="llmProfileDraft.maxTokens" type="number" min="1" max="32000" />
-            </label>
-            <label class="ops-form-span-2">
-              系统 Prompt
-              <textarea v-model="llmProfileDraft.systemPrompt" rows="7" placeholder="填写档案提取 LLM 的系统提示词"></textarea>
-            </label>
-          </div>
-          <div class="ops-detail-box">
-            <strong>当前策略</strong>
-            <p>{{ llmProfileDraft.enabled ? '发送确认后优先用 LLM 提取资料更新' : '继续使用 Skill 提取资料更新' }}；{{ llmProfileDraft.fallbackToSkill ? 'LLM 异常时自动回落 Skill' : 'LLM 异常时不写入建议' }}。</p>
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide configuration-advanced-panel">
+          <button class="ops-disclosure-button" type="button" :aria-expanded="advancedConfigurationExpanded" @click="toggleAdvancedConfigurationPanel">
+            <span>
+              <strong>高级运行配置</strong>
+              <small>模型分工、服务环境、运行保护和数据同步，日常使用不需要修改。</small>
+            </span>
+            <span>{{ advancedConfigurationExpanded ? '收起高级运行配置' : '展开高级运行配置' }}</span>
+          </button>
+          <div v-if="advancedConfigurationExpanded" class="ops-advanced-config-groups">
+            <button type="button" :class="{ active: activeAdvancedConfiguration === 'llm' }" :aria-expanded="activeAdvancedConfiguration === 'llm'" @click="toggleAdvancedConfiguration('llm')">
+              <span><strong>模型分工与调用统计</strong><small>按业务场景分配 LLM，并查看调用结果。</small></span>
+              <span>{{ activeAdvancedConfiguration === 'llm' ? '收起' : '打开' }}</span>
+            </button>
+            <button type="button" :class="{ active: activeAdvancedConfiguration === 'skillEnvironment' }" :aria-expanded="activeAdvancedConfiguration === 'skillEnvironment'" @click="toggleAdvancedConfiguration('skillEnvironment')">
+              <span><strong>Skill 服务环境</strong><small>管理 Skill 服务地址、密钥和当前启用环境。</small></span>
+              <span>{{ activeAdvancedConfiguration === 'skillEnvironment' ? '收起' : '打开' }}</span>
+            </button>
+            <button type="button" :class="{ active: activeAdvancedConfiguration === 'skillRuntime' }" :aria-expanded="activeAdvancedConfiguration === 'skillRuntime'" @click="toggleAdvancedConfiguration('skillRuntime')">
+              <span><strong>Skill 运行保护</strong><small>调整超时、熔断和失败提醒。</small></span>
+              <span>{{ activeAdvancedConfiguration === 'skillRuntime' ? '收起' : '打开' }}</span>
+            </button>
+            <button type="button" :class="{ active: activeAdvancedConfiguration === 'imageRuntime' }" :aria-expanded="activeAdvancedConfiguration === 'imageRuntime'" @click="toggleAdvancedConfiguration('imageRuntime')">
+              <span><strong>识图运行限制</strong><small>选择识图环境，并调整图片大小和失败提醒。</small></span>
+              <span>{{ activeAdvancedConfiguration === 'imageRuntime' ? '收起' : '打开' }}</span>
+            </button>
+            <button type="button" :class="{ active: activeAdvancedConfiguration === 'datasource' }" :aria-expanded="activeAdvancedConfiguration === 'datasource'" @click="toggleAdvancedConfiguration('datasource')">
+              <span><strong>数据同步</strong><small>调整自动同步频率、导入数量和异常等待时间。</small></span>
+              <span>{{ activeAdvancedConfiguration === 'datasource' ? '收起' : '打开' }}</span>
+            </button>
           </div>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide configuration-prompt-overview">
           <div class="ops-panel-head">
             <div>
-              <h2>LLM 跟进建议</h2>
-              <p>当回复流程没有返回下次跟进建议时，用 LLM 补充跟进时间和方向。</p>
+              <h2>提示词与规则</h2>
+              <p>约束输出结构、企业红线、昵称清洗、备用回复、截图识别内容和重新生成次数。</p>
             </div>
-            <button class="primary small" type="button" :disabled="loading" @click="saveLlmFollowupSettings">保存跟进建议</button>
+            <button class="secondary small" type="button" :aria-expanded="promptRulesExpanded" @click="promptRulesExpanded = !promptRulesExpanded">
+              {{ promptRulesExpanded ? '收起提示词与规则' : '编辑提示词与规则' }}
+            </button>
           </div>
-          <div class="ops-form-grid">
-            <label>
-              启用 LLM 跟进建议
-              <input v-model="llmFollowupDraft.enabled" type="checkbox" />
-            </label>
-            <label>
-              温度覆盖
-              <input v-model="llmFollowupDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用环境默认值" />
-            </label>
-            <label>
-              最大 Tokens
-              <input v-model.number="llmFollowupDraft.maxTokens" type="number" min="1" max="32000" />
-            </label>
-            <label class="ops-form-span-2">
-              系统 Prompt
-              <textarea v-model="llmFollowupDraft.systemPrompt" rows="6" placeholder="填写跟进建议 LLM 的系统提示词"></textarea>
-            </label>
-          </div>
-          <div class="ops-detail-box">
-            <strong>当前策略</strong>
-            <p>{{ llmFollowupDraft.enabled ? '缺少跟进建议时由 LLM 补充' : '继续使用当前回复方向作为跟进方向' }}。</p>
+          <div class="ops-prompt-overview-grid">
+            <span><strong>输出格式</strong>规定 Skill 返回字段与结构</span>
+            <span><strong>企业红线</strong>限制 AI 不能说什么、不能做什么</span>
+            <span><strong>昵称清洗</strong>去除昵称中的内部前缀</span>
+            <span><strong>备用回复</strong>AI 服务不可用时给员工的提示</span>
+            <span><strong>截图识别</strong>告诉模型需要提取哪些截图信息</span>
+            <span><strong>重新生成</strong>限制员工最多能换几组建议</span>
           </div>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
-          <div class="ops-panel-head">
-            <div>
-              <h2>LLM 异常识别</h2>
-              <p>发送确认后异步识别客户不满或流失风险，命中后推送到侧边栏提醒中心。</p>
-            </div>
-            <button class="primary small" type="button" :disabled="loading" @click="saveLlmAbnormalSettings">保存异常识别</button>
-          </div>
-          <div class="ops-form-grid">
-            <label>
-              启用 LLM 异常识别
-              <input v-model="llmAbnormalDraft.enabled" type="checkbox" />
-            </label>
-            <label>
-              温度覆盖
-              <input v-model="llmAbnormalDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用环境默认值" />
-            </label>
-            <label>
-              最大 Tokens
-              <input v-model.number="llmAbnormalDraft.maxTokens" type="number" min="1" max="32000" />
-            </label>
-            <label class="ops-form-span-2">
-              系统 Prompt
-              <textarea v-model="llmAbnormalDraft.systemPrompt" rows="6" placeholder="填写异常识别 LLM 的系统提示词"></textarea>
-            </label>
-          </div>
-          <div class="ops-detail-box">
-            <strong>当前策略</strong>
-            <p>{{ llmAbnormalDraft.enabled ? '发送确认后异步识别客户不满和流失风险' : '不启用 LLM 异常识别' }}。</p>
-          </div>
-        </article>
-
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
-          <div class="ops-panel-head">
-            <div>
-              <h2>LLM 总结补位</h2>
-              <p>当发送确认没有会话摘要时，用 LLM 生成短跟进备注，供客户档案和表格写入使用。</p>
-            </div>
-            <button class="primary small" type="button" :disabled="loading" @click="saveLlmSummarySettings">保存总结补位</button>
-          </div>
-          <div class="ops-form-grid">
-            <label>
-              启用 LLM 总结补位
-              <input v-model="llmSummaryDraft.enabled" type="checkbox" />
-            </label>
-            <label>
-              温度覆盖
-              <input v-model="llmSummaryDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用环境默认值" />
-            </label>
-            <label>
-              最大 Tokens
-              <input v-model.number="llmSummaryDraft.maxTokens" type="number" min="1" max="32000" />
-            </label>
-            <label class="ops-form-span-2">
-              系统 Prompt
-              <textarea v-model="llmSummaryDraft.systemPrompt" rows="6" placeholder="填写总结补位 LLM 的系统提示词"></textarea>
-            </label>
-          </div>
-          <div class="ops-detail-box">
-            <strong>当前策略</strong>
-            <p>{{ llmSummaryDraft.enabled ? '缺少摘要时由 LLM 生成跟进备注' : '缺少摘要时继续使用已发送文本作为备注' }}。</p>
-          </div>
-        </article>
-
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center' && advancedConfigurationExpanded && activeAdvancedConfiguration === 'llm'" class="ops-panel wide configuration-advanced-content">
           <div class="ops-panel-head">
             <div>
               <h2>LLM 场景路由</h2>
@@ -461,7 +442,7 @@
           </div>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center' && advancedConfigurationExpanded && activeAdvancedConfiguration === 'llm'" class="ops-panel wide configuration-advanced-content">
           <div class="ops-panel-head">
             <div>
               <h2>LLM 调用统计</h2>
@@ -517,7 +498,7 @@
           <p v-else class="ops-empty">暂无 LLM 调用记录。开启 LLM 回复生成或通过测试接口调用后会出现数据。</p>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center' && advancedConfigurationExpanded && activeAdvancedConfiguration === 'skillRuntime'" class="ops-panel wide configuration-advanced-content">
           <div class="ops-panel-head">
             <div>
               <h2>Skill 运行参数</h2>
@@ -561,7 +542,7 @@
           </div>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center' && advancedConfigurationExpanded && activeAdvancedConfiguration === 'imageRuntime'" class="ops-panel wide configuration-advanced-content">
           <div class="ops-panel-head">
             <div>
               <h2>识图运行参数</h2>
@@ -571,8 +552,15 @@
           </div>
           <div class="ops-form-grid">
             <label>
-              识图模型
-              <input v-model="imageRuntimeDraft.model" type="text" placeholder="qwen3-vl-plus" />
+              使用哪个识图模型
+              <select v-model="selectedImageEnvironmentId" aria-label="使用哪个识图模型" :disabled="!imageEnvironments.length">
+                <option v-if="!imageEnvironments.length" value="">未配置</option>
+                <option v-for="env in imageEnvironments" :key="env.id" :value="String(env.id)">
+                  {{ environmentDisplayName(env, `识图环境 #${env.id}`) }}
+                </option>
+              </select>
+              <small v-if="imageEnvironments.length">从上方已经配置好的识图环境中选择。</small>
+              <small v-else>请先在上方新建识图环境。</small>
             </label>
             <label>
               识图超时（毫秒）
@@ -602,103 +590,90 @@
           </div>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel configuration-connection-panel smart-sheet-connection-panel">
           <div class="ops-panel-head">
             <div>
-              <h2>企微表格网关</h2>
-              <p>配置真实企微/智能表格读写网关，影响客户同步和保存到表格。</p>
+              <h2>连接企业微信智能表格</h2>
+              <p>只需粘贴目标表格的完整链接，系统会检查它是否属于本项目。</p>
             </div>
-            <button class="primary small" type="button" :disabled="loading" @click="saveTableRuntimeSettings">保存表格参数</button>
           </div>
-          <div class="ops-form-grid">
+          <div class="ops-smart-sheet-connect-row">
             <label>
-              网关 Base URL
+              企业微信智能表格链接
+              <input v-model="smartSheetConnectionDraft.documentUrl" type="url" aria-label="企业微信智能表格链接" placeholder="粘贴浏览器地址栏里的完整链接" />
+              <small>打开目标表格，复制浏览器地址栏里的完整链接，粘贴到这里即可。</small>
+              <small>必须是本系统通过企业微信 API 创建并纳入管理的智能表格；你在企微中手动新建的智能表格不能连接。</small>
+            </label>
+            <button class="primary" type="button" :disabled="loading" @click="verifyAndSaveSmartSheet">检测并保存</button>
+          </div>
+          <p v-if="smartSheetConnectionDraft.connectedName" class="ops-inline-success">已连接：{{ smartSheetConnectionDraft.connectedName }}</p>
+          <button class="ops-inline-disclosure-button" type="button" :aria-expanded="tableServerSettingsExpanded" @click="tableServerSettingsExpanded = !tableServerSettingsExpanded">
+            {{ tableServerSettingsExpanded ? '收起服务器部署配置' : '展开服务器部署配置' }}
+          </button>
+          <div v-if="tableServerSettingsExpanded" class="ops-form-grid ops-nested-settings">
+            <p class="ops-form-span-2 ops-helper-callout">以下内容由服务器部署配置提供，日常使用不需要修改。</p>
+            <label>
+              表格连接服务地址
               <input v-model="tableRuntimeDraft.apiBaseUrl" type="text" placeholder="https://table-gateway.example.com" />
             </label>
             <label>
-              网关 API Key
-              <input v-model="tableRuntimeDraft.apiKey" type="password" autocomplete="new-password" aria-label="企微表格网关 API Key" placeholder="留空表示沿用当前 Key" />
-              <small>当前 Key：{{ configSecretStatus('table.api_key') }}</small>
+              表格连接密钥
+              <input v-model="tableRuntimeDraft.apiKey" type="password" autocomplete="new-password" aria-label="企微表格网关 API 密钥" placeholder="留空表示沿用当前密钥" />
+              <small>当前密钥：{{ configSecretStatus('table.api_key') }}</small>
             </label>
+            <label>写入多久没响应算失败（毫秒）<input v-model.number="tableRuntimeDraft.writeTimeoutMs" type="number" min="5000" max="20000" /></label>
+            <label>失败后最多重试几次<input v-model.number="tableRuntimeDraft.retryMaxCount" type="number" min="3" max="10" /></label>
+            <label>每次重试等待多久（秒）<input v-model.number="tableRuntimeDraft.retryIntervalS" type="number" min="30" max="300" /></label>
+            <label>失败多久后提醒（小时）<input v-model.number="tableRuntimeDraft.alertFailureHours" type="number" min="1" max="24" /></label>
             <label>
-              写入超时（毫秒）
-              <input v-model.number="tableRuntimeDraft.writeTimeoutMs" type="number" min="5000" max="20000" />
-            </label>
-            <label>
-              最大重试次数
-              <input v-model.number="tableRuntimeDraft.retryMaxCount" type="number" min="3" max="10" />
-            </label>
-            <label>
-              重试间隔（秒）
-              <input v-model.number="tableRuntimeDraft.retryIntervalS" type="number" min="30" max="300" />
-            </label>
-            <label>
-              失败告警小时数
-              <input v-model.number="tableRuntimeDraft.alertFailureHours" type="number" min="1" max="24" />
-            </label>
-            <label>
-              告警通知对象
+              提醒谁
               <select v-model="tableRuntimeDraft.alertNotifyTarget">
                 <option value="ADMIN">管理员</option>
                 <option value="LEADER">组长</option>
                 <option value="BOTH">管理员和组长</option>
               </select>
             </label>
-            <label>
-              队列提醒阈值
-              <input v-model.number="tableRuntimeDraft.queueWarnThreshold" type="number" min="50" max="500" />
-            </label>
-            <label>
-              队列告警阈值
-              <input v-model.number="tableRuntimeDraft.queueAlertThreshold" type="number" min="500" max="5000" />
-            </label>
+            <label>等待写入超过多少条时提醒<input v-model.number="tableRuntimeDraft.queueWarnThreshold" type="number" min="50" max="500" /></label>
+            <label>等待写入达到多少条时暂停新增<input v-model.number="tableRuntimeDraft.queueAlertThreshold" type="number" min="500" max="5000" /></label>
+            <div class="ops-form-span-2 ops-form-actions"><button class="primary small" type="button" :disabled="loading" @click="saveTableRuntimeSettings">保存服务器部署配置</button></div>
           </div>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center' && advancedConfigurationExpanded && activeAdvancedConfiguration === 'datasource'" class="ops-panel wide configuration-advanced-content">
           <div class="ops-panel-head">
             <div>
               <h2>数据同步策略</h2>
-              <p>控制企微表格同步频率、缓存 TTL、手动同步和导入限制。</p>
+              <p>控制多久自动同步一次，以及一次最多导入多少数据。</p>
             </div>
             <button class="primary small" type="button" :disabled="loading" @click="saveDatasourceRuntimeSettings">保存同步策略</button>
           </div>
           <div class="ops-form-grid">
             <label>
-              自动同步 Cron
+              自动同步时间规则
               <input v-model="datasourceRuntimeDraft.syncCron" type="text" placeholder="0 */30 * * * *" />
+              <small>默认值表示每 30 分钟同步一次；不清楚时保持原值。</small>
             </label>
             <label>
-              客户缓存 TTL（秒）
-              <input v-model.number="datasourceRuntimeDraft.ttlSeconds" type="number" min="60" max="86400" />
-            </label>
-            <label>
-              同步 API 超时（毫秒）
-              <input v-model.number="datasourceRuntimeDraft.syncTimeoutMs" type="number" min="5000" max="60000" />
-            </label>
-            <label>
-              映射版本保留数
-              <input v-model.number="datasourceRuntimeDraft.mappingVersionMax" type="number" min="20" max="200" />
-            </label>
-            <label>
-              CSV 单次导入行数
+              一次最多导入多少行
               <input v-model.number="datasourceRuntimeDraft.importMaxRows" type="number" min="1000" max="10000" />
             </label>
-            <label>
-              手动同步超时（秒）
-              <input v-model.number="datasourceRuntimeDraft.manualSyncTimeoutS" type="number" min="30" max="120" />
-            </label>
-            <label>
-              同步状态刷新（秒）
-              <input v-model.number="datasourceRuntimeDraft.syncStatusRefreshS" type="number" min="15" max="120" />
-            </label>
+          </div>
+          <button class="ops-inline-disclosure-button" type="button" :aria-expanded="datasourceAdvancedExpanded" @click="datasourceAdvancedExpanded = !datasourceAdvancedExpanded">
+            {{ datasourceAdvancedExpanded ? '收起同步异常设置' : '同步异常时再调整' }}
+          </button>
+          <div v-if="datasourceAdvancedExpanded" class="ops-form-grid ops-nested-settings">
+            <label>客户资料多久重新读取一次（秒）<input v-model.number="datasourceRuntimeDraft.ttlSeconds" type="number" min="60" max="86400" /></label>
+            <label>同步多久没响应算失败（毫秒）<input v-model.number="datasourceRuntimeDraft.syncTimeoutMs" type="number" min="5000" max="60000" /></label>
+            <label>保留最近多少次字段设置<input v-model.number="datasourceRuntimeDraft.mappingVersionMax" type="number" min="20" max="200" /></label>
+            <label>手动同步最多等待多久（秒）<input v-model.number="datasourceRuntimeDraft.manualSyncTimeoutS" type="number" min="30" max="120" /></label>
+            <label>同步进度多久刷新一次（秒）<input v-model.number="datasourceRuntimeDraft.syncStatusRefreshS" type="number" min="15" max="120" /></label>
           </div>
         </article>
 
-        <article v-if="activeSection.key === 'configuration-center'" class="ops-panel wide">
+        <article v-if="activeSection.key === 'configuration-center' && promptRulesExpanded" class="ops-panel wide configuration-prompt-editor">
           <div class="ops-panel-head">
             <div>
-              <h2>Prompt 与规则</h2>
+              <h2>提示词与规则</h2>
               <p>红线逐条编辑，前缀规则一行一个，保存后立即生效。</p>
             </div>
             <button class="primary small" type="button" :disabled="loading" @click="savePromptSettings">保存配置</button>
@@ -714,11 +689,13 @@
           <div class="ops-form-grid">
             <label>
               输出格式模板
-              <textarea v-model="promptDraft.format" rows="7" placeholder="填写 Skill 输出格式要求，可使用 {{字段名}} 占位符"></textarea>
+              <textarea v-model="promptDraft.format" rows="7" placeholder="例如：先输出客户称呼，再输出 3 条回复建议，最后输出下一步跟进方向。"></textarea>
+              <small>已有默认内容时通常无需修改；只有输出顺序不符合业务需要时再调整。</small>
             </label>
             <label>
               企业红线
-              <textarea v-model="promptDraft.redLinesText" rows="7" placeholder="每行一条红线"></textarea>
+              <textarea v-model="promptDraft.redLinesText" rows="7" placeholder="不得承诺治疗效果&#10;不得虚构价格或活动&#10;不得索取与服务无关的隐私信息"></textarea>
+              <small>每行一条，按回车换行，不使用分号。</small>
             </label>
             <label>
               昵称前缀去除规则
@@ -756,42 +733,75 @@
               <p>查询已同步到数据库的客户，可按姓名/昵称、手机号、门店、项目、来源或管家搜索。</p>
             </div>
           </div>
-          <div class="ops-filter-bar customer-search-filter">
-            <input v-model="customerSearchKeyword" placeholder="例如：1111、王女士、万江店" @keyup.enter="resetCustomerSearchPageAndLoad" />
-            <button class="primary small" type="button" :disabled="loading" @click="resetCustomerSearchPageAndLoad">查询客户</button>
-            <button class="secondary small" type="button" :disabled="loading" @click="exportCustomerSearch">导出当前查询</button>
+          <div class="ops-customer-query-summary">
+            <div><span>匹配客户</span><strong>{{ customerSearchPageInfo.total }}</strong><small>当前筛选结果</small></div>
+            <div><span>已选标签分类</span><strong>{{ customerSelectedTagCount }}</strong><small>参与本次查询的分类</small></div>
+            <div><span>查询方式</span><strong>{{ customerTagGroupLogic === 'AND' ? '全部分类' : '任一分类' }}</strong><small>标签组合逻辑</small></div>
           </div>
-          <div v-if="customerFilterCategories.length" class="customer-tag-filters">
-            <label class="customer-tag-logic">
-              <span>标签分类组合</span>
-              <select v-model="customerTagGroupLogic" class="customer-tag-logic-select">
-                <option value="AND">全部分类</option>
-                <option value="OR">任一分类</option>
-              </select>
-            </label>
-            <div v-for="category in customerFilterCategories" :key="category.id" class="customer-tag-filter-group">
-              <label>
-                <span>{{ category.categoryName || category.categoryKey }}</span>
-                <select
-                  v-model="customerTagSelections[String(category.id)]"
-                  class="customer-tag-category-select"
-                  :multiple="String(category.selectionMode).toUpperCase() === 'MULTI'"
-                  :size="String(category.selectionMode).toUpperCase() === 'MULTI' ? Math.min(4, Math.max(2, (category.values || []).length)) : 1"
-                >
-                  <option v-for="value in category.values || []" :key="value.id" :value="String(value.id)">
-                    {{ value.displayName || value.tagValue }}
-                  </option>
-                </select>
-              </label>
-              <label v-if="String(category.selectionMode).toUpperCase() === 'MULTI'">
-                <span>匹配方式</span>
-                <select v-model="customerTagMatchModes[String(category.id)]" class="customer-tag-match-select">
-                  <option value="ANY">任一标签</option>
-                  <option value="ALL">全部标签</option>
-                </select>
-              </label>
+          <section class="ops-customer-query-filters" aria-label="客户高级筛选">
+            <div class="customer-filter-section-head" role="button" tabindex="0" :aria-expanded="customerFiltersExpanded" @click="toggleCustomerFilters" @keydown.enter.prevent="toggleCustomerFilters" @keydown.space.prevent="toggleCustomerFilters">
+              <div><strong>筛选条件</strong><span>按客户资料、时间和标签缩小范围</span></div>
+              <div class="customer-filter-head-actions">
+                <button v-if="customerDirectFilterCount + customerSelectedTagCount" class="secondary small" type="button" @click.stop="clearCustomerFilters">重置条件</button>
+                <button class="secondary small" type="button" :aria-expanded="customerFiltersExpanded" @click.stop="toggleCustomerFilters">{{ customerFiltersExpanded ? '收起筛选' : '展开筛选' }}</button>
+              </div>
             </div>
-          </div>
+            <div class="customer-filter-summary-line">
+              <span v-if="customerFilterSummary.length">{{ customerFilterSummary.join(' · ') }}</span>
+              <span v-else>未设置筛选条件</span>
+            </div>
+            <div v-if="customerFiltersExpanded" class="customer-filter-body">
+            <div class="customer-filter-section">
+              <div class="customer-filter-section-title"><strong>基本条件</strong><span>客户当前状态</span></div>
+              <div class="customer-direct-filter-grid">
+                <label class="customer-filter-keyword"><span>关键词</span><input v-model="customerSearchKeyword" placeholder="昵称、手机号、门店、项目或管家" @keyup.enter="resetCustomerSearchPageAndLoad" /></label>
+                <label><span>客户阶段</span><select v-model="customerDirectFilters.customerStage"><option value="">全部阶段</option><option v-for="value in customerFilterOptions.customerStages || []" :key="value" :value="value">{{ translateValue(value) }}</option></select></label>
+                <label><span>线索类型</span><select v-model="customerDirectFilters.leadType"><option value="">全部类型</option><option v-for="value in customerFilterOptions.leadTypes || []" :key="value" :value="value">{{ leadTypeLabel(value) }}</option></select></label>
+                <label><span>来源渠道</span><select v-model="customerDirectFilters.sourceChannel"><option value="">全部来源</option><option v-for="value in customerFilterOptions.sourceChannels || []" :key="value" :value="value">{{ value }}</option></select></label>
+              </div>
+            </div>
+            <div class="customer-filter-section">
+              <div class="customer-filter-section-title"><strong>业务归属</strong><span>来源于同步客户资料</span></div>
+              <div class="customer-direct-filter-grid customer-business-filter-grid">
+                <label><span>负责管家</span><select v-model="customerDirectFilters.assignedKeeper"><option value="">全部管家</option><option v-for="value in customerFilterOptions.assignedKeepers || []" :key="value" :value="value">{{ value }}</option></select></label>
+                <label><span>意向门店</span><select v-model="customerDirectFilters.intendedStore"><option value="">全部门店</option><option v-for="value in customerFilterOptions.intendedStores || []" :key="value" :value="value">{{ value }}</option></select></label>
+                <label><span>意向项目</span><select v-model="customerDirectFilters.intendedProject"><option value="">全部项目</option><option v-for="value in customerFilterOptions.intendedProjects || []" :key="value" :value="value">{{ value }}</option></select></label>
+                <label><span>是否到店</span><select v-model="customerDirectFilters.arrived"><option value="">全部</option><option v-for="value in customerFilterOptions.arrivedValues || []" :key="value" :value="value">{{ value }}</option></select></label>
+              </div>
+            </div>
+            <div class="customer-filter-section">
+              <div class="customer-filter-section-title"><strong>时间与到店</strong><span>按日期范围查找待处理客户</span></div>
+              <div class="customer-date-filter-grid">
+                <label><span>预约日期</span><div><input v-model="customerDirectFilters.appointmentFrom" type="date" aria-label="预约开始日期" /><input v-model="customerDirectFilters.appointmentTo" type="date" aria-label="预约结束日期" /></div></label>
+                <label><span>最近跟进时间</span><div><input v-model="customerDirectFilters.lastFollowupFrom" type="date" aria-label="最近跟进开始日期" /><input v-model="customerDirectFilters.lastFollowupTo" type="date" aria-label="最近跟进结束日期" /></div></label>
+                <label><span>下次跟进时间</span><div><input v-model="customerDirectFilters.nextFollowupFrom" type="date" aria-label="下次跟进开始日期" /><input v-model="customerDirectFilters.nextFollowupTo" type="date" aria-label="下次跟进结束日期" /></div></label>
+                <label><span>客户更新时间</span><div><input v-model="customerDirectFilters.updatedFrom" type="date" aria-label="客户更新开始日期" /><input v-model="customerDirectFilters.updatedTo" type="date" aria-label="客户更新结束日期" /></div></label>
+              </div>
+            </div>
+            <div v-if="customerFilterCategories.length" class="customer-filter-section customer-tag-filter-section">
+              <div class="customer-filter-section-title"><strong>标签条件</strong><span>分类之间的组合方式只在选择多个分类时生效</span></div>
+              <div class="customer-tag-top-row">
+                <label class="customer-tag-logic"><span>分类组合方式</span><select v-model="customerTagGroupLogic" class="customer-tag-logic-select"><option value="AND">全部分类</option><option value="OR">任一分类</option></select></label>
+                <label v-for="category in customerSingleTagFilterCategories" :key="category.id" class="customer-tag-single-filter"><span>{{ category.categoryName || category.categoryKey }}</span><select v-model="customerTagSelections[String(category.id)]" class="customer-tag-category-select"><option value="">未选择</option><option v-for="value in category.values || []" :key="value.id" :value="String(value.id)">{{ value.displayName || value.tagValue }}</option></select></label>
+              </div>
+              <div class="customer-tag-multi-grid">
+                <div v-for="category in customerMultiTagFilterCategories" :key="category.id" class="customer-tag-filter-group">
+                  <div class="customer-tag-group-title"><strong>{{ category.categoryName || category.categoryKey }}</strong><label><span>匹配方式</span><select v-model="customerTagMatchModes[String(category.id)]" class="customer-tag-match-select"><option value="ANY">任一标签</option><option value="ALL">全部标签</option></select></label></div>
+                  <button class="customer-tag-picker-trigger" type="button" :aria-expanded="activeCustomerTagPickerId === String(category.id)" @click="toggleCustomerTagPicker(category.id)"><span>{{ customerTagSelectionLabel(category) }}</span><small>{{ activeCustomerTagPickerId === String(category.id) ? '收起' : '选择' }}</small></button>
+                  <div v-if="activeCustomerTagPickerId === String(category.id)" class="customer-tag-picker-panel">
+                    <input v-model="customerTagSearchKeywords[String(category.id)]" type="search" :aria-label="`搜索${category.categoryName || category.categoryKey}`" placeholder="搜索标签" />
+                    <div class="customer-tag-picker-options">
+                      <button v-for="value in customerTagPickerValues(category)" :key="value.id" class="customer-tag-picker-option" :class="{ active: customerTagSelected(category.id, value.id) }" type="button" :aria-pressed="customerTagSelected(category.id, value.id)" @click="toggleCustomerTag(category.id, value.id)">{{ value.displayName || value.tagValue }}</button>
+                      <span v-if="!customerTagPickerValues(category).length" class="customer-tag-picker-empty">没有匹配的标签</span>
+                    </div>
+                    <div class="customer-tag-picker-actions"><button class="secondary small" type="button" @click="clearCustomerTagSelection(category.id)">清空</button><button class="primary small" type="button" @click="closeCustomerTagPicker">完成</button></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="customer-filter-actions"><span>已选 {{ customerDirectFilterCount + customerSelectedTagCount }} 项条件</span><div><button class="secondary small" type="button" :disabled="loading" @click="exportCustomerSearch">导出当前查询</button><button class="primary small" type="button" :disabled="loading" @click="applyCustomerFilters">查询客户</button></div></div>
+            </div>
+          </section>
           <div class="ops-table">
             <div class="ops-table-row head customer-search">
               <span>客户</span>
@@ -887,7 +897,7 @@
               <span class="ops-field-title">
                 {{ field.label || field.key }}
                 <label class="ops-inline-toggle">
-                  <input v-model="mappingEnabledDraft[field.key]" type="checkbox" />
+                  <input v-model="mappingEnabledDraft[field.key]" class="ops-switch" type="checkbox" />
                   启用
                 </label>
               </span>
@@ -989,7 +999,7 @@
             <button class="secondary small" type="button" :disabled="!quickSearchSelectedIds.length" @click="batchToggleQuickSearch(true)">批量启用</button>
             <button class="secondary small danger" type="button" :disabled="!quickSearchSelectedIds.length" @click="batchDeleteQuickSearch">批量删除</button>
           </div>
-          <div class="ops-card-grid">
+          <div class="ops-card-grid ops-quick-search-list">
             <article v-for="item in quickSearchItems" :key="item.id" class="ops-content-card">
               <label class="ops-checkline">
                 <input v-model="quickSearchSelectedIds" type="checkbox" :value="item.id" />
@@ -1005,7 +1015,7 @@
               </div>
               <div class="ops-row-actions">
                 <button class="secondary small" type="button" @click="openForm('quickSearch', item)">编辑</button>
-                <label class="secondary small file-button">
+                <label v-if="item.contentType === 'IMAGE'" class="secondary small file-button">
                   上传图片
                   <input type="file" accept="image/*" @change="uploadQuickSearchImage($event, item)" />
                 </label>
@@ -1062,7 +1072,7 @@
                   <input v-model="candidatePublishDraft(candidate).leadType" maxlength="32" />
                 </label>
                 <label class="ops-checkline template-candidate-enabled">
-                  <input v-model="candidatePublishDraft(candidate).enabled" type="checkbox" />
+                  <input v-model="candidatePublishDraft(candidate).enabled" class="ops-switch" type="checkbox" />
                   发布后立即可用
                 </label>
               </div>
@@ -1084,6 +1094,12 @@
               <p>管理员可为组长或管家单独授予客户标签管理权限。</p>
             </div>
             <button class="primary small" type="button" @click="openForm('account')">新增账号</button>
+          </div>
+          <div class="ops-account-summary">
+            <div v-for="item in accountSummary" :key="item.label">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
           </div>
           <div class="ops-filter-bar three">
             <input v-model="accountKeyword" placeholder="搜索姓名或手机号" @change="resetAccountPageAndLoad" />
@@ -1112,10 +1128,13 @@
             <div v-for="account in accounts" :key="account.id" class="ops-table-row accounts">
               <span>{{ account.displayName || account.username }}</span>
               <span>{{ account.phone || account.username }}</span>
-              <span>{{ roleLabel(account.role) }}</span>
+              <span><b class="ops-role-badge" :class="`role-${String(account.role || '').toLowerCase()}`">{{ roleLabel(account.role) }}</b></span>
               <span>{{ account.leaderName || leaderName(account.leaderId) }}</span>
               <span>{{ formatDate(account.lastLoginAt) }}</span>
-              <span><b :class="account.isEnabled === false ? 'warn-text' : 'ok-text'">{{ account.isEnabled === false ? '已停用' : '启用中' }}</b></span>
+              <span class="ops-account-state">
+                <b :class="account.isEnabled === false ? 'warn-text' : 'ok-text'">{{ account.isEnabled === false ? '已停用' : '启用中' }}</b>
+                <small v-if="hasTagManagementPermission(account)">标签管理权限</small>
+              </span>
               <span class="ops-row-actions">
                 <button class="secondary small" type="button" @click="openForm('account', account)">编辑</button>
                 <button class="secondary small" type="button" @click="resetAccountPassword(account)">重置密码</button>
@@ -1190,16 +1209,20 @@
             <button class="secondary small" type="button" :disabled="!ruleSelectedIds.length" @click="batchToggleRules(false)">批量停用</button>
             <button class="secondary small danger" type="button" :disabled="!deletableSelectedRules.length" @click="batchDeleteRules">批量删除</button>
           </div>
-          <div class="ops-card-grid">
-            <article v-for="rule in rules" :key="rule.id" class="ops-rule-card">
+          <div class="ops-rule-list">
+            <article v-for="rule in rules" :key="rule.id" class="ops-rule-card ops-rule-row">
               <label class="ops-checkline">
                 <input v-model="ruleSelectedIds" type="checkbox" :value="rule.id" />
-                选中
+                <span>选中</span>
               </label>
               <div>
                 <strong>{{ rule.name }}</strong>
                 <span>{{ actionTypeLabel(rule.actionType) }} · 优先级 {{ rule.priority }}</span>
                 <p>{{ rulePreview(rule) }}</p>
+              </div>
+              <div class="ops-rule-status-stack">
+                <b :class="rule.enabled === false ? 'warn-text' : 'ok-text'">{{ rule.enabled === false ? '已停用' : '启用中' }}</b>
+                <small>{{ isBuiltinRule(rule) ? '系统内置' : '自定义规则' }}</small>
               </div>
               <div class="ops-row-actions">
                 <button class="secondary small" type="button" @click="openForm('rule', rule)">编辑</button>
@@ -1404,19 +1427,109 @@
           <div class="ops-row-actions">
             <button class="secondary small" type="button" @click="downloadAnalyticsCsv">导出当前看板</button>
           </div>
-          <div class="ops-analytics-grid">
-            <div v-for="block in analyticsBlocks" :key="block.title" class="ops-analytics-block">
-              <h3>{{ block.title }}</h3>
-              <p>{{ block.summary }}</p>
+          <section class="ops-analytics-visual-dashboard" aria-label="运营分析概览">
+            <div class="ops-analytics-visual-head">
+              <div>
+                <span>AI 使用概览</span>
+                <p>基于当前筛选条件下的真实调用、采纳与转化数据。</p>
+              </div>
             </div>
-          </div>
+            <div class="ops-analytics-summary-row">
+              <div v-for="metric in analyticsOverviewMetrics" :key="metric.label" class="ops-analytics-summary-card">
+                <span>{{ metric.label }}</span>
+                <strong>{{ metric.value }}</strong>
+                <small>{{ metric.help }}</small>
+              </div>
+            </div>
+
+            <div class="ops-analytics-trend-panel">
+              <div class="ops-analytics-panel-head">
+                <div>
+                  <strong>调用趋势</strong>
+                  <span>每日 AI 调用量</span>
+                </div>
+                <small v-if="analyticsTrendRows.length">{{ analyticsTrendRows.length }} 个数据点</small>
+              </div>
+              <div v-if="analyticsTrendRows.length" class="ops-analytics-trend">
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="AI 调用趋势线">
+                  <path class="ops-analytics-trend-area" :d="analyticsTrendAreaPath" />
+                  <path class="ops-analytics-trend-line" :d="analyticsTrendLinePath" />
+                  <circle
+                    v-for="point in analyticsTrendPoints"
+                    :key="point.key"
+                    class="ops-analytics-trend-point"
+                    :cx="point.x"
+                    :cy="point.y"
+                    r="1.8"
+                  />
+                </svg>
+                <div class="ops-analytics-trend-labels">
+                  <span>{{ analyticsTrendRows[0]?.label }}</span>
+                  <strong>{{ analyticsTrendLatestValue }} 次</strong>
+                  <span>{{ analyticsTrendRows[analyticsTrendRows.length - 1]?.label }}</span>
+                </div>
+              </div>
+              <p v-else class="ops-empty compact">{{ analyticsStatus.overview.loading ? '正在刷新趋势数据' : '当前筛选条件下暂无调用趋势数据' }}</p>
+            </div>
+
+            <div class="ops-analytics-ring-row">
+              <div v-for="metric in analyticsRingMetrics" :key="metric.label" class="ops-analytics-ring-card">
+                <div class="ops-analytics-ring" :style="{ '--ring-progress': `${metric.progress}%` }">
+                  <div>
+                    <strong>{{ metric.value }}</strong>
+                    <span>{{ metric.label }}</span>
+                  </div>
+                </div>
+                <small>{{ metric.help }}</small>
+              </div>
+            </div>
+
+            <div class="ops-analytics-conversion-row">
+              <article class="ops-analytics-funnel-panel">
+                <div class="ops-analytics-panel-head">
+                  <div>
+                    <strong>转化漏斗</strong>
+                    <span>按当前筛选返回的阶段数据</span>
+                  </div>
+                </div>
+                <div v-if="analyticsFunnelStages.length" class="ops-analytics-funnel">
+                  <div v-for="stage in analyticsFunnelStages" :key="stage.key" class="ops-analytics-funnel-step" :style="{ '--funnel-width': `${stage.width}%` }">
+                    <span>{{ stage.label }}</span>
+                    <strong>{{ stage.count }}</strong>
+                    <small>{{ stage.rate }}</small>
+                  </div>
+                </div>
+                <p v-else class="ops-empty compact">{{ analyticsStatus.funnels.loading ? '正在刷新漏斗数据' : '当前筛选条件下暂无漏斗数据' }}</p>
+              </article>
+
+              <article class="ops-analytics-ranking-panel">
+                <div class="ops-analytics-panel-head">
+                  <div>
+                    <strong>内容排行</strong>
+                    <span>来自使用与审计记录</span>
+                  </div>
+                </div>
+                <ol v-if="analyticsRankingItems.length" class="ops-analytics-ranking">
+                  <li v-for="(item, index) in analyticsRankingItems" :key="item.key">
+                    <b>{{ index + 1 }}</b>
+                    <div>
+                      <strong>{{ item.title }}</strong>
+                      <span>{{ item.detail }}</span>
+                    </div>
+                    <em>{{ item.useCount }} 次</em>
+                  </li>
+                </ol>
+                <p v-else class="ops-empty compact">{{ analyticsStatus.contentRanking.loading ? '正在刷新排行数据' : '当前筛选条件下暂无内容使用记录' }}</p>
+              </article>
+            </div>
+          </section>
           <div v-if="analyticsFailedSections.length" class="ops-detail-box warning">
             <strong>部分分析区块刷新失败</strong>
             <p>{{ analyticsFailureSummary }}</p>
             <button class="secondary small" type="button" @click="loadAnalyticsDashboard()">重试分析区块</button>
           </div>
           <div class="ops-insight-grid">
-            <article v-for="section in analyticsDetailSections" :key="section.key" class="ops-detail-box">
+            <article v-for="section in analyticsDetailSections.filter((section) => !['trend', 'content'].includes(section.key))" :key="section.key" class="ops-detail-box">
               <strong>{{ section.title }}</strong>
               <p>{{ section.description }}</p>
               <p v-if="section.status.error" class="ops-empty compact error">刷新失败：{{ section.status.error }}</p>
@@ -1443,7 +1556,9 @@
               </button>
             </div>
 
-            <div class="tag-analytics-filter-grid">
+            <details class="ops-tag-analytics-filters">
+              <summary>筛选条件</summary>
+              <div class="tag-analytics-filter-grid">
               <label>
                 <span class="ops-label-title">客户更新开始</span>
                 <input v-model="tagAnalyticsFilters.updatedFrom" type="date" />
@@ -1488,9 +1603,9 @@
                   <option v-for="option in tagAnalytics?.filterOptions.employees ?? []" :key="option.account" :value="option.account">{{ option.label }}</option>
                 </select>
               </label>
-            </div>
+              </div>
 
-            <div v-if="customerFilterCategories.length" class="customer-tag-filters tag-analytics-tag-filters">
+              <div v-if="customerFilterCategories.length" class="customer-tag-filters tag-analytics-tag-filters">
               <label class="customer-tag-logic">
                 <span class="ops-label-title">标签分类组合</span>
                 <select v-model="tagAnalyticsFilters.tagGroupLogic" class="customer-tag-logic-select">
@@ -1518,12 +1633,21 @@
                   </select>
                 </label>
               </div>
-            </div>
+              </div>
+            </details>
 
             <div v-if="tagAnalyticsStatus.error" class="ops-detail-box warning">
               <strong>标签统计刷新失败</strong>
               <p>{{ tagAnalyticsStatus.error }}</p>
               <button class="secondary small" type="button" @click="loadTagAnalytics()">重试标签统计</button>
+            </div>
+
+            <div class="ops-tag-analytics-core-summary">
+              <div v-for="metric in tagAnalyticsCoreMetrics" :key="metric.label" class="ops-tag-analytics-core-card">
+                <strong>{{ metric.value }}</strong>
+                <span>{{ metric.label }}</span>
+                <small>{{ metric.help }}</small>
+              </div>
             </div>
 
             <div class="tag-analytics-summary-grid">
@@ -1688,10 +1812,23 @@
             </label>
             <label>
               <span class="ops-label-title">转换目标阶段</span>
-              <select v-model="governanceDraft.conversionTargetStages" multiple :size="Math.min(6, Math.max(3, supervisionMetadata.customerStages.length))">
-                <option v-for="stage in supervisionMetadata.customerStages" :key="stage" :value="stage">{{ stage }}</option>
-              </select>
-              <small>选项来自当前客户档案的阶段值，不预设业务阶段。</small>
+              <div class="ops-stage-target-editor">
+                <div data-testid="conversion-target-stages" class="ops-chip-list">
+                  <span v-for="stage in governanceDraft.conversionTargetStages" :key="stage" class="ops-chip">
+                    {{ stage }}
+                    <button class="ops-chip-remove" type="button" :aria-label="`移除目标阶段 ${stage}`" :title="`移除 ${stage}`" @click="removeConversionTargetStage(stage)">×</button>
+                  </span>
+                  <span v-if="!governanceDraft.conversionTargetStages.length" class="ops-inline-info">尚未选择目标阶段</span>
+                </div>
+                <div class="ops-stage-target-actions">
+                  <select v-model="conversionStageToAdd" data-testid="conversion-stage-picker" aria-label="添加转换目标阶段">
+                    <option value="">选择阶段</option>
+                    <option v-for="stage in availableConversionTargetStages" :key="stage" :value="stage">{{ stage }}</option>
+                  </select>
+                  <button class="secondary small" type="button" :disabled="!conversionStageToAdd" @click="addConversionTargetStage">添加目标阶段</button>
+                </div>
+              </div>
+              <small>可添加或移除目标阶段；选项来自当前客户档案，避免保存无法命中的阶段。</small>
             </label>
           </div>
           <p v-if="!supervisionMetadata.customerStages.length" class="ops-empty">当前没有可配置的客户阶段，请先同步或导入客户档案数据。</p>
@@ -1817,7 +1954,7 @@
           <div class="ops-panel-head">
             <div>
               <h2>审计日志</h2>
-              <p>查询、筛选、导出，不允许修改日志。</p>
+              <p>这里记录后台谁在什么时间做了什么操作；展开详情可查看该次操作的原始记录，日志不能修改。</p>
             </div>
             <button class="secondary small" type="button" @click="exportAuditLogs">导出 CSV</button>
           </div>
@@ -1829,7 +1966,9 @@
             </select>
             <input v-model="auditTargetId" placeholder="对象 ID" @change="resetAuditPageAndLoad" />
           </div>
-          <div class="audit-action-groups">
+          <details class="ops-audit-filters">
+            <summary>动作筛选 <span>{{ selectedAuditActionsText }}</span></summary>
+          <div class="audit-action-groups ops-audit-action-grid">
             <section v-for="group in auditActionGroups" :key="group.group" class="audit-action-group">
               <strong>{{ group.group }}</strong>
               <div class="audit-action-picker">
@@ -1850,6 +1989,7 @@
               </div>
             </section>
           </div>
+          </details>
           <div class="ops-filter-bar three">
             <input v-model="auditStartDate" type="date" @change="loadAuditLogs" />
             <input v-model="auditEndDate" type="date" @change="loadAuditLogs" />
@@ -1927,8 +2067,121 @@
       </section>
     </main>
 
-    <div v-if="activeForm" class="ops-drawer-backdrop" @click.self="closeForm">
-      <form class="ops-drawer" @submit.prevent="submitActiveForm">
+    <div v-if="activeLlmCapabilityConfig" class="ops-drawer-backdrop ops-modal-backdrop" @click.self="closeLlmCapabilityConfig">
+      <form class="ops-drawer ops-modal-form ops-llm-capability-modal" @submit.prevent="saveActiveLlmCapabilityConfig">
+        <header>
+          <div>
+            <h2>{{ activeLlmCapabilityConfig.title }}</h2>
+            <p>{{ activeLlmCapabilityConfig.description }}</p>
+          </div>
+          <button class="icon-close-button" type="button" aria-label="关闭任务配置" title="关闭任务配置" @click="closeLlmCapabilityConfig">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="ops-form-grid">
+          <label v-if="activeLlmCapabilityConfig.hasSkillFallback" class="ops-boolean-field">
+            模型不可用时改用原有助手
+            <input v-model="activeLlmCapabilityConfig.draft.fallbackToSkill" class="ops-switch" type="checkbox" />
+          </label>
+          <label>
+            回答变化程度
+            <select v-model="activeLlmCapabilityConfig.draft.temperature">
+              <option value="">跟随当前模型</option>
+              <option value="0.2">稳定：措辞变化较少</option>
+              <option value="0.7">均衡：稳定并保留变化</option>
+              <option value="1">灵活：措辞变化较多</option>
+              <option v-if="!isStandardTemperature(activeLlmCapabilityConfig.draft.temperature)" :value="String(activeLlmCapabilityConfig.draft.temperature)">
+                沿用当前自定义设置
+              </option>
+            </select>
+            <small>不确定时选择“跟随当前模型”，无需理解内部数值。</small>
+          </label>
+          <label>
+            回答长度
+            <select v-model.number="activeLlmCapabilityConfig.draft.maxTokens">
+              <option :value="300">简短</option>
+              <option :value="500">常规</option>
+              <option :value="900">详细</option>
+              <option :value="1500">很详细</option>
+              <option v-if="!isStandardAnswerLength(activeLlmCapabilityConfig.draft.maxTokens)" :value="Number(activeLlmCapabilityConfig.draft.maxTokens)">
+                沿用当前自定义长度
+              </option>
+            </select>
+            <small>只限制一次回答的大致篇幅，不影响模型读取客户内容。</small>
+          </label>
+          <div class="ops-form-span-2 ops-task-prompt-disclosure">
+            <div class="ops-task-prompt-heading">
+              <span>给模型的任务说明</span>
+              <button class="secondary small" type="button" :aria-expanded="llmCapabilityPromptExpanded" @click="llmCapabilityPromptExpanded = !llmCapabilityPromptExpanded">
+                {{ llmCapabilityPromptExpanded ? '收起高级任务说明' : '查看高级任务说明' }}
+              </button>
+            </div>
+            <label v-if="llmCapabilityPromptExpanded">
+              <textarea v-model="activeLlmCapabilityConfig.draft.systemPrompt" rows="7" aria-label="给模型的任务说明" :placeholder="activeLlmCapabilityConfig.promptPlaceholder"></textarea>
+              <small>系统已经提供默认说明。只有需要改变语气、返回格式或业务限制时才修改。</small>
+            </label>
+          </div>
+        </div>
+        <div class="ops-detail-box">
+          <strong>当前策略</strong>
+          <p>{{ activeLlmCapabilityConfig.strategy }}</p>
+        </div>
+        <footer>
+          <button class="secondary" type="button" @click="closeLlmCapabilityConfig">关闭</button>
+          <button class="primary" type="submit" :disabled="loading">保存{{ activeLlmCapabilityConfig.title }}</button>
+        </footer>
+      </form>
+    </div>
+
+    <div v-if="llmProfileTestModalOpen" class="ops-drawer-backdrop ops-modal-backdrop" @click.self="closeLlmProfileTest">
+      <form class="ops-drawer ops-modal-form ops-profile-test-modal" @submit.prevent="submitLlmProfileTest">
+        <header>
+          <div>
+            <h2>档案提取后台测试</h2>
+            <p>当前模型：{{ llmProfileTestEnvironment?.envName || '未选择' }}</p>
+          </div>
+          <button class="icon-close-button" type="button" aria-label="关闭档案提取测试" title="关闭测试" @click="closeLlmProfileTest">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="ops-form-grid one">
+          <label>
+            <span class="ops-label-title">测试线索类型</span>
+            <select v-model="llmProfileTestLeadType">
+              <option v-for="option in LLM_PROFILE_LEAD_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+          <label>
+            <span class="ops-label-title">输入脱敏测试消息</span>
+            <textarea v-model="llmProfileTestMessage" rows="6" maxlength="2000" placeholder="例如：客户表示最近睡眠不好，想了解调理方案。"></textarea>
+            <small>不会写入客户档案、不会改标签、不会发消息；内容会发送到所选 LLM，请使用脱敏文本。</small>
+          </label>
+        </div>
+        <div class="ops-detail-box warning">
+          <strong>当前只支持这项后台业务测试</strong>
+          <p>识图目前只能测试连接；回复生成、跟进建议、异常识别和总结补位需要到工作台验收。</p>
+        </div>
+        <div v-if="llmProfileTestEnvironment && llmProfileTestResults[String(llmProfileTestEnvironment.id)]" class="ops-profile-test-result ops-detail-box">
+          <strong>测试结果</strong>
+          <p>{{ summarizeSkillTest(llmProfileTestResults[String(llmProfileTestEnvironment.id)]) }}</p>
+          <template v-if="llmProfileTestResults[String(llmProfileTestEnvironment.id)].profileAnalysis">
+            <p v-for="(update, field) in profileFieldUpdates(llmProfileTestResults[String(llmProfileTestEnvironment.id)])" :key="`modal-field-${String(field)}`">
+              {{ profileFieldLine(String(field), update) }}
+            </p>
+            <p v-for="(decision, index) in profileTagDecisions(llmProfileTestResults[String(llmProfileTestEnvironment.id)])" :key="`modal-decision-${decision.categoryCode || index}`">
+              {{ profileDecisionLine(decision) }}；依据：{{ decision.evidence || '未提供' }}
+            </p>
+          </template>
+        </div>
+        <footer>
+          <button class="secondary" type="button" @click="closeLlmProfileTest">关闭</button>
+          <button class="primary" type="submit" :disabled="loading || !llmProfileTestMessage.trim()">开始测试</button>
+        </footer>
+      </form>
+    </div>
+
+    <div v-if="activeForm" class="ops-drawer-backdrop" :class="{ 'ops-modal-backdrop': activeForm === 'quickSearch' }" @click.self="closeForm">
+      <form class="ops-drawer" :class="{ 'ops-modal-form': activeForm === 'quickSearch' }" @submit.prevent="submitActiveForm">
         <header>
           <div>
             <h2>{{ activeFormTitle }}</h2>
@@ -1959,8 +2212,8 @@
               <label class="ops-rule-tag-logic">
                 <span class="ops-label-title">分类组之间</span>
                 <select v-model="formDraft.tagGroupOperator">
-                  <option value="AND">AND</option>
-                  <option value="OR">OR</option>
+                  <option value="AND">全部分类</option>
+                  <option value="OR">任一分类</option>
                 </select>
               </label>
             </div>
@@ -1994,8 +2247,8 @@
               <label>
                 <span class="ops-label-title">分类内匹配</span>
                 <select class="rule-tag-match" v-model="condition.match">
-                  <option value="ANY">ANY：命中任意一个</option>
-                  <option value="ALL">ALL：必须全部命中</option>
+                  <option value="ANY">任一标签</option>
+                  <option value="ALL">全部标签</option>
                 </select>
               </label>
               <button v-if="formDraft.tagConditions.length > 1" class="secondary small" type="button" @click="removeRuleTagCondition(index)">删除</button>
@@ -2038,7 +2291,11 @@
               </select>
             </label>
           </section>
-          <label v-for="field in activeFormFields" :key="field.key" :class="{ 'ops-form-span-2': field.type === 'textarea' }">
+          <template v-for="field in activeFormFields" :key="field.key">
+          <label
+            v-if="activeForm !== 'quickSearch' || field.key !== 'imageUrl' || formDraft.contentType === 'IMAGE'"
+            :class="{ 'ops-form-span-2': field.type === 'textarea', 'ops-boolean-field': field.type === 'checkbox', 'ops-quick-search-image-field': activeForm === 'quickSearch' && field.key === 'imageUrl' }"
+          >
             <span class="ops-label-title">{{ field.label }}</span>
             <div v-if="activeForm === 'quickSearch' && field.key === 'content'" class="ops-variable-bar">
               <button
@@ -2051,15 +2308,29 @@
                 {{ variable.label }}
               </button>
             </div>
-            <select v-if="field.type === 'select'" v-model="formDraft[field.key]" :disabled="field.disabled" @change="onFormFieldChange(field.key)">
+            <div v-if="activeForm === 'quickSearch' && field.key === 'imageUrl'" class="ops-quick-search-image-control">
+              <div v-if="formDraft.imageUrl" class="ops-image-preview">
+                <img :src="String(formDraft.imageUrl)" alt="图文素材预览" />
+              </div>
+              <div class="ops-row-actions">
+                <label class="secondary small file-button">
+                  {{ formDraft.imageUrl ? '更换图片' : '上传图片' }}
+                  <input type="file" accept="image/*" @change="uploadQuickSearchImageDraft" />
+                </label>
+                <button v-if="formDraft.imageUrl" class="secondary small" type="button" @click="formDraft.imageUrl = ''">移除图片</button>
+              </div>
+              <small>仅图文素材需要图片，其他速搜内容直接填写文字即可。</small>
+            </div>
+            <select v-else-if="field.type === 'select'" v-model="formDraft[field.key]" :disabled="field.disabled" @change="onFormFieldChange(field.key)">
               <option v-for="option in field.options ?? []" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
             </select>
             <textarea v-else-if="field.type === 'textarea'" v-model="formDraft[field.key]" :placeholder="field.placeholder" :disabled="field.disabled" rows="5"></textarea>
-            <input v-else-if="field.type === 'checkbox'" v-model="formDraft[field.key]" type="checkbox" :disabled="field.disabled" />
+            <input v-else-if="field.type === 'checkbox'" v-model="formDraft[field.key]" class="ops-switch" type="checkbox" :disabled="field.disabled" />
             <input v-else-if="field.type === 'number'" v-model.number="formDraft[field.key]" type="number" :placeholder="field.placeholder" :disabled="field.disabled" :min="field.min" :max="field.max" :step="field.step" />
             <input v-else v-model="formDraft[field.key]" :type="field.type" :placeholder="field.placeholder" :disabled="field.disabled" />
             <small v-if="field.help">{{ field.help }}</small>
           </label>
+          </template>
         </div>
         <p v-if="formError" class="admin-message error">{{ formError }}</p>
         <footer>
@@ -2202,6 +2473,8 @@ type SectionKey =
   | 'system-health';
 type NoticeKind = 'info' | 'error';
 type AnyRecord = Record<string, any>;
+type LlmCapabilityKey = 'reply' | 'profile' | 'followup' | 'abnormal' | 'summary';
+type AdvancedConfigurationKey = 'llm' | 'skillEnvironment' | 'skillRuntime' | 'imageRuntime' | 'datasource';
 type SupervisionMetricKey =
   | 'AI_USAGE_RATE'
   | 'AI_COVERAGE'
@@ -2304,7 +2577,7 @@ const SUPERVISION_EVENT_LABELS: Record<string, string> = {
 
 const sections: AdminSection[] = [
   { key: 'skill-scenes', groupKey: 'config-center', group: '运营 A', module: 'A', title: 'Skill 场景管理', subtitle: '场景绑定、测试、调用监控', description: '按业务场景和线索类型维护 AI 路由，测试真实话术效果并观察调用质量。', primaryAction: '新增 Skill 绑定' },
-  { key: 'configuration-center', groupKey: 'config-center', group: '运营 B', module: 'B', title: '配置中心', subtitle: 'AI、LLM、识图、Prompt', description: '集中管理 Skill 环境、LLM 思考环境、识图环境、Prompt 模板、企业红线和降级回复。', primaryAction: '新增 Skill 环境' },
+  { key: 'configuration-center', groupKey: 'config-center', group: '运营 B', module: 'B', title: '配置中心', subtitle: 'AI、LLM、识图、提示词', description: '集中管理 Skill 环境、LLM 模型环境、识图模型环境、提示词模板、企业红线和降级回复。', primaryAction: '新增 Skill 环境' },
   { key: 'data-integration', groupKey: 'data-content', group: '运营 C', module: 'C', title: '客户数据对接', subtitle: '数据源、字段映射、同步、导入', description: '管理企微表格数据源、字段映射版本、同步状态和 CSV 导入。', primaryAction: '添加数据源' },
   { key: 'quick-search-content', groupKey: 'data-content', group: '运营 D', module: 'D', title: '速搜内容管理', subtitle: '模板、知识、图片、小程序', description: '维护桌面端速搜可用的话术、知识片段、门店定位、图片素材和小程序引导。', primaryAction: '新增内容' },
   { key: 'template-promotion-candidates', groupKey: 'data-content', group: '运营 D1', module: 'D1', title: '可推广模板', subtitle: '员工候选、团队发布', description: '查阅员工保存的调整稿和使用情况，决定是否发布为全员可用模板。', primaryAction: '刷新候选' },
@@ -2317,7 +2590,7 @@ const sections: AdminSection[] = [
   { key: 'version-management', groupKey: 'insight-ops', group: '运营 K', module: 'K', title: '版本管理', subtitle: '桌面版本、发布、撤回', description: '管理桌面端版本、发布策略、灰度和撤回记录。', primaryAction: '新增版本' },
   { key: 'system-notices', groupKey: 'insight-ops', group: '运营 L', module: 'L', title: '系统公告', subtitle: '公告、排期、停止', description: '发布工具能力变化、维护窗口和故障通知。', primaryAction: '新增公告' },
   { key: 'audit-logs', groupKey: 'insight-ops', group: '运营 M', module: 'M', title: '操作审计日志', subtitle: '查询、详情、导出', description: '查询、筛选和导出关键后台操作，审计日志不可修改。', primaryAction: '导出 CSV' },
-  { key: 'system-health', groupKey: 'insight-ops', group: '运营 N', module: 'N', title: '系统健康监控', subtitle: 'DB、缓存、AI、识图、表格', description: '监控数据库、缓存、Skill、识图和表格通道状态，查看故障与恢复情况。', primaryAction: '手动刷新' }
+  { key: 'system-health', groupKey: 'insight-ops', group: '运营 N', module: 'N', title: '系统健康监控', subtitle: '数据库、缓存、AI、识图、表格', description: '监控数据库、缓存、Skill、识图和表格通道状态，查看故障与恢复情况。', primaryAction: '手动刷新' }
 ];
 
 const SKILL_SCENE_OPTIONS = [
@@ -2432,7 +2705,7 @@ const QUICK_SEARCH_CONTENT_META: Record<string, { contentLabel: string; contentP
     contentLabel: '图片说明/配套话术',
     contentPlaceholder: '说明图片适用场景，或写发送图片时配套的一句话',
     imageLabel: '图片地址',
-    imagePlaceholder: '上传图片后会自动回填，也可以粘贴图片 URL',
+    imagePlaceholder: '上传图片后会自动回填，也可以粘贴图片链接',
     help: '适合海报、案例图、项目图等素材。'
   },
   MINI_PROGRAM: {
@@ -2445,7 +2718,7 @@ const QUICK_SEARCH_CONTENT_META: Record<string, { contentLabel: string; contentP
 };
 
 const allNavGroups: AdminNavGroup[] = [
-  { key: 'config-center', title: '配置中心', subtitle: 'Skill、AI、识图、Prompt', defaultKey: 'skill-scenes', pages: sections.filter((section) => section.groupKey === 'config-center') },
+  { key: 'config-center', title: '配置中心', subtitle: 'Skill、AI、识图、提示词', defaultKey: 'skill-scenes', pages: sections.filter((section) => section.groupKey === 'config-center') },
   { key: 'data-content', title: '数据源与内容', subtitle: '数据对接、速搜内容', defaultKey: 'data-integration', pages: sections.filter((section) => section.groupKey === 'data-content') },
   { key: 'org-rules-tags', title: '组织与规则', subtitle: '账号、规则、标签', defaultKey: 'account-permissions', pages: sections.filter((section) => section.groupKey === 'org-rules-tags') },
   { key: 'insight-ops', title: '分析与系统', subtitle: '看板、监督、配置、审计', defaultKey: 'analytics-dashboard', pages: sections.filter((section) => section.groupKey === 'insight-ops') }
@@ -2479,6 +2752,16 @@ const skillAnalyticsDays = ref(7);
 const skillTestMessage = ref('请基于当前客户状态生成一条跟进回复');
 const llmProfileTestLeadType = ref('PENDING');
 const llmProfileTestMessage = ref('客户明确说想了解适合自己的改善方案');
+const llmProfileTestModalOpen = ref(false);
+const activeLlmCapability = ref<LlmCapabilityKey | null>(null);
+const advancedConfigurationExpanded = ref(false);
+const activeAdvancedConfiguration = ref<AdvancedConfigurationKey | null>(null);
+const promptRulesExpanded = ref(false);
+const tableServerSettingsExpanded = ref(false);
+const datasourceAdvancedExpanded = ref(false);
+const llmCapabilityPromptExpanded = ref(false);
+const selectedImageEnvironmentId = ref('');
+const llmProfileTestEnvironment = ref<AnyRecord | null>(null);
 const selectedPromptType = ref('format');
 const datasourceColumns = ref<Array<AnyRecord | string>>([]);
 const datasourceColumnStatus = ref<AnyRecord | null>(null);
@@ -2487,6 +2770,27 @@ const customerSearchKeyword = ref('');
 const customerTagGroupLogic = ref<'AND' | 'OR'>('AND');
 const customerTagSelections = reactive<Record<string, string | string[]>>({});
 const customerTagMatchModes = reactive<Record<string, 'ANY' | 'ALL'>>({});
+const customerFiltersExpanded = ref(false);
+const activeCustomerTagPickerId = ref('');
+const customerTagSearchKeywords = reactive<Record<string, string>>({});
+const customerFilterOptions = ref<AnyRecord>({});
+const customerDirectFilters = reactive({
+  sourceChannel: '',
+  leadType: '',
+  assignedKeeper: '',
+  intendedStore: '',
+  intendedProject: '',
+  customerStage: '',
+  arrived: '',
+  appointmentFrom: '',
+  appointmentTo: '',
+  lastFollowupFrom: '',
+  lastFollowupTo: '',
+  nextFollowupFrom: '',
+  nextFollowupTo: '',
+  updatedFrom: '',
+  updatedTo: ''
+});
 const quickSearchKeyword = ref('');
 const quickSearchType = ref('');
 const quickSearchEnabledFilter = ref('');
@@ -2738,6 +3042,57 @@ const llmSummaryDraft = reactive({
   maxTokens: 500,
   systemPrompt: ''
 });
+const defaultLlmEnvironment = computed(() => llmEnvironments.value.find((environment) => isActiveEnvironment(environment)) || llmEnvironments.value[0] || null);
+const activeLlmCapabilityConfig = computed<{
+  title: string;
+  description: string;
+  promptPlaceholder: string;
+  hasSkillFallback: boolean;
+  draft: AnyRecord;
+  strategy: string;
+} | null>(() => {
+  if (activeLlmCapability.value === 'reply') return {
+    title: '回复生成',
+    description: '设置回复建议的变化程度、篇幅，以及模型不可用时怎么继续工作。',
+    promptPlaceholder: '例如：生成三条可以直接发送给客户的回复建议',
+    hasSkillFallback: true,
+    draft: llmReplyDraft,
+    strategy: `${llmReplyDraft.enabled ? '优先由模型生成回复建议' : '继续使用原有助手生成回复建议'}；${llmReplyDraft.fallbackToSkill ? '模型不可用时自动改用原有助手' : '模型不可用时显示备用提示'}。`
+  };
+  if (activeLlmCapability.value === 'profile') return {
+    title: '档案提取',
+    description: '调整资料更新建议的输出规则；后台测试不会直接写入客户档案。',
+    promptPlaceholder: '例如：从对话中提取客户明确表达的资料更新建议',
+    hasSkillFallback: true,
+    draft: llmProfileDraft,
+    strategy: `${llmProfileDraft.enabled ? '发送确认后优先由模型提取资料更新' : '继续使用原有助手提取资料更新'}；${llmProfileDraft.fallbackToSkill ? '模型不可用时自动改用原有助手' : '模型不可用时不生成资料建议'}。`
+  };
+  if (activeLlmCapability.value === 'followup') return {
+    title: '跟进建议',
+    description: '当回复流程没有给出下一步计划时，补充跟进时间和方向。',
+    promptPlaceholder: '例如：缺少下一步计划时，给出跟进时间和方向',
+    hasSkillFallback: false,
+    draft: llmFollowupDraft,
+    strategy: llmFollowupDraft.enabled ? '缺少跟进建议时由 LLM 补充。' : '继续使用当前回复方向作为跟进方向。'
+  };
+  if (activeLlmCapability.value === 'abnormal') return {
+    title: '异常识别',
+    description: '发送确认后异步识别明确投诉、退款或流失风险。',
+    promptPlaceholder: '例如：识别明确投诉、退款或流失风险',
+    hasSkillFallback: false,
+    draft: llmAbnormalDraft,
+    strategy: llmAbnormalDraft.enabled ? '发送确认后异步识别客户不满和流失风险。' : '不启用 LLM 异常识别。'
+  };
+  if (activeLlmCapability.value === 'summary') return {
+    title: '总结补位',
+    description: '发送确认没有会话摘要时，生成供档案和表格写入使用的短备注。',
+    promptPlaceholder: '例如：生成供客户档案和表格使用的简短会话摘要',
+    hasSkillFallback: false,
+    draft: llmSummaryDraft,
+    strategy: llmSummaryDraft.enabled ? '缺少摘要时由 LLM 生成跟进备注。' : '缺少摘要时继续使用已发送文本作为备注。'
+  };
+  return null;
+});
 const tableRuntimeDraft = reactive({
   apiBaseUrl: '',
   apiKey: '',
@@ -2748,6 +3103,10 @@ const tableRuntimeDraft = reactive({
   alertNotifyTarget: 'ADMIN',
   queueWarnThreshold: 100,
   queueAlertThreshold: 1000
+});
+const smartSheetConnectionDraft = reactive({
+  documentUrl: '',
+  connectedName: ''
 });
 const datasourceRuntimeDraft = reactive({
   syncCron: '0 */30 * * * *',
@@ -2792,6 +3151,14 @@ const governanceDraft = reactive({
   recognitionConcurrency: 4,
   conversionTargetStages: [] as string[]
 });
+const wecomConnectionDraft = reactive({
+  mode: 'RELAY' as 'RELAY' | 'DIRECT',
+  relayBaseUrl: ''
+});
+const conversionStageToAdd = ref('');
+const availableConversionTargetStages = computed(() => supervisionMetadata.customerStages
+  .map((stage) => stage.trim())
+  .filter((stage) => stage && !governanceDraft.conversionTargetStages.includes(stage)));
 
 let healthTimer: number | null = null;
 let analyticsTimer: number | null = null;
@@ -2923,6 +3290,69 @@ const analyticsBlocks = computed(() => [
   { title: '生命周期', summary: summarizeObject(analytics.lifecycle?.summary ?? analytics.lifecycle) },
   { title: '风险与内容', summary: `${listFrom(analytics.risks, 'customers').length} 个风险客户，${listFrom(analytics.contentRanking, 'items').length} 条内容排行` }
 ]);
+const analyticsOverviewMetrics = computed(() => {
+  const summary = (analytics.overview?.summary ?? analytics.overview ?? {}) as AnyRecord;
+  return [
+    { label: 'AI 调用', value: analyticsNumberLabel(summary.totalCalls), help: '当前筛选范围内的调用次数' },
+    { label: '活跃同事', value: analyticsNumberLabel(summary.activeCallerCount), help: '产生调用记录的同事数' },
+    { label: '平均响应', value: analyticsDurationLabel(summary.avgResponseTimeMs), help: '接口返回的平均响应时间' }
+  ];
+});
+const analyticsTrendRows = computed(() => listFrom(analytics.overview, 'dailyTrend')
+  .map((row, index) => ({
+    key: String(row.date ?? index),
+    label: formatDate(row.date),
+    value: analyticsNumber(row.totalCalls) ?? 0
+  })));
+const analyticsTrendPoints = computed(() => {
+  const rows = analyticsTrendRows.value;
+  if (!rows.length) return [];
+  const values = rows.map((row) => row.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return rows.map((row, index) => ({
+    ...row,
+    x: rows.length === 1 ? 50 : (index / (rows.length - 1)) * 100,
+    y: max === min ? 50 : 86 - ((row.value - min) / (max - min)) * 70
+  }));
+});
+const analyticsTrendLinePath = computed(() => smoothAnalyticsPath(analyticsTrendPoints.value));
+const analyticsTrendAreaPath = computed(() => {
+  const points = analyticsTrendPoints.value;
+  if (!points.length) return '';
+  const line = smoothAnalyticsPath(points);
+  return `${line} L ${points[points.length - 1].x} 100 L ${points[0].x} 100 Z`;
+});
+const analyticsTrendLatestValue = computed(() => analyticsTrendRows.value.at(-1)?.value ?? 0);
+const analyticsFunnelStages = computed(() => analyticsFunnelRows(analytics.funnels).map((stage, index, stages) => {
+  const highest = Math.max(...stages.map((item) => item.count), 1);
+  return {
+    ...stage,
+    key: `${stage.label}-${index}`,
+    width: Math.max(28, Math.round((stage.count / highest) * 100))
+  };
+}));
+const analyticsRingMetrics = computed(() => {
+  const summary = (analytics.overview?.summary ?? analytics.overview ?? {}) as AnyRecord;
+  const funnelLastStage = analyticsFunnelStages.value.at(-1);
+  const sourceRows = listFrom(analytics.sources, 'sources');
+  const sourceTotal = sourceRows.reduce((sum, row) => sum + (analyticsNumber(row.total) ?? 0), 0);
+  const arrivedTotal = sourceRows.reduce((sum, row) => sum + (analyticsNumber(row.arrivedCount) ?? 0), 0);
+  const hasArrivedValues = sourceRows.some((row) => analyticsNumber(row.arrivedCount) !== null);
+  return [
+    analyticsRingMetric('采纳率', summary.adoptionRate, 'AI 回复被采纳的占比'),
+    analyticsRingMetric('漏斗完成率', funnelLastStage?.rateRaw, '最后阶段相对起点的转化占比'),
+    analyticsRingMetric('到店率', sourceTotal > 0 && hasArrivedValues ? arrivedTotal / sourceTotal : null, '来源数据中的到店占比')
+  ];
+});
+const analyticsRankingItems = computed(() => listFrom(analytics.contentRanking, 'items')
+  .slice(0, 5)
+  .map((item, index) => ({
+    key: String(item.id ?? item.targetId ?? item.action ?? index),
+    title: String(item.sampleDetail || item.action || '未命名内容'),
+    detail: [item.targetType, item.targetId].filter(Boolean).join(' · ') || '使用记录',
+    useCount: analyticsNumber(item.useCount) ?? 0
+  })));
 const analyticsCallerOptions = computed(() => analyticsAccounts.value.filter((account) => ['KEEPER', 'LEADER', 'ADMIN'].includes(String(account.role ?? ''))));
 const llmCallSummary = computed(() => (llmAnalytics.value?.summary ?? {}) as AnyRecord);
 const llmCallDetails = computed(() => listFrom(llmAnalytics.value ?? {}, 'details'));
@@ -3038,6 +3468,15 @@ const tagAnalyticsSummaryCards = computed(() => {
     { label: '系统判断未更新', value: summary?.systemDecidedNoUpdateCount ?? 0 }
   ];
 });
+const tagAnalyticsCoreMetrics = computed(() => {
+  const summary = (tagAnalytics.value?.summary ?? {}) as AnyRecord;
+  const coverage = analyticsRate(summary.coverageRate);
+  return [
+    { label: '标签覆盖率', value: coverage === null ? '暂无数据' : `${Math.round(coverage * 10) / 10}%`, help: '匹配客户中已打标签的比例' },
+    { label: '已打标签客户', value: summary.taggedCustomerCount ?? '暂无数据', help: '当前筛选范围内的客户数' },
+    { label: '有效标签', value: summary.activeAssignmentCount ?? '暂无数据', help: '仍在生效的标签关系数' }
+  ];
+});
 const tagAnalyticsDetailSections = computed(() => {
   const data = tagAnalytics.value;
   return [
@@ -3137,12 +3576,13 @@ const healthCards = computed(() => {
     { key: 'redis', label: '缓存', help: '影响会话和实时状态' },
     { key: 'skill', label: 'Skill 通道', help: '影响回复生成' },
     { key: 'imageRecognition', label: '识图通道', help: '影响截图识别' },
-    { key: 'wecomTable', label: '表格通道', help: '影响保存到表格' }
+    { key: 'wecomTable', label: '企微智能表格写入', help: '影响保存到企业微信智能表格' }
   ];
   return cards.map((card) => {
     const component = components[card.key] ?? {};
     const status = component.status || data[`${card.key}Status`] || 'UNKNOWN';
-    return { label: card.label, status, ok: isOkStatus(status), help: component.duration ? `${card.help} · ${component.duration}` : card.help };
+    const help = healthComponentHelp(card.key, component, card.help);
+    return { label: card.label, status, ok: isOkStatus(status), help: component.duration ? `${help} · ${component.duration}` : help };
   });
 });
 const healthStatusText = computed(() => healthCards.value.some((item) => !item.ok) ? '需关注' : '正常');
@@ -3152,6 +3592,11 @@ const runtimeModeDescription = computed(() => String(runtimeMode.value.descripti
 const runtimeModePillClass = computed(() => runtimeMode.value.mockExternals === true ? 'mock' : runtimeMode.value.mockExternals === false ? 'real' : 'unknown');
 const auditDownloadUrl = computed(() => String(auditExportJob.value?.downloadUrl ?? ''));
 const accountTotalPages = computed(() => Math.max(1, Number(accountPageInfo.totalPages || Math.ceil(accountPageInfo.total / Math.max(1, accountPageInfo.size)) || 1)));
+const accountSummary = computed(() => [
+  { label: '账号总数', value: accountPageInfo.total },
+  { label: '当前页启用', value: accounts.value.filter((account) => account.isEnabled !== false).length },
+  { label: '标签管理授权', value: accounts.value.filter((account) => hasTagManagementPermission(account)).length }
+]);
 const customerSearchTotalPages = computed(() => Math.max(1, Number(customerSearchPageInfo.totalPages || Math.ceil(customerSearchPageInfo.total / Math.max(1, customerSearchPageInfo.size)) || 1)));
 const customerFilterCategories = computed(() => tagCategoryOptionsCache.value.filter((category) => {
   const values = Array.isArray(category.values) ? category.values : [];
@@ -3160,6 +3605,32 @@ const customerFilterCategories = computed(() => tagCategoryOptionsCache.value.fi
     && category.useForFilter !== false
     && values.some((value) => value?.isEnabled !== false && !value?.mergedIntoId);
 }));
+const customerSingleTagFilterCategories = computed(() => customerFilterCategories.value.filter((category) => String(category.selectionMode).toUpperCase() !== 'MULTI'));
+const customerMultiTagFilterCategories = computed(() => customerFilterCategories.value.filter((category) => String(category.selectionMode).toUpperCase() === 'MULTI'));
+const customerSelectedTagCount = computed(() => customerFilterCategories.value.reduce((count, category) => {
+  const selected = customerTagSelections[String(category.id)];
+  return count + (Array.isArray(selected) ? selected.length : selected ? 1 : 0);
+}, 0));
+const customerDirectFilterCount = computed(() => Object.values(customerDirectFilters).filter((value) => Boolean(value)).length);
+const customerFilterSummary = computed(() => {
+  const summaries = [
+    ['客户阶段', customerDirectFilters.customerStage],
+    ['线索类型', customerDirectFilters.leadType],
+    ['来源渠道', customerDirectFilters.sourceChannel],
+    ['负责管家', customerDirectFilters.assignedKeeper],
+    ['意向门店', customerDirectFilters.intendedStore],
+    ['意向项目', customerDirectFilters.intendedProject],
+    ['是否到店', customerDirectFilters.arrived]
+  ].filter(([, value]) => Boolean(value)).map(([label, value]) => `${label}：${value}`);
+  customerFilterCategories.value.forEach((category) => {
+    const selected = customerTagSelectionValues(category);
+    if (!selected.length) return;
+    const names = selected.slice(0, 2).map((value) => String(value.displayName || value.tagValue));
+    const suffix = selected.length > names.length ? ` +${selected.length - names.length}` : '';
+    summaries.push(`${category.categoryName || category.categoryKey}：${names.join('、')}${suffix}`);
+  });
+  return summaries;
+});
 const ruleTotalPages = computed(() => Math.max(1, Number(rulePageInfo.totalPages || Math.ceil(rulePageInfo.total / Math.max(1, rulePageInfo.size)) || 1)));
 const quickSearchTotalPages = computed(() => Math.max(1, Number(quickSearchPageInfo.totalPages || Math.ceil(quickSearchPageInfo.total / Math.max(1, quickSearchPageInfo.size)) || 1)));
 const versionTotalPages = computed(() => Math.max(1, Number(versionPageInfo.totalPages || Math.ceil(versionPageInfo.total / Math.max(1, versionPageInfo.size)) || 1)));
@@ -3295,6 +3766,9 @@ async function loadSkillAi() {
     skillEnvironments.value = listFromResponse(skillEnvList);
     imageEnvironments.value = listFromResponse(imageEnvList);
     llmEnvironments.value = listFromResponse(llmEnvList);
+    const selectedImageEnvironment = imageEnvironments.value.find((environment) => isActiveEnvironment(environment))
+      || imageEnvironments.value[0];
+    selectedImageEnvironmentId.value = selectedImageEnvironment ? String(selectedImageEnvironment.id) : '';
     llmRoutes.value = listFromResponse(llmRouteList);
     llmRouteScenes.value = listFromResponse(llmSceneList).map((item) => String(item.value ?? item.name ?? item.scene ?? item)).filter(Boolean);
     llmAnalytics.value = recordFromResponse(llmCallAnalytics);
@@ -3323,12 +3797,13 @@ async function loadLlmAnalytics() {
 
 async function loadDataContent() {
   await runWithNotice(async () => {
-    const [dsList, fieldList, syncList, importList, customerList, quickList, candidateList] = await Promise.all([
+    const [dsList, fieldList, syncList, importList, customerList, filterOptions, quickList, candidateList] = await Promise.all([
       getJson<unknown>('/admin/api/v1/datasources'),
       getJson<unknown>('/admin/api/v1/customer-fields'),
       getJson<unknown>('/admin/api/v1/datasources/sync-status'),
       getJson<unknown>('/admin/api/v1/datasources/import-logs'),
       requestPostJson<unknown>('/admin/api/v1/customers/search', customerSearchRequest()),
+      getJson<unknown>('/admin/api/v1/customers/filter-options'),
       getJson<unknown>(quickSearchListPath()),
       getJson<unknown>(withQuery('/admin/api/v1/template-promotion-candidates', { status: 'CANDIDATE' }))
     ]);
@@ -3338,6 +3813,7 @@ async function loadDataContent() {
     syncStatuses.value = listFromResponse(syncList);
     importLogs.value = listFromResponse(importList);
     applyCustomerSearchList(customerList);
+    customerFilterOptions.value = recordFromResponse(filterOptions);
     applyQuickSearchList(quickList);
     applyTemplatePromotionCandidates(candidateList);
     if (!selectedDatasource.value && datasources.value.length) {
@@ -3581,7 +4057,17 @@ function validateGovernanceSettings(entries: Array<[string, number | string]>) {
     if (!range) continue;
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed < range[0] || parsed > range[1]) {
-      throw new Error(`${key} 范围为 ${range[0]}-${range[1]}`);
+      const labels: Record<string, string> = {
+        'supervision.record_retention_days': '主管监督记录保留天数',
+        'supervision.technical_log_retention_days': '技术日志保留天数',
+        'supervision.processing_sla_minutes': '处理 SLA 分钟',
+        'chat.expired_reply_task_retention_days': '过期回复任务保留天数',
+        'chat.unfinished_task_cap': '未完成任务上限',
+        'chat.recent_task_display_cap': '最近任务显示上限',
+        'chat.recognition_concurrency': '识图并发'
+      };
+      const unit = key.includes('days') ? '天' : key.includes('minutes') ? '分钟' : key.includes('concurrency') ? '个任务' : '条';
+      throw new Error(`${labels[key] ?? '该设置'}只能填写 ${range[0]} 至 ${range[1]} ${unit}。`);
     }
   }
 }
@@ -3800,6 +4286,25 @@ async function resetCustomerSearchPageAndLoad() {
   customerSearchPageInfo.page = 1;
   selectedAdminCustomer.value = null;
   await loadDataContent();
+}
+
+function addConversionTargetStage() {
+  const stage = conversionStageToAdd.value.trim();
+  if (!stage || governanceDraft.conversionTargetStages.includes(stage)) {
+    return;
+  }
+  governanceDraft.conversionTargetStages.push(stage);
+  conversionStageToAdd.value = '';
+}
+
+function removeConversionTargetStage(stage: string) {
+  governanceDraft.conversionTargetStages = governanceDraft.conversionTargetStages.filter((item) => item !== stage);
+}
+
+async function applyCustomerFilters() {
+  customerFiltersExpanded.value = false;
+  closeCustomerTagPicker();
+  await resetCustomerSearchPageAndLoad();
 }
 
 async function changeCustomerSearchPage(delta: number) {
@@ -4136,6 +4641,9 @@ function onFormFieldChange(key: string) {
   if (key === 'role' && formDraft.role === 'ADMIN') {
     formDraft.tagManagementPermission = true;
   }
+  if (key === 'contentType' && formDraft.contentType !== 'IMAGE') {
+    formDraft.imageUrl = '';
+  }
 }
 
 async function submitForm(kind: FormKind) {
@@ -4462,27 +4970,27 @@ function formMeta(kind: FormKind | null): { title: string; description: string; 
     { key: 'skillName', label: '显示名称', type: 'text' },
     { key: 'priority', label: '优先级（数字越小越先尝试）', type: 'number', min: 0, max: 999, step: 1, help: '建议主用 10，备用 20，测试 90。相同场景和线索类型会先用数字最小的启用项。' }
   ] };
-  if (kind === 'skillEnv' || kind === 'imageEnv') return { title: kind === 'skillEnv' ? 'Skill 环境' : '识图环境', description: 'API Key 保存后只展示脱敏信息。', fields: [
+  if (kind === 'skillEnv' || kind === 'imageEnv') return { title: kind === 'skillEnv' ? 'Skill 环境' : '识图模型环境', description: 'API 密钥保存后只展示脱敏信息。', fields: [
     { key: 'envName', label: '环境名称', type: 'text', placeholder: '生产环境 / 备份环境' },
     { key: 'baseUrl', label: '服务地址', type: 'text', placeholder: 'https://api.example.com' },
-    { key: 'apiKey', label: 'API Key', type: 'password' },
-    ...(kind === 'skillEnv' ? [{ key: 'protocol', label: '接口协议', type: 'select', options: [{ label: 'OpenAI Compatible', value: 'OPENAI_COMPATIBLE' }, { label: 'MCP Streamable HTTP', value: 'MCP_STREAMABLE_HTTP' }] }] as FormField[] : [])
+    { key: 'apiKey', label: 'API 密钥', type: 'password' },
+    ...(kind === 'skillEnv' ? [{ key: 'protocol', label: '接口协议', type: 'select', options: [{ label: 'OpenAI 兼容接口', value: 'OPENAI_COMPATIBLE' }, { label: 'MCP 流式 HTTP', value: 'MCP_STREAMABLE_HTTP' }] }] as FormField[] : [])
   ] };
-  if (kind === 'llmEnv') return { title: 'LLM 思考环境', description: '每个环境可绑定一个模型和一组推理参数，API Key 保存后只展示脱敏信息。', fields: [
+  if (kind === 'llmEnv') return { title: 'LLM 模型环境', description: '每个环境可绑定一个模型和一组推理参数，API 密钥保存后只展示脱敏信息。', fields: [
     { key: 'envName', label: '环境名称', type: 'text', placeholder: 'OpenAI 主模型 / 本地模型网关' },
     { key: 'baseUrl', label: '服务地址', type: 'text', placeholder: 'https://api.example.com' },
-    { key: 'apiKey', label: 'API Key', type: 'password' },
+    { key: 'apiKey', label: 'API 密钥', type: 'password' },
     { key: 'model', label: '模型名称', type: 'text', placeholder: 'gpt-4.1-mini / qwen-plus' },
-    { key: 'protocol', label: '协议', type: 'select', options: [{ label: 'OpenAI Compatible', value: 'OPENAI_COMPATIBLE' }] },
+    { key: 'protocol', label: '协议', type: 'select', options: [{ label: 'OpenAI 兼容接口', value: 'OPENAI_COMPATIBLE' }] },
     { key: 'timeoutMs', label: '超时（毫秒）', type: 'number', min: 1000, max: 60000, step: 1000 },
-    { key: 'temperature', label: '温度', type: 'number', min: 0, max: 2, step: 0.1 },
-    { key: 'maxTokens', label: '最大 Tokens', type: 'number', min: 1, max: 32000, step: 1 }
+    { key: 'temperature', label: '默认输出稳定程度', type: 'number', min: 0, max: 2, step: 0.1, help: '数值越低越稳定保守，越高变化越多。' },
+    { key: 'maxTokens', label: '默认单次输出长度上限', type: 'number', min: 1, max: 32000, step: 1 }
   ] };
   if (kind === 'llmRoute') return { title: 'LLM 场景路由', description: '为特定业务场景指定 LLM 环境；线索类型为空时作为通用兜底路由。', fields: [
     { key: 'scene', label: '场景', type: 'select', options: llmSceneOptions() },
     { key: 'leadType', label: '线索类型', type: 'select', options: [{ label: '通用', value: '' }, ...commonOptions.leadType.filter((option) => option.value !== 'GENERAL')] },
     { key: 'environmentId', label: 'LLM 环境', type: 'select', options: llmEnvironments.value.map((env) => ({ label: `${env.envName || `#${env.id}`} · ${env.model || '未填写模型'}`, value: env.id })) },
-    { key: 'priority', label: '优先级（数字越小越先尝试）', type: 'number', min: 0, max: 999, step: 1, help: '同一场景可配置多个 LLM，数字小的先调用，失败后再尝试后面的路由。' },
+    { key: 'priority', label: '优先级（数字越小越优先）', type: 'number', min: 0, max: 999, step: 1, help: '同一场景可配置多个 LLM，运行时使用数字最小的匹配规则；没有匹配规则时回到默认 LLM。' },
     { key: 'enabled', label: '启用', type: 'checkbox' }
   ] };
   if (kind === 'datasource') return { title: '数据源', description: '配置企微智能表格来源。', fields: [
@@ -4529,10 +5037,10 @@ function formMeta(kind: FormKind | null): { title: string; description: string; 
     { key: 'priority', label: '优先级（数字越大越先执行）', type: 'number', min: 1, max: 100, step: 1, help: '跟进规则当前按数字从大到小执行。建议紧急提醒 90，普通提醒 60，观察类 30。' },
     { key: 'enabled', label: '启用', type: 'checkbox' }
   ] };
-  if (kind === 'tagCategory') return { title: editingItem.value?.id ? '编辑标签分类' : '新增标签分类', description: '系统编号由后端自动生成，分类配置保存后立即进入统一标签字典。', fields: [
+  if (kind === 'tagCategory') return { title: editingItem.value?.id ? '编辑标签分类' : '新增标签分类', description: '只需填写分类名称；系统编号自动生成。其他选项决定系统和员工如何使用这一类标签。', fields: [
     ...(editingItem.value?.id ? [{ key: 'categoryKey', label: '系统编号', type: 'text' as const, disabled: true, help: '系统编号只用于识别和兼容历史数据，不能人工修改。' }] : []),
     { key: 'categoryName', label: '分类名称', type: 'text', placeholder: '如：意向度 / 客户阶段 / 体型关注' },
-    { key: 'purpose', label: '分类用途', type: 'textarea', placeholder: '说明该分类用于什么业务判断' },
+    { key: 'purpose', label: '分类用途（可选）', type: 'textarea', placeholder: '例如：用于判断客户购买意向', help: '不填不会影响保存；填写后可帮助运营人员和 AI 理解这个分类的业务意义。' },
     { key: 'selectionMode', label: '选择模式', type: 'select', options: [{ label: '单选', value: 'SINGLE' }, { label: '多选', value: 'MULTI' }] },
     { key: 'systemInferenceEnabled', label: '允许系统判断', type: 'checkbox' },
     { key: 'manualEditEnabled', label: '允许员工手动修改', type: 'checkbox' },
@@ -4713,7 +5221,7 @@ async function savePromptSettings() {
       putJson('/admin/api/v1/configs/image.recognition_prompt', { value: promptDraft.imageRecognitionPrompt }),
       putJson('/admin/api/v1/configs/skill.regenerate_max_count', { value: String(promptDraft.regenerateMaxCount || 0) })
     ]);
-  }, 'Prompt 配置已保存');
+  }, '提示词配置已保存');
 }
 
 function hydrateRuntimeDrafts() {
@@ -4758,6 +5266,7 @@ function hydrateRuntimeDrafts() {
   llmSummaryDraft.systemPrompt = configValue('llm.summary.system_prompt');
 
   tableRuntimeDraft.apiBaseUrl = configValue('table.api_base_url');
+  smartSheetConnectionDraft.documentUrl = configValue('table.document_url');
   tableRuntimeDraft.apiKey = '';
   tableRuntimeDraft.writeTimeoutMs = intConfigValue('table.write_timeout_ms', 10000);
   tableRuntimeDraft.retryMaxCount = intConfigValue('table.retry_max_count', 5);
@@ -4766,6 +5275,8 @@ function hydrateRuntimeDrafts() {
   tableRuntimeDraft.alertNotifyTarget = configValue('table.alert_notify_target') || 'ADMIN';
   tableRuntimeDraft.queueWarnThreshold = intConfigValue('table.queue_warn_threshold', 100);
   tableRuntimeDraft.queueAlertThreshold = intConfigValue('table.queue_alert_threshold', 1000);
+  wecomConnectionDraft.mode = configValue('wecom.connection_mode') === 'DIRECT' ? 'DIRECT' : 'RELAY';
+  wecomConnectionDraft.relayBaseUrl = configValue('wecom.relay_base_url');
 
   datasourceRuntimeDraft.syncCron = configValue('cache.sync_cron') || '0 */30 * * * *';
   datasourceRuntimeDraft.ttlSeconds = intConfigValue('cache.ttl_seconds', 900);
@@ -4800,15 +5311,39 @@ async function saveImageRuntimeSettings() {
     notice.value = '截图确认提示停留必须为 0 或 3-60 秒。0 表示不自动忽略。';
     return;
   }
-  await saveConfigGroup([
-    ['image.model', imageRuntimeDraft.model],
-    ['image.timeout_ms', imageRuntimeDraft.timeoutMs],
-    ['image.max_size_bytes', imageRuntimeDraft.maxSizeBytes],
-    ['image.max_dimension_px', imageRuntimeDraft.maxDimensionPx],
-    ['image.compress_quality', imageRuntimeDraft.compressQuality],
-    ['image.consecutive_failures_alert', imageRuntimeDraft.consecutiveFailuresAlert],
-    ['desktop.clipboard_screenshot_confirm_prompt_s', imageRuntimeDraft.clipboardScreenshotConfirmPromptS]
-  ], '识图运行参数已保存');
+  await runWithNotice(async () => {
+    const selectedEnvironment = imageEnvironments.value.find((environment) => String(environment.id) === selectedImageEnvironmentId.value);
+    if (selectedEnvironment && !isActiveEnvironment(selectedEnvironment)) {
+      await putJson(`/admin/api/v1/image-environments/${selectedEnvironment.id}/activate`, {});
+    }
+    await Promise.all([
+      ['image.model', imageRuntimeDraft.model],
+      ['image.timeout_ms', imageRuntimeDraft.timeoutMs],
+      ['image.max_size_bytes', imageRuntimeDraft.maxSizeBytes],
+      ['image.max_dimension_px', imageRuntimeDraft.maxDimensionPx],
+      ['image.compress_quality', imageRuntimeDraft.compressQuality],
+      ['image.consecutive_failures_alert', imageRuntimeDraft.consecutiveFailuresAlert],
+      ['desktop.clipboard_screenshot_confirm_prompt_s', imageRuntimeDraft.clipboardScreenshotConfirmPromptS]
+    ].map(([key, value]) => putJson(`/admin/api/v1/configs/${key}`, { value: String(value) })));
+    await loadSkillAi();
+  }, '识图模型和运行设置已保存');
+}
+
+async function verifyAndSaveSmartSheet() {
+  const documentUrl = smartSheetConnectionDraft.documentUrl.trim();
+  if (!documentUrl) {
+    noticeKind.value = 'error';
+    notice.value = '请打开本系统通过企业微信 API 创建的智能表格，并粘贴浏览器地址栏里的完整链接';
+    return;
+  }
+  await runWithNotice(async () => {
+    const result = recordFromResponse(await postJson<unknown>('/admin/api/v1/datasources/smart-sheet-connection', { documentUrl }));
+    smartSheetConnectionDraft.documentUrl = String(result.documentUrl || documentUrl);
+    smartSheetConnectionDraft.connectedName = String(result.tableName || 'API 创建的智能表格');
+    const configList = await getJson<unknown>('/admin/api/v1/configs');
+    configs.value = configEntries(configList);
+    hydrateRuntimeDrafts();
+  }, '企业微信 API 表格已检测并保存');
 }
 
 async function saveLlmReplySettings() {
@@ -4919,15 +5454,15 @@ async function loadPromptVersions() {
   await runWithNotice(async () => {
     const payload = recordFromResponse(await getJson<unknown>(`/admin/api/v1/skill-prompt/${selectedPromptType.value}/versions`));
     promptVersions.value = listFrom(payload, 'versions');
-  }, 'Prompt 版本历史已加载');
+  }, '提示词版本历史已加载');
 }
 
 function confirmRestorePrompt(version: AnyRecord) {
-  if (window.confirm(`确认恢复到 Prompt 版本 ${version.version}？恢复会立即影响线上配置。`)) {
+  if (window.confirm(`确认恢复到提示词版本 ${version.version}？恢复会立即影响线上配置。`)) {
     void runWithNotice(async () => {
       await postJson(`/admin/api/v1/skill-prompt/${selectedPromptType.value}/restore`, { version: version.version, operator: props.accountName || 'admin' });
       await Promise.all([loadSkillAi(), loadPromptVersions()]);
-    }, 'Prompt 版本已恢复');
+    }, '提示词版本已恢复');
   }
 }
 
@@ -5007,6 +5542,112 @@ async function testImageEnvironment(env: AnyRecord) {
     await postJson(`/admin/api/v1/image-environments/${env.id}/test`, {});
     await loadSkillAi();
   }, '测试完成');
+}
+
+function toggleAdvancedConfigurationPanel() {
+  advancedConfigurationExpanded.value = !advancedConfigurationExpanded.value;
+  if (!advancedConfigurationExpanded.value) {
+    activeAdvancedConfiguration.value = null;
+  }
+}
+
+function toggleAdvancedConfiguration(key: AdvancedConfigurationKey) {
+  activeAdvancedConfiguration.value = activeAdvancedConfiguration.value === key ? null : key;
+}
+
+function openLlmCapabilityConfig(capability: LlmCapabilityKey) {
+  llmCapabilityPromptExpanded.value = false;
+  activeLlmCapability.value = capability;
+}
+
+function closeLlmCapabilityConfig() {
+  llmCapabilityPromptExpanded.value = false;
+  activeLlmCapability.value = null;
+}
+
+function isStandardTemperature(value: unknown) {
+  return ['', '0.2', '0.7', '1'].includes(String(value ?? ''));
+}
+
+function isStandardAnswerLength(value: unknown) {
+  return [300, 500, 900, 1500].includes(Number(value));
+}
+
+async function saveActiveLlmCapabilityConfig() {
+  if (activeLlmCapability.value === 'reply') await saveLlmReplySettings();
+  if (activeLlmCapability.value === 'profile') await saveLlmProfileSettings();
+  if (activeLlmCapability.value === 'followup') await saveLlmFollowupSettings();
+  if (activeLlmCapability.value === 'abnormal') await saveLlmAbnormalSettings();
+  if (activeLlmCapability.value === 'summary') await saveLlmSummarySettings();
+}
+
+function llmCapabilityEnableMeta(capability: LlmCapabilityKey): { configKey: string; draft: { enabled: boolean }; label: string } {
+  if (capability === 'reply') return { configKey: 'llm.reply_generation.enabled', draft: llmReplyDraft, label: '回复生成' };
+  if (capability === 'profile') return { configKey: 'llm.profile_extraction.enabled', draft: llmProfileDraft, label: '档案提取' };
+  if (capability === 'followup') return { configKey: 'llm.followup_suggestion.enabled', draft: llmFollowupDraft, label: '跟进建议' };
+  if (capability === 'abnormal') return { configKey: 'llm.abnormal_detection.enabled', draft: llmAbnormalDraft, label: '异常识别' };
+  return { configKey: 'llm.summary.enabled', draft: llmSummaryDraft, label: '总结补位' };
+}
+
+async function saveLlmCapabilityEnabled(capability: LlmCapabilityKey, event: Event) {
+  const input = event.target as HTMLInputElement;
+  const meta = llmCapabilityEnableMeta(capability);
+  const previous = meta.draft.enabled;
+  const next = input.checked;
+  meta.draft.enabled = next;
+  loading.value = true;
+  notice.value = '';
+  try {
+    await putJson(`/admin/api/v1/configs/${meta.configKey}`, { value: next ? 'true' : 'false' });
+    const configList = await getJson<unknown>('/admin/api/v1/configs');
+    configs.value = configEntries(configList);
+    hydrateRuntimeDrafts();
+    noticeKind.value = 'info';
+    notice.value = `${meta.label}已${next ? '启用' : '停用'}`;
+  } catch (error) {
+    meta.draft.enabled = previous;
+    noticeKind.value = 'error';
+    notice.value = humanizeError(error);
+  } finally {
+    loading.value = false;
+  }
+}
+
+function openDefaultLlmProfileTest() {
+  if (!defaultLlmEnvironment.value) {
+    noticeKind.value = 'error';
+    notice.value = '请先新增一个 LLM 模型环境。';
+    return;
+  }
+  openLlmProfileTest(defaultLlmEnvironment.value);
+}
+
+function openLlmProfileTest(env: AnyRecord) {
+  llmProfileTestEnvironment.value = env;
+  llmProfileTestModalOpen.value = true;
+  llmProfileTestMessage.value = '';
+  llmProfileTestLeadType.value = LLM_PROFILE_LEAD_TYPE_OPTIONS[0]?.value ?? 'PENDING';
+}
+
+function closeLlmProfileTest() {
+  llmProfileTestModalOpen.value = false;
+  llmProfileTestEnvironment.value = null;
+}
+
+async function submitLlmProfileTest() {
+  const environment = llmProfileTestEnvironment.value;
+  const message = llmProfileTestMessage.value.trim();
+  if (!environment || !message) {
+    noticeKind.value = 'error';
+    notice.value = '请先输入一段脱敏测试消息。';
+    return;
+  }
+  if (message.length > 2000) {
+    noticeKind.value = 'error';
+    notice.value = '测试消息最多 2000 字。';
+    return;
+  }
+  await testLlmEnvironment(environment);
 }
 
 async function testLlmEnvironment(env: AnyRecord) {
@@ -5176,6 +5817,37 @@ async function uploadQuickSearchImage(event: Event, item: AnyRecord) {
     await putJson(`/admin/api/v1/quick-search/items/${item.id}`, { ...quickSearchPayload(item), imageUrl, contentType: 'IMAGE' });
     await loadDataContent();
   }, '图片已上传并绑定到速搜内容');
+}
+
+async function saveWecomConnectionSettings() {
+  const relayBaseUrl = wecomConnectionDraft.relayBaseUrl.trim();
+  if (wecomConnectionDraft.mode === 'RELAY' && !relayBaseUrl) {
+    noticeKind.value = 'error';
+    notice.value = '使用服务器转发时，请填写企业微信服务器转发地址。';
+    return;
+  }
+  const entries: Array<[string, string]> = wecomConnectionDraft.mode === 'RELAY'
+    ? [['wecom.relay_base_url', relayBaseUrl], ['wecom.connection_mode', 'RELAY']]
+    : [['wecom.connection_mode', 'DIRECT']];
+  await saveConfigGroup(entries, '企业微信连接方式已保存');
+}
+
+async function uploadQuickSearchImageDraft(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  formError.value = '';
+  try {
+    const body = new FormData();
+    body.append('file', file);
+    const uploaded = recordFromResponse(await postForm<unknown>('/admin/api/v1/upload/image', body));
+    const imageUrl = String(uploaded.imageUrl || uploaded.url || '');
+    if (!imageUrl) throw new Error('图片上传成功但未返回可用地址');
+    formDraft.imageUrl = imageUrl;
+  } catch (error) {
+    formError.value = humanizeError(error);
+  }
 }
 
 async function clearQuickSearchImage(item: AnyRecord) {
@@ -5851,14 +6523,21 @@ function customerSearchRequest() {
   });
   return {
     keyword: customerSearchKeyword.value,
-    sourceChannels: [],
-    leadTypes: [],
-    assignedKeepers: [],
-    intendedStores: [],
-    intendedProjects: [],
-    customerStages: [],
-    updatedFrom: null,
-    updatedTo: null,
+    sourceChannels: customerDirectFilters.sourceChannel ? [customerDirectFilters.sourceChannel] : [],
+    leadTypes: customerDirectFilters.leadType ? [customerDirectFilters.leadType] : [],
+    assignedKeepers: customerDirectFilters.assignedKeeper ? [customerDirectFilters.assignedKeeper] : [],
+    intendedStores: customerDirectFilters.intendedStore ? [customerDirectFilters.intendedStore] : [],
+    intendedProjects: customerDirectFilters.intendedProject ? [customerDirectFilters.intendedProject] : [],
+    customerStages: customerDirectFilters.customerStage ? [customerDirectFilters.customerStage] : [],
+    arrivedValues: customerDirectFilters.arrived ? [customerDirectFilters.arrived] : [],
+    updatedFrom: localDayStart(customerDirectFilters.updatedFrom) ?? null,
+    updatedTo: localDayEnd(customerDirectFilters.updatedTo) ?? null,
+    appointmentFrom: customerDirectFilters.appointmentFrom || null,
+    appointmentTo: customerDirectFilters.appointmentTo || null,
+    lastFollowupFrom: localDayStart(customerDirectFilters.lastFollowupFrom) ?? null,
+    lastFollowupTo: localDayEnd(customerDirectFilters.lastFollowupTo) ?? null,
+    nextFollowupFrom: localDayStart(customerDirectFilters.nextFollowupFrom) ?? null,
+    nextFollowupTo: localDayEnd(customerDirectFilters.nextFollowupTo) ?? null,
     tagGroups,
     tagGroupLogic: customerTagGroupLogic.value,
     sortBy: 'UPDATED_AT',
@@ -5871,6 +6550,76 @@ function customerSearchRequest() {
 function customerSearchExportRequest() {
   const { page: _page, pageSize: _pageSize, ...request } = customerSearchRequest();
   return request;
+}
+
+function clearCustomerFilters() {
+  customerSearchKeyword.value = '';
+  customerTagGroupLogic.value = 'AND';
+  Object.keys(customerDirectFilters).forEach((key) => {
+    customerDirectFilters[key as keyof typeof customerDirectFilters] = '';
+  });
+  customerFilterCategories.value.forEach((category) => {
+    const key = String(category.id);
+    customerTagSelections[key] = String(category.selectionMode).toUpperCase() === 'MULTI' ? [] : '';
+    customerTagMatchModes[key] = 'ANY';
+  });
+}
+
+function toggleCustomerFilters() {
+  customerFiltersExpanded.value = !customerFiltersExpanded.value;
+  if (!customerFiltersExpanded.value) closeCustomerTagPicker();
+}
+
+function toggleCustomerTagPicker(categoryId: unknown) {
+  const key = String(categoryId);
+  activeCustomerTagPickerId.value = activeCustomerTagPickerId.value === key ? '' : key;
+}
+
+function closeCustomerTagPicker() {
+  activeCustomerTagPickerId.value = '';
+}
+
+function clearCustomerTagSelection(categoryId: unknown) {
+  customerTagSelections[String(categoryId)] = [];
+}
+
+function customerTagPickerValues(category: AnyRecord): AnyRecord[] {
+  const keyword = String(customerTagSearchKeywords[String(category.id)] || '').trim().toLowerCase();
+  const values = Array.isArray(category.values) ? category.values : [];
+  if (!keyword) return values;
+  return values.filter((value) => `${value.displayName || ''} ${value.tagValue || ''}`.toLowerCase().includes(keyword));
+}
+
+function customerTagSelectionValues(category: AnyRecord): AnyRecord[] {
+  const selected = customerTagSelections[String(category.id)];
+  const selectedIds = (Array.isArray(selected) ? selected : selected ? [selected] : []).map(String);
+  return (Array.isArray(category.values) ? category.values : [])
+    .filter((value) => selectedIds.includes(String(value.id)));
+}
+
+function customerTagSelectionLabel(category: AnyRecord): string {
+  const selected = customerTagSelectionValues(category);
+  if (!selected.length) return '选择标签';
+  const names = selected.slice(0, 2).map((value) => String(value.displayName || value.tagValue));
+  const suffix = selected.length > names.length ? ` +${selected.length - names.length}` : '';
+  return `已选 ${selected.length} 项：${names.join('、')}${suffix}`;
+}
+
+function customerTagSelected(categoryId: unknown, valueId: unknown) {
+  const selected = customerTagSelections[String(categoryId)];
+  return Array.isArray(selected)
+    ? selected.map(String).includes(String(valueId))
+    : String(selected ?? '') === String(valueId);
+}
+
+function toggleCustomerTag(categoryId: unknown, valueId: unknown) {
+  const key = String(categoryId);
+  const current = Array.isArray(customerTagSelections[key])
+    ? customerTagSelections[key].map(String)
+    : customerTagSelections[key] ? [String(customerTagSelections[key])] : [];
+  customerTagSelections[key] = current.includes(String(valueId))
+    ? current.filter((value) => value !== String(valueId))
+    : [...current, String(valueId)];
 }
 
 async function exportCustomerSearch() {
@@ -6135,6 +6884,10 @@ function isCurrentAccount(account: AnyRecord) {
   const current = props.accountName?.trim();
   if (!current) return false;
   return [account.username, account.phone, account.displayName].some((value) => String(value ?? '') === current);
+}
+
+function hasTagManagementPermission(account: AnyRecord) {
+  return account.role === 'ADMIN' || (Array.isArray(account.permissions) && account.permissions.includes('TAG_MANAGEMENT'));
 }
 
 function leaderOptions() {
@@ -6512,6 +7265,71 @@ function analyticsLeadType() {
   return skillLeadTypeFilter.value === 'GENERAL' ? '' : skillLeadTypeFilter.value;
 }
 
+function analyticsNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const text = String(value ?? '').trim().replace(/,/g, '').replace(/%$/, '');
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function analyticsNumberLabel(value: unknown): string {
+  const parsed = analyticsNumber(value);
+  return parsed === null ? '暂无数据' : String(parsed);
+}
+
+function analyticsDurationLabel(value: unknown): string {
+  const parsed = analyticsNumber(value);
+  return parsed === null ? '暂无数据' : `${Math.round(parsed)} ms`;
+}
+
+function analyticsRate(value: unknown): number | null {
+  const parsed = analyticsNumber(value);
+  if (parsed === null) return null;
+  const rate = typeof value === 'string' && value.trim().endsWith('%') ? parsed : parsed <= 1 ? parsed * 100 : parsed;
+  return Math.min(100, Math.max(0, rate));
+}
+
+function analyticsRingMetric(label: string, value: unknown, help: string) {
+  const rate = analyticsRate(value);
+  return {
+    label,
+    value: rate === null ? '暂无数据' : `${Math.round(rate * 10) / 10}%`,
+    progress: rate ?? 0,
+    help
+  };
+}
+
+function analyticsFunnelRows(value: unknown): Array<{ label: string; count: number; rate: string; rateRaw: unknown }> {
+  const root = value as AnyRecord;
+  if (!root || typeof root !== 'object') return [];
+  const funnels = Object.values(root).filter((item) => item && typeof item === 'object') as AnyRecord[];
+  const stages = funnels.flatMap((funnel) => Array.isArray(funnel.stages) ? funnel.stages : []);
+  return stages.map((stage, index) => {
+    const count = analyticsNumber(stage.count) ?? 0;
+    const rateRaw = stage.totalRate ?? stage.layerRate;
+    return {
+      label: String(stage.stage ?? stage.label ?? stage.stageKey ?? `阶段 ${index + 1}`),
+      count,
+      rate: analyticsRate(rateRaw) === null ? '暂无占比' : `${Math.round((analyticsRate(rateRaw) ?? 0) * 10) / 10}%`,
+      rateRaw
+    };
+  });
+}
+
+function smoothAnalyticsPath(points: Array<{ x: number; y: number }>): string {
+  if (!points.length) return '';
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  let path = `M ${points[0].x} ${points[0].y}`;
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const midpoint = (previous.x + current.x) / 2;
+    path += ` C ${midpoint} ${previous.y}, ${midpoint} ${current.y}, ${current.x} ${current.y}`;
+  }
+  return path;
+}
+
 function analyticsCell(row: AnyRecord, key: string) {
   const value = row?.[key];
   if (key === 'phone') return value ? String(value).replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2') : '-';
@@ -6554,7 +7372,25 @@ function percentLabel(value: unknown) {
 }
 
 function healthAlertTitle(alert: AnyRecord) {
-  return alert.title || alert.alertType || alert.type || alert.sourceModule || alert.component || '系统告警';
+  const alertType = String(alert.alertType || alert.type || '');
+  const labels: Record<string, string> = {
+    IMAGE_SERVICE_DOWN: '识图服务不可用',
+    IMAGE_DOWN: '识图服务不可用',
+    COS_UPLOAD_FAILED: '图片上传失败'
+  };
+  return alert.title || labels[alertType] || alertType || alert.sourceModule || alert.component || '系统告警';
+}
+
+function healthComponentHelp(key: string, component: AnyRecord, fallback: string) {
+  if (key !== 'wecomTable') {
+    return fallback;
+  }
+  const detail = (component.detail ?? {}) as AnyRecord;
+  const staleFailedCount = Number(detail.staleFailedCount ?? 0);
+  if (Number.isFinite(staleFailedCount) && staleFailedCount > 0) {
+    return `写入队列中有 ${staleFailedCount} 条过期失败记录，需要检查失败原因或重新处理；这不代表服务器转发地址是否连通。`;
+  }
+  return '当前检查智能表格写入队列；服务器转发地址是否连通需单独检测。';
 }
 
 function healthAlertStatusLabel(alert: AnyRecord) {
@@ -6583,7 +7419,23 @@ function rulePreview(rule: AnyRecord) {
 
 function activeEnvironmentName(items: AnyRecord[]) {
   const item = items.find((env) => isActiveEnvironment(env));
-  return item ? `当前使用：${item.envName}` : '尚未启用环境';
+  return item ? `当前使用：${environmentDisplayName(item, `环境 #${item.id}`)}` : '尚未启用环境';
+}
+
+function environmentDisplayName(environment: AnyRecord, fallback: string) {
+  const name = String(environment?.envName ?? '').trim();
+  if (name && !hasBrokenEncoding(name)) {
+    return name;
+  }
+  const model = String(environment?.model ?? '').trim();
+  if (model && !hasBrokenEncoding(model)) {
+    return model;
+  }
+  return fallback;
+}
+
+function hasBrokenEncoding(value: string) {
+  return /\?{2,}|\uFFFD|锟斤拷/.test(value);
 }
 
 function summarizeObject(value: unknown) {

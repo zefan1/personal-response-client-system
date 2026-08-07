@@ -16,14 +16,24 @@ import org.springframework.web.multipart.MultipartFile;
 public class DatasourceAdminController {
 
   private final DatasourceAdminService service;
+  private final SmartSheetConnectionService smartSheetConnectionService;
 
-  public DatasourceAdminController(DatasourceAdminService service) {
+  public DatasourceAdminController(
+      DatasourceAdminService service,
+      SmartSheetConnectionService smartSheetConnectionService) {
     this.service = service;
+    this.smartSheetConnectionService = smartSheetConnectionService;
   }
 
   @GetMapping("/admin/api/v1/datasources")
   public ApiResponse<Map<String, Object>> list() {
     return ApiResponse.ok(service.list());
+  }
+
+  @PostMapping("/admin/api/v1/datasources/smart-sheet-connection")
+  public ApiResponse<SmartSheetConnectionResult> verifySmartSheet(
+      @RequestBody SmartSheetConnectionRequest request) {
+    return ApiResponse.ok(smartSheetConnectionService.verifyAndSave(request));
   }
 
   @PostMapping("/admin/api/v1/datasources")

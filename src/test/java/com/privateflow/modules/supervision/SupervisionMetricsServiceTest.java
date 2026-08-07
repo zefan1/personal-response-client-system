@@ -65,20 +65,20 @@ class SupervisionMetricsServiceTest {
     Map<String, SupervisionMetric> report = service.report(query());
 
     assertMetric(report.get("AI_USAGE_RATE"), 1, 2, 0.5,
-        "AI copied customers", "AI generated customers", true);
+        "已复制 AI 回复的客户", "AI 已生成回复的客户", true);
     assertMetric(report.get("AI_COVERAGE"), 2, 4, 0.5,
-        "Customers with AI replies", "Customers processed by recognition", true);
+        "已使用 AI 回复的客户", "已完成识别处理的客户", true);
     assertMetric(report.get("PROCESSING_EFFICIENCY"), 1, 4, 0.25,
-        "Customers handled within SLA", "Customers processed by recognition", true);
+        "在服务时限内处理的客户", "已完成识别处理的客户", true);
     assertMetric(report.get("EMPLOYEE_CONVERSION"), 1, 3, 1.0 / 3,
-        "Assigned customers from the selected period currently at configured target stages",
-        "Assigned customers from the selected period", true);
+        "所选期间分配且当前处于目标阶段的客户",
+        "所选期间分配的客户", true);
 
     insertEvent("REPLY_COPIED", "alice", "13800000002", "WECHAT", "ads-form",
         FROM.plusMinutes(40));
     report = service.report(query());
     assertMetric(report.get("AI_REPLY_CONVERSION"), 1, 2, 0.5,
-        "AI copied customers currently at configured target stages", "AI copied customers", true);
+        "已复制 AI 回复且当前处于目标阶段的客户", "已复制 AI 回复的客户", true);
   }
 
   @Test
@@ -95,10 +95,10 @@ class SupervisionMetricsServiceTest {
     Map<String, SupervisionMetric> report = service.report(query());
 
     assertMetric(report.get("EMPLOYEE_CONVERSION"), 0, 3, 0.0,
-        "Assigned customers from the selected period currently at configured target stages",
-        "Assigned customers from the selected period", false);
+        "所选期间分配且当前处于目标阶段的客户",
+        "所选期间分配的客户", false);
     assertMetric(report.get("AI_REPLY_CONVERSION"), 0, 1, 0.0,
-        "AI copied customers currently at configured target stages", "AI copied customers", false);
+        "已复制 AI 回复且当前处于目标阶段的客户", "已复制 AI 回复的客户", false);
   }
 
   @Test

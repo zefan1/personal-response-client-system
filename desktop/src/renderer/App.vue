@@ -232,6 +232,7 @@ import { clearDesktopNotice, desktopNoticeState, setDesktopNotice } from './shar
 import { desktopStatusState, loadDesktopStatus, resetDesktopStatus } from './shared/desktopStatusStore';
 import { loadDesktopConfig, saveDesktopConfig } from './shared/config';
 import { eventBus } from './shared/eventBus';
+import { connectWsMessageBus, disconnectWsMessageBus } from './shared/wsMessageBus';
 import { cleanupStageSuggestionHandler, initializeStageSuggestionHandler } from './modules/stage-suggestion/stageSuggestionHandler';
 import WorkbenchPanel from './modules/workbench/WorkbenchPanel.vue';
 import {
@@ -428,6 +429,7 @@ onBeforeUnmount(() => {
   cleanupStageSuggestionHandler();
   eventDisposers.splice(0).forEach((dispose) => dispose());
   clearSessionRefreshTimer();
+  disconnectWsMessageBus();
 });
 
 async function login() {
@@ -464,6 +466,7 @@ async function login() {
     });
     if (!await refreshDesktopStatus(authenticatedEpoch)) return;
     if (authenticatedEpoch !== sessionEpoch) return;
+    connectWsMessageBus();
     scheduleSessionRefresh();
     setMode(loginForm.mode === 'admin' && !hasDesktopBridge() ? currentMode.value === 'admin-dev' && devConsoleEnabled ? 'admin-dev' : 'admin' : 'desktop');
   } catch (error) {
@@ -552,6 +555,7 @@ function clearSession(preserveIdentity = false) {
   sessionEpoch += 1;
   refreshPromise = null;
   clearSessionRefreshTimer();
+  disconnectWsMessageBus();
   const username = session.accountUsername;
   session.accessToken = '';
   session.refreshToken = '';
@@ -579,6 +583,7 @@ async function initializeAuthenticatedSession(): Promise<void> {
   }
   if (!await refreshDesktopStatus(authenticatedEpoch)) return;
   if (authenticatedEpoch !== sessionEpoch) return;
+  connectWsMessageBus();
   scheduleSessionRefresh();
 }
 

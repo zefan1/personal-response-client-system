@@ -3,8 +3,10 @@ package com.privateflow.modules.tablewrite.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+import static org.mockito.Mockito.mock;
 
 import java.time.ZoneId;
+import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.test.context.support.TestPropertySourceUtils;
@@ -76,6 +78,8 @@ class WecomSmartSheetConfigTest {
           "WECOM_SMARTSHEET_VIEW_ID=view-1",
           "WECOM_SMARTSHEET_SOURCE_TABLE=Customers",
           "WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE=Customer ID");
+      context.registerBean(SystemConfigRepository.class, () -> mock(SystemConfigRepository.class));
+      context.register(WecomApiEndpointProvider.class);
       context.register(WecomSmartSheetConfig.class);
       context.refresh();
 

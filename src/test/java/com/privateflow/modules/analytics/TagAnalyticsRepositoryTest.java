@@ -2,6 +2,11 @@ package com.privateflow.modules.analytics;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.privateflow.modules.customer.admin.CustomerAccessScope;
 import com.privateflow.modules.customer.admin.CustomerFilter;
@@ -13,6 +18,7 @@ import com.privateflow.modules.customer.admin.TagFilterGroup;
 import com.privateflow.modules.customer.admin.TagGroupLogic;
 import com.privateflow.modules.customer.admin.TagMatchMode;
 import java.time.LocalDateTime;
+import java.lang.reflect.Method;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -279,6 +285,38 @@ class TagAnalyticsRepositoryTest {
           assertThat(row.scope()).isEqualTo("EVENT_WINDOW");
           assertThat(row.sampleReason()).contains("客户版本冲突");
         });
+  }
+
+  @Test
+  void separatesTheWhereClauseFromLatestRunConditionForMariaDb() throws Exception {
+    JdbcTemplate queryRecorder = mock(JdbcTemplate.class);
+    when(queryRecorder.queryForObject(any(String.class), eq(Long.class), any(Object[].class))).thenReturn(0L);
+    TagAnalyticsRepository recorderRepository = new TagAnalyticsRepository(queryRecorder);
+    Method method = TagAnalyticsRepository.class.getDeclaredMethod(
+        "countLatestRunCustomers", CustomerQuerySpec.class, TagAnalyticsWindow.class, String.class);
+    method.setAccessible(true);
+
+    method.invoke(recorderRepository, allSpec(), window(), "REJECTED");
+
+    org.mockito.ArgumentCaptor<String> sql = org.mockito.ArgumentCaptor.forClass(String.class);
+    verify(queryRecorder).queryForObject(sql.capture(), eq(Long.class), any(Object[].class));
+    assertThat(sql.getValue()).contains("WHERE 1=1 AND EXISTS");
+  }
+
+  @Test
+  void separatesTheWhereClauseFromCurrentGapConditionsForMariaDb() throws Exception {
+    JdbcTemplate queryRecorder = mock(JdbcTemplate.class);
+    when(queryRecorder.queryForObject(any(String.class), eq(Long.class), any(Object[].class))).thenReturn(0L);
+    TagAnalyticsRepository recorderRepository = new TagAnalyticsRepository(queryRecorder);
+    Method method = TagAnalyticsRepository.class.getDeclaredMethod(
+        "countCustomers", CustomerQuerySpec.class, String.class);
+    method.setAccessible(true);
+
+    method.invoke(recorderRepository, allSpec(), "AND EXISTS (SELECT 1)");
+
+    org.mockito.ArgumentCaptor<String> sql = org.mockito.ArgumentCaptor.forClass(String.class);
+    verify(queryRecorder).queryForObject(sql.capture(), eq(Long.class), any(Object[].class));
+    assertThat(sql.getValue()).contains("WHERE 1=1 AND EXISTS");
   }
 
   private CustomerQuerySpec allSpec() {

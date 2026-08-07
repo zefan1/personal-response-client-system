@@ -75,6 +75,7 @@ import {
   copyPersonalTemplate,
   copyShortcutSpeech,
   copyTeamTemplate,
+  handleTemplateLibraryConfigRefresh,
   openPersonalTemplateEditor,
   openTemplateLibrary,
   resolveTemplateLibraryText,
@@ -133,6 +134,7 @@ onMounted(() => {
   disposers.push(eventBus.on<QuickSearchCustomerContext | undefined>('template-library:show', (context) => {
     void openTemplateLibrary(context);
   }));
+  disposers.push(eventBus.on('CONFIG_REFRESH', handleTemplateLibraryConfigRefresh));
   disposers.push(onQuickSearchShow(() => void openTemplateLibrary()));
   disposers.push(onQuickSearchHide(closeTemplateLibrary));
 });

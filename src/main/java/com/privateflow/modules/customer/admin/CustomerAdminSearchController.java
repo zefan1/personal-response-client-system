@@ -35,6 +35,11 @@ public class CustomerAdminSearchController {
     return ApiResponse.ok(service.search(request));
   }
 
+  @GetMapping("/admin/api/v1/customers/filter-options")
+  public ApiResponse<CustomerFilterOptions> filterOptions() {
+    return ApiResponse.ok(service.filterOptions());
+  }
+
   @PostMapping("/admin/api/v1/customers/export")
   public ResponseEntity<byte[]> export(@RequestBody(required = false) CustomerSearchRequest request) {
     byte[] content = service.export(request);

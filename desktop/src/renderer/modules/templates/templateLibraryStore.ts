@@ -90,6 +90,13 @@ export async function refreshTemplateLibrary(): Promise<void> {
   }
 }
 
+export function handleTemplateLibraryConfigRefresh(payload: { configKeys?: string[] }): void {
+  if (!templateLibraryState.visible || !payload.configKeys?.includes('quick_search')) {
+    return;
+  }
+  void refreshTemplateLibrary();
+}
+
 export function openPersonalTemplateEditor(draft?: Partial<PersonalTemplateDraft>): void {
   templateEditorState.draft = {
     title: draft?.title?.trim() ?? '',

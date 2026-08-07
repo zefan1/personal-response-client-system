@@ -48,6 +48,23 @@ class CustomerAdminSearchControllerTest {
   }
 
   @Test
+  void exposesDynamicCustomerFilterOptions() throws Exception {
+    CustomerAdminSearchService service = mock(CustomerAdminSearchService.class);
+    when(service.filterOptions()).thenReturn(new CustomerFilterOptions(
+        List.of("企微"), List.of("TUAN_GOU"), List.of("林管家"),
+        List.of("万江店"), List.of("产后修复"), List.of("跟进中"), List.of("是")));
+    MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new CustomerAdminSearchController(service)).build();
+
+    mockMvc.perform(get("/admin/api/v1/customers/filter-options"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.sourceChannels[0]").value("企微"))
+        .andExpect(jsonPath("$.data.customerStages[0]").value("跟进中"))
+        .andExpect(jsonPath("$.data.arrivedValues[0]").value("是"));
+
+    verify(service).filterOptions();
+  }
+
+  @Test
   void serviceValidatesBoundsWithChineseMessages() {
     CustomerAdminSearchRepository repository = mock(CustomerAdminSearchRepository.class);
     CustomerAdminSearchService service = new CustomerAdminSearchService(

@@ -95,7 +95,7 @@ public class ConfigAdminService {
         || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.") || key.startsWith("health.")
         || key.startsWith("desktop.")
         || key.startsWith("tag.") || key.startsWith("version.") || key.startsWith("notice.") || key.startsWith("audit.")
-        || key.startsWith("chat.") || key.startsWith("supervision.")) {
+        || key.startsWith("chat.") || key.startsWith("supervision.") || key.startsWith("wecom.")) {
       if (key.endsWith("_s") || key.endsWith("_ms") || key.endsWith("_days") || key.endsWith("_hours")
           || key.endsWith("_minutes") || key.endsWith("_count") || key.endsWith("_size") || key.endsWith("_limit")
           || key.endsWith("_chars") || key.endsWith("_rows") || key.endsWith("_seconds") || key.endsWith("_bytes")
@@ -136,6 +136,13 @@ public class ConfigAdminService {
       }
       if ("llm.protocol".equals(key) && !"OPENAI_COMPATIBLE".equals(value)) {
         throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "llm.protocol must be OPENAI_COMPATIBLE");
+      }
+      if ("wecom.connection_mode".equals(key) && !("DIRECT".equals(value) || "RELAY".equals(value))) {
+        throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "wecom.connection_mode must be DIRECT or RELAY");
+      }
+      if ("wecom.relay_base_url".equals(key) && !value.isBlank()
+          && !(value.startsWith("http://") || value.startsWith("https://"))) {
+        throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "wecom.relay_base_url must be a valid URL");
       }
       if (key.endsWith("api_base_url") && !value.isBlank() && !value.startsWith("http://") && !value.startsWith("https://")) {
         throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "config value must be valid URL");
@@ -317,7 +324,7 @@ public class ConfigAdminService {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.unfinished_task_cap range is 10-50");
     }
     if ("chat.recent_task_display_cap".equals(key) && (value < 20 || value > 100)) {
-      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.recent_task_display_cap range is 20-100");
+      throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "最近任务显示上限只能填写 20 至 100 条");
     }
     if ("chat.recognition_concurrency".equals(key) && (value < 1 || value > 16)) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "chat.recognition_concurrency range is 1-16");

@@ -29,6 +29,10 @@ public class CustomerAdminSearchService {
     return searchValidated(request == null ? null : request.toFilter());
   }
 
+  public CustomerFilterOptions filterOptions() {
+    return repository.filterOptions(accessScopeResolver.currentScope());
+  }
+
   public CustomerAdminSearchPage search(String keyword, int page, int size) {
     String normalizedKeyword = keyword == null ? "" : keyword.trim();
     if (normalizedKeyword.length() > 100) {

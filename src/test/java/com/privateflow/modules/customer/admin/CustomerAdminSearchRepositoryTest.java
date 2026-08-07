@@ -175,4 +175,34 @@ class CustomerAdminSearchRepositoryTest {
     assertThat(exported.get(0).tags()).extracting(CustomerTagSummary::valueId)
         .containsExactly(101L, 102L);
   }
+
+  @Test
+  void filterOptionsAreDistinctAndRespectKeeperScope() {
+    jdbcTemplate.update("""
+        UPDATE customers SET source_channel='企微', lead_type='TUAN_GOU',
+          intended_store='万江店', intended_project='产后修复', customer_stage='跟进中', arrived='是'
+        WHERE id = 1
+        """);
+    jdbcTemplate.update("""
+        UPDATE customers SET assigned_keeper='keeper-2', source_channel='抖音', lead_type='XIAN_SUO',
+          intended_store='南城店', intended_project='盆底修复', customer_stage='待联系', arrived='否'
+        WHERE id = 2
+        """);
+    jdbcTemplate.update("""
+        UPDATE customers SET source_channel='企微', lead_type='TUAN_GOU',
+          intended_store='万江店', intended_project='产后修复', customer_stage='跟进中', arrived='是'
+        WHERE id = 3
+        """);
+
+    CustomerFilterOptions options = repository.filterOptions(
+        new CustomerAccessScope(false, List.of("keeper-1"), true));
+
+    assertThat(options.sourceChannels()).containsExactly("企微");
+    assertThat(options.leadTypes()).containsExactly("TUAN_GOU");
+    assertThat(options.assignedKeepers()).containsExactly("keeper-1");
+    assertThat(options.intendedStores()).containsExactly("万江店");
+    assertThat(options.intendedProjects()).containsExactly("产后修复");
+    assertThat(options.customerStages()).containsExactly("跟进中");
+    assertThat(options.arrivedValues()).containsExactly("是");
+  }
 }
