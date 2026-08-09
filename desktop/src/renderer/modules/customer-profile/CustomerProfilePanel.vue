@@ -197,12 +197,12 @@
               </p>
             </div>
             <div class="suggestion-actions">
-              <button class="secondary small" :disabled="suggestion.resolving || state.editMode" @click="resolveProfileSuggestion('CONFIRM', suggestion)">确认</button>
+              <button class="secondary small" :disabled="suggestion.resolving || state.editMode" @click="resolveProfileSuggestion('CONFIRM', suggestion)">同意并执行</button>
               <button class="secondary small" :disabled="suggestion.resolving || state.editMode" @click="resolveProfileSuggestion('REJECT', suggestion)">拒绝</button>
             </div>
           </article>
           <div class="reply-actions">
-            <button class="secondary small" :disabled="state.editMode" @click="resolveProfileSuggestion('CONFIRM')">全部确认</button>
+            <button class="secondary small" :disabled="state.editMode" @click="resolveProfileSuggestion('CONFIRM')">全部同意并执行</button>
             <button class="secondary small" :disabled="state.editMode" @click="resolveProfileSuggestion('REJECT')">全部拒绝</button>
           </div>
         </div>
@@ -210,6 +210,15 @@
       </ProfileSection>
       <ProfileSection title="预约信息" section-key="appointment">
         <FieldGrid :items="appointmentItems" />
+        <button class="primary small" type="button" :disabled="state.editMode" @click="beginBooking">确认预约并生成填写信息</button>
+        <form v-if="state.bookingOpen" class="booking-form" @submit.prevent="confirmBooking">
+          <label>预约日期<input v-model="state.bookingDraft.appointmentDate" type="date" required /></label>
+          <label>预约时间<input v-model="state.bookingDraft.appointmentTime" type="time" /></label>
+          <label>预约门店<input v-model="state.bookingDraft.appointmentStore" required /></label>
+          <label>预约项目<input v-model="state.bookingDraft.appointmentItem" /></label>
+          <button class="primary small" type="submit">生成预约信息</button>
+          <textarea v-if="state.bookingTemplate" :value="state.bookingTemplate" readonly rows="6" aria-label="预约信息模板" />
+        </form>
       </ProfileSection>
     </article>
 
@@ -228,10 +237,12 @@ import { eventBus } from '../../shared/eventBus';
 import {
   appendProfileSuggestions,
   appendStageSuggestion,
+  beginBooking,
   beginTagEdit,
   cancelTagEdit,
   cancelEditMode,
   cleanupCustomerProfileStore,
+  confirmBooking,
   confirmTableSync,
   copyCustomerNickname,
   customerProfileState as state,
@@ -283,7 +294,9 @@ const bodyItems = computed<Array<[string, unknown]>>(() => [
 ]);
 
 const appointmentItems = computed<Array<[string, unknown]>>(() => [
+  ['预约状态', editField('appointmentStatus')],
   ['预约日期', editField('appointmentDate')],
+  ['预约时间', editField('appointmentTime')],
   ['预约门店', editField('appointmentStore')],
   ['预约项目', editField('appointmentItem')],
   ['是否到店', editField('arrived')],

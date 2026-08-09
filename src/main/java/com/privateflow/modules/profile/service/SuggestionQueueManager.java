@@ -3,6 +3,7 @@ package com.privateflow.modules.profile.service;
 import com.privateflow.common.events.ProfileSuggestionsReadyEvent;
 import com.privateflow.common.events.ProfileUpdatedEvent;
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.booking.CustomerBookingService;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.profile.BatchResolveRequest;
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -37,6 +39,29 @@ public class SuggestionQueueManager {
   private final ApplicationEventPublisher eventPublisher;
   private final AuditLogRepository auditLogRepository;
   private final CustomerAccessService customerAccessService;
+  private final CustomerBookingService customerBookingService;
+
+  @Autowired
+  public SuggestionQueueManager(
+      SuggestionRepository suggestionRepository,
+      CustomerQueryService customerQueryService,
+      ProfileFieldRegistry fieldRegistry,
+      ProfileWriter profileWriter,
+      ProfileConfigProvider configProvider,
+      ApplicationEventPublisher eventPublisher,
+      AuditLogRepository auditLogRepository,
+      CustomerAccessService customerAccessService,
+      CustomerBookingService customerBookingService) {
+    this.suggestionRepository = suggestionRepository;
+    this.customerQueryService = customerQueryService;
+    this.fieldRegistry = fieldRegistry;
+    this.profileWriter = profileWriter;
+    this.configProvider = configProvider;
+    this.eventPublisher = eventPublisher;
+    this.auditLogRepository = auditLogRepository;
+    this.customerAccessService = customerAccessService;
+    this.customerBookingService = customerBookingService;
+  }
 
   public SuggestionQueueManager(
       SuggestionRepository suggestionRepository,
@@ -47,14 +72,8 @@ public class SuggestionQueueManager {
       ApplicationEventPublisher eventPublisher,
       AuditLogRepository auditLogRepository,
       CustomerAccessService customerAccessService) {
-    this.suggestionRepository = suggestionRepository;
-    this.customerQueryService = customerQueryService;
-    this.fieldRegistry = fieldRegistry;
-    this.profileWriter = profileWriter;
-    this.configProvider = configProvider;
-    this.eventPublisher = eventPublisher;
-    this.auditLogRepository = auditLogRepository;
-    this.customerAccessService = customerAccessService;
+    this(suggestionRepository, customerQueryService, fieldRegistry, profileWriter, configProvider,
+        eventPublisher, auditLogRepository, customerAccessService, null);
   }
 
   public List<ProfileSuggestion> listPending(String phone) {
@@ -137,6 +156,9 @@ public class SuggestionQueueManager {
       profileWriter.write(phone, updates, customer.getVersion(), false);
       eventPublisher.publishEvent(new ProfileUpdatedEvent(phone, List.copyOf(updates.keySet())));
       confirmed = suggestionRepository.markStatus(confirmedIds, SuggestionStatus.CONFIRMED);
+      if (customerBookingService != null) {
+        customerBookingService.completeAfterSuggestion(phone);
+      }
     }
     int skipped = suggestionRepository.markStatus(skippedIds, SuggestionStatus.CONFLICT_SKIPPED);
     auditLogRepository.log("UPDATE_PROFILE", operator, "customer", phone, "confirm profile suggestions");

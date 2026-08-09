@@ -21,6 +21,8 @@ public record CustomerAdminListItem(
     String appointmentStore,
     String appointmentItem,
     String arrived,
+    String appointmentStatus,
+    String appointmentTime,
     String sourceTable,
     LocalDateTime updatedAt,
     List<CustomerTagSummary> tags) {
@@ -47,7 +49,7 @@ public record CustomerAdminListItem(
     this(
         id, phone, nickname, sourceChannel, leadType, assignedKeeper, intendedStore,
         intendedProject, customerStage, intentLevel, lastFollowupAt, nextFollowupAt,
-        appointmentDate, appointmentStore, appointmentItem, arrived, sourceTable,
+        appointmentDate, appointmentStore, appointmentItem, arrived, null, null, sourceTable,
         updatedAt, List.of());
   }
 
@@ -59,7 +61,7 @@ public record CustomerAdminListItem(
     return new CustomerAdminListItem(
         id, phone, nickname, sourceChannel, leadType, assignedKeeper, intendedStore,
         intendedProject, customerStage, intentLevel, lastFollowupAt, nextFollowupAt,
-        appointmentDate, appointmentStore, appointmentItem, arrived, sourceTable,
+        appointmentDate, appointmentStore, appointmentItem, arrived, appointmentStatus, appointmentTime, sourceTable,
         updatedAt, nextTags);
   }
 }

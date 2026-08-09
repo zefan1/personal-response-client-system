@@ -830,7 +830,7 @@
           <div v-if="selectedAdminCustomer" class="ops-detail-box customer-search-detail">
             <strong>{{ selectedAdminCustomer.nickname || '未填写昵称' }} · {{ selectedAdminCustomer.phone }}</strong>
             <p>客户阶段：{{ translateValue(selectedAdminCustomer.customerStage) }} · 意向等级：{{ translateValue(selectedAdminCustomer.intentLevel) }} · 最近跟进：{{ formatDate(selectedAdminCustomer.lastFollowupAt) }} · 下次跟进：{{ formatDate(selectedAdminCustomer.nextFollowupAt) }}</p>
-            <p>预约：{{ formatDate(selectedAdminCustomer.appointmentDate) }} · {{ selectedAdminCustomer.appointmentStore || '-' }} · {{ selectedAdminCustomer.appointmentItem || '-' }} · 到店：{{ selectedAdminCustomer.arrived || '-' }}</p>
+            <p>预约：{{ selectedAdminCustomer.appointmentStatus || '未预约' }} · {{ formatDate(selectedAdminCustomer.appointmentDate) }} {{ selectedAdminCustomer.appointmentTime || '' }} · {{ selectedAdminCustomer.appointmentStore || '-' }} · {{ selectedAdminCustomer.appointmentItem || '-' }} · 到店：{{ selectedAdminCustomer.arrived || '-' }}</p>
             <p>数据来源：{{ selectedAdminCustomer.sourceTable || selectedAdminCustomer.sourceChannel || '-' }} · 最后更新：{{ formatDate(selectedAdminCustomer.updatedAt) }}</p>
           </div>
           <div class="ops-pagination">

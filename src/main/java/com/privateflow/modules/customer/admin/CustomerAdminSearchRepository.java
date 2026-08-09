@@ -143,6 +143,8 @@ public class CustomerAdminSearchRepository {
         customer.getAppointmentStore(),
         customer.getAppointmentItem(),
         customer.getArrived(),
+        customer.getAppointmentStatus(),
+        customer.getAppointmentTime(),
         customer.getSourceTable(),
         customer.getUpdatedAt());
   }

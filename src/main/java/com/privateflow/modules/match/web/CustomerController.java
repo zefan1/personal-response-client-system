@@ -1,6 +1,9 @@
 package com.privateflow.modules.match.web;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.booking.BookingConfirmRequest;
+import com.privateflow.modules.customer.booking.BookingConfirmResult;
+import com.privateflow.modules.customer.booking.CustomerBookingService;
 import com.privateflow.modules.match.ApiResponse;
 import com.privateflow.modules.match.CustomerBatchRequest;
 import com.privateflow.modules.match.CustomerBatchResponse;
@@ -31,6 +34,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -52,6 +56,25 @@ public class CustomerController {
   private final SuggestionQueueManager suggestionQueueManager;
   private final ManualSaveHandler manualSaveHandler;
   private final CustomerTagUpdateService customerTagUpdateService;
+  private final CustomerBookingService customerBookingService;
+
+  @Autowired
+  public CustomerController(
+      CustomerSearchService customerSearchService,
+      CustomerProfileService customerProfileService,
+      ManualEditHandler manualEditHandler,
+      SuggestionQueueManager suggestionQueueManager,
+      ManualSaveHandler manualSaveHandler,
+      CustomerTagUpdateService customerTagUpdateService,
+      CustomerBookingService customerBookingService) {
+    this.customerSearchService = customerSearchService;
+    this.customerProfileService = customerProfileService;
+    this.manualEditHandler = manualEditHandler;
+    this.suggestionQueueManager = suggestionQueueManager;
+    this.manualSaveHandler = manualSaveHandler;
+    this.customerTagUpdateService = customerTagUpdateService;
+    this.customerBookingService = customerBookingService;
+  }
 
   public CustomerController(
       CustomerSearchService customerSearchService,
@@ -60,12 +83,8 @@ public class CustomerController {
       SuggestionQueueManager suggestionQueueManager,
       ManualSaveHandler manualSaveHandler,
       CustomerTagUpdateService customerTagUpdateService) {
-    this.customerSearchService = customerSearchService;
-    this.customerProfileService = customerProfileService;
-    this.manualEditHandler = manualEditHandler;
-    this.suggestionQueueManager = suggestionQueueManager;
-    this.manualSaveHandler = manualSaveHandler;
-    this.customerTagUpdateService = customerTagUpdateService;
+    this(customerSearchService, customerProfileService, manualEditHandler, suggestionQueueManager,
+        manualSaveHandler, customerTagUpdateService, null);
   }
 
   @GetMapping("/search")
@@ -115,6 +134,16 @@ public class CustomerController {
       @PathVariable("phone") String phone,
       @RequestBody ManualProfileUpdateRequest request) {
     return ApiResponse.ok(manualEditHandler.update(phone, request));
+  }
+
+  @PostMapping("/{phone}/booking")
+  public ApiResponse<BookingConfirmResult> confirmBooking(
+      @PathVariable("phone") String phone,
+      @RequestBody BookingConfirmRequest request) {
+    if (customerBookingService == null) {
+      throw new IllegalStateException("预约服务不可用");
+    }
+    return ApiResponse.ok(customerBookingService.confirm(phone, request));
   }
 
   @PutMapping("/{phone}/tags/{categoryId}")
