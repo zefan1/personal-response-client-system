@@ -78,8 +78,8 @@ export const customerProfileState = reactive({
     suggestions: false,
     appointment: false
   } as Record<SectionKey, boolean>,
-  toast: ''
-  ,bookingOpen: false,
+  toast: '',
+  bookingOpen: false,
   bookingTemplate: '',
   bookingDraft: { appointmentDate: '', appointmentTime: '', appointmentStore: '', appointmentItem: '' }
 });
