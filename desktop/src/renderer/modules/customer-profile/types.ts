@@ -57,6 +57,9 @@ export type Customer = {
   appointmentStore?: string | null;
   appointmentItem?: string | null;
   arrived?: string | null;
+  appointmentStatus?: string | null;
+  appointmentTime?: string | null;
+  arrivalSourceRowId?: string | null;
   sourceTable?: string | null;
   sourceRowId?: string | null;
   syncedAt?: string | null;

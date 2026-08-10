@@ -52,6 +52,9 @@ public class ProfileFieldRegistry {
     register("appointmentStore", "appointment_store", String.class);
     register("appointmentItem", "appointment_item", String.class);
     register("arrived", "arrived", String.class);
+    register("appointmentStatus", "appointment_status", String.class);
+    register("appointmentTime", "appointment_time", String.class);
+    register("arrivalSourceRowId", "arrival_source_row_id", String.class);
   }
 
   public Set<String> supportedFields() {

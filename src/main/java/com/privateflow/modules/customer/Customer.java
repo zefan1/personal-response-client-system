@@ -46,6 +46,9 @@ public class Customer {
   private String appointmentStore;
   private String appointmentItem;
   private String arrived;
+  private String appointmentStatus;
+  private String appointmentTime;
+  private String arrivalSourceRowId;
   private String sourceTable;
   private String sourceRowId;
   private LocalDateTime syncedAt;
@@ -133,6 +136,12 @@ public class Customer {
   public void setAppointmentItem(String appointmentItem) { this.appointmentItem = appointmentItem; }
   public String getArrived() { return arrived; }
   public void setArrived(String arrived) { this.arrived = arrived; }
+  public String getAppointmentStatus() { return appointmentStatus; }
+  public void setAppointmentStatus(String appointmentStatus) { this.appointmentStatus = appointmentStatus; }
+  public String getAppointmentTime() { return appointmentTime; }
+  public void setAppointmentTime(String appointmentTime) { this.appointmentTime = appointmentTime; }
+  public String getArrivalSourceRowId() { return arrivalSourceRowId; }
+  public void setArrivalSourceRowId(String arrivalSourceRowId) { this.arrivalSourceRowId = arrivalSourceRowId; }
   public String getSourceTable() { return sourceTable; }
   public void setSourceTable(String sourceTable) { this.sourceTable = sourceTable; }
   public String getSourceRowId() { return sourceRowId; }

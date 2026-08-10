@@ -185,6 +185,26 @@ const apiData: Record<string, unknown> = {
     size: 20,
     totalPages: 1
   },
+  '/api/v1/customers/by-id/11': {
+    customer: {
+      id: 11,
+      phone: '13800001111',
+      nickname: '王女士',
+      customerStage: 'PENDING',
+      lochiaPeriod: '已结束，月经未恢复',
+      diastasisRecti: '两指',
+      urineLeakage: '偶有',
+      pubicLumbago: '久坐腰痛',
+      prevRepairExp: '无',
+      postpartumCheck: '已检查',
+      version: 2
+    },
+    phoneFull: '13800001111',
+    pendingSuggestions: [],
+    currentTags: [],
+    tagLocks: [],
+    editableTagCategories: []
+  },
   '/admin/api/v1/customers/filter-options': {
     sourceChannels: ['企微', '抖音'],
     leadTypes: ['TUAN_GOU', 'XIAN_SUO'],
@@ -1609,10 +1629,16 @@ describe('AdminConsole product surface', () => {
       page: 1,
       pageSize: 20
     });
+    const customerTable = host.querySelector('.ops-table') as HTMLElement;
+    customerTable.scrollLeft = 456;
     findButton(host, '查看档案').click();
     await flushUi();
-    expect(mainText(host)).toContain('客户阶段：待确认');
-    expect(mainText(host)).toContain('数据来源：私域客资管理表');
+    expect(customerTable.scrollLeft).toBe(0);
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/api/v1/customers/by-id/11', expect.any(Number), expect.anything());
+    expect(mainText(host)).toContain('恶露/月经');
+    expect(mainText(host)).toContain('腹直肌');
+    expect(mainText(host)).not.toContain('编辑档案');
+    expect(host.querySelector('.ops-customer-profile-row')?.classList).toContain('ops-table-detail-row');
 
     app.unmount();
   });

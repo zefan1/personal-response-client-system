@@ -50,6 +50,9 @@ public class CustomerRowMapper implements RowMapper<Customer> {
     customer.setAppointmentStore(rs.getString("appointment_store"));
     customer.setAppointmentItem(rs.getString("appointment_item"));
     customer.setArrived(rs.getString("arrived"));
+    customer.setAppointmentStatus(rs.getString("appointment_status"));
+    customer.setAppointmentTime(rs.getString("appointment_time"));
+    customer.setArrivalSourceRowId(rs.getString("arrival_source_row_id"));
     customer.setSourceTable(rs.getString("source_table"));
     customer.setSourceRowId(rs.getString("source_row_id"));
     customer.setSyncedAt(rs.getTimestamp("synced_at") == null ? null : rs.getTimestamp("synced_at").toLocalDateTime());
