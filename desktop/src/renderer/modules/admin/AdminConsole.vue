@@ -104,7 +104,17 @@
             </div>
             <button class="secondary small" type="button" @click="loadSkillAnalytics">刷新监控</button>
           </div>
-          <div class="ops-form-grid">
+          <div class="ops-form-grid ops-skill-test-panel">
+            <label>
+              选择测试能力
+              <select v-model="selectedSkillTestBindingId" aria-label="选择测试能力">
+                <option value="">请选择要测试的能力</option>
+                <option v-for="item in skillBindings" :key="item.id" :value="String(item.id)">
+                  {{ sceneLabel(item.scene) }} / {{ leadTypeLabel(item.leadType) }} / {{ item.skillName || item.skillId }}
+                </option>
+              </select>
+              <small>先选能力，再输入测试消息；列表里的“测试”也会自动选中对应能力。</small>
+            </label>
             <label>
               测试消息
               <textarea v-model="skillTestMessage" rows="4" placeholder="输入客户最近一句话，验证对应 Skill 的回复效果"></textarea>
@@ -113,6 +123,11 @@
               <strong>调用监控</strong>
               <p>{{ summarizeObject(skillAnalytics?.summary ?? skillAnalytics) }}</p>
               <small>{{ skillAnalytics ? `统计窗口：近 ${skillAnalyticsDays} 天` : '尚未加载调用统计' }}</small>
+            </div>
+            <div class="ops-detail-box ops-skill-test-action-box">
+              <strong>{{ selectedSkillTestBinding ? '待测试能力' : '未选择能力' }}</strong>
+              <p>{{ selectedSkillTestBinding ? `${sceneLabel(selectedSkillTestBinding.scene)} / ${leadTypeLabel(selectedSkillTestBinding.leadType)} / ${selectedSkillTestBinding.skillName || selectedSkillTestBinding.skillId}` : '请选择上方能力后再执行。' }}</p>
+              <button class="primary small" type="button" :disabled="loading || !selectedSkillTestBinding || !skillTestMessage.trim()" @click="runSelectedSkillTest">执行测试</button>
             </div>
           </div>
           <div v-if="Object.keys(skillTestResults).length" class="ops-card-grid">
@@ -594,10 +609,33 @@
           <div class="ops-panel-head">
             <div>
               <h2>连接企业微信智能表格</h2>
-              <p>只需粘贴目标表格的完整链接，系统会检查它是否属于本项目。</p>
+              <p>客户主表、分配表、到店表分开连接，系统会检查链接是否属于本项目。</p>
             </div>
           </div>
+          <div class="ops-smart-sheet-card-grid">
+            <article
+              v-for="card in smartSheetCards"
+              :key="card.value"
+              class="ops-smart-sheet-card"
+              :class="{ active: card.isActive }"
+            >
+              <div>
+                <strong>{{ card.label }}</strong>
+                <span :class="card.status === '已连接' ? 'ok-text' : 'warn-text'">{{ card.status }}</span>
+              </div>
+              <p>{{ card.help }}</p>
+              <small>{{ card.name }} · 映射 {{ card.mappingCount }} 项</small>
+              <button class="secondary small" type="button" @click="smartSheetConnectionDraft.role = card.value">配置这张表</button>
+            </article>
+          </div>
           <div class="ops-smart-sheet-connect-row">
+            <label>
+              要配置的表格
+              <select v-model="smartSheetConnectionDraft.role" aria-label="连接表格角色">
+                <option v-for="role in SMART_SHEET_ROLES" :key="role.value" :value="role.value">{{ role.label }}</option>
+              </select>
+              <small>当前保存会写入所选表格，不会覆盖其他两张表。</small>
+            </label>
             <label>
               企业微信智能表格链接
               <input v-model="smartSheetConnectionDraft.documentUrl" type="url" aria-label="企业微信智能表格链接" placeholder="粘贴浏览器地址栏里的完整链接" />
@@ -814,7 +852,15 @@
               <span>操作</span>
             </div>
             <template v-for="customer in customerSearchItems" :key="customer.id || customer.phone">
-            <div class="ops-table-row customer-search">
+            <div
+              class="ops-table-row customer-search"
+              role="button"
+              tabindex="0"
+              :aria-expanded="selectedAdminCustomer?.id === customer.id"
+              @click="handleCustomerRowToggle(customer, $event)"
+              @keydown.enter.prevent="toggleAdminCustomerDetail(customer)"
+              @keydown.space.prevent="toggleAdminCustomerDetail(customer)"
+            >
               <span>{{ customer.nickname || '未填写昵称' }}</span>
               <span>{{ customer.phone || '-' }}</span>
               <span>{{ customer.sourceChannel || customer.sourceTable || '-' }}</span>
@@ -823,7 +869,7 @@
               <span>{{ translateValue(customer.customerStage) }} / {{ translateValue(customer.intentLevel) }}</span>
               <span>{{ customer.assignedKeeper || '-' }}</span>
               <span class="ops-row-actions">
-                <button class="secondary small" type="button" @click="toggleAdminCustomerDetail(customer)">{{ selectedAdminCustomer?.phone === customer.phone ? '收起' : '查看档案' }}</button>
+                <button class="secondary small" type="button" @click.stop="toggleAdminCustomerDetail(customer)">{{ selectedAdminCustomer?.phone === customer.phone ? '收起' : '查看档案' }}</button>
               </span>
             </div>
             <div v-if="selectedAdminCustomer?.id === customer.id" class="ops-customer-profile-row ops-table-detail-row">
@@ -1039,27 +1085,38 @@
           <div class="ops-panel-head">
             <div>
               <h2>可推广模板</h2>
-              <p>查看员工保存时留下的原始 AI 文本与调整稿，确认后发布到全员模板库。</p>
+              <p>先筛选员工候选模板，确认内容、线索类型和可用范围后再发布。</p>
             </div>
             <button class="secondary small" type="button" :disabled="loading" @click="refreshTemplatePromotionCandidates">刷新候选</button>
           </div>
-          <div class="ops-card-grid template-candidate-grid">
-            <article v-for="candidate in templatePromotionCandidates" :key="candidate.id" class="ops-content-card template-candidate-card">
-              <div class="ops-card-head">
+          <div class="ops-filter-bar three template-candidate-filters">
+            <input v-model="templatePromotionKeyword" placeholder="搜索标题、员工或正文" />
+            <select v-model="templatePromotionLeadTypeFilter" aria-label="筛选线索类型">
+              <option value="">全部线索类型</option>
+              <option v-for="option in LEAD_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+            <select v-model="templatePromotionScopeFilter" aria-label="筛选发布范围">
+              <option value="">全部范围</option>
+              <option value="ALL">全部成员</option>
+              <option value="GROUP">指定组</option>
+            </select>
+          </div>
+          <div class="template-candidate-list">
+            <article v-for="candidate in filteredTemplatePromotionCandidates" :key="candidate.id" class="template-candidate-row">
+              <div class="template-candidate-main">
                 <div>
                   <h3>{{ candidate.editedTitle }}</h3>
-                  <span>{{ candidate.ownerUsername || '-' }} · {{ formatDate(candidate.createdAt) }}</span>
+                  <span>{{ candidate.ownerUsername || '-' }} · {{ formatDate(candidate.createdAt) }} · 已用 {{ candidate.personalTemplateUsageCount || 0 }} 次</span>
                 </div>
-                <strong>已用 {{ candidate.personalTemplateUsageCount || 0 }} 次</strong>
+                <p class="template-candidate-metadata">{{ candidateMetadataSummary(candidate) }}</p>
+                <div class="template-candidate-copy">
+                  <label>原始 AI 回复<textarea :value="candidate.originalAiReply" readonly rows="3"></textarea></label>
+                  <label>员工调整稿<textarea :value="candidate.editedBody" readonly rows="3"></textarea></label>
+                </div>
               </div>
-              <p class="template-candidate-metadata">{{ candidateMetadataSummary(candidate) }}</p>
-              <div class="template-candidate-copy">
-                <label>原始 AI 回复<textarea :value="candidate.originalAiReply" readonly rows="3"></textarea></label>
-                <label>员工调整稿<textarea :value="candidate.editedBody" readonly rows="3"></textarea></label>
-              </div>
-              <div class="ops-form-grid template-candidate-publish-form">
+              <div class="template-candidate-publish-form">
                 <label>
-                  团队标题
+                  模板标题
                   <input :data-testid="`candidate-title-${candidate.id}`" v-model="candidatePublishDraft(candidate).title" maxlength="120" />
                 </label>
                 <label>
@@ -1068,20 +1125,36 @@
                 </label>
                 <label>
                   线索类型
-                  <input v-model="candidatePublishDraft(candidate).leadType" maxlength="32" />
+                  <select v-model="candidatePublishDraft(candidate).leadType" aria-label="线索类型">
+                    <option v-for="option in LEAD_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
+                </label>
+                <label>
+                  发布范围
+                  <select v-model="candidatePublishDraft(candidate).scopeType" aria-label="发布范围">
+                    <option value="ALL">全部成员</option>
+                    <option value="GROUP">指定组</option>
+                  </select>
+                </label>
+                <label v-if="candidatePublishDraft(candidate).scopeType === 'GROUP'">
+                  可用分组
+                  <select v-model="candidatePublishDraft(candidate).groupIds" multiple aria-label="可用分组">
+                    <option v-for="group in accountGroupOptions" :key="group.value" :value="group.value">{{ group.label }}</option>
+                  </select>
+                  <small v-if="!accountGroupOptions.length">暂无可选分组，请先在账号与权限中维护分组。</small>
                 </label>
                 <label class="ops-checkline template-candidate-enabled">
                   <input v-model="candidatePublishDraft(candidate).enabled" class="ops-switch" type="checkbox" />
                   发布后立即可用
                 </label>
-              </div>
-              <div class="ops-row-actions">
-                <button :data-testid="`candidate-publish-${candidate.id}`" class="primary small" type="button" :disabled="loading" @click="publishTemplateCandidate(candidate)">发布到团队模板库</button>
-                <button :data-testid="`candidate-not-publish-${candidate.id}`" class="secondary small" type="button" :disabled="loading" @click="markTemplateCandidateNotPublished(candidate)">暂不发布</button>
+                <div class="ops-row-actions">
+                  <button :data-testid="`candidate-publish-${candidate.id}`" class="primary small" type="button" :disabled="loading" @click="publishTemplateCandidate(candidate)">发布到团队模板库</button>
+                  <button :data-testid="`candidate-not-publish-${candidate.id}`" class="secondary small" type="button" :disabled="loading" @click="markTemplateCandidateNotPublished(candidate)">暂不发布</button>
+                </div>
               </div>
             </article>
           </div>
-          <p v-if="!templatePromotionCandidates.length" class="ops-empty">当前没有待查阅的模板候选。</p>
+          <p v-if="!filteredTemplatePromotionCandidates.length" class="ops-empty">当前没有符合筛选条件的模板候选。</p>
         </article>
       </section>
 
@@ -1114,33 +1187,75 @@
               <option value="0">已停用</option>
             </select>
           </div>
-          <div class="ops-table">
-            <div class="ops-table-row head accounts">
-              <span>姓名</span>
-              <span>手机号</span>
-              <span>角色</span>
-              <span>直属组长</span>
-              <span>最近登录</span>
-              <span>状态</span>
-              <span>操作</span>
-            </div>
-            <div v-for="account in accounts" :key="account.id" class="ops-table-row accounts">
-              <span>{{ account.displayName || account.username }}</span>
-              <span>{{ account.phone || account.username }}</span>
-              <span><b class="ops-role-badge" :class="`role-${String(account.role || '').toLowerCase()}`">{{ roleLabel(account.role) }}</b></span>
-              <span>{{ account.leaderName || leaderName(account.leaderId) }}</span>
-              <span>{{ formatDate(account.lastLoginAt) }}</span>
-              <span class="ops-account-state">
-                <b :class="account.isEnabled === false ? 'warn-text' : 'ok-text'">{{ account.isEnabled === false ? '已停用' : '启用中' }}</b>
-                <small v-if="hasTagManagementPermission(account)">标签管理权限</small>
-              </span>
-              <span class="ops-row-actions">
-                <button class="secondary small" type="button" @click="openForm('account', account)">编辑</button>
-                <button class="secondary small" type="button" @click="resetAccountPassword(account)">重置密码</button>
-                <button class="secondary small" type="button" @click="confirmToggleAccount(account)">{{ account.isEnabled === false ? '启用' : '停用' }}</button>
-                <button class="secondary small danger" type="button" @click="confirmDeleteAccount(account)">删除</button>
-              </span>
-            </div>
+          <div class="ops-account-groups">
+            <section v-if="ungroupedAccounts.length" class="ops-account-ungrouped ops-account-section">
+              <header>
+                <strong>未分组</strong>
+                <span>{{ ungroupedAccounts.length }} 人</span>
+              </header>
+              <div class="ops-table">
+                <div class="ops-table-row head accounts">
+                  <span>姓名</span>
+                  <span>手机号</span>
+                  <span>角色</span>
+                  <span>直属组长</span>
+                  <span>最近登录</span>
+                  <span>状态</span>
+                  <span>操作</span>
+                </div>
+                <div v-for="account in ungroupedAccounts" :key="account.id" class="ops-table-row accounts">
+                  <span>{{ account.displayName || account.username }}</span>
+                  <span>{{ account.phone || account.username }}</span>
+                  <span><b class="ops-role-badge" :class="`role-${String(account.role || '').toLowerCase()}`">{{ roleLabel(account.role) }}</b></span>
+                  <span>{{ account.leaderName || leaderName(account.leaderId) }}</span>
+                  <span>{{ formatDate(account.lastLoginAt) }}</span>
+                  <span class="ops-account-state">
+                    <b :class="account.isEnabled === false ? 'warn-text' : 'ok-text'">{{ account.isEnabled === false ? '已停用' : '启用中' }}</b>
+                    <small v-if="hasTagManagementPermission(account)">标签管理权限</small>
+                  </span>
+                  <span class="ops-row-actions">
+                    <button class="secondary small" type="button" @click="openForm('account', account)">编辑</button>
+                    <button class="secondary small" type="button" @click="resetAccountPassword(account)">重置密码</button>
+                    <button class="secondary small" type="button" @click="confirmToggleAccount(account)">{{ account.isEnabled === false ? '启用' : '停用' }}</button>
+                    <button class="secondary small danger" type="button" @click="confirmDeleteAccount(account)">删除</button>
+                  </span>
+                </div>
+              </div>
+            </section>
+            <section v-for="group in accountGroups" :key="group.key" class="ops-account-group ops-account-section">
+              <header>
+                <strong>{{ group.name }}</strong>
+                <span>组长：{{ group.leader ? group.leader.displayName || group.leader.username : '未设置' }} · 组员 {{ group.members.length }} 人</span>
+              </header>
+              <div class="ops-table">
+                <div class="ops-table-row head accounts">
+                  <span>姓名</span>
+                  <span>手机号</span>
+                  <span>角色</span>
+                  <span>直属组长</span>
+                  <span>最近登录</span>
+                  <span>状态</span>
+                  <span>操作</span>
+                </div>
+                <div v-for="account in group.rows" :key="account.id" class="ops-table-row accounts">
+                  <span>{{ account.displayName || account.username }}</span>
+                  <span>{{ account.phone || account.username }}</span>
+                  <span><b class="ops-role-badge" :class="`role-${String(account.role || '').toLowerCase()}`">{{ roleLabel(account.role) }}</b></span>
+                  <span>{{ account.leaderName || leaderName(account.leaderId) }}</span>
+                  <span>{{ formatDate(account.lastLoginAt) }}</span>
+                  <span class="ops-account-state">
+                    <b :class="account.isEnabled === false ? 'warn-text' : 'ok-text'">{{ account.isEnabled === false ? '已停用' : '启用中' }}</b>
+                    <small v-if="hasTagManagementPermission(account)">标签管理权限</small>
+                  </span>
+                  <span class="ops-row-actions">
+                    <button class="secondary small" type="button" @click="openForm('account', account)">编辑</button>
+                    <button class="secondary small" type="button" @click="resetAccountPassword(account)">重置密码</button>
+                    <button class="secondary small" type="button" @click="confirmToggleAccount(account)">{{ account.isEnabled === false ? '启用' : '停用' }}</button>
+                    <button class="secondary small danger" type="button" @click="confirmDeleteAccount(account)">删除</button>
+                  </span>
+                </div>
+              </div>
+            </section>
             <p v-if="!accounts.length" class="ops-empty">暂无账号。</p>
           </div>
           <div class="ops-pagination">
@@ -1189,8 +1304,8 @@
             </div>
             <button class="primary small" type="button" @click="openForm('rule')">新增规则</button>
           </div>
-          <div class="ops-filter-bar">
-            <input v-model="ruleKeyword" placeholder="搜索规则名称" @change="resetRulePageAndLoad" />
+          <div class="ops-filter-bar ops-rule-filter-bar">
+            <input class="ops-rule-search-compact" v-model="ruleKeyword" placeholder="搜索规则名称" @change="resetRulePageAndLoad" />
             <select v-model="ruleActionType" @change="resetRulePageAndLoad">
               <option value="">全部动作</option>
               <option value="ALERT">提醒/告警</option>
@@ -1492,7 +1607,7 @@
                   </div>
                 </div>
                 <div v-if="analyticsFunnelStages.length" class="ops-analytics-funnel">
-                  <div v-for="stage in analyticsFunnelStages" :key="stage.key" class="ops-analytics-funnel-step" :style="{ '--funnel-width': `${stage.width}%` }">
+                  <div v-for="stage in analyticsFunnelStages" :key="stage.key" class="ops-analytics-funnel-step ops-analytics-funnel-trapezoid" :style="{ '--funnel-width': `${stage.width}%` }">
                     <span>{{ stage.label }}</span>
                     <strong>{{ stage.count }}</strong>
                     <small>{{ stage.rate }}</small>
@@ -2202,11 +2317,11 @@
               {{ versionUploadState.message }}
             </span>
           </div>
-          <section v-if="activeForm === 'rule'" class="ops-rule-tag-editor">
+          <section v-if="activeForm === 'rule'" class="ops-rule-form-section ops-rule-tag-editor">
             <div class="ops-form-section-head">
               <div>
-                <strong>动态标签条件</strong>
-                <small>只显示启用且允许用于跟进规则的标签分类和值。</small>
+                <strong>触发条件</strong>
+                <small>按线索类型、超时时间和动态标签决定何时触发。</small>
               </div>
               <label class="ops-rule-tag-logic">
                 <span class="ops-label-title">分类组之间</span>
@@ -2216,6 +2331,15 @@
                 </select>
               </label>
             </div>
+            <label v-for="field in ruleConditionFields" :key="field.key">
+              <span class="ops-label-title">{{ field.label }}</span>
+              <select v-if="field.type === 'select'" v-model="formDraft[field.key]" :disabled="field.disabled" @change="onFormFieldChange(field.key)">
+                <option v-for="option in field.options ?? []" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
+              </select>
+              <input v-else-if="field.type === 'number'" v-model.number="formDraft[field.key]" type="number" :placeholder="field.placeholder" :disabled="field.disabled" :min="field.min" :max="field.max" :step="field.step" />
+              <input v-else v-model="formDraft[field.key]" :type="field.type" :placeholder="field.placeholder" :disabled="field.disabled" />
+              <small v-if="field.help">{{ field.help }}</small>
+            </label>
             <div
               v-for="(condition, index) in formDraft.tagConditions"
               :key="condition.key ?? index"
@@ -2255,42 +2379,70 @@
             <button class="secondary small rule-tag-add-button" type="button" @click="addRuleTagCondition">添加标签条件</button>
             <p v-if="formDraft.legacyTagRule" class="warn-text">这是旧文本标签规则。保留原格式保存；选择正式分类和值后才会升级为目录引用。</p>
           </section>
+          <section v-if="activeForm === 'rule'" class="ops-rule-form-section ops-rule-meta-section">
+            <div class="ops-form-section-head">
+              <div>
+                <strong>规则信息</strong>
+                <small>命名、优先级和启停状态放在这里。</small>
+              </div>
+            </div>
+            <label v-for="field in ruleMetaFields" :key="field.key" :class="{ 'ops-boolean-field': field.type === 'checkbox' }">
+              <span class="ops-label-title">{{ field.label }}</span>
+              <select v-if="field.type === 'select'" v-model="formDraft[field.key]" :disabled="field.disabled" @change="onFormFieldChange(field.key)">
+                <option v-for="option in field.options ?? []" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
+              </select>
+              <input v-else-if="field.type === 'checkbox'" v-model="formDraft[field.key]" class="ops-switch" type="checkbox" :disabled="field.disabled" />
+              <input v-else-if="field.type === 'number'" v-model.number="formDraft[field.key]" type="number" :placeholder="field.placeholder" :disabled="field.disabled" :min="field.min" :max="field.max" :step="field.step" />
+              <input v-else v-model="formDraft[field.key]" :type="field.type" :placeholder="field.placeholder" :disabled="field.disabled" />
+              <small v-if="field.help">{{ field.help }}</small>
+            </label>
+          </section>
           <section
             v-if="activeForm === 'rule'"
-            v-show="formDraft.actionType === 'TAG_CHANGE'"
-            class="ops-rule-tag-action"
+            class="ops-rule-form-section ops-rule-tag-action"
           >
             <div class="ops-form-section-head">
               <div>
-                <strong>正式标签建议目标</strong>
-                <small>选择目录目标后，系统会保存分类 ID、标签值 ID 和正式名称。</small>
+                <strong>执行动作</strong>
+                <small>设置提醒、通知组长或标签建议的具体动作。</small>
               </div>
             </div>
-            <label>
-              <span class="ops-label-title">正式标签分类</span>
-              <select class="rule-tag-action-category" v-model="formDraft.tagCategoryId" @change="resetRuleActionValue">
-                <option value="">使用旧文本规则</option>
-                <option v-for="category in followupRuleTagCategories()" :key="category.id" :value="String(category.id)">
-                  {{ category.categoryName }}
-                </option>
+            <label v-for="field in ruleActionFields" :key="field.key">
+              <span class="ops-label-title">{{ field.label }}</span>
+              <select v-if="field.type === 'select'" v-model="formDraft[field.key]" :disabled="field.disabled" @change="onFormFieldChange(field.key)">
+                <option v-for="option in field.options ?? []" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
               </select>
+              <input v-else-if="field.type === 'number'" v-model.number="formDraft[field.key]" type="number" :placeholder="field.placeholder" :disabled="field.disabled" :min="field.min" :max="field.max" :step="field.step" />
+              <input v-else v-model="formDraft[field.key]" :type="field.type" :placeholder="field.placeholder" :disabled="field.disabled" />
+              <small v-if="field.help">{{ field.help }}</small>
             </label>
-            <label>
-              <span class="ops-label-title">正式标签值</span>
-              <select class="rule-tag-action-value" v-model="formDraft.tagValueId" :disabled="!formDraft.tagCategoryId">
-                <option value="">请选择标签值</option>
-                <option
-                  v-for="value in followupRuleAllTagValues()"
-                  :key="`${value.categoryId}-${value.id}`"
-                  :value="String(value.id)"
-                  :hidden="String(value.categoryId) !== String(formDraft.tagCategoryId)"
-                >
-                  {{ value.displayName || value.tagValue }}
-                </option>
-              </select>
-            </label>
+            <div v-show="formDraft.actionType === 'TAG_CHANGE'" class="ops-rule-formal-target">
+              <label>
+                <span class="ops-label-title">正式标签分类</span>
+                <select class="rule-tag-action-category" v-model="formDraft.tagCategoryId" @change="resetRuleActionValue">
+                  <option value="">使用旧文本规则</option>
+                  <option v-for="category in followupRuleTagCategories()" :key="category.id" :value="String(category.id)">
+                    {{ category.categoryName }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                <span class="ops-label-title">正式标签值</span>
+                <select class="rule-tag-action-value" v-model="formDraft.tagValueId" :disabled="!formDraft.tagCategoryId">
+                  <option value="">请选择标签值</option>
+                  <option
+                    v-for="value in followupRuleAllTagValues()"
+                    :key="`${value.categoryId}-${value.id}`"
+                    :value="String(value.id)"
+                    :hidden="String(value.categoryId) !== String(formDraft.tagCategoryId)"
+                  >
+                    {{ value.displayName || value.tagValue }}
+                  </option>
+                </select>
+              </label>
+            </div>
           </section>
-          <template v-for="field in activeFormFields" :key="field.key">
+          <template v-for="field in activeForm === 'rule' ? [] : activeFormFields" :key="field.key">
           <label
             v-if="activeForm !== 'quickSearch' || field.key !== 'imageUrl' || formDraft.contentType === 'IMAGE'"
             :class="{ 'ops-form-span-2': field.type === 'textarea', 'ops-boolean-field': field.type === 'checkbox', 'ops-quick-search-image-field': activeForm === 'quickSearch' && field.key === 'imageUrl' }"
@@ -2616,6 +2768,19 @@ const LEAD_TYPE_OPTIONS = [
   { label: '待确认', value: 'PENDING' }
 ];
 const LLM_PROFILE_LEAD_TYPE_OPTIONS = LEAD_TYPE_OPTIONS.filter((option) => option.value !== 'GENERAL');
+const SMART_SHEET_ROLES = [
+  { value: 'PRIMARY', label: '客户主表', configKey: 'table.document_url', help: '客户资料、标签和跟进记录的主视图' },
+  { value: 'ASSIGNMENT', label: '分配表', configKey: 'table.assignment_document_url', help: '线索分配、负责人和分组流转' },
+  { value: 'ARRIVAL', label: '到店表', configKey: 'table.arrival_document_url', help: '预约、到店和成交转化' }
+] as const;
+const FUNNEL_STAGE_LABELS: Record<string, string> = {
+  ASSIGNED: '已分配',
+  CONTACTED: '已联系',
+  ARRIVED: '已到店',
+  CONVERTED: '已成交',
+  PAID: '已付款',
+  LOST: '已流失'
+};
 
 const CUSTOMER_FIELD_LABELS: Record<string, string> = {
   phone: '手机号',
@@ -2653,7 +2818,13 @@ const TRANSLATED_VALUE_LABELS: Record<string, string> = {
   CHAT_RECOGNIZE: '聊天识别',
   PROFILE_EXTRACT: '档案提取',
   REGENERATE: '换一组',
-  OPENING: '开场白'
+  OPENING: '开场白',
+  ASSIGNED: '已分配',
+  CONTACTED: '已联系',
+  ARRIVED: '已到店',
+  CONVERTED: '已成交',
+  PAID: '已付款',
+  LOST: '已流失'
 };
 
 const ANALYTICS_KEY_LABELS: Record<string, string> = {
@@ -2750,6 +2921,7 @@ const skillSceneFilter = ref('');
 const skillLeadTypeFilter = ref('');
 const skillAnalyticsDays = ref(7);
 const skillTestMessage = ref('请基于当前客户状态生成一条跟进回复');
+const selectedSkillTestBindingId = ref('');
 const llmProfileTestLeadType = ref('PENDING');
 const llmProfileTestMessage = ref('客户明确说想了解适合自己的改善方案');
 const llmProfileTestModalOpen = ref(false);
@@ -2795,6 +2967,9 @@ const quickSearchKeyword = ref('');
 const quickSearchType = ref('');
 const quickSearchEnabledFilter = ref('');
 const quickSearchSelectedIds = ref<Array<string | number>>([]);
+const templatePromotionKeyword = ref('');
+const templatePromotionLeadTypeFilter = ref('');
+const templatePromotionScopeFilter = ref('');
 const ruleKeyword = ref('');
 const ruleActionType = ref('');
 const ruleEnabledFilter = ref('');
@@ -2874,7 +3049,8 @@ const selectedAdminCustomer = ref<AnyRecord | null>(null);
 const customerSearchTable = ref<HTMLElement | null>(null);
 const quickSearchItems = ref<AnyRecord[]>([]);
 const templatePromotionCandidates = ref<AnyRecord[]>([]);
-const candidatePublishDrafts = reactive<Record<string, { title: string; shortcutCode: string; leadType: string; enabled: boolean }>>({});
+type CandidatePublishDraft = { title: string; shortcutCode: string; leadType: string; enabled: boolean; scopeType: 'ALL' | 'GROUP'; groupIds: string[] };
+const candidatePublishDrafts = reactive<Record<string, CandidatePublishDraft>>({});
 const accounts = ref<AnyRecord[]>([]);
 const leaderAccounts = ref<AnyRecord[]>([]);
 const analyticsAccounts = ref<AnyRecord[]>([]);
@@ -3107,7 +3283,8 @@ const tableRuntimeDraft = reactive({
 });
 const smartSheetConnectionDraft = reactive({
   documentUrl: '',
-  connectedName: ''
+  connectedName: '',
+  role: 'PRIMARY'
 });
 const datasourceRuntimeDraft = reactive({
   syncCron: '0 */30 * * * *',
@@ -3645,9 +3822,61 @@ const filteredHealthAlerts = computed(() => listFrom(health.value ?? {}, 'recent
 const activeFormTitle = computed(() => formMeta(activeForm.value).title);
 const activeFormDescription = computed(() => formMeta(activeForm.value).description);
 const activeFormFields = computed(() => formMeta(activeForm.value).fields);
+const ruleConditionFields = computed(() => activeFormFields.value.filter((field) => ['leadType', 'thresholdHours'].includes(field.key)));
+const ruleMetaFields = computed(() => activeFormFields.value.filter((field) => ['name', 'priority', 'enabled'].includes(field.key)));
+const ruleActionFields = computed(() => activeFormFields.value.filter((field) => ['actionType', 'alertLevel', 'reminderType', 'tagName'].includes(field.key)));
 const quickSearchVariables = QUICK_SEARCH_TEMPLATE_VARIABLES.map((variable) => ({
   label: variable.label,
   value: variable.placeholder
+}));
+const selectedSkillTestBinding = computed(() => skillBindings.value.find((item) => String(item.id) === selectedSkillTestBindingId.value) || null);
+const smartSheetCards = computed(() => SMART_SHEET_ROLES.map((role) => {
+  const configuredUrl = configValue(role.configKey);
+  const isActive = smartSheetConnectionDraft.role === role.value;
+  return {
+    ...role,
+    configuredUrl,
+    status: configuredUrl || (role.value === 'PRIMARY' && smartSheetConnectionDraft.connectedName) ? '已连接' : '未配置',
+    name: role.value === 'PRIMARY' && smartSheetConnectionDraft.connectedName
+      ? smartSheetConnectionDraft.connectedName
+      : configuredUrl ? '已保存链接' : '等待配置',
+    mappingCount: role.value === 'PRIMARY' ? mappings.value.filter((item) => item.enabled !== false).length : 0,
+    isActive
+  };
+}));
+const accountGroups = computed(() => {
+  const groups = new Map<string, { key: string; name: string; leader: AnyRecord | null; members: AnyRecord[] }>();
+  for (const account of accounts.value) {
+    const groupName = String(account.groupName ?? account.teamName ?? '').trim();
+    const groupId = account.groupId ?? account.teamId;
+    if (!groupName && !groupId) continue;
+    const key = String(groupId ?? groupName);
+    if (!groups.has(key)) groups.set(key, { key, name: groupName || `分组 ${key}`, leader: null, members: [] });
+    const group = groups.get(key)!;
+    if (String(account.role) === 'LEADER') group.leader = account;
+    else group.members.push(account);
+  }
+  return [...groups.values()].map((group) => ({
+    ...group,
+    rows: [group.leader, ...group.members.sort(accountRoleSort)].filter(Boolean) as AnyRecord[]
+  }));
+});
+const ungroupedAccounts = computed(() => accounts.value.filter((account) => !(account.groupName ?? account.teamName ?? account.groupId ?? account.teamId)));
+const accountGroupOptions = computed(() => accountGroups.value.map((group) => ({ label: group.name, value: group.key })));
+const filteredTemplatePromotionCandidates = computed(() => templatePromotionCandidates.value.filter((candidate) => {
+  const draft = candidatePublishDraft(candidate);
+  const keyword = templatePromotionKeyword.value.trim().toLowerCase();
+  const matchesKeyword = !keyword || [
+    candidate.editedTitle,
+    candidate.ownerUsername,
+    candidate.editedBody,
+    candidate.originalAiReply,
+    draft.title
+  ].some((value) => String(value ?? '').toLowerCase().includes(keyword));
+  const metadata = candidateMetadata(candidate);
+  const matchesLeadType = !templatePromotionLeadTypeFilter.value || draft.leadType === templatePromotionLeadTypeFilter.value || metadata.leadType === templatePromotionLeadTypeFilter.value;
+  const matchesScope = !templatePromotionScopeFilter.value || draft.scopeType === templatePromotionScopeFilter.value;
+  return matchesKeyword && matchesLeadType && matchesScope;
 }));
 const auditActionGroups = computed(() => {
   const groups = new Map<string, AnyRecord[]>();
@@ -3762,6 +3991,9 @@ async function loadSkillAi() {
       getJson<unknown>('/admin/api/v1/configs')
     ]);
     skillBindings.value = listFromResponse(skillList);
+    if (!skillBindings.value.some((item) => String(item.id) === selectedSkillTestBindingId.value)) {
+      selectedSkillTestBindingId.value = skillBindings.value[0] ? String(skillBindings.value[0].id) : '';
+    }
     availableSkills.value = listFromResponse(availableSkillList);
     skillAnalytics.value = recordFromResponse(skillCallAnalytics);
     skillEnvironments.value = listFromResponse(skillEnvList);
@@ -4326,6 +4558,12 @@ function toggleAdminCustomerDetail(customer: AnyRecord) {
   }
 }
 
+function handleCustomerRowToggle(customer: AnyRecord, event: MouseEvent) {
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('.ops-row-actions')) return;
+  toggleAdminCustomerDetail(customer);
+}
+
 async function changeAccountPage(delta: number) {
   const nextPage = Math.min(accountTotalPages.value, Math.max(1, accountPageInfo.page + delta));
   if (nextPage === accountPageInfo.page) return;
@@ -4474,25 +4712,30 @@ function applyTemplatePromotionCandidates(response: ApiResponse<unknown>) {
   }
 }
 
-function candidatePublishDraft(candidate: AnyRecord): { title: string; shortcutCode: string; leadType: string; enabled: boolean } {
+function candidatePublishDraft(candidate: AnyRecord): CandidatePublishDraft {
   const key = String(candidate.id);
   const existing = candidatePublishDrafts[key];
   if (existing) return existing;
   const metadata = candidateMetadata(candidate);
+  const metadataLeadType = String(metadata.leadType || '').trim();
   return {
     title: String(candidate.editedTitle || '').trim(),
     shortcutCode: `TM${Number(candidate.id).toString(36).toUpperCase()}`,
-    leadType: String(metadata.leadType || '').trim(),
-    enabled: true
+    leadType: LEAD_TYPE_OPTIONS.some((option) => option.value === metadataLeadType) ? metadataLeadType : 'GENERAL',
+    enabled: true,
+    scopeType: 'ALL',
+    groupIds: []
   };
 }
 
 async function refreshTemplatePromotionCandidates() {
   await runWithNotice(async () => {
-    applyTemplatePromotionCandidates(await getJson<unknown>(withQuery(
-      '/admin/api/v1/template-promotion-candidates',
-      { status: 'CANDIDATE' }
-    )));
+    const [candidateList, accountList] = await Promise.all([
+      getJson<unknown>(withQuery('/admin/api/v1/template-promotion-candidates', { status: 'CANDIDATE' })),
+      getJson<unknown>(accountListPath())
+    ]);
+    applyTemplatePromotionCandidates(candidateList);
+    applyAccountList(accountList);
   }, '模板候选已刷新');
 }
 
@@ -4503,7 +4746,9 @@ async function publishTemplateCandidate(candidate: AnyRecord) {
       title: draft.title.trim(),
       shortcutCode: draft.shortcutCode.trim(),
       leadType: draft.leadType.trim() || null,
-      enabled: draft.enabled
+      enabled: draft.enabled,
+      scopeType: draft.scopeType,
+      groupIds: draft.scopeType === 'GROUP' ? draft.groupIds : []
     });
     removeTemplatePromotionCandidate(candidate.id);
   }, '已发布到团队模板库');
@@ -5344,7 +5589,10 @@ async function verifyAndSaveSmartSheet() {
     return;
   }
   await runWithNotice(async () => {
-    const result = recordFromResponse(await postJson<unknown>('/admin/api/v1/datasources/smart-sheet-connection', { documentUrl }));
+    const result = recordFromResponse(await postJson<unknown>('/admin/api/v1/datasources/smart-sheet-connection', {
+      documentUrl,
+      role: smartSheetConnectionDraft.role
+    }));
     smartSheetConnectionDraft.documentUrl = String(result.documentUrl || documentUrl);
     smartSheetConnectionDraft.connectedName = String(result.tableName || 'API 创建的智能表格');
     const configList = await getJson<unknown>('/admin/api/v1/configs');
@@ -5474,10 +5722,26 @@ function confirmRestorePrompt(version: AnyRecord) {
 }
 
 async function runSkillTest(item: AnyRecord) {
+  selectedSkillTestBindingId.value = String(item.id ?? '');
   await runWithNotice(async () => {
     const response = recordFromResponse(await postJson<unknown>(`/admin/api/v1/skills/${item.id}/test`, { testMessage: skillTestMessage.value }));
     skillTestResults[String(item.id)] = { ...response, skillName: item.skillName || item.skillId };
   }, 'Skill 测试完成');
+}
+
+async function runSelectedSkillTest() {
+  const item = selectedSkillTestBinding.value;
+  if (!item) {
+    noticeKind.value = 'error';
+    notice.value = '请先选择要测试的能力。';
+    return;
+  }
+  if (!skillTestMessage.value.trim()) {
+    noticeKind.value = 'error';
+    notice.value = '请先输入测试消息。';
+    return;
+  }
+  await runSkillTest(item);
 }
 
 function confirmToggleSkill(item: AnyRecord) {
@@ -7224,6 +7488,11 @@ function leaderName(leaderId: unknown) {
   return leader?.displayName || leader?.username || `#${leaderId}`;
 }
 
+function accountRoleSort(left: AnyRecord, right: AnyRecord) {
+  const order: Record<string, number> = { LEADER: 0, KEEPER: 1, ADMIN: 2 };
+  return (order[String(left.role ?? '').toUpperCase()] ?? 9) - (order[String(right.role ?? '').toUpperCase()] ?? 9);
+}
+
 function syncStatusFor(id: unknown) {
   const status = syncStatuses.value.find((item) => String(item.datasourceId ?? item.id) === String(id));
   return status?.syncStatus || status?.status || '待同步';
@@ -7315,8 +7584,9 @@ function analyticsFunnelRows(value: unknown): Array<{ label: string; count: numb
   return stages.map((stage, index) => {
     const count = analyticsNumber(stage.count) ?? 0;
     const rateRaw = stage.totalRate ?? stage.layerRate;
+    const labelSource = String(stage.stage ?? stage.label ?? stage.stageKey ?? `阶段 ${index + 1}`);
     return {
-      label: String(stage.stage ?? stage.label ?? stage.stageKey ?? `阶段 ${index + 1}`),
+      label: FUNNEL_STAGE_LABELS[labelSource] ?? translateValue(labelSource),
       count,
       rate: analyticsRate(rateRaw) === null ? '暂无占比' : `${Math.round((analyticsRate(rateRaw) ?? 0) * 10) / 10}%`,
       rateRaw

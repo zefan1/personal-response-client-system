@@ -1,4 +1,4 @@
-import { createApp, nextTick, type App } from 'vue';
+﻿import { createApp, nextTick, type App } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AdminConsole from './AdminConsole.vue';
 
@@ -276,7 +276,8 @@ const apiData: Record<string, unknown> = {
   '/admin/api/v1/accounts': {
     list: [
       { id: 30, displayName: '管理员', phone: '18800000000', role: 'ADMIN', isEnabled: true, permissions: ['TAG_MANAGEMENT'], lastLoginAt: '2026-07-03T09:00:00Z' },
-      { id: 31, displayName: '组长', phone: '18800000001', role: 'LEADER', isEnabled: true, permissions: [], lastLoginAt: '2026-07-03T09:05:00Z' }
+      { id: 31, displayName: '万江组长', phone: '18800000001', role: 'LEADER', groupId: 9, groupName: '万江私域组', isEnabled: true, permissions: [], lastLoginAt: '2026-07-03T09:05:00Z' },
+      { id: 32, displayName: '万江管家', phone: '18800000002', role: 'KEEPER', groupId: 9, groupName: '万江私域组', leaderId: 31, leaderName: '万江组长', isEnabled: true, permissions: ['TAG_MANAGEMENT'], lastLoginAt: '2026-07-03T09:08:00Z' }
     ],
     total: 42,
     page: 1,
@@ -424,7 +425,15 @@ const apiData: Record<string, unknown> = {
     summary: { totalCalls: 18, adoptionRate: '98%', avgResponseTimeMs: 1200, activeCallerCount: 2 },
     dailyTrend: [{ date: '2026-07-03', totalCalls: 18, adoptionCount: 16, adoptionRate: '88%', avgResponseTimeMs: 1200 }]
   },
-  '/admin/api/v1/analytics/funnels': { tuanGou: { stages: [{ stage: '已分配', stageKey: 'ASSIGNED', count: 12, layerRate: '100%', totalRate: '100%' }] } },
+  '/admin/api/v1/analytics/funnels': {
+    tuanGou: {
+      stages: [
+        { stageKey: 'ASSIGNED', count: 12, layerRate: '100%', totalRate: '100%' },
+        { stageKey: 'CONTACTED', count: 9, layerRate: '75%', totalRate: '75%' },
+        { stageKey: 'ARRIVED', count: 5, layerRate: '55.6%', totalRate: '41.7%' }
+      ]
+    }
+  },
   '/admin/api/v1/analytics/staff': { list: [{ caller: '18800000001', totalCustomers: 6, totalCalls: 8, adoptionCount: 7, adoptionRate: '87%', overdueCount: 1, silentCount: 2 }] },
   '/admin/api/v1/analytics/sources': { list: [{ sourceChannel: '企微', total: 12, tuanGouCount: 7, xianSuoCount: 5, arrivedCount: 3, arrivalRate: '25%' }] },
   '/admin/api/v1/analytics/stages': { list: [{ customerStage: 'PENDING', total: 5, tuanGouCount: 2, xianSuoCount: 3 }] },
@@ -791,6 +800,32 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
+  it('lets the operator choose a test binding before running a Skill test', async () => {
+    apiMocks.postJson.mockImplementation(async (path: string) => {
+      if (path === '/admin/api/v1/skills/1/test') {
+        return { success: true, data: { responseTimeMs: 12, suggestions: [] }, errorCode: null, message: null };
+      }
+      return { success: true, data: apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] }, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, 'Skill 场景管理').click();
+    await flushUi();
+    const testPanel = [...host.querySelectorAll('.ops-panel')].find((item) => item.textContent?.includes('在线测试与调用监控')) as HTMLElement;
+    const selector = testPanel.querySelector('select') as HTMLSelectElement;
+    expect(selector).toBeTruthy();
+    expect(testPanel.textContent).toContain('执行测试');
+    setInputValue(selector, '1');
+    setInputValue(testPanel.querySelector('textarea') as HTMLTextAreaElement, '客户明确表达目标');
+    await flushUi();
+    findButton(testPanel, '执行测试').click();
+    await flushSave();
+
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/skills/1/test', { testMessage: '客户明确表达目标' });
+
+    app.unmount();
+  });
+
   it('saves configuration center prompt, external gateway, and runtime config keys', async () => {
     const { app, host } = await mountConsole();
 
@@ -1114,15 +1149,23 @@ describe('AdminConsole product surface', () => {
     expect(mainText(host)).toContain('打开目标表格，复制浏览器地址栏里的完整链接');
     expect(mainText(host)).toContain('必须是本系统通过企业微信 API 创建并纳入管理的智能表格');
     expect(mainText(host)).toContain('你在企微中手动新建的智能表格不能连接');
+    expect(host.querySelectorAll('.ops-smart-sheet-card')).toHaveLength(3);
+    expect(mainText(host)).toContain('客户主表');
+    expect(mainText(host)).toContain('分配表');
+    expect(mainText(host)).toContain('到店表');
 
     const smartSheetInput = host.querySelector('input[aria-label="企业微信智能表格链接"]') as HTMLInputElement;
     expect(smartSheetInput.value).toBe('https://doc.weixin.qq.com/smartsheet/doc-api-owned');
     expect(host.querySelector('input[aria-label="企微表格网关 API 密钥"]')).toBeFalsy();
     setInputValue(smartSheetInput, 'https://doc.weixin.qq.com/smartsheet/doc-api-owned');
+    const smartSheetRoleSelect = host.querySelector('select[aria-label="连接表格角色"]') as HTMLSelectElement;
+    expect(smartSheetRoleSelect).toBeTruthy();
+    setInputValue(smartSheetRoleSelect, 'ASSIGNMENT');
     findButton(host, '检测并保存').click();
     await flushSave();
     expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/datasources/smart-sheet-connection', {
-      documentUrl: 'https://doc.weixin.qq.com/smartsheet/doc-api-owned'
+      documentUrl: 'https://doc.weixin.qq.com/smartsheet/doc-api-owned',
+      role: 'ASSIGNMENT'
     });
     expect(mainText(host)).toContain('已连接：客户资料表');
 
@@ -1481,6 +1524,23 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
+  it('groups account permissions by team and shows the leader before team members', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '账号与权限').click();
+    await flushUi();
+    await flushUi();
+
+    const groups = [...host.querySelectorAll('.ops-account-group')];
+    expect(groups.length).toBeGreaterThanOrEqual(1);
+    expect(groups[0].textContent).toContain('万江私域组');
+    expect(groups[0].textContent).toContain('组长');
+    expect(groups[0].textContent).toContain('管家');
+    expect(mainText(host)).toContain('未分组');
+
+    app.unmount();
+  });
+
   it('loads and saves login, workbench sync, and Skill expiry settings from account management', async () => {
     const { app, host } = await mountConsole();
 
@@ -1639,6 +1699,26 @@ describe('AdminConsole product surface', () => {
     expect(mainText(host)).toContain('腹直肌');
     expect(mainText(host)).not.toContain('编辑档案');
     expect(host.querySelector('.ops-customer-profile-row')?.classList).toContain('ops-table-detail-row');
+
+    app.unmount();
+  });
+
+  it('toggles a customer profile from the whole row without requiring the action button', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户数据对接').click();
+    await flushUi();
+    await flushUi();
+
+    const row = [...host.querySelectorAll('.ops-table-row.customer-search')]
+      .find((item) => item.textContent?.includes('王女士')) as HTMLElement;
+    expect(row).toBeTruthy();
+    row.click();
+    await flushUi();
+    expect(host.querySelector('.ops-customer-profile-row')).toBeTruthy();
+    row.click();
+    await flushUi();
+    expect(host.querySelector('.ops-customer-profile-row')).toBeNull();
 
     app.unmount();
   });
@@ -2090,6 +2170,11 @@ describe('AdminConsole product surface', () => {
     await flushUi();
 
     const drawer = host.querySelector('.ops-drawer') as HTMLElement;
+    expect(host.querySelector('.ops-rule-search-compact')).toBeTruthy();
+    expect(drawer.querySelectorAll('.ops-rule-form-section')).toHaveLength(3);
+    expect(drawer.textContent).toContain('触发条件');
+    expect(drawer.textContent).toContain('规则信息');
+    expect(drawer.textContent).toContain('执行动作');
     const textInputs = [...drawer.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
     const numberInputs = [...drawer.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
     const selects = [...drawer.querySelectorAll('select')] as HTMLSelectElement[];
@@ -2565,6 +2650,22 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
+  it('renders template candidates in a filterable list with lead type and scope controls', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '可推广模板').click();
+    await flushUi();
+    await flushUi();
+
+    expect(host.querySelector('.template-candidate-list')).toBeTruthy();
+    expect(host.querySelectorAll('.template-candidate-row')).toHaveLength(2);
+    expect(host.querySelector('select[aria-label="线索类型"]')).toBeTruthy();
+    expect(host.querySelector('select[aria-label="发布范围"]')).toBeTruthy();
+    expect(mainText(host)).toContain('模板标题');
+
+    app.unmount();
+  });
+
   it('loads supervisor metrics and saves governance settings from the administrator console', async () => {
     const { app, host } = await mountConsole();
 
@@ -2708,6 +2809,10 @@ describe('AdminConsole product surface', () => {
     expect(visualDashboard.querySelector('.ops-analytics-trend')).toBeTruthy();
     expect(visualDashboard.querySelectorAll('.ops-analytics-ring')).toHaveLength(3);
     expect(visualDashboard.querySelector('.ops-analytics-funnel')).toBeTruthy();
+    expect(visualDashboard.querySelectorAll('.ops-analytics-funnel-step')).toHaveLength(3);
+    expect(visualDashboard.textContent).toContain('已分配');
+    expect(visualDashboard.textContent).toContain('已联系');
+    expect(visualDashboard.textContent).toContain('已到店');
     expect(visualDashboard.querySelector('.ops-analytics-ranking')).toBeTruthy();
     expect(visualDashboard.textContent).toContain('开场话术');
 
