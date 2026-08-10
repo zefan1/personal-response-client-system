@@ -31,7 +31,7 @@ import type {
   StageSuggestPayload
 } from './types';
 
-type SectionKey = 'intent' | 'body' | 'followup' | 'tags' | 'suggestions' | 'appointment';
+type SectionKey = 'identity' | 'intent' | 'body' | 'followup' | 'conversion' | 'tags' | 'suggestions' | 'appointment';
 type TableSyncStatusLevel = 'pending' | 'syncing' | 'success' | 'retrying' | 'skipped';
 
 type TableSyncStatus = {
@@ -71,9 +71,11 @@ export const customerProfileState = reactive({
   tagSavingCategoryId: null as number | null,
   tagDrafts: {} as Record<number, number[]>,
   sectionCollapsed: {
+    identity: false,
     intent: false,
     body: false,
     followup: false,
+    conversion: false,
     tags: false,
     suggestions: false,
     appointment: false
@@ -666,9 +668,11 @@ function collectChangedFields(original: Customer, edited: Record<string, unknown
 }
 
 function resetSectionState(): void {
+  customerProfileState.sectionCollapsed.identity = false;
   customerProfileState.sectionCollapsed.intent = false;
   customerProfileState.sectionCollapsed.body = false;
   customerProfileState.sectionCollapsed.followup = false;
+  customerProfileState.sectionCollapsed.conversion = false;
   customerProfileState.sectionCollapsed.tags = false;
   customerProfileState.sectionCollapsed.suggestions = customerProfileState.suggestions.length === 0;
   customerProfileState.sectionCollapsed.appointment = false;

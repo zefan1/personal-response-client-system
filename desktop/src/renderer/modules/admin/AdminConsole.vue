@@ -802,7 +802,7 @@
             <div class="customer-filter-actions"><span>已选 {{ customerDirectFilterCount + customerSelectedTagCount }} 项条件</span><div><button class="secondary small" type="button" :disabled="loading" @click="exportCustomerSearch">导出当前查询</button><button class="primary small" type="button" :disabled="loading" @click="applyCustomerFilters">查询客户</button></div></div>
             </div>
           </section>
-          <div class="ops-table">
+          <div ref="customerSearchTable" class="ops-table">
             <div class="ops-table-row head customer-search">
               <span>客户</span>
               <span>手机号</span>
@@ -813,7 +813,8 @@
               <span>分配管家</span>
               <span>操作</span>
             </div>
-            <div v-for="customer in customerSearchItems" :key="customer.id || customer.phone" class="ops-table-row customer-search">
+            <template v-for="customer in customerSearchItems" :key="customer.id || customer.phone">
+            <div class="ops-table-row customer-search">
               <span>{{ customer.nickname || '未填写昵称' }}</span>
               <span>{{ customer.phone || '-' }}</span>
               <span>{{ customer.sourceChannel || customer.sourceTable || '-' }}</span>
@@ -825,13 +826,11 @@
                 <button class="secondary small" type="button" @click="toggleAdminCustomerDetail(customer)">{{ selectedAdminCustomer?.phone === customer.phone ? '收起' : '查看档案' }}</button>
               </span>
             </div>
+            <div v-if="selectedAdminCustomer?.id === customer.id" class="ops-customer-profile-row ops-table-detail-row">
+              <CustomerProfilePanel :customer-id="Number(customer.id)" read-only embedded />
+            </div>
+            </template>
             <p v-if="!customerSearchItems.length" class="ops-empty">没有找到符合条件的客户。</p>
-          </div>
-          <div v-if="selectedAdminCustomer" class="ops-detail-box customer-search-detail">
-            <strong>{{ selectedAdminCustomer.nickname || '未填写昵称' }} · {{ selectedAdminCustomer.phone }}</strong>
-            <p>客户阶段：{{ translateValue(selectedAdminCustomer.customerStage) }} · 意向等级：{{ translateValue(selectedAdminCustomer.intentLevel) }} · 最近跟进：{{ formatDate(selectedAdminCustomer.lastFollowupAt) }} · 下次跟进：{{ formatDate(selectedAdminCustomer.nextFollowupAt) }}</p>
-            <p>预约：{{ selectedAdminCustomer.appointmentStatus || '未预约' }} · {{ formatDate(selectedAdminCustomer.appointmentDate) }} {{ selectedAdminCustomer.appointmentTime || '' }} · {{ selectedAdminCustomer.appointmentStore || '-' }} · {{ selectedAdminCustomer.appointmentItem || '-' }} · 到店：{{ selectedAdminCustomer.arrived || '-' }}</p>
-            <p>数据来源：{{ selectedAdminCustomer.sourceTable || selectedAdminCustomer.sourceChannel || '-' }} · 最后更新：{{ formatDate(selectedAdminCustomer.updatedAt) }}</p>
           </div>
           <div class="ops-pagination">
             <strong>当前筛选：{{ customerSearchPageInfo.total }} 个客户</strong>
@@ -2431,8 +2430,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import AdminNavigation from './AdminNavigation.vue';
+import CustomerProfilePanel from '../customer-profile/CustomerProfilePanel.vue';
 import {
   deleteJson as requestDeleteJson,
   getBlob as requestGetBlob,
@@ -2871,6 +2871,7 @@ const mappingVersions = ref<AnyRecord[]>([]);
 const importLogs = ref<AnyRecord[]>([]);
 const customerSearchItems = ref<AnyRecord[]>([]);
 const selectedAdminCustomer = ref<AnyRecord | null>(null);
+const customerSearchTable = ref<HTMLElement | null>(null);
 const quickSearchItems = ref<AnyRecord[]>([]);
 const templatePromotionCandidates = ref<AnyRecord[]>([]);
 const candidatePublishDrafts = reactive<Record<string, { title: string; shortcutCode: string; leadType: string; enabled: boolean }>>({});
@@ -4316,7 +4317,13 @@ async function changeCustomerSearchPage(delta: number) {
 }
 
 function toggleAdminCustomerDetail(customer: AnyRecord) {
-  selectedAdminCustomer.value = selectedAdminCustomer.value?.phone === customer.phone ? null : customer;
+  const opening = selectedAdminCustomer.value?.phone !== customer.phone;
+  selectedAdminCustomer.value = opening ? customer : null;
+  if (opening) {
+    void nextTick(() => {
+      if (customerSearchTable.value) customerSearchTable.value.scrollLeft = 0;
+    });
+  }
 }
 
 async function changeAccountPage(delta: number) {
