@@ -1,8 +1,11 @@
 package com.privateflow.modules.tablewrite.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.privateflow.modules.customer.infra.SystemConfigRepository;
+import com.privateflow.modules.tablewrite.config.WecomApiEndpointProvider;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -22,7 +25,9 @@ class WecomSmartSheetClientSpringWiringTest {
           "WECOM_SMARTSHEET_SOURCE_TABLE=Customers",
           "WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE=Customer ID");
       context.registerBean(ObjectMapper.class);
+      context.registerBean(SystemConfigRepository.class, () -> mock(SystemConfigRepository.class));
       context.register(
+          WecomApiEndpointProvider.class,
           WecomSmartSheetConfig.class,
           WecomAccessTokenProvider.class,
           WecomSmartSheetApiClient.class,

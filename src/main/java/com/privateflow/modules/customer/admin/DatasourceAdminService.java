@@ -648,6 +648,9 @@ public class DatasourceAdminService {
       case "appointmentStore" -> "预约门店";
       case "appointmentItem" -> "预约项目";
       case "arrived" -> "是否到店";
+      case "appointmentStatus" -> "预约状态";
+      case "appointmentTime" -> "预约时间";
+      case "arrivalSourceRowId" -> "到店衔接记录";
       case "sourceTable" -> "数据来源表";
       default -> field;
     };

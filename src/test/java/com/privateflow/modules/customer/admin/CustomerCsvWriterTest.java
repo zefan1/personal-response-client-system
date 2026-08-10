@@ -12,7 +12,7 @@ class CustomerCsvWriterTest {
   void writesUtf8CsvWithEscapingFormulaProtectionAndTagCodes() {
     CustomerAdminListItem item = new CustomerAdminListItem(
         1L, "13800000001", "=Alice", "企微\"来源", "GENERAL", "keeper-1", "万江店", "产后修复",
-        "待跟进", "MEDIUM", null, null, null, null, null, null, "customers", null,
+        "待跟进", "MEDIUM", null, null, null, null, null, null, null, null, "customers", null,
         List.of(new CustomerTagSummary(7L, "body_concerns", "身体关注", 101L, "DIASTASIS", "腹直肌分离")));
 
     byte[] csv = new CustomerCsvWriter().write(List.of(item));

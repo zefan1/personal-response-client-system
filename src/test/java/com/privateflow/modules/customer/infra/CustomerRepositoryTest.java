@@ -46,6 +46,7 @@ class CustomerRepositoryTest {
           first_tracking_capture TEXT, second_tracking_capture TEXT, third_tracking_capture TEXT,
           last_followup_at DATETIME, followup_notes TEXT, next_followup_at DATETIME, next_followup_dir VARCHAR(200),
           appointment_date DATE, appointment_store VARCHAR(100), appointment_item VARCHAR(100), arrived VARCHAR(10),
+          appointment_status VARCHAR(20), appointment_time VARCHAR(10), arrival_source_row_id VARCHAR(100),
           source_table VARCHAR(100), source_row_id VARCHAR(100), synced_at DATETIME, version INT NOT NULL DEFAULT 0,
           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
