@@ -952,6 +952,16 @@ describe('AdminConsole product surface', () => {
     expect(apiMocks.putJson).not.toHaveBeenCalledWith('/admin/api/v1/configs/table.api_key', expect.anything());
 
     const relayUrlInput = host.querySelector('input[aria-label="企业微信服务器转发地址"]') as HTMLInputElement;
+    expect(mainText(host)).toContain('在哪里找？');
+    expect(mainText(host)).toContain('wecom.relay_base_url');
+    expect(mainText(host)).toContain('WECOM_API_BASE_URL');
+    const beforeBlankRelaySaveCalls = apiMocks.putJson.mock.calls.length;
+    findButton(host, '保存企业微信连接').click();
+    await flushSave();
+    const blankRelaySaveCalls = apiMocks.putJson.mock.calls.slice(beforeBlankRelaySaveCalls);
+    expect(blankRelaySaveCalls).toContainEqual(['/admin/api/v1/configs/wecom.connection_mode', { value: 'RELAY' }]);
+    expect(blankRelaySaveCalls).not.toContainEqual(['/admin/api/v1/configs/wecom.relay_base_url', { value: '' }]);
+
     setInputValue(relayUrlInput, 'https://wecom-relay.example.com');
     findButton(host, '保存企业微信连接').click();
     await flushSave();
@@ -1161,7 +1171,7 @@ describe('AdminConsole product surface', () => {
     const smartSheetRoleSelect = host.querySelector('select[aria-label="连接表格角色"]') as HTMLSelectElement;
     expect(smartSheetRoleSelect).toBeTruthy();
     setInputValue(smartSheetRoleSelect, 'ASSIGNMENT');
-    findButton(host, '检测并保存').click();
+    findButton(host, '保存并检测这张表').click();
     await flushSave();
     expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/datasources/smart-sheet-connection', {
       documentUrl: 'https://doc.weixin.qq.com/smartsheet/doc-api-owned',
@@ -1541,7 +1551,7 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
-  it('loads and saves login, workbench sync, and Skill expiry settings from account management', async () => {
+  it('loads and saves login and workbench sync while showing Skill expiry as read-only', async () => {
     const { app, host } = await mountConsole();
 
     findSubnavButton(host, '账号与权限').click();
@@ -1555,14 +1565,15 @@ describe('AdminConsole product surface', () => {
     setInputValue(controlByLabel<HTMLInputElement>(panel, '登录凭证有效小时'), '4');
     setInputValue(controlByLabel<HTMLInputElement>(panel, '免登录天数'), '30');
     setInputValue(controlByLabel<HTMLInputElement>(panel, '工作台自动同步秒数'), '90');
-    setInputValue(controlByLabel<HTMLInputElement>(panel, 'Skill 到期日期'), '2026-12-31');
+    expect(panel.textContent).toContain('系统会从 Skill 服务或授权配置自动读取');
+    expect(panel.querySelector('input[type="date"]')).toBeNull();
     findButton(panel, '保存设置').click();
     await flushSave();
 
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/system.jwt_access_token_ttl_s', { value: '14400' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/system.jwt_refresh_token_ttl_s', { value: '2592000' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/desktop.workbench_refresh_interval_s', { value: '90' });
-    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/skill.subscription_expire_at', { value: '2026-12-31' });
+    expect(apiMocks.putJson).not.toHaveBeenCalledWith('/admin/api/v1/configs/skill.subscription_expire_at', expect.anything());
 
     app.unmount();
   });
@@ -2675,7 +2686,7 @@ describe('AdminConsole product surface', () => {
 
     expect(mainText(host)).toContain('AI 使用率');
     expect(mainText(host)).toContain('已复制客户');
-    expect(mainText(host)).toContain('转换目标已配置');
+    expect(mainText(host)).toContain('转化目标已配置');
     expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringContaining('/admin/api/v1/supervision/metrics'));
     expect(apiMocks.getJson).toHaveBeenCalledWith(expect.stringContaining('/admin/api/v1/supervision/events'));
     expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/supervision/metadata');
@@ -2690,12 +2701,12 @@ describe('AdminConsole product surface', () => {
     await flushSave();
 
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/supervision.record_retention_days', { value: '200' });
-    expect(mainText(host)).toContain('转换目标阶段');
+    expect(mainText(host)).toContain('哪些阶段算转化成功');
     expect((host.querySelector('[data-testid="conversion-target-stages"]') as HTMLElement).textContent).toContain('已成交');
     const targetStagePicker = host.querySelector('[data-testid="conversion-stage-picker"]') as HTMLSelectElement;
     setInputValue(targetStagePicker, '跟进中');
     await flushSave();
-    findButton(host, '添加目标阶段').click();
+    findButton(host, '加入转化成功').click();
     await flushSave();
     expect((host.querySelector('[data-testid="conversion-target-stages"]') as HTMLElement).textContent).toContain('跟进中');
     app.unmount();

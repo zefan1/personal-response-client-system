@@ -82,7 +82,7 @@
             <div v-for="item in skillBindings" :key="item.id" class="ops-table-row">
               <span>{{ sceneLabel(item.scene) }}</span>
               <span>{{ leadTypeLabel(item.leadType) }}</span>
-              <span>{{ item.skillName || item.skillId }}</span>
+              <span>{{ skillBindingName(item) }}</span>
               <span>{{ item.priority }}</span>
               <span><b :class="item.enabled ? 'ok-text' : 'warn-text'">{{ item.enabled ? '当前可用' : '已停用' }}</b></span>
               <span class="ops-row-actions">
@@ -110,7 +110,7 @@
               <select v-model="selectedSkillTestBindingId" aria-label="选择测试能力">
                 <option value="">请选择要测试的能力</option>
                 <option v-for="item in skillBindings" :key="item.id" :value="String(item.id)">
-                  {{ sceneLabel(item.scene) }} / {{ leadTypeLabel(item.leadType) }} / {{ item.skillName || item.skillId }}
+                  {{ sceneLabel(item.scene) }} / {{ leadTypeLabel(item.leadType) }} / {{ skillBindingName(item) }}
                 </option>
               </select>
               <small>先选能力，再输入测试消息；列表里的“测试”也会自动选中对应能力。</small>
@@ -126,13 +126,13 @@
             </div>
             <div class="ops-detail-box ops-skill-test-action-box">
               <strong>{{ selectedSkillTestBinding ? '待测试能力' : '未选择能力' }}</strong>
-              <p>{{ selectedSkillTestBinding ? `${sceneLabel(selectedSkillTestBinding.scene)} / ${leadTypeLabel(selectedSkillTestBinding.leadType)} / ${selectedSkillTestBinding.skillName || selectedSkillTestBinding.skillId}` : '请选择上方能力后再执行。' }}</p>
+              <p>{{ selectedSkillTestBinding ? `${sceneLabel(selectedSkillTestBinding.scene)} / ${leadTypeLabel(selectedSkillTestBinding.leadType)} / ${skillBindingName(selectedSkillTestBinding)}` : '请选择上方能力后再执行。' }}</p>
               <button class="primary small" type="button" :disabled="loading || !selectedSkillTestBinding || !skillTestMessage.trim()" @click="runSelectedSkillTest">执行测试</button>
             </div>
           </div>
           <div v-if="Object.keys(skillTestResults).length" class="ops-card-grid">
             <article v-for="(result, key) in skillTestResults" :key="key" class="ops-content-card">
-              <strong>{{ result.skillName || key }}</strong>
+              <strong>{{ displaySafeName(result.skillName || key, '测试结果') }}</strong>
               <span>{{ result.responseTimeMs ? `${result.responseTimeMs}ms` : '已完成' }}</span>
               <p>{{ summarizeSkillTest(result) }}</p>
               <div v-if="result.profileAnalysis" class="ops-profile-test-details">
@@ -208,9 +208,16 @@
           <div class="ops-panel-head">
             <div>
               <h2>企业微信连接方式</h2>
-              <p>决定本服务器访问企业微信官方接口时，经过你的服务器转发还是直接访问企业微信。</p>
+              <p>部署人员不用懂技术名词：不知道怎么选，就保持“服务器转发”，下面地址留空，系统会使用后端已经准备好的连接。</p>
             </div>
             <button class="primary small" type="button" :disabled="loading" @click="saveWecomConnectionSettings">保存企业微信连接</button>
+          </div>
+          <div class="ops-beginner-steps">
+            <strong>不会配置时就按这 3 步</strong>
+            <span>1. 不切换，保持“服务器转发”</span>
+            <span>2. “服务器转发地址”先留空</span>
+            <span>3. 点右上角“保存企业微信连接”</span>
+            <small>如果后面检测企业微信失败，再让项目负责人按下面“在哪里找”去确认地址。</small>
           </div>
           <div class="ops-form-grid">
             <div class="ops-form-span-2">
@@ -218,13 +225,19 @@
                 <button type="button" :class="{ active: wecomConnectionDraft.mode === 'RELAY' }" role="radio" :aria-checked="wecomConnectionDraft.mode === 'RELAY'" @click="wecomConnectionDraft.mode = 'RELAY'">服务器转发</button>
                 <button type="button" :class="{ active: wecomConnectionDraft.mode === 'DIRECT' }" role="radio" :aria-checked="wecomConnectionDraft.mode === 'DIRECT'" @click="wecomConnectionDraft.mode = 'DIRECT'">直接连接企业微信</button>
               </div>
-              <small v-if="wecomConnectionDraft.mode === 'RELAY'">服务器先请求下方转发地址，再由转发服务访问企业微信。保存后不会自动切到直连。</small>
+              <small v-if="wecomConnectionDraft.mode === 'RELAY'">推荐默认方式。地址留空时，系统会使用服务器里已经配置好的企业微信连接。</small>
               <small v-else>服务器直接请求企业微信官方地址 https://qyapi.weixin.qq.com，不会自动切到转发。</small>
             </div>
             <label v-if="wecomConnectionDraft.mode === 'RELAY'" class="ops-form-span-2">
               服务器转发地址
-              <input v-model="wecomConnectionDraft.relayBaseUrl" type="url" aria-label="企业微信服务器转发地址" placeholder="https://wecom-relay.example.com" />
-              <small>必须填写可由本服务器访问的完整地址。首次保存前的空值会继续使用启动时的地址，避免影响现有连接。</small>
+              <input v-model="wecomConnectionDraft.relayBaseUrl" type="url" aria-label="企业微信服务器转发地址" placeholder="不知道就留空，系统会用后端已配置的地址" />
+              <small>这个不是企业微信表格链接，而是你们自己服务器上的“企业微信转发网关”地址。</small>
+              <div class="ops-address-help">
+                <strong>在哪里找？</strong>
+                <span>1. 输入框已经有值：直接保存，不用找。</span>
+                <span>2. 输入框为空：先留空保存，系统会继续用服务器启动时的配置。</span>
+                <span>3. 如果检测失败：把这句话发给项目负责人——请查看后台配置 wecom.relay_base_url，或服务器环境变量 WECOM_API_BASE_URL / 反向代理公网地址。</span>
+              </div>
             </label>
           </div>
         </article>
@@ -608,10 +621,11 @@
         <article v-if="activeSection.key === 'configuration-center'" class="ops-panel configuration-connection-panel smart-sheet-connection-panel">
           <div class="ops-panel-head">
             <div>
-              <h2>连接企业微信智能表格</h2>
-              <p>客户主表、分配表、到店表分开连接，系统会检查链接是否属于本项目。</p>
+              <h2>连接企业微信智能表格（三张固定表）</h2>
+              <p>当前版本只连接客户主表、分配表、到店表这三张表；不新增第四张表，也不会让系统猜什么时候写入。</p>
             </div>
           </div>
+          <p class="ops-form-span-2 ops-helper-callout">先看下面三张卡片：显示“已接入”就不用再配；显示“未配置”才点“配置这张表”。如果系统已经能同步三张表，这里会自动识别为已接入。</p>
           <div class="ops-smart-sheet-card-grid">
             <article
               v-for="card in smartSheetCards"
@@ -621,7 +635,7 @@
             >
               <div>
                 <strong>{{ card.label }}</strong>
-                <span :class="card.status === '已连接' ? 'ok-text' : 'warn-text'">{{ card.status }}</span>
+                <span :class="card.status === '已接入' ? 'ok-text' : 'warn-text'">{{ card.status }}</span>
               </div>
               <p>{{ card.help }}</p>
               <small>{{ card.name }} · 映射 {{ card.mappingCount }} 项</small>
@@ -642,8 +656,9 @@
               <small>打开目标表格，复制浏览器地址栏里的完整链接，粘贴到这里即可。</small>
               <small>必须是本系统通过企业微信 API 创建并纳入管理的智能表格；你在企微中手动新建的智能表格不能连接。</small>
             </label>
-            <button class="primary" type="button" :disabled="loading" @click="verifyAndSaveSmartSheet">检测并保存</button>
+            <button class="primary" type="button" :disabled="loading" @click="verifyAndSaveSmartSheet">保存并检测这张表</button>
           </div>
+          <p v-if="smartSheetConnectionDraft.checkMessage" class="ops-inline-status" :class="smartSheetConnectionDraft.checkKind">{{ smartSheetConnectionDraft.checkMessage }}</p>
           <p v-if="smartSheetConnectionDraft.connectedName" class="ops-inline-success">已连接：{{ smartSheetConnectionDraft.connectedName }}</p>
           <button class="ops-inline-disclosure-button" type="button" :aria-expanded="tableServerSettingsExpanded" @click="tableServerSettingsExpanded = !tableServerSettingsExpanded">
             {{ tableServerSettingsExpanded ? '收起服务器部署配置' : '展开服务器部署配置' }}
@@ -653,6 +668,7 @@
             <label>
               表格连接服务地址
               <input v-model="tableRuntimeDraft.apiBaseUrl" type="text" placeholder="https://table-gateway.example.com" />
+              <small>从后端部署配置里找，通常是 table.api_base_url、部署平台环境变量或反向代理地址；不确定就保持当前值。</small>
             </label>
             <label>
               表格连接密钥
@@ -892,10 +908,11 @@
           <div class="ops-panel-head">
             <div>
               <h2>客户数据源</h2>
-              <p>配置企微表格、同步状态、字段映射和手动导入。</p>
+              <p>先把当前三张固定表配置清楚：客户主表、分配表、到店表。暂时不做新增企业微信表格。</p>
             </div>
-            <button class="primary small" type="button" @click="openForm('datasource')">添加数据源</button>
+            <button class="primary small" type="button" @click="goToSmartSheetSetup">去连接三张表</button>
           </div>
+          <p class="ops-helper-callout">这里的“数据源”是系统已经支持的业务表，不是随便新增一张企微表。要新增业绩表之类的新写入目标，后面需要再补触发逻辑。</p>
           <div class="ops-table">
             <div class="ops-table-row head">
               <span>名称</span>
@@ -920,7 +937,7 @@
                 <button class="secondary small danger" type="button" @click="confirmDeleteDatasource(item)">删除</button>
               </span>
             </div>
-            <p v-if="!datasources.length" class="ops-empty">暂无数据源，添加第一张企微表格开始同步。</p>
+            <p v-if="!datasources.length" class="ops-empty">暂无数据源，请先配置当前三张固定业务表。</p>
           </div>
         </article>
 
@@ -938,6 +955,10 @@
             </div>
           </div>
           <div v-if="selectedDatasource" class="ops-mapping-grid">
+            <div class="ops-detail-box ops-form-span-2">
+              <strong>字段来源说明</strong>
+              <p>左侧系统字段来自系统唯一事实数据库；企微表格只是同步和展示入口。“客户阶段”是系统字段之一，用来做漏斗和转化统计，不是另一套单独数据源。</p>
+            </div>
             <label v-for="field in customerFields" :key="field.key">
               <span class="ops-field-title">
                 {{ field.label || field.key }}
@@ -986,33 +1007,42 @@
         <article v-if="activeSection.key === 'data-integration'" class="ops-panel">
           <div class="ops-panel-head">
             <div>
-              <h2>CSV 导入</h2>
-              <p>先预览前几行，确认包含手机号列后再导入。</p>
+              <h2>备用 CSV 导入</h2>
+              <p>日常以三张企业微信智能表格为准；CSV 只用于没有表格时临时补历史客户。</p>
             </div>
           </div>
-          <input type="file" accept=".csv,text/csv" @change="previewCsv" />
-          <div v-if="csvPreview.length" class="ops-preview-list">
-            <strong>预览前 {{ csvPreview.length }} 行</strong>
-            <pre>{{ csvPreview.join('\n') }}</pre>
-            <button class="primary small" type="button" @click="importCsv">确认导入</button>
-          </div>
-          <div v-if="csvImportResult" class="ops-detail-box">
-            <strong>导入结果</strong>
-            <p>{{ csvImportSummary }}</p>
-            <p v-if="csvUnmatchedCount">未匹配标签 {{ csvUnmatchedCount }}，涉及第 {{ csvUnmatchedRows.join('、') }} 行</p>
-            <div v-if="csvImportErrors.length" class="ops-error-list">
-              <span v-for="error in csvImportErrors.slice(0, 8)" :key="`${error.row}-${error.reason}`">第 {{ error.row }} 行：{{ error.reason }}</span>
-              <small v-if="csvImportErrors.length > 8">还有 {{ csvImportErrors.length - 8 }} 条错误未展示</small>
+          <details class="ops-csv-import-details">
+            <summary>
+              <strong>展开备用 CSV 导入</strong>
+              <span>三张企微表已经接入时，这里平时不用操作。</span>
+            </summary>
+            <div class="ops-csv-import-body">
+              <p class="ops-helper-callout">只有两种情况建议使用：第一次补历史数据，或企微智能表格暂时不可用。导入前先预览，确认有手机号列再点“确认导入”。</p>
+              <input type="file" accept=".csv,text/csv" @change="previewCsv" />
+              <div v-if="csvPreview.length" class="ops-preview-list">
+                <strong>预览前 {{ csvPreview.length }} 行</strong>
+                <pre>{{ csvPreview.join('\n') }}</pre>
+                <button class="primary small" type="button" @click="importCsv">确认导入</button>
+              </div>
+              <div v-if="csvImportResult" class="ops-detail-box">
+                <strong>导入结果</strong>
+                <p>{{ csvImportSummary }}</p>
+                <p v-if="csvUnmatchedCount">未匹配标签 {{ csvUnmatchedCount }}，涉及第 {{ csvUnmatchedRows.join('、') }} 行</p>
+                <div v-if="csvImportErrors.length" class="ops-error-list">
+                  <span v-for="error in csvImportErrors.slice(0, 8)" :key="`${error.row}-${error.reason}`">第 {{ error.row }} 行：{{ error.reason }}</span>
+                  <small v-if="csvImportErrors.length > 8">还有 {{ csvImportErrors.length - 8 }} 条错误未展示</small>
+                </div>
+              </div>
+              <div v-if="importLogs.length" class="ops-preview-list">
+                <strong>最近导入记录</strong>
+                <span v-for="log in importLogs.slice(0, 4)" :key="log.id || log.createdAt">
+                  {{ formatDate(log.createdAt) }} · {{ log.fileName || 'CSV 文件' }} · {{ importLogSummary(log) }}
+                  <small v-if="log.errorDetail">错误：{{ textSnippet(log.errorDetail) }}</small>
+                </span>
+              </div>
+              <p v-if="!csvPreview.length && !importLogs.length" class="ops-empty">选择 CSV 文件后，系统会先展示预览，不会立刻导入。</p>
             </div>
-          </div>
-          <div v-if="importLogs.length" class="ops-preview-list">
-            <strong>最近导入记录</strong>
-            <span v-for="log in importLogs.slice(0, 4)" :key="log.id || log.createdAt">
-              {{ formatDate(log.createdAt) }} · {{ log.fileName || 'CSV 文件' }} · {{ importLogSummary(log) }}
-              <small v-if="log.errorDetail">错误：{{ textSnippet(log.errorDetail) }}</small>
-            </span>
-          </div>
-          <p v-if="!csvPreview.length && !importLogs.length" class="ops-empty">拖拽或选择 CSV 文件。</p>
+          </details>
         </article>
 
         <article v-if="activeSection.key === 'quick-search-content'" class="ops-panel wide">
@@ -1163,7 +1193,7 @@
           <div class="ops-panel-head">
             <div>
               <h2>账号与权限</h2>
-              <p>管理员可为组长或管家单独授予客户标签管理权限。</p>
+              <p>列表按分组展示，标题里直接看组长是谁、组员是谁；未绑定组长的账号会放到未分组。</p>
             </div>
             <button class="primary small" type="button" @click="openForm('account')">新增账号</button>
           </div>
@@ -1289,9 +1319,10 @@
               <span class="ops-label-title">工作台自动同步秒数</span>
               <input v-model.number="loginDesktopDraft.workbenchRefreshIntervalS" type="number" min="30" max="300" step="10" />
             </label>
-            <label>
+            <label class="ops-readonly-setting">
               <span class="ops-label-title">Skill 到期日期</span>
-              <input v-model="loginDesktopDraft.skillSubscriptionExpireAt" type="date" />
+              <div class="ops-readonly-field">{{ skillSubscriptionExpireLabel }}</div>
+              <small>系统会从 Skill 服务或授权配置自动读取；这里不用手填。</small>
             </label>
           </div>
         </article>
@@ -1538,6 +1569,23 @@
               </option>
             </select>
           </div>
+          <p class="ops-helper-callout">看转化漏斗时，先选线索类型：线索客资、团购客资或全部。不同客资阶段不一样，分开看会更准。</p>
+          <div class="ops-conversion-settings-callout">
+            <div>
+              <strong>转化成功怎么算？</strong>
+              <span>例如“成交”或“已付款”算成功，系统会用这个口径计算漏斗和员工转化率。</span>
+            </div>
+            <button class="secondary small" type="button" @click="goToConversionTargetSettings">去设置哪些阶段算转化成功</button>
+          </div>
+          <div class="ops-stage-flow-grid">
+            <article v-for="flow in CUSTOMER_STAGE_FLOWS" :key="flow.leadType" class="ops-stage-flow-card">
+              <strong>{{ flow.title }}</strong>
+              <p>{{ flow.description }}</p>
+              <div class="ops-stage-flow-steps">
+                <span v-for="stage in flow.stages" :key="`${flow.leadType}-${stage}`">{{ stage }}</span>
+              </div>
+            </article>
+          </div>
           <div class="ops-row-actions">
             <button class="secondary small" type="button" @click="downloadAnalyticsCsv">导出当前看板</button>
           </div>
@@ -1603,7 +1651,7 @@
                 <div class="ops-analytics-panel-head">
                   <div>
                     <strong>转化漏斗</strong>
-                    <span>按当前筛选返回的阶段数据</span>
+                    <span>按当前时间、线索类型和成员筛选后的阶段数据</span>
                   </div>
                 </div>
                 <div v-if="analyticsFunnelStages.length" class="ops-analytics-funnel">
@@ -1832,7 +1880,7 @@
               <strong>{{ percentLabel(metric.rate) }}</strong>
               <p>{{ metric.numerator }} / {{ metric.denominator }}</p>
               <small>{{ metric.numeratorLabel }} / {{ metric.denominatorLabel }}</small>
-              <small v-if="metric.conversionTargetConfigured === false" class="warn-text">尚未配置转换目标阶段</small>
+              <small v-if="metric.conversionTargetConfigured === false" class="warn-text">尚未配置转化目标阶段</small>
             </section>
           </div>
           <p v-if="!supervisionMetricCards.length" class="ops-empty">暂无监督指标数据。</p>
@@ -1925,24 +1973,24 @@
               <small>全局范围 1-16 个任务</small>
             </label>
             <label>
-              <span class="ops-label-title">转换目标阶段</span>
+              <span class="ops-label-title">哪些阶段算转化成功</span>
               <div class="ops-stage-target-editor">
                 <div data-testid="conversion-target-stages" class="ops-chip-list">
                   <span v-for="stage in governanceDraft.conversionTargetStages" :key="stage" class="ops-chip">
                     {{ stage }}
-                    <button class="ops-chip-remove" type="button" :aria-label="`移除目标阶段 ${stage}`" :title="`移除 ${stage}`" @click="removeConversionTargetStage(stage)">×</button>
+                    <button class="ops-chip-remove" type="button" :aria-label="`移除转化成功阶段 ${stage}`" :title="`移除 ${stage}`" @click="removeConversionTargetStage(stage)">×</button>
                   </span>
                   <span v-if="!governanceDraft.conversionTargetStages.length" class="ops-inline-info">尚未选择目标阶段</span>
                 </div>
                 <div class="ops-stage-target-actions">
-                  <select v-model="conversionStageToAdd" data-testid="conversion-stage-picker" aria-label="添加转换目标阶段">
+                  <select v-model="conversionStageToAdd" data-testid="conversion-stage-picker" aria-label="添加转化成功阶段">
                     <option value="">选择阶段</option>
                     <option v-for="stage in availableConversionTargetStages" :key="stage" :value="stage">{{ stage }}</option>
                   </select>
-                  <button class="secondary small" type="button" :disabled="!conversionStageToAdd" @click="addConversionTargetStage">添加目标阶段</button>
+                  <button class="secondary small" type="button" :disabled="!conversionStageToAdd" @click="addConversionTargetStage">加入转化成功</button>
                 </div>
               </div>
-              <small>可添加或移除目标阶段；选项来自当前客户档案，避免保存无法命中的阶段。</small>
+              <small>可以选多个阶段。这里只决定报表里哪些客户算“转化成功”，不会自动修改客户资料，也不会改变客户当前阶段。</small>
             </label>
           </div>
           <p v-if="!supervisionMetadata.customerStages.length" class="ops-empty">当前没有可配置的客户阶段，请先同步或导入客户档案数据。</p>
@@ -2128,7 +2176,7 @@
           </div>
           <div v-for="log in filteredAuditLogs" :key="log.id" class="ops-notice-row">
             <strong>{{ log.actionLabel || actionLabel(log.action) }}</strong>
-            <span>{{ log.actionGroup || '-' }} · {{ log.targetTypeLabel || targetTypeLabel(log.targetType) }} {{ log.targetId || '' }}</span>
+            <span>{{ auditGroupLabel(log.actionGroup) }} · {{ log.targetTypeLabel || targetTypeLabel(log.targetType) }} {{ log.targetId || '' }}</span>
             <small>{{ log.operator || '-' }} · {{ formatDate(log.createdAt) }}</small>
             <p>{{ log.detailSummary || log.detail || log.target || '无详情' }}</p>
             <button class="secondary small" type="button" @click="toggleAuditDetail(log)">查看详情</button>
@@ -2386,7 +2434,7 @@
                 <small>命名、优先级和启停状态放在这里。</small>
               </div>
             </div>
-            <label v-for="field in ruleMetaFields" :key="field.key" :class="{ 'ops-boolean-field': field.type === 'checkbox' }">
+            <label v-for="field in ruleMetaFields" :key="field.key" :class="{ 'ops-boolean-field': field.type === 'checkbox', 'ops-rule-name-field': field.key === 'name' }">
               <span class="ops-label-title">{{ field.label }}</span>
               <select v-if="field.type === 'select'" v-model="formDraft[field.key]" :disabled="field.disabled" @change="onFormFieldChange(field.key)">
                 <option v-for="option in field.options ?? []" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
@@ -2727,10 +2775,78 @@ const SUPERVISION_EVENT_LABELS: Record<string, string> = {
   TEMPLATE_COPIED: '复制模板'
 };
 
+const AUDIT_ACTION_FALLBACK_LABELS: Record<string, string> = {
+  CREATE: '新增',
+  UPDATE: '修改',
+  DELETE: '删除',
+  ENABLE: '启用',
+  DISABLE: '停用',
+  LOGIN: '登录',
+  LOGOUT: '退出登录',
+  UPDATE_CONFIG: '修改配置',
+  CREATE_ACCOUNT: '新增账号',
+  UPDATE_ACCOUNT: '编辑账号',
+  DELETE_ACCOUNT: '删除账号',
+  RESET_PASSWORD: '重置密码',
+  RESET_ACCOUNT_PASSWORD: '重置账号密码',
+  ENABLE_ACCOUNT: '启用账号',
+  DISABLE_ACCOUNT: '停用账号',
+  CREATE_RULE: '新增跟进规则',
+  UPDATE_RULE: '编辑跟进规则',
+  DELETE_RULE: '删除跟进规则',
+  ENABLE_RULE: '启用跟进规则',
+  DISABLE_RULE: '停用跟进规则',
+  CREATE_DATASOURCE: '新增数据源',
+  UPDATE_DATASOURCE: '编辑数据源',
+  DELETE_DATASOURCE: '删除数据源',
+  SYNC_DATASOURCE: '同步数据源',
+  SAVE_MAPPING: '保存字段映射',
+  RESTORE_MAPPING: '恢复字段映射',
+  SMART_SHEET_CONNECTED: '连接企微表格',
+  UPDATE_QUICK_SEARCH: '编辑速搜内容',
+  CREATE_QUICK_SEARCH: '新增速搜内容',
+  DELETE_QUICK_SEARCH: '删除速搜内容',
+  PUBLISH_NOTICE: '发布公告',
+  STOP_NOTICE: '停止公告',
+  DELETE_NOTICE: '删除公告',
+  CREATE_VERSION: '新增版本',
+  PUBLISH_VERSION: '发布版本',
+  REVOKE_VERSION: '撤回版本',
+  EXPORT_AUDIT_LOG: '导出审计日志'
+};
+
+const AUDIT_TARGET_FALLBACK_LABELS: Record<string, string> = {
+  CONFIG: '配置',
+  ACCOUNT: '账号',
+  RULE: '跟进规则',
+  DATASOURCE: '数据源',
+  SMART_SHEET: '企微表格',
+  MAPPING: '字段映射',
+  QUICK_SEARCH: '速搜内容',
+  NOTICE: '系统公告',
+  VERSION: '桌面版本',
+  TAG: '客户标签',
+  TAG_CATEGORY: '标签分类',
+  TAG_VALUE: '标签值'
+};
+
+const AUDIT_GROUP_FALLBACK_LABELS: Record<string, string> = {
+  CONFIG: '配置中心',
+  ACCOUNT: '账号与权限',
+  RULE: '跟进规则',
+  DATASOURCE: '客户数据对接',
+  SMART_SHEET: '企业微信表格',
+  CONTENT: '内容管理',
+  NOTICE: '系统公告',
+  VERSION: '版本管理',
+  AUDIT: '审计导出',
+  OTHER: '其他操作'
+};
+
 const sections: AdminSection[] = [
   { key: 'skill-scenes', groupKey: 'config-center', group: '运营 A', module: 'A', title: 'Skill 场景管理', subtitle: '场景绑定、测试、调用监控', description: '按业务场景和线索类型维护 AI 路由，测试真实话术效果并观察调用质量。', primaryAction: '新增 Skill 绑定' },
   { key: 'configuration-center', groupKey: 'config-center', group: '运营 B', module: 'B', title: '配置中心', subtitle: 'AI、LLM、识图、提示词', description: '集中管理 Skill 环境、LLM 模型环境、识图模型环境、提示词模板、企业红线和降级回复。', primaryAction: '新增 Skill 环境' },
-  { key: 'data-integration', groupKey: 'data-content', group: '运营 C', module: 'C', title: '客户数据对接', subtitle: '数据源、字段映射、同步、导入', description: '管理企微表格数据源、字段映射版本、同步状态和 CSV 导入。', primaryAction: '添加数据源' },
+  { key: 'data-integration', groupKey: 'data-content', group: '运营 C', module: 'C', title: '客户数据对接', subtitle: '三张表、字段映射、同步', description: '先连通客户主表、分配表、到店表，再维护字段映射和同步状态。', primaryAction: '配置表格' },
   { key: 'quick-search-content', groupKey: 'data-content', group: '运营 D', module: 'D', title: '速搜内容管理', subtitle: '模板、知识、图片、小程序', description: '维护桌面端速搜可用的话术、知识片段、门店定位、图片素材和小程序引导。', primaryAction: '新增内容' },
   { key: 'template-promotion-candidates', groupKey: 'data-content', group: '运营 D1', module: 'D1', title: '可推广模板', subtitle: '员工候选、团队发布', description: '查阅员工保存的调整稿和使用情况，决定是否发布为全员可用模板。', primaryAction: '刷新候选' },
   { key: 'account-permissions', groupKey: 'org-rules-tags', group: '运营 E', module: 'E', title: '账号与权限', subtitle: '账号、角色、组长关系', description: '管理 ADMIN、LEADER、KEEPER 的账号权限和直属组长关系。', primaryAction: '新增账号' },
@@ -2768,6 +2884,20 @@ const LEAD_TYPE_OPTIONS = [
   { label: '待确认', value: 'PENDING' }
 ];
 const LLM_PROFILE_LEAD_TYPE_OPTIONS = LEAD_TYPE_OPTIONS.filter((option) => option.value !== 'GENERAL');
+const CUSTOMER_STAGE_FLOWS = [
+  {
+    leadType: 'XIAN_SUO',
+    title: '线索客资阶段',
+    description: '线索客资需要先销售体验卡，再预约到店，最后看成交。',
+    stages: ['销售体验卡', '预约到店', '成交']
+  },
+  {
+    leadType: 'TUAN_GOU',
+    title: '团购客资阶段',
+    description: '团购客资不需要销售体验卡，直接看预约到店和成交。',
+    stages: ['预约到店', '成交']
+  }
+] as const;
 const SMART_SHEET_ROLES = [
   { value: 'PRIMARY', label: '客户主表', configKey: 'table.document_url', help: '客户资料、标签和跟进记录的主视图' },
   { value: 'ASSIGNMENT', label: '分配表', configKey: 'table.assignment_document_url', help: '线索分配、负责人和分组流转' },
@@ -3284,7 +3414,9 @@ const tableRuntimeDraft = reactive({
 const smartSheetConnectionDraft = reactive({
   documentUrl: '',
   connectedName: '',
-  role: 'PRIMARY'
+  role: 'PRIMARY',
+  checkMessage: '',
+  checkKind: ''
 });
 const datasourceRuntimeDraft = reactive({
   syncCron: '0 */30 * * * *',
@@ -3415,7 +3547,7 @@ const activeMetrics = computed(() => {
     'supervision-dashboard': [
       { label: '监督指标', value: supervisionMetricCards.value.length, help: '五项分子、分母和比率口径' },
       { label: '事件记录', value: supervisionEventPage.total, help: '按当前筛选查看脱敏明细' },
-      { label: '转换目标', value: supervisionMetrics.value.EMPLOYEE_CONVERSION?.conversionTargetConfigured ? '已配置' : '未配置', help: '未配置时转换率明确标记' }
+      { label: '转化目标', value: supervisionMetrics.value.EMPLOYEE_CONVERSION?.conversionTargetConfigured ? '已配置' : '未配置', help: '未配置时转化率明确标记' }
     ],
     'governance-settings': [
       { label: '监督留存', value: `${governanceDraft.recordRetentionDays} 天`, help: '主管监督记录保留期限' },
@@ -3503,11 +3635,11 @@ const analyticsTrendAreaPath = computed(() => {
 });
 const analyticsTrendLatestValue = computed(() => analyticsTrendRows.value.at(-1)?.value ?? 0);
 const analyticsFunnelStages = computed(() => analyticsFunnelRows(analytics.funnels).map((stage, index, stages) => {
-  const highest = Math.max(...stages.map((item) => item.count), 1);
+  const shrinkStep = stages.length > 1 ? 56 / (stages.length - 1) : 0;
   return {
     ...stage,
     key: `${stage.label}-${index}`,
-    width: Math.max(28, Math.round((stage.count / highest) * 100))
+    width: Math.max(40, Math.round(100 - index * shrinkStep))
   };
 }));
 const analyticsRingMetrics = computed(() => {
@@ -3832,18 +3964,28 @@ const quickSearchVariables = QUICK_SEARCH_TEMPLATE_VARIABLES.map((variable) => (
 const selectedSkillTestBinding = computed(() => skillBindings.value.find((item) => String(item.id) === selectedSkillTestBindingId.value) || null);
 const smartSheetCards = computed(() => SMART_SHEET_ROLES.map((role) => {
   const configuredUrl = configValue(role.configKey);
+  const datasource = datasourceForSmartSheetRole(role);
   const isActive = smartSheetConnectionDraft.role === role.value;
+  const connected = Boolean(configuredUrl || datasource || (role.value === 'PRIMARY' && smartSheetConnectionDraft.connectedName));
+  const datasourceName = datasource
+    ? String(datasource.name || datasource.sourceTable || datasource.sheetId || '已接入数据源')
+    : '';
   return {
     ...role,
     configuredUrl,
-    status: configuredUrl || (role.value === 'PRIMARY' && smartSheetConnectionDraft.connectedName) ? '已连接' : '未配置',
-    name: role.value === 'PRIMARY' && smartSheetConnectionDraft.connectedName
+    datasource,
+    status: connected ? '已接入' : '未配置',
+    name: datasourceName || (role.value === 'PRIMARY' && smartSheetConnectionDraft.connectedName
       ? smartSheetConnectionDraft.connectedName
-      : configuredUrl ? '已保存链接' : '等待配置',
-    mappingCount: role.value === 'PRIMARY' ? mappings.value.filter((item) => item.enabled !== false).length : 0,
+      : configuredUrl ? '已保存链接' : '等待配置'),
+    mappingCount: datasource ? mappingCountFor(datasource.id) : (role.value === 'PRIMARY' ? mappings.value.filter((item) => item.enabled !== false).length : 0),
     isActive
   };
 }));
+const skillSubscriptionExpireLabel = computed(() => {
+  const value = loginDesktopDraft.skillSubscriptionExpireAt || configValue('skill.subscription_expire_at');
+  return value ? formatDate(value) : '未读取到到期时间';
+});
 const accountGroups = computed(() => {
   const groups = new Map<string, { key: string; name: string; leader: AnyRecord | null; members: AnyRecord[] }>();
   for (const account of accounts.value) {
@@ -3961,7 +4103,7 @@ async function refreshActiveSection() {
 function startPrimaryAction() {
   if (activeSectionKey.value === 'skill-scenes') openForm('skill');
   if (activeSectionKey.value === 'configuration-center') openForm('skillEnv');
-  if (activeSectionKey.value === 'data-integration') openForm('datasource');
+  if (activeSectionKey.value === 'data-integration') goToSmartSheetSetup();
   if (activeSectionKey.value === 'quick-search-content') openForm('quickSearch');
   if (activeSectionKey.value === 'template-promotion-candidates') void refreshTemplatePromotionCandidates();
   if (activeSectionKey.value === 'account-permissions') openForm('account');
@@ -3976,9 +4118,24 @@ function startPrimaryAction() {
   if (activeSectionKey.value === 'system-health') void loadHealth(true);
 }
 
+function goToSmartSheetSetup() {
+  activeSectionKey.value = 'configuration-center';
+  advancedConfigurationExpanded.value = false;
+  activeAdvancedConfiguration.value = 'datasource';
+  smartSheetConnectionDraft.role = smartSheetConnectionDraft.role || 'PRIMARY';
+  closeForm();
+  void refreshActiveSection();
+}
+
+function goToConversionTargetSettings() {
+  activeSectionKey.value = 'governance-settings';
+  closeForm();
+  void refreshActiveSection();
+}
+
 async function loadSkillAi() {
   await runWithNotice(async () => {
-    const [skillList, availableSkillList, skillCallAnalytics, skillEnvList, imageEnvList, llmEnvList, llmRouteList, llmSceneList, llmCallAnalytics, configList] = await Promise.all([
+    const [skillList, availableSkillList, skillCallAnalytics, skillEnvList, imageEnvList, llmEnvList, llmRouteList, llmSceneList, llmCallAnalytics, configList, dsList, syncList] = await Promise.all([
       getJson<unknown>(withQuery('/admin/api/v1/skills', { scene: skillSceneFilter.value, leadType: skillLeadTypeFilter.value })),
       getJson<unknown>('/admin/api/v1/skills/available'),
       getJson<unknown>(withQuery('/admin/api/v1/analytics/skill-calls', { days: skillAnalyticsDays.value, scene: skillSceneFilter.value, leadType: skillLeadTypeFilter.value })),
@@ -3988,7 +4145,9 @@ async function loadSkillAi() {
       getJson<unknown>('/admin/api/v1/llm-routes'),
       getJson<unknown>('/admin/api/v1/llm-routes/scenes'),
       getJson<unknown>(withQuery('/admin/api/v1/analytics/llm-calls', { days: llmAnalyticsDays.value })),
-      getJson<unknown>('/admin/api/v1/configs')
+      getJson<unknown>('/admin/api/v1/configs'),
+      getJson<unknown>('/admin/api/v1/datasources'),
+      getJson<unknown>('/admin/api/v1/datasources/sync-status')
     ]);
     skillBindings.value = listFromResponse(skillList);
     if (!skillBindings.value.some((item) => String(item.id) === selectedSkillTestBindingId.value)) {
@@ -4006,6 +4165,8 @@ async function loadSkillAi() {
     llmRouteScenes.value = listFromResponse(llmSceneList).map((item) => String(item.value ?? item.name ?? item.scene ?? item)).filter(Boolean);
     llmAnalytics.value = recordFromResponse(llmCallAnalytics);
     configs.value = configEntries(configList);
+    datasources.value = listFromResponse(dsList);
+    syncStatuses.value = listFromResponse(syncList);
     hydratePromptDraft();
   }, '配置中心已刷新');
 }
@@ -4802,14 +4963,14 @@ function applyNoticeList(response: ApiResponse<unknown>) {
 function applyAuditDictionary(response: ApiResponse<unknown>) {
   const data = recordFromResponse(response);
   const actions = listFrom(data, 'actions');
-  auditActions.value = actions.map((item) => typeof item === 'string' ? { action: item, label: item, group: '其他' } : {
+  auditActions.value = actions.map((item) => typeof item === 'string' ? { action: item, label: auditActionFallbackLabel(item), group: '其他操作' } : {
     action: String(item.action ?? item.name ?? ''),
-    label: String(item.label ?? item.action ?? item.name ?? ''),
-    group: String(item.group ?? '其他')
+    label: auditActionFallbackLabel(item.label ?? item.action ?? item.name),
+    group: auditGroupLabel(item.group ?? '其他')
   }).filter((item) => item.action);
-  auditTargetTypes.value = listFrom(data, 'targetTypes').map((item) => typeof item === 'string' ? { type: item, label: item } : {
+  auditTargetTypes.value = listFrom(data, 'targetTypes').map((item) => typeof item === 'string' ? { type: item, label: targetTypeLabel(item) } : {
     type: String(item.type ?? item.value ?? ''),
-    label: String(item.label ?? item.type ?? item.value ?? '')
+    label: targetTypeLabel(item.label ?? item.type ?? item.value)
   }).filter((item) => item.type);
 }
 
@@ -5217,7 +5378,7 @@ function formMeta(kind: FormKind | null): { title: string; description: string; 
     { key: 'scene', label: '场景', type: 'select', options: commonOptions.scene },
     { key: 'leadType', label: '线索类型', type: 'select', options: commonOptions.leadType, help: '选“全部客资”时作为兜底绑定；具体线索类型优先于全部客资。' },
     availableSkills.value.length
-      ? { key: 'skillId', label: '技能', type: 'select', options: availableSkills.value.map((skill) => ({ label: skill.skillName || skill.skillId, value: skill.skillId })) }
+      ? { key: 'skillId', label: '技能', type: 'select', options: availableSkills.value.map((skill) => ({ label: skillBindingName(skill), value: skill.skillId })) }
       : { key: 'skillId', label: '技能标识', type: 'text', placeholder: '选择或填写已登记的技能标识' },
     { key: 'skillName', label: '显示名称', type: 'text' },
     { key: 'priority', label: '优先级（数字越小越先尝试）', type: 'number', min: 0, max: 999, step: 1, help: '建议主用 10，备用 20，测试 90。相同场景和线索类型会先用数字最小的启用项。' }
@@ -5245,11 +5406,11 @@ function formMeta(kind: FormKind | null): { title: string; description: string; 
     { key: 'priority', label: '优先级（数字越小越优先）', type: 'number', min: 0, max: 999, step: 1, help: '同一场景可配置多个 LLM，运行时使用数字最小的匹配规则；没有匹配规则时回到默认 LLM。' },
     { key: 'enabled', label: '启用', type: 'checkbox' }
   ] };
-  if (kind === 'datasource') return { title: '数据源', description: '配置企微智能表格来源。', fields: [
-    { key: 'name', label: '数据源名称', type: 'text' },
-    { key: 'sheetId', label: '企微表格标识', type: 'text' },
-    { key: 'sourceTable', label: '来源表标识', type: 'text' },
-    { key: 'description', label: '说明', type: 'textarea' }
+  if (kind === 'datasource') return { title: '三张表配置', description: '只维护当前系统已支持的业务表；新增第四张企微表需要另做触发逻辑。', fields: [
+    { key: 'name', label: '业务表名称', type: 'text', placeholder: '客户主表 / 分配表 / 到店表' },
+    { key: 'sheetId', label: '企微表格标识', type: 'text', placeholder: '从表格链接或部署配置中复制' },
+    { key: 'sourceTable', label: '子表/工作表名称', type: 'text', placeholder: '填写企微智能表格里的子表名称' },
+    { key: 'description', label: '用途说明', type: 'textarea', placeholder: '说明这张表保存什么数据，方便后续排查' }
   ] };
   if (kind === 'quickSearch') {
     const meta = quickSearchContentMeta();
@@ -5586,8 +5747,13 @@ async function verifyAndSaveSmartSheet() {
   if (!documentUrl) {
     noticeKind.value = 'error';
     notice.value = '请打开本系统通过企业微信 API 创建的智能表格，并粘贴浏览器地址栏里的完整链接';
+    smartSheetConnectionDraft.checkKind = 'error';
+    smartSheetConnectionDraft.checkMessage = notice.value;
     return;
   }
+  const role = SMART_SHEET_ROLES.find((item) => item.value === smartSheetConnectionDraft.role);
+  smartSheetConnectionDraft.checkKind = 'info';
+  smartSheetConnectionDraft.checkMessage = `正在检测${role?.label || '这张表'}，请稍等。`;
   await runWithNotice(async () => {
     const result = recordFromResponse(await postJson<unknown>('/admin/api/v1/datasources/smart-sheet-connection', {
       documentUrl,
@@ -5595,10 +5761,16 @@ async function verifyAndSaveSmartSheet() {
     }));
     smartSheetConnectionDraft.documentUrl = String(result.documentUrl || documentUrl);
     smartSheetConnectionDraft.connectedName = String(result.tableName || 'API 创建的智能表格');
+    smartSheetConnectionDraft.checkKind = 'success';
+    smartSheetConnectionDraft.checkMessage = `${role?.label || '这张表'}已检测通过并保存，后续会按系统已有同步流程使用。`;
     const configList = await getJson<unknown>('/admin/api/v1/configs');
     configs.value = configEntries(configList);
     hydrateRuntimeDrafts();
   }, '企业微信 API 表格已检测并保存');
+  if (noticeKind.value === 'error') {
+    smartSheetConnectionDraft.checkKind = 'error';
+    smartSheetConnectionDraft.checkMessage = notice.value || '检测失败，请检查表格链接、服务器转发地址和企微权限。';
+  }
 }
 
 async function saveLlmReplySettings() {
@@ -5691,8 +5863,7 @@ async function saveLoginDesktopSettings() {
   await saveConfigGroup([
     ['system.jwt_access_token_ttl_s', Math.round(loginDesktopDraft.accessTokenHours * 3600)],
     ['system.jwt_refresh_token_ttl_s', Math.round(loginDesktopDraft.refreshTokenDays * 86400)],
-    ['desktop.workbench_refresh_interval_s', Math.round(loginDesktopDraft.workbenchRefreshIntervalS)],
-    ['skill.subscription_expire_at', loginDesktopDraft.skillSubscriptionExpireAt]
+    ['desktop.workbench_refresh_interval_s', Math.round(loginDesktopDraft.workbenchRefreshIntervalS)]
   ], '登录与桌面设置已保存');
 }
 
@@ -5725,7 +5896,7 @@ async function runSkillTest(item: AnyRecord) {
   selectedSkillTestBindingId.value = String(item.id ?? '');
   await runWithNotice(async () => {
     const response = recordFromResponse(await postJson<unknown>(`/admin/api/v1/skills/${item.id}/test`, { testMessage: skillTestMessage.value }));
-    skillTestResults[String(item.id)] = { ...response, skillName: item.skillName || item.skillId };
+    skillTestResults[String(item.id)] = { ...response, skillName: skillBindingName(item) };
   }, 'Skill 测试完成');
 }
 
@@ -5745,7 +5916,7 @@ async function runSelectedSkillTest() {
 }
 
 function confirmToggleSkill(item: AnyRecord) {
-  const message = item.enabled ? `确认停用「${item.skillName || item.skillId}」？停用后该场景可能断开。` : `确认启用「${item.skillName || item.skillId}」？`;
+  const message = item.enabled ? `确认停用「${skillBindingName(item)}」？停用后该场景可能断开。` : `确认启用「${skillBindingName(item)}」？`;
   if (window.confirm(message)) {
     void runWithNotice(async () => {
       await putJson(`/admin/api/v1/skills/${item.id}/toggle`, { enabled: !item.enabled });
@@ -5755,7 +5926,7 @@ function confirmToggleSkill(item: AnyRecord) {
 }
 
 function confirmDeleteSkill(item: AnyRecord) {
-  if (window.confirm(`确认删除「${item.skillName || item.skillId}」？删除后不可恢复。`)) {
+  if (window.confirm(`确认删除「${skillBindingName(item)}」？删除后不可恢复。`)) {
     void runWithNotice(async () => {
       await deleteJson(`/admin/api/v1/skills/${item.id}`);
       await loadSkillAi();
@@ -6092,13 +6263,10 @@ async function uploadQuickSearchImage(event: Event, item: AnyRecord) {
 
 async function saveWecomConnectionSettings() {
   const relayBaseUrl = wecomConnectionDraft.relayBaseUrl.trim();
-  if (wecomConnectionDraft.mode === 'RELAY' && !relayBaseUrl) {
-    noticeKind.value = 'error';
-    notice.value = '使用服务器转发时，请填写企业微信服务器转发地址。';
-    return;
-  }
   const entries: Array<[string, string]> = wecomConnectionDraft.mode === 'RELAY'
-    ? [['wecom.relay_base_url', relayBaseUrl], ['wecom.connection_mode', 'RELAY']]
+    ? relayBaseUrl
+      ? [['wecom.relay_base_url', relayBaseUrl], ['wecom.connection_mode', 'RELAY']]
+      : [['wecom.connection_mode', 'RELAY']]
     : [['wecom.connection_mode', 'DIRECT']];
   await saveConfigGroup(entries, '企业微信连接方式已保存');
 }
@@ -7460,14 +7628,26 @@ function actionTypeLabel(value: string) {
   return ({ ALERT: '提醒/告警', TAG_CHANGE: '标签建议', TAG_SUGGESTION: '标签建议', NOTIFY_LEADER: '通知组长' } as Record<string, string>)[value] ?? value ?? '-';
 }
 
+function auditActionFallbackLabel(value: unknown) {
+  const action = String(value ?? '').trim();
+  if (!action) return '-';
+  return AUDIT_ACTION_FALLBACK_LABELS[action.toUpperCase()] ?? action;
+}
+
 function actionLabel(value: unknown) {
   const action = String(value ?? '');
-  return auditActions.value.find((item) => item.action === action)?.label ?? action;
+  return auditActions.value.find((item) => item.action === action)?.label ?? auditActionFallbackLabel(action);
+}
+
+function auditGroupLabel(value: unknown) {
+  const group = String(value ?? '').trim();
+  if (!group || group === '-') return '-';
+  return AUDIT_GROUP_FALLBACK_LABELS[group.toUpperCase()] ?? group;
 }
 
 function targetTypeLabel(value: unknown) {
   const type = String(value ?? '');
-  return auditTargetTypes.value.find((item) => item.type === type)?.label ?? type;
+  return auditTargetTypes.value.find((item) => item.type === type)?.label ?? AUDIT_TARGET_FALLBACK_LABELS[type.toUpperCase()] ?? type;
 }
 
 function updateStrategyLabel(value: string) {
@@ -7491,6 +7671,36 @@ function leaderName(leaderId: unknown) {
 function accountRoleSort(left: AnyRecord, right: AnyRecord) {
   const order: Record<string, number> = { LEADER: 0, KEEPER: 1, ADMIN: 2 };
   return (order[String(left.role ?? '').toUpperCase()] ?? 9) - (order[String(right.role ?? '').toUpperCase()] ?? 9);
+}
+
+function datasourceForSmartSheetRole(role: typeof SMART_SHEET_ROLES[number]) {
+  const wantedRole = role.value.toUpperCase();
+  const tokens: Record<string, string[]> = {
+    PRIMARY: ['客户', '主表', '客资', 'customer', 'primary', 'lead', 'leads'],
+    ASSIGNMENT: ['分配', '负责人', '管家', 'assignment', 'assign', 'owner', 'keeper'],
+    ARRIVAL: ['到店', '预约', '成交', 'arrival', 'arrive', 'booking', 'appointment']
+  };
+  const enabledDatasources = datasources.value.filter((item) => item.enabled !== false);
+  const direct = enabledDatasources.find((item) => {
+    const itemRole = String(item.smartSheetRole ?? item.tableRole ?? item.role ?? item.kind ?? '').toUpperCase();
+    return itemRole === wantedRole;
+  });
+  if (direct) return direct;
+
+  const matched = enabledDatasources.find((item) => {
+    const text = [
+      item.name,
+      item.sourceTable,
+      item.sheetName,
+      item.sheetId,
+      item.description,
+      item.documentName
+    ].map((value) => String(value ?? '').toLowerCase()).join(' ');
+    return tokens[wantedRole]?.some((token) => text.includes(token.toLowerCase()));
+  });
+  if (matched) return matched;
+
+  return role.value === 'PRIMARY' && enabledDatasources.length === 1 ? enabledDatasources[0] : null;
 }
 
 function syncStatusFor(id: unknown) {
@@ -7709,6 +7919,17 @@ function environmentDisplayName(environment: AnyRecord, fallback: string) {
     return model;
   }
   return fallback;
+}
+
+function displaySafeName(value: unknown, fallback: string) {
+  const text = String(value ?? '').trim();
+  if (!text || hasBrokenEncoding(text)) return fallback;
+  if (/duplicate\s+fixture/i.test(text)) return '重复测试数据';
+  return translateValue(text);
+}
+
+function skillBindingName(item: AnyRecord) {
+  return displaySafeName(item?.skillName || item?.skillId, '未命名 Skill');
 }
 
 function hasBrokenEncoding(value: string) {
