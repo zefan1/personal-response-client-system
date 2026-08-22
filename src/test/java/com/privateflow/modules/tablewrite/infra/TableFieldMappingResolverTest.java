@@ -1,9 +1,7 @@
 package com.privateflow.modules.tablewrite.infra;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.privateflow.modules.tablewrite.TableWriteException;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,7 +32,7 @@ class TableFieldMappingResolverTest {
   }
 
   @Test
-  void mapsOnlyConfiguredFieldsToSourceColumns() {
+  void mapsOnlyConfiguredFieldsToSourceColumnsForLenientProjection() {
     jdbcTemplate.update("""
         INSERT INTO datasource_field_mappings (source_table, source_field, target_field, is_enabled)
         VALUES ('私域客资管理表', '联系方式', 'phone', 1)
@@ -50,12 +48,34 @@ class TableFieldMappingResolverTest {
   }
 
   @Test
-  void rejectsTableWritesWhenMappingsAreMissing() {
+  void reportsUnmappedFieldsSoWritebackCannotClaimSuccess() {
+    jdbcTemplate.update("""
+        INSERT INTO datasource_field_mappings (source_table, source_field, target_field, is_enabled)
+        VALUES ('私域客资管理表', '联系方式', 'phone', 1)
+        """);
     TableFieldMappingResolver resolver = new TableFieldMappingResolver(jdbcTemplate);
 
-    assertThatThrownBy(() -> resolver.toSourceFields("未配置表", Map.of("phone", "13800000000")))
-        .isInstanceOf(TableWriteException.class)
-        .hasMessageContaining("no enabled field mappings");
+    assertThat(resolver.unmappedInternalFields("私域客资管理表", Map.of(
+        "phone", "13800000000", "customerStage", "待联系")))
+        .containsExactly("customerStage");
+  }
+
+  @Test
+  void resolvesTheActualSourceColumnBoundToPhone() {
+    jdbcTemplate.update("""
+        INSERT INTO datasource_field_mappings (source_table, source_field, target_field, is_enabled)
+        VALUES ('分配表', '客户联系电话', 'phone', 1)
+        """);
+    TableFieldMappingResolver resolver = new TableFieldMappingResolver(jdbcTemplate);
+
+    assertThat(resolver.sourceFieldFor("分配表", "phone")).isEqualTo("客户联系电话");
+  }
+
+  @Test
+  void returnsNoFieldsWhenNoOutboundMappingsAreConfigured() {
+    TableFieldMappingResolver resolver = new TableFieldMappingResolver(jdbcTemplate);
+
+    assertThat(resolver.toSourceFields("未配置表", Map.of("phone", "13800000000"))).isEmpty();
   }
 
   @Test

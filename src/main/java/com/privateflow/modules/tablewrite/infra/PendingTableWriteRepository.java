@@ -6,6 +6,7 @@ import com.privateflow.modules.tablewrite.TableWriteStatus;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -31,25 +32,55 @@ public class PendingTableWriteRepository {
 
   public List<PendingTableWrite> due(int limit) {
     return jdbcTemplate.query("""
-        SELECT id, customer_id, phone, action_type, payload, retry_count, status, next_retry_at, error_msg
+        SELECT id, customer_id, phone, action_type, payload, retry_count, status, next_retry_at, error_msg, created_at, updated_at
         FROM pending_table_writes
         WHERE status = 'PENDING' AND next_retry_at <= NOW()
         ORDER BY next_retry_at ASC
         LIMIT ?
-        """, (rs, rowNum) -> {
-          PendingTableWrite item = new PendingTableWrite();
-          item.setId(rs.getLong("id"));
-          long customerId = rs.getLong("customer_id");
-          item.setCustomerId(rs.wasNull() ? null : customerId);
-          item.setPhone(rs.getString("phone"));
-          item.setActionType(TableWriteActionType.valueOf(rs.getString("action_type")));
-          item.setPayload(rs.getString("payload"));
-          item.setRetryCount(rs.getInt("retry_count"));
-          item.setStatus(TableWriteStatus.valueOf(rs.getString("status")));
-          item.setNextRetryAt(rs.getTimestamp("next_retry_at").toLocalDateTime());
-          item.setErrorMsg(rs.getString("error_msg"));
-          return item;
-        }, limit);
+        """, (rs, rowNum) -> map(rs), limit);
+  }
+
+  public List<PendingTableWrite> failed(int limit) {
+    return jdbcTemplate.query("""
+        SELECT id, customer_id, phone, action_type, payload, retry_count, status, next_retry_at, error_msg, created_at, updated_at
+        FROM pending_table_writes
+        WHERE status = 'FAILED'
+        ORDER BY updated_at DESC, id DESC
+        LIMIT ?
+        """, (rs, rowNum) -> map(rs), limit);
+  }
+
+  public Optional<PendingTableWrite> findFailed(long id) {
+    List<PendingTableWrite> items = jdbcTemplate.query("""
+        SELECT id, customer_id, phone, action_type, payload, retry_count, status, next_retry_at, error_msg, created_at, updated_at
+        FROM pending_table_writes
+        WHERE id = ? AND status = 'FAILED'
+        """, (rs, rowNum) -> map(rs), id);
+    return items.stream().findFirst();
+  }
+
+  /**
+   * The original error is retained for operator review and audit. Only a terminal FAILED item
+   * can be returned to the retry queue, which makes duplicate clicks and stale pages harmless.
+   */
+  public int requeueFailed(long id, LocalDateTime nextRetryAt) {
+    return jdbcTemplate.update("""
+        UPDATE pending_table_writes
+        SET status = 'PENDING', retry_count = 0, next_retry_at = ?, updated_at = NOW()
+        WHERE id = ? AND status = 'FAILED'
+        """, Timestamp.valueOf(nextRetryAt), id);
+  }
+
+  /**
+   * Closes a terminal failure without deleting its payload or original error.
+   * The status predicate makes repeated clicks and stale admin pages harmless.
+   */
+  public int resolveFailed(long id) {
+    return jdbcTemplate.update("""
+        UPDATE pending_table_writes
+        SET status = 'RESOLVED', updated_at = NOW()
+        WHERE id = ? AND status = 'FAILED'
+        """, id);
   }
 
   public void markResolved(long id) {
@@ -92,5 +123,25 @@ public class PendingTableWriteRepository {
       return null;
     }
     return value.length() <= 500 ? value : value.substring(0, 500);
+  }
+
+  private PendingTableWrite map(java.sql.ResultSet rs) throws java.sql.SQLException {
+    PendingTableWrite item = new PendingTableWrite();
+    item.setId(rs.getLong("id"));
+    long customerId = rs.getLong("customer_id");
+    item.setCustomerId(rs.wasNull() ? null : customerId);
+    item.setPhone(rs.getString("phone"));
+    item.setActionType(TableWriteActionType.valueOf(rs.getString("action_type")));
+    item.setPayload(rs.getString("payload"));
+    item.setRetryCount(rs.getInt("retry_count"));
+    item.setStatus(TableWriteStatus.valueOf(rs.getString("status")));
+    Timestamp nextRetryAt = rs.getTimestamp("next_retry_at");
+    item.setNextRetryAt(nextRetryAt == null ? null : nextRetryAt.toLocalDateTime());
+    item.setErrorMsg(rs.getString("error_msg"));
+    Timestamp createdAt = rs.getTimestamp("created_at");
+    item.setCreatedAt(createdAt == null ? null : createdAt.toLocalDateTime());
+    Timestamp updatedAt = rs.getTimestamp("updated_at");
+    item.setUpdatedAt(updatedAt == null ? null : updatedAt.toLocalDateTime());
+    return item;
   }
 }

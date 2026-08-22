@@ -10,7 +10,8 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-import org.springframework.context.event.EventListener;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -73,7 +74,7 @@ public class SupervisionConfig {
     return current.get();
   }
 
-  @EventListener
+  @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
   public void onConfigChanged(ConfigChangedEvent event) {
     if (event != null && shouldRefresh(event.configKey())) {
       refresh();

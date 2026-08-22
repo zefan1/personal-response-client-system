@@ -7,8 +7,12 @@ export type CustomerSummary = {
   phone: string;
   phoneFull?: string | null;
   nickname?: string | null;
+  wechatId?: string | null;
   sourceChannel?: string | null;
   leadType?: LeadType | null;
+  leadCaptureMethod?: string | null;
+  platformLeadAt?: string | null;
+  conversionTrace?: string | null;
   assignedKeeper?: string | null;
   lastFollowupAt?: string | null;
   intendedStore?: string | null;
@@ -20,8 +24,12 @@ export type Customer = {
   phone: string;
   phoneFull?: string | null;
   nickname?: string | null;
+  wechatId?: string | null;
   sourceChannel?: string | null;
   leadType?: LeadType | null;
+  leadCaptureMethod?: string | null;
+  platformLeadAt?: string | null;
+  conversionTrace?: string | null;
   personalityType?: string | null;
   assignedKeeper?: string | null;
   intendedStore?: string | null;

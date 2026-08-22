@@ -9,11 +9,15 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-/** Installs the configured API-owned Smart Sheet as the application's business datasource. */
+/**
+ * Adds missing default mappings for the configured customer-master Smart Sheet.
+ *
+ * <p>Datasource registration and enablement belong to the administrator-managed three-table
+ * configuration. This startup hook must never change an operator's enablement choice.
+ */
 @Component
 public final class WecomSmartSheetDatasourceInitializer implements ApplicationRunner {
 
-  private static final String DATASOURCE_NAME = "PrivateDomainAssistant-API";
   private static final Map<String, String> BUSINESS_MAPPINGS = mappings();
 
   private final WecomSmartSheetConfig config;
@@ -37,47 +41,25 @@ public final class WecomSmartSheetDatasourceInitializer implements ApplicationRu
       return;
     }
 
-    jdbcTemplate.update("""
-        UPDATE datasource_field_mappings
-        SET is_enabled = 0, updated_at = NOW()
-        WHERE source_table = ?
-          AND target_field IN (
-            'phone', 'nickname', 'leadType', 'customerStage',
-            'bodyConcerns', 'customerProfileSummary', 'followupNotes', 'internalNote',
-            'firstTrackingCapture', 'secondTrackingCapture', 'thirdTrackingCapture',
-            'nextFollowupDir', 'nextFollowupAt', 'lastFollowupAt'
-          )
-        """, config.sourceTable());
-
-    jdbcTemplate.update("""
-        UPDATE datasources
-        SET is_enabled = 0, updated_at = NOW()
-        WHERE is_enabled = 1
-        """);
-
-    jdbcTemplate.update("""
-        INSERT INTO datasources (name, sheet_id, source_table, description, is_enabled, created_by)
-        VALUES (?, ?, ?, ?, 1, ?)
-        ON DUPLICATE KEY UPDATE
-          sheet_id = VALUES(sheet_id),
-          source_table = VALUES(source_table),
-          description = VALUES(description),
-          is_enabled = 1,
-          updated_at = NOW()
-        """, DATASOURCE_NAME, config.documentId(), config.sourceTable(),
-        "Enterprise WeCom Smart Sheet API datasource", "SYSTEM");
-
+    int insertedMappings = 0;
     for (Map.Entry<String, String> mapping : BUSINESS_MAPPINGS.entrySet()) {
       String sourceField = "phone".equals(mapping.getValue())
           ? config.uniqueFieldTitle()
           : mapping.getKey();
-      jdbcTemplate.update("""
-          INSERT INTO datasource_field_mappings (source_table, source_field, target_field, transform_rule, is_enabled)
-          VALUES (?, ?, ?, NULL, 1)
-          ON DUPLICATE KEY UPDATE is_enabled = 1, transform_rule = NULL, updated_at = NOW()
-          """, config.sourceTable(), sourceField, mapping.getValue());
+      insertedMappings += jdbcTemplate.update("""
+          INSERT INTO datasource_field_mappings (
+              source_table, source_field, target_field, transform_rule, is_enabled)
+          SELECT ?, ?, ?, NULL, 1
+          WHERE NOT EXISTS (
+              SELECT 1
+              FROM datasource_field_mappings
+              WHERE source_table = ? AND target_field = ?
+          )
+          """, config.sourceTable(), sourceField, mapping.getValue(), config.sourceTable(), mapping.getValue());
     }
-    eventPublisher.publishEvent(new ConfigChangedEvent("datasource.field_mappings"));
+    if (insertedMappings > 0) {
+      eventPublisher.publishEvent(new ConfigChangedEvent("datasource.field_mappings"));
+    }
   }
 
   private static Map<String, String> mappings() {

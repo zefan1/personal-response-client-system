@@ -37,6 +37,60 @@ public class AccountRepository {
     return rows.stream().findFirst();
   }
 
+  /** Resolves a value entered in a business sheet without assuming display names are unique. */
+  public List<Account> findEnabledByIdentity(String identity) {
+    if (identity == null || identity.isBlank()) {
+      return List.of();
+    }
+    return jdbcTemplate.query("""
+        SELECT id, COALESCE(phone, username) AS phone, password_hash, display_name, role, leader_id, is_enabled, token_version
+        FROM accounts
+        WHERE is_enabled = 1 AND (phone = ? OR username = ? OR display_name = ?)
+        ORDER BY id ASC
+        """, (rs, rowNum) -> new Account(
+        rs.getLong("id"),
+        rs.getString("phone"),
+        rs.getString("password_hash"),
+        rs.getString("display_name"),
+        Role.valueOf(rs.getString("role")),
+        rs.getObject("leader_id", Long.class),
+        true,
+        rs.getLong("token_version")), identity.trim(), identity.trim(), identity.trim());
+  }
+
+  public Optional<String> resolveEnabledUsername(String identity) {
+    List<Account> matches = findEnabledByIdentity(identity);
+    return matches.size() == 1 ? Optional.of(matches.get(0).username()) : Optional.empty();
+  }
+
+  /** Resolves a business-sheet identity to the account's human-facing name. */
+  public Optional<String> resolveEnabledDisplayName(String identity) {
+    List<Account> matches = findEnabledByIdentity(identity).stream()
+        .filter(account -> account.displayName() != null && !account.displayName().isBlank())
+        .toList();
+    if (matches.size() != 1) {
+      return Optional.empty();
+    }
+    return Optional.of(matches.get(0).displayName().trim());
+  }
+
+  public List<Account> findEnabledKeepersByLeaderId(long leaderId) {
+    return jdbcTemplate.query("""
+        SELECT id, COALESCE(phone, username) AS phone, password_hash, display_name, role, leader_id, is_enabled, token_version
+        FROM accounts
+        WHERE leader_id = ? AND role = 'KEEPER' AND is_enabled = 1
+        ORDER BY id ASC
+        """, (rs, rowNum) -> new Account(
+        rs.getLong("id"),
+        rs.getString("phone"),
+        rs.getString("password_hash"),
+        rs.getString("display_name"),
+        Role.valueOf(rs.getString("role")),
+        rs.getObject("leader_id", Long.class),
+        true,
+        rs.getLong("token_version")), leaderId);
+  }
+
   public Optional<Account> findById(long id) {
     List<Account> rows = jdbcTemplate.query("""
         SELECT id, COALESCE(phone, username) AS phone, password_hash, display_name, role, leader_id, is_enabled, token_version

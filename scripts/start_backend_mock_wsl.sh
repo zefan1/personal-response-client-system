@@ -29,12 +29,22 @@ fi
 sudo service mariadb start >/dev/null 2>&1 || sudo /etc/init.d/mariadb start >/dev/null 2>&1
 sudo service redis-server start >/dev/null 2>&1 || sudo /etc/init.d/redis-server start >/dev/null 2>&1
 
-mysql -uroot <<SQL
+if mysql -uroot 2>"$LOG_DIR/mysql-bootstrap.err" <<SQL
 CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
 GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
 FLUSH PRIVILEGES;
 SQL
+then
+  echo "smoke_database_bootstrapped=true"
+else
+  if ! mysql -u"${DB_USER}" -p"${DB_PASSWORD}" "${DB_NAME}" -N -e 'SELECT 1' >/dev/null 2>&1; then
+    echo "smoke_database_unavailable=true" >&2
+    echo "The MariaDB root account cannot initialize the smoke database and the existing smoke account cannot connect." >&2
+    exit 1
+  fi
+  echo "smoke_database_reused=true"
+fi
 
 cd "$ROOT_DIR"
 rm -f "$LOG_FILE"
@@ -44,6 +54,10 @@ SPRING_DATASOURCE_USERNAME="$DB_USER" \
 SPRING_DATASOURCE_PASSWORD="$DB_PASSWORD" \
 MOCK_EXTERNALS=true \
 SERVER_PORT="$PORT" \
+WECOM_TRANSPORT_MODE="${WECOM_TRANSPORT_MODE:-RELAY}" \
+WECOM_RELAY_BASE_URL="${WECOM_RELAY_BASE_URL:-}" \
+WECOM_RELAY_KEY_ID="${WECOM_RELAY_KEY_ID:-}" \
+WECOM_RELAY_SECRET="${WECOM_RELAY_SECRET:-}" \
 MAVEN_OPTS="-Dstyle.color=never" \
 nohup mvn -Dstyle.color=never org.springframework.boot:spring-boot-maven-plugin:3.3.7:run >"$LOG_FILE" 2>&1 &
 echo "$!" > "$PID_FILE"

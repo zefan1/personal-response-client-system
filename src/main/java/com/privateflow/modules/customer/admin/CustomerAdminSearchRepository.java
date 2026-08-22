@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -74,6 +75,62 @@ public class CustomerAdminSearchRepository {
         keyword, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
         null, null, List.of(), TagGroupLogic.AND, CustomerSortField.UPDATED_AT,
         SortDirection.DESC, page, size), CustomerAccessScope.all());
+  }
+
+  public Optional<Customer> findLatestInScope(CustomerAccessScope accessScope) {
+    return findOneInScope("", List.of(), accessScope, " ORDER BY c.updated_at DESC, c.id DESC");
+  }
+
+  public Optional<Customer> findByIdInScope(long customerId, CustomerAccessScope accessScope) {
+    return findOneInScope(" AND c.id = ?", List.of(customerId), accessScope, "");
+  }
+
+  public List<Customer> searchMasterCandidates(String keyword, CustomerAccessScope accessScope, int limit) {
+    CustomerAccessScope scope = accessScope == null ? CustomerAccessScope.all() : accessScope;
+    if (!scope.unrestricted() && scope.permittedKeepers().isEmpty()) {
+      return List.of();
+    }
+    String digits = keyword.replaceAll("[^\\d]", "");
+    StringBuilder sql = new StringBuilder("SELECT c.* FROM customers c WHERE (")
+        .append("INSTR(COALESCE(c.nickname, ''), ?) > 0 ")
+        .append("OR INSTR(COALESCE(c.wechat_id, ''), ?) > 0 ")
+        .append("OR CAST(c.id AS CHAR) = ?");
+    List<Object> args = new ArrayList<>(List.of(keyword, keyword, keyword));
+    if (!digits.isBlank()) {
+      sql.append(" OR INSTR(COALESCE(c.phone, ''), ?) > 0");
+      args.add(digits);
+    }
+    sql.append(")");
+    appendScope(sql, args, scope);
+    sql.append(" ORDER BY c.updated_at DESC, c.id DESC LIMIT ?");
+    args.add(Math.max(1, Math.min(50, limit)));
+    return jdbcTemplate.query(sql.toString(), ROW_MAPPER, args.toArray());
+  }
+
+  private Optional<Customer> findOneInScope(
+      String predicate,
+      List<Object> predicateArgs,
+      CustomerAccessScope accessScope,
+      String orderClause) {
+    CustomerAccessScope scope = accessScope == null ? CustomerAccessScope.all() : accessScope;
+    if (!scope.unrestricted() && scope.permittedKeepers().isEmpty()) {
+      return Optional.empty();
+    }
+    StringBuilder sql = new StringBuilder("SELECT c.* FROM customers c WHERE 1=1").append(predicate);
+    List<Object> args = new ArrayList<>(predicateArgs);
+    appendScope(sql, args, scope);
+    sql.append(orderClause).append(" LIMIT 1");
+    return jdbcTemplate.query(sql.toString(), ROW_MAPPER, args.toArray()).stream().findFirst();
+  }
+
+  private void appendScope(StringBuilder sql, List<Object> args, CustomerAccessScope scope) {
+    if (scope.unrestricted()) {
+      return;
+    }
+    sql.append(" AND c.assigned_keeper IN (")
+        .append(String.join(", ", java.util.Collections.nCopies(scope.permittedKeepers().size(), "?")))
+        .append(")");
+    args.addAll(scope.permittedKeepers());
   }
 
   private List<String> distinctValues(String column, CustomerAccessScope scope) {

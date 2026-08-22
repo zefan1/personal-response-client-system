@@ -1,6 +1,7 @@
 package com.privateflow.modules.api.chat;
 
 import com.privateflow.common.events.CustomerMessageSentEvent;
+import com.privateflow.common.events.RecognizedConversationEvent;
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.audit.AuditLogger;
@@ -26,6 +27,8 @@ import com.privateflow.modules.match.Confidence;
 import com.privateflow.modules.profile.service.FollowupConfirmationService;
 import com.privateflow.modules.profile.service.FollowupAnalysisFieldMerger;
 import com.privateflow.modules.match.CustomerMatchService;
+import com.privateflow.modules.match.CustomerMatchException;
+import com.privateflow.modules.match.CustomerMatchErrorCodes;
 import com.privateflow.modules.match.CustomerSummary;
 import com.privateflow.modules.skill.Scene;
 import com.privateflow.modules.skill.SkillGatewayService;
@@ -267,6 +270,9 @@ public class ChatOrchestrationService {
       return null;
     }
     communicationArchiveService.archive(request, recognized, customer, AuthContext.username());
+    eventPublisher.publishEvent(new RecognizedConversationEvent(
+        customer.getId(), customer.getPhone(),
+        chatMessages(request, recognized), AuthContext.username()));
     if (!stillActive(stillActive)) {
       return null;
     }
@@ -398,17 +404,49 @@ public class ChatOrchestrationService {
   }
 
   @Transactional
-  public Map<String, Object> sendConfirm(SendConfirmRequest request) {
-    if (request == null || request.customerId() == null || request.customerId() <= 0 || blank(request.sentText())) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "customerId and sentText are required");
+  public Map<String, Object> registerPendingSend(PendingSendRequest request) {
+    if (request == null || blank(request.confirmationId()) || blank(request.copiedText())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "confirmationId and copiedText are required");
     }
-    Customer customer = requireSendConfirmAccess(request);
+    if (request.copiedText().trim().length() > 4000) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "copiedText exceeds 4000 characters");
+    }
+    sendConfirmationRepository.registerPending(request, AuthContext.username());
+    return Map.of("accepted", true);
+  }
+
+  @Transactional
+  public Map<String, Object> updatePendingSend(PendingSendStatusRequest request) {
+    if (request == null || blank(request.confirmationId()) || blank(request.status())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "confirmationId and status are required");
+    }
+    String status = request.status().trim().toUpperCase(java.util.Locale.ROOT);
+    if (!status.equals("AWAITING_DECISION")
+        && !status.equals("UNSENT")
+        && !status.equals("RECOGNITION_RETRY")) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "pending send status is invalid");
+    }
+    int reminderCount = request.reminderCount() == null ? 0 : Math.max(0, Math.min(5, request.reminderCount()));
+    sendConfirmationRepository.updatePendingStatus(
+        request.confirmationId(), AuthContext.username(), status, reminderCount);
+    return Map.of("accepted", true, "status", status);
+  }
+
+  @Transactional
+  public Map<String, Object> sendConfirm(SendConfirmRequest request) {
+    if (request == null || blank(request.sentText())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "sentText is required");
+    }
+    Customer customer = resolveSendConfirmCustomer(request);
     if (!blank(request.confirmationId())
         && !sendConfirmationRepository.claim(
             request.confirmationId().trim(),
             AuthContext.username(),
-            String.valueOf(request.customerId()))) {
+            String.valueOf(customer.getId()))) {
       return Map.of("accepted", true, "duplicate", true);
+    }
+    if (!blank(request.confirmationId())) {
+      sendConfirmationRepository.claimPendingForSend(request.confirmationId(), AuthContext.username());
     }
     communicationArchiveService.archiveConfirmedEmployeeMessage(
         customer, request.sentText(), AuthContext.username());
@@ -453,6 +491,10 @@ public class ChatOrchestrationService {
         AuthContext.username(),
         customer.getId()));
     auditLogger.log("SEND_CONFIRM", AuthContext.username(), "CUSTOMER", String.valueOf(customer.getId()), "message sent");
+    if (!blank(request.confirmationId())) {
+      sendConfirmationRepository.markPendingSent(
+          request.confirmationId(), AuthContext.username(), customer.getId());
+    }
     return Map.of("accepted", true, "duplicate", false);
   }
 
@@ -493,8 +535,10 @@ public class ChatOrchestrationService {
     return value == null ? null : value.toString();
   }
 
-  private Customer requireSendConfirmAccess(SendConfirmRequest request) {
-    Customer customer = customerQueryService.getById(request.customerId());
+  private Customer resolveSendConfirmCustomer(SendConfirmRequest request) {
+    Customer customer = request.customerId() == null || request.customerId() <= 0
+        ? communicationArchiveService.createPendingSendCustomer(request)
+        : customerQueryService.getById(request.customerId());
     if (customer != null) {
       if (!customerAccessService.canAccess(customer)) {
         throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权操作该客户");
@@ -553,8 +597,11 @@ public class ChatOrchestrationService {
   private MatchResult match(String nickname, String phone, String leadType, String sourceTable) {
     try {
       return customerMatchService.match(new MatchRequest(nickname, phone, leadType, sourceTable, AuthContext.username()));
+    } catch (CustomerMatchException ex) {
+      throw new ApiException(ex.getErrorCode(), ex.getMessage());
     } catch (RuntimeException ex) {
-      return MatchResult.none();
+      log.error("customer matching failed during recognition", ex);
+      throw new ApiException(CustomerMatchErrorCodes.MATCH_FAILED, "客户匹配服务暂不可用");
     }
   }
 
@@ -608,6 +655,28 @@ public class ChatOrchestrationService {
       return new MatchResult(MatchType.FUZZY, accessibleCandidates, 1);
     }
     return new MatchResult(MatchType.MULTIPLE, accessibleCandidates, accessibleCandidates.size());
+  }
+
+  private List<CustomerMessageSentEvent.ChatMessage> chatMessages(
+      ChatRecognizeRequest request, RecognitionResult recognized) {
+    if (request != null && request.rawMessages() != null && !request.rawMessages().isEmpty()) {
+      return request.rawMessages().stream()
+          .filter(java.util.Objects::nonNull)
+          .map(message -> new CustomerMessageSentEvent.ChatMessage(
+              message.role(), message.text(), message.timestamp()))
+          .toList();
+    }
+    if (recognized != null && recognized.messages() != null) {
+      return recognized.messages().stream()
+          .filter(java.util.Objects::nonNull)
+          .map(message -> new CustomerMessageSentEvent.ChatMessage(
+              message.role(), message.text(), recognized.timestamp()))
+          .toList();
+    }
+    if (request != null && !blank(request.textMessage())) {
+      return List.of(new CustomerMessageSentEvent.ChatMessage("client", request.textMessage(), null));
+    }
+    return List.of();
   }
 
   private MatchResult rememberedMatch(Customer customer) {

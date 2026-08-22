@@ -71,7 +71,7 @@ describe('WorkbenchPanel', () => {
           followup({ phone: '18800000001', nickname: 'Overdue A', reminderType: 'OVERDUE', leadType: 'TUAN_GOU', overdueHours: 5 }),
           followup({ phone: '18800000002', nickname: 'Due B', reminderType: 'DUE_TODAY', leadType: 'XIAN_SUO', nextFollowupAt: '2026-07-03T13:00:00' }),
           followup({ phone: '18800000003', nickname: 'Appointment C', reminderType: 'APPOINTMENT', leadType: 'TUAN_GOU' }),
-          followup({ phone: '18800000004', nickname: 'Lead D', reminderType: 'NEW_LEAD', leadType: 'XIAN_SUO', sourceTable: 'sheet-a', arrivedAt: '2026-07-03T11:00:00Z' })
+          followup({ phone: '18800000004', phoneFull: '18800000004', nickname: 'Lead D', reminderType: 'NEW_LEAD', leadType: 'XIAN_SUO', sourceTable: 'sheet-a', assignedKeeper: 'admin', arrivedAt: '2026-07-03T11:00:00Z' })
         ]
       },
       errorCode: null,
@@ -94,6 +94,9 @@ describe('WorkbenchPanel', () => {
     expect(host.textContent).toContain('Overdue A');
     expect(host.textContent).toContain('Due B');
     expect(host.textContent).toContain('Lead D');
+    expect(host.textContent).toContain('手机号 18800000004');
+    expect(host.textContent).toContain('来源 sheet-a');
+    expect(host.textContent).not.toContain('admin');
 
     app.unmount();
   });

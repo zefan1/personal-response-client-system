@@ -101,12 +101,13 @@ class DatasourceAdminControllerTest {
 
     mockMvc.perform(post("/admin/api/v1/datasources/smart-sheet-connection")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"documentUrl\":\"" + documentUrl + "\"}"))
+            .content("{\"documentUrl\":\"" + documentUrl + "\",\"role\":\"ASSIGNMENT\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.connected").value(true))
         .andExpect(jsonPath("$.data.tableName").value("客户资料表"));
 
-    verify(smartSheetConnectionService).verifyAndSave(new SmartSheetConnectionRequest(documentUrl));
+    verify(smartSheetConnectionService).verifyAndSave(
+        new SmartSheetConnectionRequest(documentUrl, "ASSIGNMENT"));
   }
 
   @Test
@@ -147,6 +148,7 @@ class DatasourceAdminControllerTest {
     when(service.customerFields()).thenReturn(Map.of("fields", List.of(new CustomerFieldDto("phone", "Phone", "base"))));
     when(service.syncStatus()).thenReturn(Map.of("running", false));
     when(service.sync(7L)).thenReturn(Map.of("started", true));
+    when(service.resolveHistoricalFailures(eq(7L), any())).thenReturn(Map.of("resolvedCount", 345));
     when(service.importLogs()).thenReturn(Map.of("logs", List.of(Map.of("fileName", "customers.csv")), "total", 1));
 
     mockMvc.perform(get("/admin/api/v1/datasources/7/columns"))
@@ -161,9 +163,15 @@ class DatasourceAdminControllerTest {
     mockMvc.perform(post("/admin/api/v1/datasources/7/sync"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.started").value(true));
+    mockMvc.perform(post("/admin/api/v1/datasources/7/sync-failures/resolve")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"confirmSourceTable\":\"ASSIGNMENT:q979lj\",\"before\":\"2026-08-16T13:00:00\",\"reason\":\"归档历史失败\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.resolvedCount").value(345));
     mockMvc.perform(get("/admin/api/v1/datasources/import-logs"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.logs[0].fileName").value("customers.csv"));
+    verify(service).resolveHistoricalFailures(eq(7L), any());
   }
 
   @Test

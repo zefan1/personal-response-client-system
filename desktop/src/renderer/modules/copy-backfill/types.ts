@@ -16,6 +16,8 @@ export type PendingSendDecision = ReplySelectedPayload & {
   status: 'AWAITING_DECISION' | 'SUBMITTING' | 'SUBMIT_FAILED';
   createdAt: string;
   errorMessage: string;
+  reminderCount: number;
+  lastReminderAt?: string;
 };
 
 export type ProfileSuggestion = {

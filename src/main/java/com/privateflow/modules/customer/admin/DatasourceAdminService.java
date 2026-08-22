@@ -1,20 +1,29 @@
 package com.privateflow.modules.customer.admin;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.common.events.ConfigChangedEvent;
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
+import com.privateflow.modules.api.Role;
 import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.auth.AuthContext;
+import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.api.ws.WsMessage;
 import com.privateflow.modules.api.ws.WsPushService;
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.CustomerMasterFieldCatalog;
 import com.privateflow.modules.customer.infra.CustomerRepository;
 import com.privateflow.modules.customer.sync.CustomerSyncScheduler;
 import com.privateflow.modules.customer.sync.SheetClient;
 import com.privateflow.modules.customer.sync.SheetRow;
 import com.privateflow.modules.customer.sync.SheetSource;
+import com.privateflow.modules.tablewrite.client.WecomSmartSheetApiClient;
+import com.privateflow.modules.tablewrite.client.WecomSmartSheetFieldMetadata;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTargets;
+import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
 import com.privateflow.modules.tags.TagExchangeResult;
 import com.privateflow.modules.tags.TagExchangeService;
 import com.privateflow.modules.tags.TagExchangeSourceType;
@@ -27,8 +36,8 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -56,6 +65,9 @@ public class DatasourceAdminService {
   private final ObjectMapper objectMapper;
   private final AuditLogger auditLogger;
   private final TagExchangeService exchangeService;
+  private final WecomSmartSheetApiClient smartSheetApiClient;
+  private final WecomSmartSheetConfig smartSheetConfig;
+  private final AuxiliarySmartSheetTargets auxiliarySmartSheetTargets;
 
   @Autowired
   public DatasourceAdminService(
@@ -67,7 +79,10 @@ public class DatasourceAdminService {
       WsPushService wsPushService,
       ObjectMapper objectMapper,
       AuditLogger auditLogger,
-      TagExchangeService exchangeService) {
+      TagExchangeService exchangeService,
+      WecomSmartSheetApiClient smartSheetApiClient,
+      WecomSmartSheetConfig smartSheetConfig,
+      AuxiliarySmartSheetTargets auxiliarySmartSheetTargets) {
     this.repository = repository;
     this.customerRepository = customerRepository;
     this.syncScheduler = syncScheduler;
@@ -77,6 +92,34 @@ public class DatasourceAdminService {
     this.objectMapper = objectMapper;
     this.auditLogger = auditLogger;
     this.exchangeService = exchangeService;
+    this.smartSheetApiClient = smartSheetApiClient;
+    this.smartSheetConfig = smartSheetConfig;
+    this.auxiliarySmartSheetTargets = auxiliarySmartSheetTargets;
+  }
+
+  public DatasourceAdminService(
+      DatasourceAdminRepository repository,
+      CustomerRepository customerRepository,
+      CustomerSyncScheduler syncScheduler,
+      SheetClient sheetClient,
+      ApplicationEventPublisher eventPublisher,
+      WsPushService wsPushService,
+      ObjectMapper objectMapper,
+      AuditLogger auditLogger,
+      TagExchangeService exchangeService) {
+    this(
+        repository,
+        customerRepository,
+        syncScheduler,
+        sheetClient,
+        eventPublisher,
+        wsPushService,
+        objectMapper,
+        auditLogger,
+        exchangeService,
+        null,
+        null,
+        null);
   }
 
   public DatasourceAdminService(
@@ -97,12 +140,31 @@ public class DatasourceAdminService {
         wsPushService,
         objectMapper,
         auditLogger,
+        null,
+        null,
+        null,
         null);
   }
 
   public Map<String, Object> list() {
-    List<Datasource> datasources = repository.list();
+    ensureManagedSmartSheetDatasources();
+    List<Datasource> datasources = repository.list().stream()
+        .filter(datasource -> datasource.description() != null
+            && datasource.description().startsWith("SYSTEM_MANAGED_SMART_SHEET:"))
+        .toList();
     return Map.of("datasources", datasources, "total", datasources.size());
+  }
+
+  private void ensureManagedSmartSheetDatasources() {
+    if (smartSheetConfig != null && !smartSheetConfig.documentId().isBlank() && !smartSheetConfig.sheetId().isBlank()) {
+      repository.ensureManagedSmartSheetDatasource("PRIMARY", smartSheetConfig.documentId(), smartSheetConfig.sheetId());
+    }
+    if (auxiliarySmartSheetTargets != null) {
+      auxiliarySmartSheetTargets.assignment().ifPresent(target ->
+          repository.ensureManagedSmartSheetDatasource("ASSIGNMENT", target.documentId(), target.sheetId()));
+      auxiliarySmartSheetTargets.arrival().ifPresent(target ->
+          repository.ensureManagedSmartSheetDatasource("ARRIVAL", target.documentId(), target.sheetId()));
+    }
   }
 
   public Datasource create(DatasourceRequest request) {
@@ -178,15 +240,20 @@ public class DatasourceAdminService {
   public Map<String, Object> saveMappings(long id, MappingSaveRequest request) {
     Datasource datasource = repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
     List<FieldMappingDto> mappings = validateMappings(request);
+    validateManagedSmartSheetMapping(datasource, mappings);
+    ExternalSchema schema = requireReadableExternalSchema(datasource);
+    validateSourceColumns(schema, mappings);
     repository.replaceMappings(datasource.sourceTable(), mappings);
-    int version = repository.createMappingVersion(id, toJson(mappings), mappings.size(), "replace mappings: " + mappings.size(), AuthContext.username());
+    int enabledMappingCount = (int) mappings.stream().filter(FieldMappingDto::enabled).count();
+    int version = repository.createMappingVersion(id, toJson(mappings), enabledMappingCount,
+        "replace mappings: " + enabledMappingCount, AuthContext.username());
     publish(FIELD_MAPPING_CONFIG_KEY);
     audit("DATASOURCE_MAPPING_SAVE", datasource, Map.of(
         "datasourceId", datasource.id(),
         "sourceTable", datasource.sourceTable(),
-        "mappingCount", mappings.size(),
+        "mappingCount", enabledMappingCount,
         "version", version));
-    return Map.of("mappingCount", mappings.size(), "version", version);
+    return Map.of("mappingCount", enabledMappingCount, "version", version);
   }
 
   public Map<String, Object> mappingVersions(long id) {
@@ -243,6 +310,9 @@ public class DatasourceAdminService {
     String json = repository.mappingSnapshot(id, request.version())
         .orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "mapping version not found"));
     List<FieldMappingDto> mappings = fromJson(json);
+    validateManagedSmartSheetMapping(datasource, mappings);
+    ExternalSchema schema = requireReadableExternalSchema(datasource);
+    validateSourceColumns(schema, mappings);
     repository.replaceMappings(datasource.sourceTable(), mappings);
     int newVersion = repository.createMappingVersion(id, toJson(mappings), mappings.size(), "restore from version " + request.version(), AuthContext.username());
     publish(FIELD_MAPPING_CONFIG_KEY);
@@ -258,31 +328,28 @@ public class DatasourceAdminService {
   public Map<String, Object> columns(long id) {
     Datasource datasource = repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
     LinkedHashSet<String> columnNames = new LinkedHashSet<>();
-    String source = "MAPPING_CONFIG";
-    String fetchStatus = "NOT_ATTEMPTED";
-    String fetchError = null;
-    try {
-      List<SheetRow> rows = sheetClient.fetchIncrementalRows(sheetSource(datasource), LocalDateTime.of(1970, 1, 1, 0, 0), 20);
-      for (SheetRow row : rows) {
-        columnNames.addAll(row.values().keySet());
-      }
-      fetchStatus = "OK";
-      if (!columnNames.isEmpty()) {
-        source = "SHEET_SAMPLE";
-      }
-    } catch (RuntimeException ex) {
-      fetchStatus = "UNAVAILABLE";
-      fetchError = ex.getMessage();
-    }
+    ExternalSchema schema = readExternalSchema(datasource);
+    columnNames.addAll(schema.columns());
+    String source = schema.readable() ? schema.source() : "MAPPING_CONFIG";
+    String fetchStatus = schema.readable() ? "OK" : "UNAVAILABLE";
+    String fetchError = schema.error();
     List<FieldMappingDto> mappings = repository.mappings(datasource.sourceTable());
+    Set<String> remoteColumns = new LinkedHashSet<>(schema.columns());
     for (FieldMappingDto mapping : mappings) {
-      columnNames.add(mapping.sourceField());
+      if (!remoteColumns.contains(mapping.sourceField())) {
+        columnNames.add(mapping.sourceField());
+      }
     }
+    // Keep the order returned by WeCom. The fields endpoint follows the
+    // Smart Sheet's left-to-right column order; sorting here makes the mapping
+    // editor look random and disconnects it from the actual table layout.
     List<Map<String, Object>> columns = columnNames.stream()
-        .sorted(Comparator.naturalOrder())
         .map(column -> {
           Map<String, Object> item = new LinkedHashMap<>();
           item.put("name", column);
+          boolean remotePresent = remoteColumns.contains(column);
+          item.put("remotePresent", remotePresent);
+          item.put("stale", !remotePresent && schema.readable());
           mappings.stream()
               .filter(mapping -> mapping.sourceField().equals(column))
               .findFirst()
@@ -302,30 +369,135 @@ public class DatasourceAdminService {
     result.put("source", source);
     result.put("fetchStatus", fetchStatus);
     result.put("externalFetchAvailable", "OK".equals(fetchStatus));
-    result.put("fallback", !"SHEET_SAMPLE".equals(source));
+    result.put("schemaReadable", schema.readable());
+    result.put("fallback", !"OK".equals(fetchStatus) || "MAPPING_CONFIG".equals(source));
     if (fetchError != null && !fetchError.isBlank()) {
       result.put("fetchError", fetchError);
     }
     return result;
   }
 
-  public Map<String, Object> customerFields() {
-    List<CustomerFieldDto> fields = new ArrayList<>();
-    try {
-      for (PropertyDescriptor descriptor : Introspector.getBeanInfo(Customer.class).getPropertyDescriptors()) {
-        if (descriptor.getWriteMethod() == null || SYSTEM_FIELDS.contains(descriptor.getName())) {
-          continue;
-        }
-        fields.add(new CustomerFieldDto(descriptor.getName(), label(descriptor.getName()), category(descriptor.getName())));
-      }
-    } catch (Exception ex) {
-      throw new ApiException(ApiErrorCodes.INTERNAL_ERROR, "customer fields introspection failed");
+  private ExternalSchema requireReadableExternalSchema(Datasource datasource) {
+    ExternalSchema schema = readExternalSchema(datasource);
+    if (!schema.readable()) {
+      String detail = schema.error() == null || schema.error().isBlank() ? "未返回任何列名" : schema.error();
+      throw new ApiException(ApiErrorCodes.CONFLICT,
+          "无法读取企业微信表格列名，已拒绝保存映射以保护现有配置。请恢复表格连接后重新识别列名。原因：" + detail);
     }
+    return schema;
+  }
+
+  private void validateSourceColumns(ExternalSchema schema, List<FieldMappingDto> mappings) {
+    Set<String> available = new LinkedHashSet<>(schema.columns());
+    List<String> stale = mappings.stream()
+        .filter(FieldMappingDto::enabled)
+        .map(FieldMappingDto::sourceField)
+        .filter(source -> !available.contains(source))
+        .distinct()
+        .toList();
+    if (!stale.isEmpty()) {
+      throw new ApiException(ApiErrorCodes.CONFLICT,
+          "以下映射字段已不在企业微信表格中，请先清除或改为真实列名：" + String.join("、", stale));
+    }
+  }
+
+  private ExternalSchema readExternalSchema(Datasource datasource) {
+    try {
+      List<String> columns;
+      AuxiliarySmartSheetTarget target = managedSmartSheetTarget(datasource);
+      if (target != null) {
+        columns = loadSmartSheetColumns(target);
+        return new ExternalSchema(columns, "SMART_SHEET_SCHEMA", null);
+      }
+      List<SheetRow> rows = sheetClient.fetchIncrementalRows(
+          sheetSource(datasource), LocalDateTime.of(1970, 1, 1, 0, 0), 20);
+      LinkedHashSet<String> columnNames = new LinkedHashSet<>();
+      if (rows != null) {
+        for (SheetRow row : rows) {
+          if (row != null && row.values() != null) {
+            columnNames.addAll(row.values().keySet());
+          }
+        }
+      }
+      if (columnNames.isEmpty()) {
+        return new ExternalSchema(List.of(), "SHEET_SAMPLE", "企业微信未返回可用列名");
+      }
+      return new ExternalSchema(List.copyOf(columnNames), "SHEET_SAMPLE", null);
+    } catch (RuntimeException ex) {
+      return new ExternalSchema(List.of(), "MAPPING_CONFIG", ex.getMessage());
+    }
+  }
+
+  private record ExternalSchema(List<String> columns, String source, String error) {
+    private boolean readable() {
+      return error == null && !columns.isEmpty();
+    }
+  }
+
+  private AuxiliarySmartSheetTarget managedSmartSheetTarget(Datasource datasource) {
+    if (smartSheetConfig != null && datasource.sheetId().equals(smartSheetConfig.documentId())
+        && datasource.sourceTable().equals(smartSheetConfig.sourceTable())) {
+      return new AuxiliarySmartSheetTarget("PRIMARY", smartSheetConfig.documentId(), smartSheetConfig.sheetId(),
+          smartSheetConfig.viewId(), smartSheetConfig.uniqueFieldTitle(), "");
+    }
+    if (auxiliarySmartSheetTargets == null) return null;
+    return auxiliarySmartSheetTargets.assignment()
+        .filter(target -> datasource.sourceTable().equals("ASSIGNMENT:" + target.sheetId()))
+        .or(() -> auxiliarySmartSheetTargets.arrival()
+            .filter(target -> datasource.sourceTable().equals("ARRIVAL:" + target.sheetId())))
+        .orElse(null);
+  }
+
+  private void validateManagedSmartSheetMapping(Datasource datasource, List<FieldMappingDto> mappings) {
+    AuxiliarySmartSheetTarget target = managedSmartSheetTarget(datasource);
+    if (target == null) return;
+    long phoneMappings = mappings.stream().filter(mapping -> mapping.enabled()
+        && "phone".equals(mapping.targetField())).count();
+    if (phoneMappings != 1) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST,
+          "请将企业微信表格中实际代表手机号的列设置为系统内容“手机号”，系统将以唯一事实数据库的手机号查找客户");
+    }
+  }
+
+  private List<String> loadSmartSheetColumns(AuxiliarySmartSheetTarget target) {
+    if (smartSheetApiClient == null || target == null || !target.configured()) {
+      throw new IllegalStateException("企业微信表格连接尚未就绪");
+    }
+    JsonNode fields = smartSheetApiClient.postForTarget("get_fields", Map.of(
+        "docid", target.documentId(),
+        "sheet_id", target.sheetId(),
+        "view_id", target.viewId(),
+        "offset", 0,
+        "limit", 1000), Duration.ofSeconds(10), "PRIMARY".equals(target.role())).get("fields");
+    if (fields == null || !fields.isArray()) {
+      throw new IllegalStateException("企业微信未返回客户主表列名");
+    }
+    List<String> result = new ArrayList<>();
+    for (JsonNode field : fields) {
+      String title = WecomSmartSheetFieldMetadata.title(field);
+      if (!title.isBlank()) {
+        result.add(title);
+      }
+    }
+    if (result.isEmpty()) {
+      throw new IllegalStateException("客户主表没有可用列");
+    }
+    return result;
+  }
+
+  public Map<String, Object> customerFields() {
+    List<CustomerFieldDto> fields = CustomerMasterFieldCatalog.fields().stream()
+        .map(field -> new CustomerFieldDto(field.name(), field.label(), field.category()))
+        .toList();
     return Map.of("fields", fields);
   }
 
   public Map<String, Object> syncStatus() {
     List<Map<String, Object>> items = repository.list().stream()
+        // The admin console is scoped to the three managed Smart Sheets. Legacy
+        // imports and API-owned migration rows must not alter the operator view.
+        .filter(source -> source.description() != null
+            && source.description().startsWith("SYSTEM_MANAGED_SMART_SHEET:"))
         .map(source -> {
           Map<String, Object> item = new LinkedHashMap<>();
           item.put("datasourceId", source.id());
@@ -341,15 +513,57 @@ public class DatasourceAdminService {
   }
 
   public Map<String, Object> sync(long id) {
+    return sync(id, false);
+  }
+
+  public Map<String, Object> sync(long id, boolean full) {
     Datasource datasource = repository.find(id).orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
     if (!datasource.enabled()) {
       throw new ApiException(ApiErrorCodes.CONFLICT, "datasource is disabled");
     }
-    if (!syncScheduler.tryStartOneAsync(sheetSource(datasource))) {
+    boolean started = full
+        ? syncScheduler.tryStartOneAsync(sheetSource(datasource), true)
+        : syncScheduler.tryStartOneAsync(sheetSource(datasource));
+    if (!started) {
       throw new ApiException(ApiErrorCodes.CONFLICT, "datasource sync already running");
     }
-    audit("DATASOURCE_SYNC_START", datasource, Map.of("datasourceId", id, "sourceTable", datasource.sourceTable()));
-    return Map.of("accepted", true, "datasourceId", id, "sourceTable", datasource.sourceTable());
+    audit("DATASOURCE_SYNC_START", datasource, Map.of(
+        "datasourceId", id,
+        "sourceTable", datasource.sourceTable(),
+        "mode", full ? "FULL" : "INCREMENTAL"));
+    return Map.of("accepted", true, "datasourceId", id, "sourceTable", datasource.sourceTable(),
+        "mode", full ? "FULL" : "INCREMENTAL");
+  }
+
+  @Transactional
+  public Map<String, Object> resolveHistoricalFailures(long id, HistoricalSyncFailureResolveRequest request) {
+    requireAdmin();
+    if (request == null || request.before() == null || blank(request.reason()) || blank(request.confirmSourceTable())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "请提供截止时间、确认表名和归档原因");
+    }
+    if (request.before().isAfter(LocalDateTime.now())) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "归档截止时间不能晚于当前时间");
+    }
+    Datasource datasource = repository.find(id)
+        .orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "datasource not found"));
+    if (datasource.description() == null || !datasource.description().startsWith("SYSTEM_MANAGED_SMART_SHEET:")) {
+      throw new ApiException(ApiErrorCodes.CONFLICT, "只能归档系统管理的企业微信智能表格历史失败");
+    }
+    if (!datasource.sourceTable().equals(request.confirmSourceTable().trim())) {
+      throw new ApiException(ApiErrorCodes.CONFLICT, "确认表名与当前数据源不一致");
+    }
+    int resolved = repository.resolveFailuresBefore(datasource.sourceTable(), request.before());
+    audit("DATASOURCE_SYNC_FAILURES_RESOLVE", datasource, Map.of(
+        "sourceTable", datasource.sourceTable(),
+        "before", request.before().toString(),
+        "reason", request.reason().trim(),
+        "resolvedCount", resolved));
+    return Map.of(
+        "datasourceId", datasource.id(),
+        "sourceTable", datasource.sourceTable(),
+        "resolvedCount", resolved,
+        "before", request.before(),
+        "message", "已归档截止时间前的历史同步失败记录；原始记录保留，不会重跑或写入企业微信表");
   }
 
   private SheetSource sheetSource(Datasource datasource) {
@@ -514,9 +728,16 @@ public class DatasourceAdminService {
       return LocalDate.parse(value);
     }
     if (LocalDateTime.class.equals(type)) {
-      return LocalDateTime.parse(value);
+      return parseDateTime(value);
     }
     return value;
+  }
+
+  private LocalDateTime parseDateTime(String value) {
+    if (value.matches("\\d{4}-\\d{2}-\\d{2}")) {
+      return LocalDate.parse(value).atStartOfDay();
+    }
+    return LocalDateTime.parse(value.replace(' ', 'T'));
   }
 
   private List<String> parseLine(String line) {
@@ -608,13 +829,22 @@ public class DatasourceAdminService {
   }
 
   private String label(String field) {
+    String approvedLabel = CustomerMasterFieldCatalog.labelOf(field);
+    if (!approvedLabel.equals(field)) {
+      return approvedLabel;
+    }
     return switch (field) {
       case "phone" -> "手机号";
       case "nickname" -> "客户昵称";
+      case "wechatId" -> "微信号";
       case "sourceChannel" -> "来源渠道";
-      case "leadType" -> "线索类型";
+      case "leadType" -> "客资类型";
+      case "leadCaptureType" -> "留资类型";
+      case "leadCaptureMethod" -> "留资方式";
+      case "platformLeadAt" -> "平台留资时间";
       case "personalityType" -> "性格类型";
       case "assignedKeeper" -> "分配管家";
+      case "assignedAt" -> "分配日期";
       case "intendedStore" -> "意向门店";
       case "intendedProject" -> "意向项目";
       case "purchasedProject" -> "已购项目";
@@ -657,6 +887,21 @@ public class DatasourceAdminService {
   }
 
   private String category(String field) {
+    if (field.equals("wechatId") || field.equals("leadCaptureType") || field.equals("leadCaptureMethod")
+        || field.equals("platformLeadAt") || field.equals("assignedAt")) {
+      return "留资与分配";
+    }
     return field.contains("Weight") || field.contains("postpartum") || field.contains("delivery") ? "身体数据" : "基本信息";
+  }
+
+  private void requireAdmin() {
+    AuthUser user = AuthContext.current();
+    if (user == null || user.role() != Role.ADMIN) {
+      throw new ApiException(ApiErrorCodes.FORBIDDEN, "管理员权限不足");
+    }
+  }
+
+  private boolean blank(String value) {
+    return value == null || value.isBlank();
   }
 }

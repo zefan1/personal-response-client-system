@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.customer.sync.SheetRow;
 import com.privateflow.modules.customer.sync.SheetSource;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTargets;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.time.Clock;
@@ -80,6 +82,37 @@ class WecomSmartSheetRecordClientTest {
 
     assertThat(rows).extracting(SheetRow::rowId).containsExactly("rec-earliest-later-page");
     assertThat(recordOffsets(api)).containsExactly(0L, 1L);
+  }
+
+  @Test
+  void readsExactlyTheRowsNamedByACallback() throws Exception {
+    ScriptedApi api = api("""
+        {"errcode":0,"has_more":false,"records":[
+          {"record_id":"rec-2","update_time":1784822410000,"values":{"Phone":"13800000002"}},
+          {"record_id":"rec-1","update_time":1784822410000,"values":{"Phone":"13800000001"}}
+        ]}""");
+    AuxiliarySmartSheetTarget target = new AuxiliarySmartSheetTarget(
+        "PRIMARY", "doc-1", "sheet-1", "view-1", "Phone", "");
+
+    List<SheetRow> rows = client(api).fetchRecords(target, List.of("rec-2", "rec-1", "rec-2"), TIMEOUT);
+
+    assertThat(rows).extracting(SheetRow::rowId).containsExactly("rec-2", "rec-1");
+    assertThat(onlyBody(api, "get_records").path("record_ids"))
+        .extracting(JsonNode::asText).containsExactly("rec-2", "rec-1");
+  }
+
+  @Test
+  void rejectsCallbackReadWhenWeComDoesNotReturnEveryNamedRow() throws Exception {
+    ScriptedApi api = api("""
+        {"errcode":0,"has_more":false,"records":[
+          {"record_id":"rec-1","update_time":1784822410000,"values":{"Phone":"13800000001"}}
+        ]}""");
+    AuxiliarySmartSheetTarget target = new AuxiliarySmartSheetTarget(
+        "PRIMARY", "doc-1", "sheet-1", "view-1", "Phone", "");
+
+    assertThatThrownBy(() -> client(api).fetchRecords(target, List.of("rec-1", "rec-2"), TIMEOUT))
+        .isInstanceOf(WecomSmartSheetException.class)
+        .hasMessageContaining("did not contain every requested record");
   }
 
   @Test
@@ -840,6 +873,38 @@ class WecomSmartSheetRecordClientTest {
   }
 
   @Test
+  void recentSuccessCacheIsScopedToSmartSheetTargetAndSourceTable() throws Exception {
+    ScriptedApi api = api(emptyRecords(), emptyRecords());
+    api.fieldResponses.add(JSON.readTree(fields()));
+    api.responds("add_records",
+        "{\"errcode\":0,\"records\":[{\"record_id\":\"r-assignment-a\"}]}",
+        "{\"errcode\":0,\"records\":[{\"record_id\":\"r-assignment-b\"}]}");
+    java.util.concurrent.atomic.AtomicReference<AuxiliarySmartSheetTarget> current =
+        new java.util.concurrent.atomic.AtomicReference<>(new AuxiliarySmartSheetTarget(
+            "ASSIGNMENT", "doc-a", "sheet-a", "view-a", "Phone", ""));
+    AuxiliarySmartSheetTargets targets = new AuxiliarySmartSheetTargets() {
+      @Override
+      public java.util.Optional<AuxiliarySmartSheetTarget> assignment() {
+        return java.util.Optional.of(current.get());
+      }
+    };
+    WecomSmartSheetConfig config = config();
+    WecomSmartSheetRecordClient recordClient = new WecomSmartSheetRecordClient(
+        config, api, new WecomSmartSheetFieldCatalog(api, config),
+        new WecomSmartSheetValueCodec(config), targets,
+        Clock.systemUTC(), Duration.ofMinutes(5), 1024);
+
+    String first = recordClient.createRow("ASSIGNMENT:sheet-a", Map.of("Phone", "13800000021"), TIMEOUT);
+    current.set(new AuxiliarySmartSheetTarget("ASSIGNMENT", "doc-b", "sheet-b", "view-b", "Phone", ""));
+    String second = recordClient.createRow("ASSIGNMENT:sheet-b", Map.of("Phone", "13800000021"), TIMEOUT);
+
+    assertThat(first).isEqualTo("r-assignment-a");
+    assertThat(second).isEqualTo("r-assignment-b");
+    assertThat(operationBodies(api, "add_records")).extracting(body -> body.path("docid").asText())
+        .containsExactly("doc-a", "doc-b");
+  }
+
+  @Test
   void rejectsMismatchedUpdateConfirmationWithoutLeakingRequestOrResponseData() throws Exception {
     String recordId = "r-private-request";
     String value = "private-update-value";
@@ -1067,6 +1132,15 @@ class WecomSmartSheetRecordClientTest {
         return updateResponses.removeFirst();
       }
       throw new AssertionError("unexpected operation");
+    }
+
+    @Override public JsonNode postForTarget(String operation, Object body, Duration timeout) {
+      return post(operation, body, timeout);
+    }
+
+    @Override public JsonNode postForTarget(
+        String operation, Object body, Duration timeout, boolean primaryTarget) {
+      return post(operation, body, timeout);
     }
   }
 

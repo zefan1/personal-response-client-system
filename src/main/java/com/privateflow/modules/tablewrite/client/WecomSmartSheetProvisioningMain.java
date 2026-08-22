@@ -1,7 +1,10 @@
 package com.privateflow.modules.tablewrite.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.privateflow.modules.tablewrite.config.WecomRelayConfig;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import com.privateflow.modules.tablewrite.config.WecomTransportMode;
+import java.time.ZoneId;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
@@ -24,7 +27,10 @@ public final class WecomSmartSheetProvisioningMain {
           environment.getOrDefault("WECOM_API_BASE_URL", DEFAULT_API_BASE_URL),
           environment.get("WECOM_CORP_ID"),
           environment.get("WECOM_APP_SECRET"),
-          "", "", "", "", "");
+          "", "", "", "", "", ZoneId.of("Asia/Shanghai"),
+          WecomTransportMode.from(environment.getOrDefault("WECOM_TRANSPORT_MODE", "DIRECT")),
+          new WecomRelayConfig(environment.get("WECOM_RELAY_BASE_URL"), environment.get("WECOM_RELAY_KEY_ID"),
+              environment.get("WECOM_RELAY_SECRET")));
       WecomAccessTokenProvider tokenProvider = new WecomAccessTokenProvider(objectMapper, config);
       WecomSmartSheetApiClient apiClient = new WecomSmartSheetApiClient(objectMapper, config, tokenProvider);
       WecomSmartSheetProvisioningService service =

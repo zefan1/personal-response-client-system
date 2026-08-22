@@ -34,9 +34,12 @@ class Api:
         self.token = None
         self.checks = []
 
-    def request(self, name, method, path, body=None, token=True, expect_success=True, allow_status=None):
+    def request(
+            self, name, method, path, body=None, token=True, expect_success=True,
+            allow_status=None, sensitive_body=False):
         if os.name == "nt" and os.environ.get("PDA_ACCEPTANCE_VIA_WSL", "true").lower() == "true":
-            return self.request_via_wsl(name, method, path, body, token, expect_success, allow_status)
+            return self.request_via_wsl(
+                name, method, path, body, token, expect_success, allow_status, sensitive_body)
         headers = {}
         if token and self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -69,7 +72,9 @@ class Api:
             raise AssertionError(f"{name} failed status={status} body={raw[:1000]}")
         return payload
 
-    def request_via_wsl(self, name, method, path, body=None, token=True, expect_success=True, allow_status=None):
+    def request_via_wsl(
+            self, name, method, path, body=None, token=True, expect_success=True,
+            allow_status=None, sensitive_body=False):
         request_file = None
         curl = ["curl", "-sS", "-X", method]
         if token and self.token:
@@ -82,12 +87,16 @@ class Api:
             curl.extend(["-H", "Content-Type: application/json", "--data-binary", "@" + wsl_path(request_file)])
         curl.extend(["-w", "\\n__STATUS__:%{http_code}", self.base_url + path])
         quoted = " ".join(shell_quote(part) for part in curl)
-        result = subprocess.run(
-            ["wsl", "-d", "Ubuntu", "--", "bash", "-lc", quoted],
-            cwd=ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        try:
+            result = subprocess.run(
+                ["wsl", "-d", "Ubuntu", "--", "bash", "-lc", quoted],
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        finally:
+            if sensitive_body and request_file is not None:
+                request_file.unlink(missing_ok=True)
         raw_output = (result.stdout or b"").decode("utf-8", errors="replace")
         stderr = (result.stderr or b"").decode("utf-8", errors="replace")
         marker = "\n__STATUS__:"
@@ -195,7 +204,7 @@ def start_fake_provider():
     return proc
 
 
-def start_real_backend():
+def start_real_backend(extra_env=None):
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     ps_kill_port(8081)
     subprocess.run(
@@ -206,6 +215,12 @@ def start_real_backend():
         check=False,
     )
     log = open(RUNTIME_DIR / "real-backend.log", "w", encoding="utf-8")
+    extra_env = extra_env or {}
+    exports = "\n".join(
+        f"export {key}={shell_quote(value)}"
+        for key, value in extra_env.items()
+        if key and value is not None
+    )
     script = f"""
 set -euo pipefail
 sudo service mariadb start >/dev/null 2>&1 || sudo /etc/init.d/mariadb start >/dev/null 2>&1
@@ -218,6 +233,7 @@ FLUSH PRIVILEGES;
 SQL
 mysql -u'{DB_USER}' -p'{DB_PASSWORD}' -e "DROP DATABASE IF EXISTS {DB_NAME}; CREATE DATABASE {DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 cd '{wsl_path(ROOT)}'
+{exports}
 SPRING_DATASOURCE_URL='jdbc:mysql://localhost:3306/{DB_NAME}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false' \
 SPRING_DATASOURCE_USERNAME='{DB_USER}' \
 SPRING_DATASOURCE_PASSWORD='{DB_PASSWORD}' \

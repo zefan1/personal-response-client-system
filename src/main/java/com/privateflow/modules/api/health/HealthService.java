@@ -7,6 +7,8 @@ import com.privateflow.modules.api.Role;
 import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.auth.AuthUser;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
+import com.privateflow.modules.customer.admin.DatasourceAdminRepository;
+import com.privateflow.modules.customer.sync.SheetSource;
 import com.privateflow.modules.image.health.ImageServiceHealthMonitor;
 import com.privateflow.modules.runtime.RuntimeModeService;
 import com.privateflow.modules.skill.health.SkillHealthMonitor;
@@ -34,6 +36,7 @@ public class HealthService {
   private final ImageServiceHealthMonitor imageHealthMonitor;
   private final PendingTableWriteRepository tableWriteRepository;
   private final TableConfigProvider tableConfigProvider;
+  private final DatasourceAdminRepository datasourceRepository;
   private final RuntimeModeService runtimeModeService;
   private final Map<String, String> lastStatuses = new ConcurrentHashMap<>();
   private final Map<String, Instant> statusSince = new ConcurrentHashMap<>();
@@ -47,6 +50,7 @@ public class HealthService {
       ImageServiceHealthMonitor imageHealthMonitor,
       PendingTableWriteRepository tableWriteRepository,
       TableConfigProvider tableConfigProvider,
+      DatasourceAdminRepository datasourceRepository,
       RuntimeModeService runtimeModeService) {
     this.dataSource = dataSource;
     this.redisTemplate = redisTemplate;
@@ -56,6 +60,7 @@ public class HealthService {
     this.imageHealthMonitor = imageHealthMonitor;
     this.tableWriteRepository = tableWriteRepository;
     this.tableConfigProvider = tableConfigProvider;
+    this.datasourceRepository = datasourceRepository;
     this.runtimeModeService = runtimeModeService;
   }
 
@@ -64,7 +69,8 @@ public class HealthService {
     Map<String, Object> components = new LinkedHashMap<>();
     components.put("skill", skill());
     components.put("imageRecognition", imageRecognition());
-    components.put("wecomTable", wecomTable());
+    components.put("wecomTableConnection", wecomTableConnection());
+    components.put("wecomTableQueue", wecomTableQueue());
     components.put("redis", redis());
     components.put("db", db());
     Map<String, Object> result = new LinkedHashMap<>();
@@ -116,14 +122,53 @@ public class HealthService {
         "lastError", imageHealthMonitor.lastErrorMsg() == null ? "" : imageHealthMonitor.lastErrorMsg()));
   }
 
-  private Map<String, Object> wecomTable() {
+  private Map<String, Object> wecomTableConnection() {
+    try {
+      var sources = datasourceRepository.enabledSources();
+      if (sources.isEmpty()) {
+        return component("wecomTableConnection", "UNKNOWN", Map.of("message", "尚未配置企业微信智能表格"));
+      }
+      LocalDateTime now = LocalDateTime.now();
+      Map<String, Object> tables = new LinkedHashMap<>();
+      boolean unread = false;
+      boolean stale = false;
+      for (SheetSource source : sources) {
+        var lastRead = datasourceRepository.lastSuccessfulRemoteRead(source.sourceTable());
+        String status;
+        if (lastRead.isEmpty()) {
+          unread = true;
+          status = "UNKNOWN";
+        } else if (lastRead.get().isBefore(now.minusMinutes(3))) {
+          stale = true;
+          status = "DEGRADED";
+        } else {
+          status = "UP";
+        }
+        Map<String, Object> table = new LinkedHashMap<>();
+        table.put("status", status);
+        lastRead.ifPresent(value -> table.put("lastSuccessfulReadAt", value));
+        tables.put(source.sourceTable(), table);
+      }
+      String status = unread ? "UNKNOWN" : (stale ? "DEGRADED" : "UP");
+      Map<String, Object> detail = new LinkedHashMap<>();
+      detail.put("checkedTableCount", sources.size());
+      detail.put("tables", tables);
+      if (unread) detail.put("message", "部分表格尚未完成首次真实读取");
+      if (stale) detail.put("message", "最近真实读取超过 3 分钟，请检查同步任务和企业微信连接");
+      return component("wecomTableConnection", status, detail);
+    } catch (RuntimeException ex) {
+      return component("wecomTableConnection", "UNKNOWN", Map.of("message", "智能表格连通性状态暂时不可用"));
+    }
+  }
+
+  private Map<String, Object> wecomTableQueue() {
     try {
       int pending = tableWriteRepository.countPending();
       int staleFailed = tableWriteRepository.countStaleFailed(tableConfigProvider.get().alertFailureHours());
-      String status = staleFailed > 0 ? "DOWN" : (pending >= tableConfigProvider.get().queueWarnThreshold() ? "DEGRADED" : "UP");
-      return component("wecomTable", status, Map.of("pendingCount", pending, "staleFailedCount", staleFailed));
+      String status = staleFailed > 0 || pending >= tableConfigProvider.get().queueWarnThreshold() ? "DEGRADED" : "UP";
+      return component("wecomTableQueue", status, Map.of("pendingCount", pending, "staleFailedCount", staleFailed));
     } catch (RuntimeException ex) {
-      return component("wecomTable", "UNKNOWN", Map.of("message", "table write health unavailable"));
+      return component("wecomTableQueue", "UNKNOWN", Map.of("message", "table write queue health unavailable"));
     }
   }
 

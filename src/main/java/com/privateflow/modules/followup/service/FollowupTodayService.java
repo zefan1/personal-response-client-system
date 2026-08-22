@@ -18,7 +18,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -40,6 +42,8 @@ public class FollowupTodayService {
   public FollowupTodayResponse today(String keeperId) {
     String requestedKeeperId = keeperId == null ? "" : keeperId.trim();
     List<FollowupItem> items = new ArrayList<>();
+    Set<String> newLeadPhones = new HashSet<>();
+    LocalDate today = LocalDate.now();
     for (Customer customer : customerQueryService.scanActiveCustomers(new ScanFilter(null, null, null, true, 5000))) {
       if (!canInclude(customer, requestedKeeperId)) {
         continue;
@@ -48,8 +52,17 @@ public class FollowupTodayService {
       if (item != null) {
         items.add(item);
       }
+      // Assignment is the authoritative new-lead signal. The reminder log is
+      // only a compatibility fallback for rows created before this rule existed.
+      if (customer.getAssignedAt() != null && customer.getAssignedAt().toLocalDate().equals(today)) {
+        items.add(toItem(customer, ReminderType.NEW_LEAD, null, AlertLevel.NORMAL, customer.getAssignedAt(), null));
+        newLeadPhones.add(customer.getPhone());
+      }
     }
     for (String phone : reminderLogRepository.findTodayPhones(ReminderType.NEW_LEAD)) {
+      if (newLeadPhones.contains(phone)) {
+        continue;
+      }
       Customer customer = customerQueryService.getByPhone(phone);
       if (canInclude(customer, requestedKeeperId)) {
         items.add(toItem(customer, ReminderType.NEW_LEAD, null, AlertLevel.NORMAL, LocalDateTime.now(), null));

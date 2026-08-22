@@ -11,7 +11,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.event.EventListener;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -56,7 +57,7 @@ public class ProfileConfigProvider {
     return current.get();
   }
 
-  @EventListener
+  @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
   public void onConfigChanged(ConfigChangedEvent event) {
     if (event.configKey() != null && event.configKey().startsWith("profile.")) {
       refresh();

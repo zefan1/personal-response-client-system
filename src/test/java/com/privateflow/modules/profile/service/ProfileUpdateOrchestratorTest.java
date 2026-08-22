@@ -9,14 +9,18 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.privateflow.common.events.CustomerMessageSentEvent;
+import com.privateflow.common.events.RecognizedConversationEvent;
+import com.privateflow.common.events.RecognizedProfileFactsUpdatedEvent;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.profile.config.ProfileConfig;
 import com.privateflow.modules.profile.config.ProfileConfigProvider;
 import com.privateflow.modules.profile.infra.AuditLogRepository;
 import com.privateflow.modules.profile.infra.ProfileWriter;
+import com.privateflow.modules.profile.infra.ProfileUpdateFailureRepository;
 import com.privateflow.modules.skill.ProfileAnalysisResult;
 import com.privateflow.modules.skill.ProfileUpdates;
+import com.privateflow.modules.skill.FieldUpdate;
 import com.privateflow.modules.skill.TagAnalysisAction;
 import com.privateflow.modules.skill.TagAnalysisDecision;
 import com.privateflow.modules.skill.TagAnalysisResultType;
@@ -27,8 +31,86 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 class ProfileUpdateOrchestratorTest {
+
+  @Test
+  void recognitionWritesFactsImmediatelyButDoesNotWriteFollowupFields() {
+    EventDeduplicator deduplicator = mock(EventDeduplicator.class);
+    CustomerQueryService customerQueryService = mock(CustomerQueryService.class);
+    ProfileExtractionClient extractionClient = mock(ProfileExtractionClient.class);
+    ConfidenceRouter confidenceRouter = mock(ConfidenceRouter.class);
+    ProfileWriter profileWriter = mock(ProfileWriter.class);
+    SuggestionQueueManager suggestionQueueManager = mock(SuggestionQueueManager.class);
+    CustomerTagUpdateService customerTagUpdateService = mock(CustomerTagUpdateService.class);
+    ProfileConfigProvider configProvider = mock(ProfileConfigProvider.class);
+    AuditLogRepository auditLogRepository = mock(AuditLogRepository.class);
+    ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+    ProfileUpdateOrchestrator orchestrator = new ProfileUpdateOrchestrator(
+        deduplicator, customerQueryService, extractionClient, confidenceRouter, profileWriter,
+        suggestionQueueManager, customerTagUpdateService, configProvider, auditLogRepository, eventPublisher);
+    Customer customer = new Customer();
+    customer.setId(9L);
+    customer.setPhone("18800001111");
+    customer.setVersion(3);
+    when(customerQueryService.getById(9L)).thenReturn(customer);
+    when(extractionClient.extract(any(), any(), eq(customer), eq("keeper-1")))
+        .thenReturn(ProfileAnalysisResult.empty());
+    when(confidenceRouter.route(any())).thenReturn(new RoutedProfileUpdates(
+        Map.of(
+            "bodyConcerns", new FieldUpdate("腰痛", "HIGH"),
+            "nextFollowupDir", new FieldUpdate("下周回访", "HIGH")),
+        Map.of()));
+
+    orchestrator.handleRecognition(new RecognizedConversationEvent(
+        9L,
+        "18800001111",
+        List.of(new CustomerMessageSentEvent.ChatMessage("client", "最近腰痛", "12:00")),
+        "keeper-1"));
+
+    verify(profileWriter).writeByCustomerId(
+        eq(9L), eq(Map.of("bodyConcerns", "腰痛")), eq(3), eq(true));
+    verify(profileWriter, never()).write(eq("18800001111"), any(), any(), eq(true));
+    ArgumentCaptor<RecognizedProfileFactsUpdatedEvent> facts = ArgumentCaptor.forClass(
+        RecognizedProfileFactsUpdatedEvent.class);
+    verify(eventPublisher).publishEvent(facts.capture());
+    assertThat(facts.getValue().customerId()).isEqualTo(9L);
+    assertThat(facts.getValue().fields()).containsEntry("bodyConcerns", "腰痛");
+  }
+
+  @Test
+  void recognitionFailureIsPersistedWithStageAndAuditInsteadOfOnlyBeingLogged() {
+    EventDeduplicator deduplicator = mock(EventDeduplicator.class);
+    CustomerQueryService customerQueryService = mock(CustomerQueryService.class);
+    ProfileExtractionClient extractionClient = mock(ProfileExtractionClient.class);
+    ConfidenceRouter confidenceRouter = mock(ConfidenceRouter.class);
+    ProfileWriter profileWriter = mock(ProfileWriter.class);
+    SuggestionQueueManager suggestionQueueManager = mock(SuggestionQueueManager.class);
+    CustomerTagUpdateService customerTagUpdateService = mock(CustomerTagUpdateService.class);
+    ProfileConfigProvider configProvider = mock(ProfileConfigProvider.class);
+    AuditLogRepository auditLogRepository = mock(AuditLogRepository.class);
+    ProfileUpdateFailureRepository failureRepository = mock(ProfileUpdateFailureRepository.class);
+    Customer customer = new Customer();
+    customer.setId(9L);
+    customer.setPhone("18800001111");
+    when(customerQueryService.getById(9L)).thenReturn(customer);
+    when(extractionClient.extract(any(), any(), eq(customer), eq("keeper-1")))
+        .thenThrow(new IllegalStateException("model unavailable"));
+
+    ProfileUpdateOrchestrator orchestrator = new ProfileUpdateOrchestrator(
+        deduplicator, customerQueryService, extractionClient, confidenceRouter, profileWriter,
+        suggestionQueueManager, customerTagUpdateService, configProvider, auditLogRepository,
+        mock(ApplicationEventPublisher.class), failureRepository);
+    List<CustomerMessageSentEvent.ChatMessage> messages = List.of(
+        new CustomerMessageSentEvent.ChatMessage("client", "客户说腰痛", "12:00"));
+
+    orchestrator.handleRecognition(new RecognizedConversationEvent(9L, "18800001111", messages, "keeper-1"));
+
+    verify(failureRepository).recordFailure(
+        eq(9L), eq("18800001111"), eq(messages), eq("keeper-1"), eq("PROFILE_EXTRACTION"), any(RuntimeException.class));
+    verify(auditLogRepository).log(eq("PROFILE_UPDATE_FAILED"), eq("SYSTEM"), eq("customer"), eq("9"), any());
+  }
 
   @Test
   void passesStructuredRawMessagesToProfileExtractionClient() {

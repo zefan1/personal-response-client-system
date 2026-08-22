@@ -6,7 +6,8 @@ import com.privateflow.modules.followup.infra.FollowupRuleRepository;
 import jakarta.annotation.PostConstruct;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import org.springframework.context.event.EventListener;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -30,7 +31,7 @@ public class RuleLoader {
     rules.set(List.copyOf(ruleRepository.findEnabled()));
   }
 
-  @EventListener
+  @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
   public void onConfigChanged(ConfigChangedEvent event) {
     if (event.configKey() != null && (event.configKey().startsWith("followup.") || event.configKey().startsWith("rules."))) {
       refresh();

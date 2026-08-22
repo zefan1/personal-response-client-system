@@ -95,8 +95,8 @@ class WecomSmartSheetValueCodecTest {
     assertThat(codec.encode(moment, "2026-07-24T12:30:00.123").asText()).isEqualTo("1784867400123");
     assertThat(codec.decode(moment, JSON.getNodeFactory().textNode("1784867400123"))).isEqualTo("2026-07-24T12:30:00.123");
     assertThat(codec.encode(day, "").asText()).isEmpty();
-    assertThatThrownBy(() -> codec.encode(day, LocalDateTime.of(2026, 7, 24, 12, 30)))
-        .hasMessageContaining("Day");
+    assertThat(codec.encode(day, LocalDateTime.of(2026, 7, 24, 12, 30)).asText())
+        .isEqualTo("1784822400000");
     assertThatThrownBy(() -> codec.encode(day, "2026-07-24T12:30:00"))
         .hasMessageContaining("Day");
     assertThat(codec.encode(moment, LocalDate.of(2026, 7, 24)).asText()).isEqualTo("1784822400000");

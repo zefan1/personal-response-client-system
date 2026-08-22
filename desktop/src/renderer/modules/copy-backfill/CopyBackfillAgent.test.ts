@@ -73,24 +73,18 @@ describe('CopyBackfillAgent', () => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
   });
 
-  it('copies selected replies, posts AI usage, and does not emit sent confirmation', async () => {
+  it('copies selected replies without treating the reply as sent', async () => {
     const { app, host, eventBus } = await mountAgent();
     const confirmed: unknown[] = [];
     eventBus.on('reply:send-confirmed', (payload) => confirmed.push(payload));
 
     eventBus.emit('reply:selected', reply({ text: 'Use this reply', direction: 'NEXT_STEP' }));
     await flushUi();
-    await vi.runAllTimersAsync();
     await flushUi();
 
     expect(mocks.writeClipboardText).toHaveBeenCalledWith('Use this reply');
-    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/ai-usage', {
-      phone: '18800001111',
-      taskId: 'task-1',
-      replySessionId: 'reply-session-1',
-      replySource: 'SKILL',
-      copiedText: 'Use this reply'
-    }, undefined, expect.any(AbortSignal));
+    expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/chat/send-pending', expect.objectContaining({ copiedText: 'Use this reply' }));
+    expect(mocks.postJson.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/ai-usage');
     expect(mocks.postJson.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/send-confirm');
     expect(confirmed).toEqual([]);
     app.unmount();
@@ -128,7 +122,7 @@ describe('CopyBackfillAgent', () => {
     await flushUi();
 
     const confirmButton = Array.from(host.querySelectorAll('button'))
-      .find((button) => button.textContent?.includes('确认已发送'));
+      .find((button) => button.textContent?.includes('已发送'));
     confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushUi();
 
@@ -146,7 +140,7 @@ describe('CopyBackfillAgent', () => {
     await flushUi();
 
     const confirmButton = Array.from(host.querySelectorAll('button'))
-      .find((button) => button.textContent?.includes('确认已发送'));
+      .find((button) => button.textContent?.includes('已发送'));
     confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushUi();
 

@@ -134,6 +134,23 @@ class ExistingCustomerUpdaterTest {
     verify(client, never()).updateRow(any(), any(), any(), any(Duration.class));
   }
 
+  @Test
+  void unmappedOutboundFieldsStayInTheSystemWithoutCallingRemoteClient() {
+    WecomTableClient client = mock(WecomTableClient.class);
+    TableConfigProvider config = mock(TableConfigProvider.class);
+    TableFieldMappingResolver mapping = mock(TableFieldMappingResolver.class);
+    when(config.get()).thenReturn(new TableConfig("", "", 5000, 3, 30, 1, "ADMIN", 50, 500));
+    when(mapping.toSourceFields(eq("table_a"), any(Map.class))).thenReturn(Map.of());
+    ExistingCustomerUpdater updater = new ExistingCustomerUpdater(client, config, mapping);
+    Customer customer = new Customer();
+    customer.setSourceTable("table_a");
+    customer.setSourceRowId("row-1");
+
+    updater.updateFields(customer, Map.of("diastasisRecti", "分离三指"));
+
+    verify(client, never()).updateRow(any(), any(), any(), any(Duration.class));
+  }
+
   private CustomerMessageSentEvent event() {
     return event("summary", null, false);
   }

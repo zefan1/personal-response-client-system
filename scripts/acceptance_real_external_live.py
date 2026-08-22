@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
+import base64
 import json
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 from acceptance_real_external_local import (
     Api,
     BASE_URL,
+    Check,
     REPORT_DIR,
-    ensure_datasource,
     ensure_skill_binding,
     start_real_backend,
     stop_process,
     restore_mock_backend,
+    shell_quote,
+    wsl_path,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED_ENV = [
+REQUIRED_PROVIDER_ENV = [
     "PDA_LIVE_SKILL_BASE_URL",
     "PDA_LIVE_SKILL_API_KEY",
     "PDA_LIVE_IMAGE_BASE_URL",
@@ -25,14 +30,42 @@ REQUIRED_ENV = [
     "PDA_LIVE_LLM_BASE_URL",
     "PDA_LIVE_LLM_API_KEY",
     "PDA_LIVE_LLM_MODEL",
-    "PDA_LIVE_TABLE_BASE_URL",
-    "PDA_LIVE_TABLE_API_KEY",
 ]
+REQUIRED_WECOM_ENV = [
+    "WECOM_TRANSPORT_MODE",
+    "WECOM_SMARTSHEET_DOC_ID",
+    "WECOM_SMARTSHEET_SHEET_ID",
+    "WECOM_SMARTSHEET_VIEW_ID",
+    "WECOM_SMARTSHEET_SOURCE_TABLE",
+    "WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE",
+]
+ACCEPTANCE_SCREENSHOT_PATH = "PDA_LIVE_ACCEPTANCE_SCREENSHOT_PATH"
+ACCEPTANCE_CONFIRMATION = "PDA_LIVE_ACCEPTANCE_CONFIRM"
+ISOLATION_CONFIRMATION = "ISOLATED_WECOM_SHEET"
+WECOM_ENV_PREFIX = "WECOM_"
 
 
 def require_live_env() -> dict[str, str]:
-    values = {key: os.environ.get(key, "").strip() for key in REQUIRED_ENV}
+    keys = REQUIRED_PROVIDER_ENV + REQUIRED_WECOM_ENV + [
+        ACCEPTANCE_SCREENSHOT_PATH,
+        ACCEPTANCE_CONFIRMATION,
+    ]
+    values = {key: os.environ.get(key, "").strip() for key in keys}
+    mode = values["WECOM_TRANSPORT_MODE"].upper()
+    if mode == "RELAY":
+        keys.extend(["WECOM_RELAY_BASE_URL", "WECOM_RELAY_KEY_ID", "WECOM_RELAY_SECRET"])
+    elif mode == "DIRECT":
+        keys.extend(["WECOM_CORP_ID", "WECOM_APP_SECRET"])
+    else:
+        values["WECOM_TRANSPORT_MODE"] = ""
+    values.update({key: os.environ.get(key, "").strip() for key in keys if key not in values})
     missing = [key for key, value in values.items() if not value]
+    screenshot = Path(values.get(ACCEPTANCE_SCREENSHOT_PATH, ""))
+    if not missing and not screenshot.is_file():
+        missing.append(f"{ACCEPTANCE_SCREENSHOT_PATH} (must be a readable file)")
+    if (values.get(ACCEPTANCE_CONFIRMATION)
+            and values[ACCEPTANCE_CONFIRMATION] != ISOLATION_CONFIRMATION):
+        missing.append(f"{ACCEPTANCE_CONFIRMATION}={ISOLATION_CONFIRMATION}")
     if missing:
         write_report([], False, missing, "missing live external environment variables")
         raise SystemExit("missing live external environment variables: " + ", ".join(missing))
@@ -48,8 +81,6 @@ def configure_live_external(api: Api, env: dict[str, str]):
         "llm.api_base_url": env["PDA_LIVE_LLM_BASE_URL"],
         "llm.api_key": env["PDA_LIVE_LLM_API_KEY"],
         "llm.model": env["PDA_LIVE_LLM_MODEL"],
-        "table.api_base_url": env["PDA_LIVE_TABLE_BASE_URL"],
-        "table.api_key": env["PDA_LIVE_TABLE_API_KEY"],
     }
     for key, value in pairs.items():
         api.request(f"configure live {key}", "PUT", f"/admin/api/v1/configs/{key}", {"value": value})
@@ -84,6 +115,73 @@ def ensure_live_environment(api: Api, kind: str, base_url: str, api_key: str):
     return env_id
 
 
+def poll_live_recognition(api: Api, screenshot_path: Path):
+    image_base64 = base64.b64encode(screenshot_path.read_bytes()).decode("ascii")
+    submitted = api.request(
+        "live screenshot recognition submission",
+        "POST",
+        "/api/v1/chat/recognition-jobs",
+        {
+            "imageBase64": image_base64,
+            "leadType": "GENERAL",
+            "replySessionId": f"live-acceptance-{int(time.time())}",
+        },
+        sensitive_body=True,
+    )
+    job_id = ((submitted.get("data") or {}).get("jobId") or "").strip()
+    if not job_id:
+        raise AssertionError("live screenshot recognition did not return a job id")
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        job = api.request(
+            "live screenshot recognition result",
+            "GET",
+            f"/api/v1/chat/recognition-jobs/{job_id}",
+        )
+        data = job.get("data") or {}
+        status = data.get("status")
+        if status == "READY":
+            response = data.get("response") or {}
+            suggestions = ((response.get("skill") or {}).get("suggestions") or [])
+            if not suggestions:
+                raise AssertionError("live screenshot recognition completed without a reply suggestion")
+            return
+        if status in {"FAILED", "CANCELLED", "EXPIRED"}:
+            raise AssertionError(f"live screenshot recognition ended as {status}: {data.get('errorCode')}")
+        time.sleep(1)
+    raise TimeoutError("live screenshot recognition did not finish within 90 seconds")
+
+
+def run_live_wecom_acceptance(api: Api):
+    exported = " ".join(
+        f"export {key}={shell_quote(value)};"
+        for key, value in os.environ.items()
+        if key.startswith(WECOM_ENV_PREFIX)
+    )
+    command = (
+        f"{exported} cd {shell_quote(wsl_path(ROOT))} && "
+        "mvn -q -DskipTests "
+        "-Dexec.mainClass=com.privateflow.modules.tablewrite.client.WecomSmartSheetLiveAcceptanceMain "
+        "org.codehaus.mojo:exec-maven-plugin:3.5.0:java"
+    )
+    result = subprocess.run(
+        ["wsl", "-d", "Ubuntu", "--", "bash", "-lc", command],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=180,
+    )
+    output = (result.stdout or b"").decode("utf-8", errors="replace")
+    api.checks.append(Check(
+        "live WeCom Smart Sheet create/update/reread",
+        result.returncode == 0,
+        result.returncode,
+        output[-240:],
+    ))
+    if result.returncode != 0:
+        raise AssertionError("live WeCom Smart Sheet acceptance failed: " + output[-1000:])
+
+
 def run_live_acceptance(api: Api, env: dict[str, str]):
     api.login()
     configure_live_external(api, env)
@@ -111,22 +209,8 @@ def run_live_acceptance(api: Api, env: dict[str, str]):
     if not llm_data.get("success"):
         raise AssertionError(f"live LLM environment test not successful: {llm_data}")
 
-    datasource_id = ensure_datasource(api)
-    columns = api.request("live wecom sheet columns", "GET", f"/admin/api/v1/datasources/{datasource_id}/columns")
-    columns_data = columns.get("data") or {}
-    if columns_data.get("fetchStatus") != "OK" or columns_data.get("source") != "SHEET_SAMPLE":
-        raise AssertionError(f"live datasource columns did not use SheetClient sample rows: {columns_data}")
-
-    api.request(
-        "live wecom table update",
-        "POST",
-        "/api/v1/customers/13900000001/save-to-table",
-        {
-            "sourceTable": "acceptance_customers",
-            "sourceRowId": "acceptance_customers-row-001",
-            "fields": {"nickname": "验收客户", "lead_type": "XIAN_SUO"},
-        },
-    )
+    poll_live_recognition(api, Path(env[ACCEPTANCE_SCREENSHOT_PATH]))
+    run_live_wecom_acceptance(api)
 
 
 def write_report(checks, passed: bool, missing_env=None, fatal=None):
@@ -152,7 +236,9 @@ def main():
     api = Api(BASE_URL)
     failed = None
     try:
-        backend_proc = start_real_backend()
+        backend_proc = start_real_backend({
+            key: value for key, value in env.items() if key.startswith(WECOM_ENV_PREFIX)
+        })
         run_live_acceptance(api, env)
     except Exception as ex:
         failed = ex

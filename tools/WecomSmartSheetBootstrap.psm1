@@ -227,6 +227,7 @@ function Invoke-WithWecomSmartSheetEnvironment {
   param(
     [Parameter(Mandatory)]
     [string]$Path,
+    [string]$RelayPath = (Join-Path $env:LOCALAPPDATA 'PrivateDomainAssistant\wecom-relay.clixml'),
     [Parameter(Mandatory)]
     [scriptblock]$Command
   )
@@ -241,12 +242,34 @@ function Invoke-WithWecomSmartSheetEnvironment {
   foreach ($name in $script:RequiredEnvironmentVariables) {
     $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
   }
+  $relayNames = @('WECOM_TRANSPORT_MODE', 'WECOM_RELAY_BASE_URL', 'WECOM_RELAY_KEY_ID', 'WECOM_RELAY_SECRET')
+  $relayPrevious = @{}
+  $relayConfigured = Test-Path -LiteralPath $RelayPath -PathType Leaf
+  if ($relayConfigured) {
+    $relayStored = Import-Clixml -LiteralPath $RelayPath -ErrorAction Stop
+    foreach ($name in $relayNames) {
+      $property = $relayStored.Values.PSObject.Properties[$name]
+      if ($null -eq $property -or $property.Value -isnot [System.Security.SecureString]) {
+        throw "Encrypted WeCom relay configuration is incomplete: $name"
+      }
+      $relayPrevious[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    }
+  }
 
   try {
     foreach ($name in $script:RequiredEnvironmentVariables) {
       $secureValue = $stored.Values.PSObject.Properties[$name].Value
       $plainValue = [System.Net.NetworkCredential]::new('', $secureValue).Password
       Set-Item -Path "Env:$name" -Value $plainValue
+    }
+    if ($relayConfigured) {
+      foreach ($name in $relayNames) {
+        $plainValue = [System.Net.NetworkCredential]::new('', $relayStored.Values.PSObject.Properties[$name].Value).Password
+        if ([string]::IsNullOrWhiteSpace($plainValue)) {
+          throw "Encrypted WeCom relay configuration is incomplete: $name"
+        }
+        Set-Item -Path "Env:$name" -Value $plainValue
+      }
     }
     & $Command
   } finally {
@@ -255,6 +278,16 @@ function Invoke-WithWecomSmartSheetEnvironment {
         Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
       } else {
         Set-Item -Path "Env:$name" -Value $previous[$name]
+      }
+    }
+    foreach ($name in $relayNames) {
+      if (-not $relayPrevious.ContainsKey($name)) {
+        continue
+      }
+      if ($null -eq $relayPrevious[$name]) {
+        Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+      } else {
+        Set-Item -Path "Env:$name" -Value $relayPrevious[$name]
       }
     }
   }

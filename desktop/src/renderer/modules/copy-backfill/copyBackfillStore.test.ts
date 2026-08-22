@@ -75,7 +75,6 @@ describe('copyBackfillStore', () => {
     const confirmed: unknown[] = [];
     eventBus.on('reply:send-confirmed', (payload) => confirmed.push(payload));
     writeClipboardTextMock.mockResolvedValue({ success: true });
-    postJsonMock.mockResolvedValue({ success: true, data: {} });
 
     await store.handleReplySelected(reply({
       text: 'hello',
@@ -83,17 +82,11 @@ describe('copyBackfillStore', () => {
       isFallback: true,
       replySource: 'FALLBACK'
     }));
-    await vi.runAllTimersAsync();
 
     expect(writeClipboardTextMock).toHaveBeenCalledWith('hello');
     expect(confirmed).toEqual([]);
-    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/ai-usage', {
-      phone: '18800001111',
-      taskId: 'task-1',
-      replySessionId: 'reply-session-1',
-      replySource: 'FALLBACK',
-      copiedText: 'hello'
-    }, undefined, expect.any(AbortSignal));
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/send-pending', expect.objectContaining({ copiedText: 'hello' }));
+    expect(postJsonMock.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/ai-usage');
     expect(postJsonMock.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/send-confirm');
     expect(store.copyBackfillState.pendingSendDecision).toMatchObject({
       text: 'hello',
@@ -115,11 +108,18 @@ describe('copyBackfillStore', () => {
     writeClipboardTextMock.mockResolvedValue({ success: true });
 
     await store.handleReplySelected(reply({ text: 'not sent' }));
+    const confirmationId = store.copyBackfillState.pendingSendDecision?.confirmationId;
     store.discardPendingSendDecision();
+    await Promise.resolve();
 
     expect(store.copyBackfillState.pendingSendDecision).toBeNull();
     expect(localStorage.getItem('copy_backfill_pending_send')).toBeNull();
     expect(postJsonMock.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/send-confirm');
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/send-pending/status', {
+      confirmationId,
+      status: 'UNSENT',
+      reminderCount: 0
+    });
   });
 
   it('unlocks only after send confirmation is accepted', async () => {
@@ -171,20 +171,20 @@ describe('copyBackfillStore', () => {
     expect(localStorage.getItem('copy_backfill_pending_send')).not.toBeNull();
   });
 
-  it('does not submit a send confirmation without the customer created during recognition', async () => {
+  it('submits a sent confirmation even when no customer identifier was returned', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
+    postJsonMock.mockResolvedValue({ success: true, data: { accepted: true } });
     await store.handleReplySelected(reply({ customerId: null, phone: '', nickname: 'Only nickname' }));
 
     const accepted = await store.confirmPendingSendDecision();
 
-    expect(accepted).toBe(false);
-    expect(postJsonMock.mock.calls.map(([path]) => path)).not.toContain('/api/v1/chat/send-confirm');
-    expect(store.copyBackfillState.pendingSendDecision).toMatchObject({
-      phone: '',
-      status: 'AWAITING_DECISION',
-      errorMessage: '当前回复没有对应的客户档案，请重新识别聊天'
-    });
+    expect(accepted).toBe(true);
+    expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/send-confirm', expect.objectContaining({
+      customerId: null,
+      isNewCustomer: true,
+      nickname: 'Only nickname'
+    }));
   });
 
   it('restores an interrupted pending decision after restart as retryable', async () => {
@@ -225,29 +225,35 @@ describe('copyBackfillStore', () => {
     await store.handleReplySelected(reply({ text: 'copied only', phone: '' }));
 
     expect(writeClipboardTextMock).toHaveBeenCalledWith('copied only');
-    expect(postJsonMock).not.toHaveBeenCalled();
+    expect(postJsonMock.mock.calls.map(([path]) => path)).toContain('/api/v1/chat/send-pending');
     expect(store.copyBackfillState.toast).toBe('已复制到剪贴板，请粘贴到微信发送');
   });
 
-  it('keeps copied text usable when AI usage recording fails and surfaces the degraded state', async () => {
+  it('records AI usage only after sent confirmation', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
-    postJsonMock.mockResolvedValue({ success: false, errorCode: 'BAD_REQUEST', message: 'phone and sentText are required' });
+    postJsonMock.mockImplementation(async (path: string) => path === '/api/v1/chat/send-confirm'
+      ? { success: true, data: { accepted: true } }
+      : { success: false, errorCode: 'BAD_REQUEST', message: 'usage unavailable' });
 
     await store.handleReplySelected(reply({ text: 'hello' }));
-    await vi.runAllTimersAsync();
+    await store.confirmPendingSendDecision();
+    await Promise.resolve();
 
     expect(writeClipboardTextMock).toHaveBeenCalledWith('hello');
     expect(store.copyBackfillState.toast).toBe('已复制，但 AI 使用记录未同步，不影响正常跟进');
   });
 
-  it('uses the recognized phone for AI usage', async () => {
+  it('uses the recognized phone for AI usage after sent confirmation', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
-    postJsonMock.mockResolvedValue({ success: true, data: {} });
+    postJsonMock.mockImplementation(async (path: string) => path === '/api/v1/chat/send-confirm'
+      ? { success: true, data: { accepted: true } }
+      : { success: true, data: {} });
 
     await store.handleReplySelected(reply({ phone: '18800001111' }));
-    await vi.runAllTimersAsync();
+    await store.confirmPendingSendDecision();
+    await Promise.resolve();
 
     expect(postJsonMock).toHaveBeenCalledWith('/api/v1/chat/ai-usage', expect.objectContaining({
       phone: '18800001111'
@@ -258,15 +264,22 @@ describe('copyBackfillStore', () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });
     const signals: AbortSignal[] = [];
-    postJsonMock.mockImplementation((_path, _body, _timeout, signal: AbortSignal) => {
+    postJsonMock.mockImplementation((path, _body, _timeout, signal: AbortSignal) => {
+      if (path === '/api/v1/chat/send-pending') {
+        return Promise.resolve({ success: true, data: { accepted: true } });
+      }
+      if (path === '/api/v1/chat/send-confirm') {
+        return Promise.resolve({ success: true, data: { accepted: true } });
+      }
       signals.push(signal);
       return new Promise(() => undefined);
     });
 
     await store.handleReplySelected(reply({ text: 'first' }));
+    await store.confirmPendingSendDecision();
     store.cleanupCopyBackfillStore();
 
-    expect(postJsonMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/chat/ai-usage']);
+    expect(postJsonMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/chat/send-pending', '/api/v1/chat/send-confirm', '/api/v1/chat/ai-usage']);
     expect(signals).toHaveLength(1);
     expect(signals[0].aborted).toBe(false);
   });
@@ -301,6 +314,21 @@ describe('copyBackfillStore', () => {
       status: 'AWAITING_DECISION'
     });
     expect(localStorage.getItem('copy_backfill_pending_send')).not.toBeNull();
+  });
+
+  it('reminds at five-minute intervals and stops after five reminders', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+
+    await store.handleReplySelected(reply({ text: 'remind me' }));
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 * 5);
+
+    expect(store.copyBackfillState.pendingSendDecision).toMatchObject({ reminderCount: 5 });
+    expect(store.copyBackfillState.toast).toBe('仍未确认发送情况，请在下次使用时确认');
+    expect(postJsonMock.mock.calls.filter(([path]) => path === '/api/v1/chat/send-pending/status')
+      .every(([, payload]) => (payload as { status?: string }).status === 'AWAITING_DECISION')).toBe(true);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    expect(store.copyBackfillState.pendingSendDecision).toMatchObject({ reminderCount: 5 });
   });
 
   it('stores incoming suggestions collapsed until the inline panel expands them', async () => {

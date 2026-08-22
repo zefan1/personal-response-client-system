@@ -417,6 +417,49 @@ Describe 'WeCom Smart Sheet local configuration' {
     $during | Should Be 'test-corp|doc-1|sheet-1|view-1|sheet-1|Customer ID'
   }
 
+  It 'passes encrypted relay settings to isolated-document provisioning without persisting them' {
+    $path = Join-Path $TestDrive 'wecom-smartsheet.clixml'
+    $draft = Join-Path $TestDrive 'secret-draft.clixml'
+    $relay = Join-Path $TestDrive 'wecom-relay.clixml'
+    [pscustomobject]@{
+      Version = 1
+      Value = ConvertTo-SecureString 'test-app-secret' -AsPlainText -Force
+    } | Export-Clixml -LiteralPath $draft
+    [pscustomobject]@{
+      Version = 1
+      Values = [pscustomobject]@{
+        WECOM_TRANSPORT_MODE = ConvertTo-SecureString 'RELAY' -AsPlainText -Force
+        WECOM_RELAY_BASE_URL = ConvertTo-SecureString 'https://relay.example.test' -AsPlainText -Force
+        WECOM_RELAY_KEY_ID = ConvertTo-SecureString 'test-key' -AsPlainText -Force
+        WECOM_RELAY_SECRET = ConvertTo-SecureString 'test-relay-secret' -AsPlainText -Force
+      }
+    } | Export-Clixml -LiteralPath $relay
+
+    & $launcherPath -Mode Provision -Path $path -RelayPath $relay -DraftSecretPath $draft `
+      -ProvisioningStatePath (Join-Path $TestDrive 'provisioning-state.clixml') -CorpId 'test-corp' `
+      -CreateDocument {
+        param($settings, $documentName)
+        $settings['WECOM_TRANSPORT_MODE'] | Should Be 'RELAY'
+        $settings['WECOM_RELAY_BASE_URL'] | Should Be 'https://relay.example.test'
+        $settings['WECOM_RELAY_KEY_ID'] | Should Be 'test-key'
+        $settings['WECOM_RELAY_SECRET'] | Should Be 'test-relay-secret'
+        [pscustomobject]@{ documentId = 'doc-1'; documentUrl = 'https://doc.example/1' }
+      } -PrepareSheet {
+        param($settings, $created)
+        [pscustomobject]@{
+          documentId = $created.documentId
+          documentUrl = $created.documentUrl
+          sheetId = 'sheet-1'
+          viewId = 'view-1'
+          sourceTable = 'sheet-1'
+          uniqueFieldTitle = 'Customer ID'
+        }
+      } | Out-Null
+
+    (Get-Content -LiteralPath $path -Raw) | Should Not Match 'test-relay-secret'
+    $env:WECOM_RELAY_SECRET | Should Be $null
+  }
+
   It 'reuses the saved document checkpoint after preparation fails' {
     $path = Join-Path $TestDrive 'resume-config.clixml'
     $draft = Join-Path $TestDrive 'resume-secret.clixml'

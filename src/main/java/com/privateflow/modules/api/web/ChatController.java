@@ -12,6 +12,8 @@ import com.privateflow.modules.api.chat.RegenerateRequest;
 import com.privateflow.modules.api.chat.RecognitionJobService;
 import com.privateflow.modules.api.chat.RecognitionJobView;
 import com.privateflow.modules.api.chat.SendConfirmRequest;
+import com.privateflow.modules.api.chat.PendingSendRequest;
+import com.privateflow.modules.api.chat.PendingSendStatusRequest;
 import com.privateflow.modules.match.ApiResponse;
 import com.privateflow.modules.supervision.SupervisionConfig;
 import com.privateflow.modules.supervision.SupervisionEventService;
@@ -96,6 +98,16 @@ public class ChatController {
   @PostMapping("/send-confirm")
   public ApiResponse<Map<String, Object>> sendConfirm(@RequestBody SendConfirmRequest request) {
     return ApiResponse.ok(orchestrationService.sendConfirm(request));
+  }
+
+  @PostMapping("/send-pending")
+  public ApiResponse<Map<String, Object>> registerPendingSend(@RequestBody PendingSendRequest request) {
+    return ApiResponse.ok(orchestrationService.registerPendingSend(request));
+  }
+
+  @PostMapping("/send-pending/status")
+  public ApiResponse<Map<String, Object>> updatePendingSend(@RequestBody PendingSendStatusRequest request) {
+    return ApiResponse.ok(orchestrationService.updatePendingSend(request));
   }
 
   @PostMapping("/ai-usage")

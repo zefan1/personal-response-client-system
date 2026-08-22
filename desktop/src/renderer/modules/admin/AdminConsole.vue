@@ -208,16 +208,16 @@
           <div class="ops-panel-head">
             <div>
               <h2>企业微信连接方式</h2>
-              <p>部署人员不用懂技术名词：不知道怎么选，就保持“服务器转发”，下面地址留空，系统会使用后端已经准备好的连接。</p>
+              <p>你没有固定公网 IP，就使用服务器转发。系统会通过固定服务器访问企业微信，不需要你反复添加本地 IP。</p>
             </div>
             <button class="primary small" type="button" :disabled="loading" @click="saveWecomConnectionSettings">保存企业微信连接</button>
           </div>
           <div class="ops-beginner-steps">
-            <strong>不会配置时就按这 3 步</strong>
-            <span>1. 不切换，保持“服务器转发”</span>
-            <span>2. “服务器转发地址”先留空</span>
-            <span>3. 点右上角“保存企业微信连接”</span>
-            <small>如果后面检测企业微信失败，再让项目负责人按下面“在哪里找”去确认地址。</small>
+            <strong>按这 3 步配置</strong>
+            <span>1. 保持“服务器转发”</span>
+            <span>2. 填写 https://sy.xn--15tq51d.top（不要加 /wecom）</span>
+            <span>3. 点击“保存企业微信连接”</span>
+            <small>这个地址是系统服务器的中转地址，不是企业微信管理后台地址。</small>
           </div>
           <div class="ops-form-grid">
             <div class="ops-form-span-2">
@@ -225,18 +225,18 @@
                 <button type="button" :class="{ active: wecomConnectionDraft.mode === 'RELAY' }" role="radio" :aria-checked="wecomConnectionDraft.mode === 'RELAY'" @click="wecomConnectionDraft.mode = 'RELAY'">服务器转发</button>
                 <button type="button" :class="{ active: wecomConnectionDraft.mode === 'DIRECT' }" role="radio" :aria-checked="wecomConnectionDraft.mode === 'DIRECT'" @click="wecomConnectionDraft.mode = 'DIRECT'">直接连接企业微信</button>
               </div>
-              <small v-if="wecomConnectionDraft.mode === 'RELAY'">推荐默认方式。地址留空时，系统会使用服务器里已经配置好的企业微信连接。</small>
+              <small v-if="wecomConnectionDraft.mode === 'RELAY'">推荐方式。地址已配置时直接保存；留空只适用于服务器启动配置已准备好的情况。</small>
               <small v-else>服务器直接请求企业微信官方地址 https://qyapi.weixin.qq.com，不会自动切到转发。</small>
             </div>
             <label v-if="wecomConnectionDraft.mode === 'RELAY'" class="ops-form-span-2">
               服务器转发地址
-              <input v-model="wecomConnectionDraft.relayBaseUrl" type="url" aria-label="企业微信服务器转发地址" placeholder="不知道就留空，系统会用后端已配置的地址" />
+              <input v-model="wecomConnectionDraft.relayBaseUrl" type="url" aria-label="企业微信服务器转发地址" placeholder="https://sy.xn--15tq51d.top" />
               <small>这个不是企业微信表格链接，而是你们自己服务器上的“企业微信转发网关”地址。</small>
               <div class="ops-address-help">
                 <strong>在哪里找？</strong>
                 <span>1. 输入框已经有值：直接保存，不用找。</span>
                 <span>2. 输入框为空：先留空保存，系统会继续用服务器启动时的配置。</span>
-                <span>3. 如果检测失败：把这句话发给项目负责人——请查看后台配置 wecom.relay_base_url，或服务器环境变量 WECOM_API_BASE_URL / 反向代理公网地址。</span>
+                <span>3. 如果检测失败：把这句话发给项目负责人——请确认服务器已部署中转服务，并检查 WECOM_RELAY_BASE_URL、WECOM_RELAY_KEY_ID、WECOM_RELAY_SECRET。</span>
               </div>
             </label>
           </div>
@@ -625,7 +625,7 @@
               <p>当前版本只连接客户主表、分配表、到店表这三张表；不新增第四张表，也不会让系统猜什么时候写入。</p>
             </div>
           </div>
-          <p class="ops-form-span-2 ops-helper-callout">先看下面三张卡片：显示“已接入”就不用再配；显示“未配置”才点“配置这张表”。如果系统已经能同步三张表，这里会自动识别为已接入。</p>
+          <p class="ops-form-span-2 ops-helper-callout">管理员保存并检测后，系统会立即使用这里的配置进行读取和写入，不需要修改服务器环境变量，也不需要重启。</p>
           <div class="ops-smart-sheet-card-grid">
             <article
               v-for="card in smartSheetCards"
@@ -635,17 +635,19 @@
             >
               <div>
                 <strong>{{ card.label }}</strong>
-                <span :class="card.status === '已接入' ? 'ok-text' : 'warn-text'">{{ card.status }}</span>
+                <span :class="card.ready ? 'ok-text' : 'warn-text'">{{ card.status }}</span>
               </div>
               <p>{{ card.help }}</p>
               <small>{{ card.name }} · 映射 {{ card.mappingCount }} 项</small>
-              <button class="secondary small" type="button" @click="smartSheetConnectionDraft.role = card.value">配置这张表</button>
+              <small class="ops-smart-sheet-card-url" :class="{ missing: !card.configuredUrl }">{{ card.configuredUrl || '未保存网址' }}</small>
+              <small v-if="card.ready" class="ops-smart-sheet-target-summary">运行目标：{{ card.sheetId }} / {{ card.viewId }}</small>
+              <button class="secondary small" type="button" @click="selectSmartSheetRole(card.value)">配置这张表</button>
             </article>
           </div>
           <div class="ops-smart-sheet-connect-row">
             <label>
               要配置的表格
-              <select v-model="smartSheetConnectionDraft.role" aria-label="连接表格角色">
+              <select v-model="smartSheetConnectionDraft.role" aria-label="连接表格角色" @change="selectSmartSheetRole(smartSheetConnectionDraft.role)">
                 <option v-for="role in SMART_SHEET_ROLES" :key="role.value" :value="role.value">{{ role.label }}</option>
               </select>
               <small>当前保存会写入所选表格，不会覆盖其他两张表。</small>
@@ -654,43 +656,37 @@
               企业微信智能表格链接
               <input v-model="smartSheetConnectionDraft.documentUrl" type="url" aria-label="企业微信智能表格链接" placeholder="粘贴浏览器地址栏里的完整链接" />
               <small>打开目标表格，复制浏览器地址栏里的完整链接，粘贴到这里即可。</small>
-              <small>必须是本系统通过企业微信 API 创建并纳入管理的智能表格；你在企微中手动新建的智能表格不能连接。</small>
             </label>
-            <button class="primary" type="button" :disabled="loading" @click="verifyAndSaveSmartSheet">保存并检测这张表</button>
+            <button class="primary" type="button" :disabled="loading" @click="verifyAndSaveSmartSheet">{{ loading ? '正在检测…' : '保存并检测这张表' }}</button>
           </div>
+          <details class="ops-smart-sheet-advanced">
+            <summary>更换为另一张表时使用</summary>
+            <p>系统已经为当前三张表填好这些信息，平时不要修改。只有更换了表格且检测提示无法识别时，才填写新表格的识别信息。</p>
+            <div class="ops-form-grid">
+              <label>
+                文档 ID
+                <input v-model="smartSheetConnectionDraft.documentId" type="text" aria-label="智能表格文档 ID" placeholder="例如 dcSfo..." />
+                <small>这是企业微信 API 使用的文档编号，不是浏览器网址。新表由系统创建时会返回这个编号。</small>
+              </label>
+              <label>
+                子表 ID
+                <input v-model="smartSheetConnectionDraft.sheetId" type="text" aria-label="智能表格子表 ID" placeholder="网址带 tab 时可自动识别" />
+                <small>链接里有 tab 参数时系统会自动识别，可以留空。</small>
+              </label>
+              <label>
+                视图 ID
+                <input v-model="smartSheetConnectionDraft.viewId" type="text" aria-label="智能表格视图 ID" placeholder="留空自动选择第一个视图" />
+                <small>不确定时清空，系统会自动选择这张子表的第一个视图。</small>
+              </label>
+              <label>
+                唯一字段名称
+                <input v-model="smartSheetConnectionDraft.uniqueFieldTitle" type="text" aria-label="智能表格查找列名称" placeholder="可留空，使用字段映射中的手机号列" />
+                <small>可选的连接检测提示；实际同步以字段映射中绑定到“手机号”的列为准。</small>
+              </label>
+            </div>
+          </details>
           <p v-if="smartSheetConnectionDraft.checkMessage" class="ops-inline-status" :class="smartSheetConnectionDraft.checkKind">{{ smartSheetConnectionDraft.checkMessage }}</p>
           <p v-if="smartSheetConnectionDraft.connectedName" class="ops-inline-success">已连接：{{ smartSheetConnectionDraft.connectedName }}</p>
-          <button class="ops-inline-disclosure-button" type="button" :aria-expanded="tableServerSettingsExpanded" @click="tableServerSettingsExpanded = !tableServerSettingsExpanded">
-            {{ tableServerSettingsExpanded ? '收起服务器部署配置' : '展开服务器部署配置' }}
-          </button>
-          <div v-if="tableServerSettingsExpanded" class="ops-form-grid ops-nested-settings">
-            <p class="ops-form-span-2 ops-helper-callout">以下内容由服务器部署配置提供，日常使用不需要修改。</p>
-            <label>
-              表格连接服务地址
-              <input v-model="tableRuntimeDraft.apiBaseUrl" type="text" placeholder="https://table-gateway.example.com" />
-              <small>从后端部署配置里找，通常是 table.api_base_url、部署平台环境变量或反向代理地址；不确定就保持当前值。</small>
-            </label>
-            <label>
-              表格连接密钥
-              <input v-model="tableRuntimeDraft.apiKey" type="password" autocomplete="new-password" aria-label="企微表格网关 API 密钥" placeholder="留空表示沿用当前密钥" />
-              <small>当前密钥：{{ configSecretStatus('table.api_key') }}</small>
-            </label>
-            <label>写入多久没响应算失败（毫秒）<input v-model.number="tableRuntimeDraft.writeTimeoutMs" type="number" min="5000" max="20000" /></label>
-            <label>失败后最多重试几次<input v-model.number="tableRuntimeDraft.retryMaxCount" type="number" min="3" max="10" /></label>
-            <label>每次重试等待多久（秒）<input v-model.number="tableRuntimeDraft.retryIntervalS" type="number" min="30" max="300" /></label>
-            <label>失败多久后提醒（小时）<input v-model.number="tableRuntimeDraft.alertFailureHours" type="number" min="1" max="24" /></label>
-            <label>
-              提醒谁
-              <select v-model="tableRuntimeDraft.alertNotifyTarget">
-                <option value="ADMIN">管理员</option>
-                <option value="LEADER">组长</option>
-                <option value="BOTH">管理员和组长</option>
-              </select>
-            </label>
-            <label>等待写入超过多少条时提醒<input v-model.number="tableRuntimeDraft.queueWarnThreshold" type="number" min="50" max="500" /></label>
-            <label>等待写入达到多少条时暂停新增<input v-model.number="tableRuntimeDraft.queueAlertThreshold" type="number" min="500" max="5000" /></label>
-            <div class="ops-form-span-2 ops-form-actions"><button class="primary small" type="button" :disabled="loading" @click="saveTableRuntimeSettings">保存服务器部署配置</button></div>
-          </div>
         </article>
 
         <article v-if="activeSection.key === 'configuration-center' && advancedConfigurationExpanded && activeAdvancedConfiguration === 'datasource'" class="ops-panel wide configuration-advanced-content">
@@ -904,6 +900,41 @@
           </div>
         </article>
 
+        <article v-if="activeSection.key === 'single-source-of-truth'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>客户唯一事实数据库</h2>
+              <p>只读展示客户主档案中的字段与当前真实值。空字段保持为空，不会写回数据库或企业微信表格。</p>
+            </div>
+            <button class="primary small" type="button" :disabled="loading" @click="openCustomerMasterSearch">查找客户</button>
+          </div>
+          <template v-if="customerMasterRecord">
+            <div class="ops-detail-box customer-master-current-record">
+              <strong>{{ customerMasterCustomerLabel }}</strong>
+              <p>客户编号 {{ customerMasterRecord.customer?.id }}{{ customerMasterRecord.customer?.phone ? ` · ${customerMasterRecord.customer.phone}` : '' }}{{ customerMasterRecord.customer?.wechatId ? ` · 微信号 ${customerMasterRecord.customer.wechatId}` : '' }}</p>
+            </div>
+            <div class="ops-table">
+              <div class="ops-table-row head customer-master-fields">
+                <span>唯一事实数据库字段</span>
+                <span>真实值</span>
+                <span>最新来源</span>
+                <span>最新来源字段</span>
+                <span>历史</span>
+              </div>
+              <div v-for="field in customerMasterFields" :key="String(field.fieldName)" class="ops-table-row customer-master-fields">
+                <span>{{ field.label || field.fieldName }}</span>
+                <span :class="{ 'customer-master-empty-value': customerMasterValue(field.value) === '' }">{{ customerMasterValue(field.value) }}</span>
+                <span>{{ customerMasterValue(field.source) || '暂无记录' }}</span>
+                <span>{{ customerMasterValue(field.sourceField) || '暂无记录' }}</span>
+                <span class="customer-master-history-action">
+                  <button class="secondary small" type="button" :disabled="loading" @click="openCustomerMasterHistory(field)">查看历史</button>
+                </span>
+              </div>
+            </div>
+          </template>
+          <p v-else class="ops-empty">唯一事实数据库中暂时没有可查看的客户记录。</p>
+        </article>
+
         <article v-if="activeSection.key === 'data-integration'" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
@@ -916,25 +947,21 @@
           <div class="ops-table">
             <div class="ops-table-row head">
               <span>名称</span>
-              <span>来源表</span>
-              <span>同步状态</span>
+              <span>用途</span>
+              <span>状态</span>
               <span>映射数</span>
               <span>状态</span>
               <span>操作</span>
             </div>
             <div v-for="item in datasources" :key="item.id" class="ops-table-row">
               <span>{{ item.name }}</span>
-              <span>{{ item.sourceTable || item.sheetId }}</span>
-              <span>{{ syncStatusFor(item.id) }}</span>
+              <span>{{ String(item.description || '').includes('ASSIGNMENT') ? '系统分配后写入' : String(item.description || '').includes('ARRIVAL') ? '预约后写入' : '客户资料读写' }}</span>
+              <span>{{ mappingCountFor(item.id) ? syncStatusFor(item.id) : '待配置字段映射' }}</span>
               <span>{{ mappingCountFor(item.id) }}</span>
               <span><b :class="item.enabled === false ? 'warn-text' : 'ok-text'">{{ item.enabled === false ? '已停用' : '启用中' }}</b></span>
               <span class="ops-row-actions">
                 <button class="secondary small" type="button" @click="selectDatasource(item)">字段映射</button>
-                <button class="secondary small" type="button" @click="openForm('datasource', item)">编辑</button>
-                <button class="secondary small" type="button" @click="replaceDatasource(item)">换表</button>
-                <button class="secondary small" type="button" @click="triggerDatasourceSync(item)">立即同步</button>
                 <button class="secondary small" type="button" @click="toggleDatasource(item)">{{ item.enabled === false ? '启用' : '停用' }}</button>
-                <button class="secondary small danger" type="button" @click="confirmDeleteDatasource(item)">删除</button>
               </span>
             </div>
             <p v-if="!datasources.length" class="ops-empty">暂无数据源，请先配置当前三张固定业务表。</p>
@@ -948,29 +975,70 @@
               <p>{{ selectedDatasource ? `当前数据源：${selectedDatasource.name}` : '选择数据源后编辑字段映射' }}</p>
             </div>
             <div class="ops-row-actions">
-              <button class="secondary small" type="button" :disabled="!selectedDatasource" @click="loadDatasourceColumns">识别列名</button>
+              <button class="secondary small" type="button" :disabled="!selectedDatasource" @click="() => loadDatasourceColumns(true, true)">识别列名</button>
               <button class="secondary small" type="button" :disabled="!selectedDatasource" @click="compareMappings">对比最新版本</button>
               <button class="secondary small" type="button" :disabled="!selectedDatasource" @click="loadMappingVersions">版本历史</button>
-              <button class="primary small" type="button" :disabled="!selectedDatasource" @click="saveMappings">保存映射</button>
+              <button class="primary small" type="button" :disabled="!selectedDatasource || !mappingSchemaReadable" @click="saveMappings">保存映射</button>
             </div>
           </div>
+          <p v-if="notice && selectedDatasource" class="admin-message" :class="{ error: noticeKind === 'error' }">{{ notice }}</p>
           <div v-if="selectedDatasource" class="ops-mapping-grid">
-            <div class="ops-detail-box ops-form-span-2">
-              <strong>字段来源说明</strong>
-              <p>左侧系统字段来自系统唯一事实数据库；企微表格只是同步和展示入口。“客户阶段”是系统字段之一，用来做漏斗和转化统计，不是另一套单独数据源。</p>
+          <p v-if="!mappingSchemaReadable" class="admin-message error ops-form-span-2">当前无法读取企业微信表格的完整列名，映射已锁定，现有配置不会被保存覆盖。请先恢复表格连接，再点击“识别列名”。</p>
+          <div class="ops-detail-box ops-form-span-2">
+            <strong>字段来源说明</strong>
+            <p>左侧严格按企业微信智能表格从左到右的字段位置显示；右侧由你指定这列要写入系统里的哪项内容。“客户阶段”用于漏斗和转化统计，不是另一套数据源。</p>
+            <p class="ops-mapping-guide">填写方式：每个表格列选择对应的系统内容；不需要写入系统时选择“不写入系统”。保存后系统始终按你的选择同步。请将表格中实际代表手机号的列映射为“手机号”，系统会以唯一事实数据库的手机号查找并更新客户。</p>
+          </div>
+          <div class="ops-mapping-section ops-form-span-2">
+            <div class="ops-mapping-section-head">
+              <strong>按企业微信字段位置设置表格列写入的系统内容</strong>
+              <span>共 {{ activeDatasourceColumns.length }} 个真实列<span v-if="staleDatasourceColumns.length">，{{ staleDatasourceColumns.length }} 个待清理</span></span>
             </div>
-            <label v-for="field in customerFields" :key="field.key">
-              <span class="ops-field-title">
-                {{ field.label || field.key }}
+            <p>系统只会在第一次没有保存过配置时给出建议；之后你可以随时改成任意系统内容，再点击“保存映射”。</p>
+          </div>
+          <label v-for="column in activeDatasourceColumns" :key="columnName(column)">
+            <span class="ops-field-title">
+              {{ columnName(column) }}
                 <label class="ops-inline-toggle">
-                  <input v-model="mappingEnabledDraft[field.key]" class="ops-switch" type="checkbox" />
+                  <input
+                    class="ops-switch"
+                    type="checkbox"
+                    :checked="mappingEnabledForColumn(columnName(column))"
+                    :disabled="!mappingSchemaReadable || !mappingTargetForColumn(columnName(column))"
+                    @change="setMappingEnabledForColumn(columnName(column), $event)"
+                  />
                   启用
                 </label>
               </span>
-              <input v-model="mappingDraft[field.key]" :list="`columns-${field.key}`" :placeholder="field.key === 'phone' ? '必须映射手机号列' : '填写表格列名'" />
-              <datalist :id="`columns-${field.key}`">
-                <option v-for="column in datasourceColumns" :key="`${field.key}-${columnName(column)}`" :value="columnName(column)" />
-              </datalist>
+              <select :value="mappingTargetForColumn(columnName(column))" :disabled="!mappingSchemaReadable" :aria-label="`${columnName(column)}对应系统内容`" @change="mapColumnToCustomerField(columnName(column), $event)">
+                <option value="">不写入系统</option>
+                <option v-for="field in customerFields" :key="`${columnName(column)}-${field.key}`" :value="field.key">
+                  {{ field.label || field.key }}
+                </option>
+              </select>
+              <small v-if="mappingTargetForColumn(columnName(column))">将写入系统：{{ customerFieldLabel(mappingTargetForColumn(columnName(column))) }}</small>
+              <small v-else>这列暂不写入系统</small>
+          </label>
+          </div>
+          <div v-if="staleDatasourceColumns.length" class="ops-mapping-stale-section ops-form-span-2">
+            <div class="ops-mapping-section-head">
+              <strong>待清理的失效映射</strong>
+              <span>{{ staleDatasourceColumns.length }} 项</span>
+            </div>
+            <p>这些名称已不在企业微信当前表格中，只保留在数据库里等待清除。请将它们改为“不写入系统”，再保存映射。</p>
+            <label v-for="column in staleDatasourceColumns" :key="`stale-${columnName(column)}`" class="stale-column">
+              <span class="ops-field-title">
+                {{ columnName(column) }}
+                <small class="warn-text">远程已不存在</small>
+              </span>
+              <select :value="mappingTargetForColumn(columnName(column))" :disabled="!mappingSchemaReadable" :aria-label="`${columnName(column)}对应系统内容`" @change="mapColumnToCustomerField(columnName(column), $event)">
+                <option value="">不写入系统</option>
+                <option v-for="field in customerFields" :key="`${columnName(column)}-stale-${field.key}`" :value="field.key">
+                  {{ field.label || field.key }}
+                </option>
+              </select>
+              <small v-if="mappingTargetForColumn(columnName(column))">当前旧映射：{{ customerFieldLabel(mappingTargetForColumn(columnName(column))) }}</small>
+              <small v-else>清除后点击“保存映射”</small>
             </label>
           </div>
           <div v-if="datasourceColumnStatus" class="ops-detail-box">
@@ -1646,6 +1714,23 @@
               </div>
             </div>
 
+            <div class="ops-analytics-trend-panel">
+              <div class="ops-analytics-panel-head">
+                <div>
+                  <strong>回复确认状态</strong>
+                  <span>只按员工最终点击的结果统计，待确认不会计入已发送率</span>
+                </div>
+              </div>
+              <div class="ops-analytics-summary-row reply-confirmation-summary">
+                <div v-for="metric in replyConfirmationMetrics" :key="metric.label" class="ops-analytics-summary-card">
+                  <span>{{ metric.label }}</span>
+                  <strong>{{ metric.value }}</strong>
+                  <small>{{ metric.help }}</small>
+                </div>
+              </div>
+              <p v-if="analyticsStatus.replyConfirmations.error" class="ops-empty compact error">刷新失败：{{ analyticsStatus.replyConfirmations.error }}</p>
+            </div>
+
             <div class="ops-analytics-conversion-row">
               <article class="ops-analytics-funnel-panel">
                 <div class="ops-analytics-panel-head">
@@ -2174,6 +2259,22 @@
               <button v-if="auditDownloadUrl" class="primary small" type="button" @click="downloadAuditExport">下载 CSV</button>
             </div>
           </div>
+          <div class="ops-detail-box">
+            <strong>识别后档案更新失败：{{ profileUpdateFailures.length }} 条</strong>
+            <p>失败阶段、错误原因和重试结果保存在本地数据库；管理员可重新排队处理。</p>
+            <div v-for="failure in profileUpdateFailures" :key="failure.id" class="ops-notice-row">
+              <strong>#{{ failure.id }} · {{ failure.status }}</strong>
+              <span>客户 {{ failure.customerId }} · {{ failure.stage }} · 重试 {{ failure.retryCount }} 次</span>
+              <p>{{ failure.errorMessage || '未知错误' }}</p>
+              <button
+                v-if="failure.status === 'FAILED'"
+                class="secondary small"
+                type="button"
+                @click="retryProfileUpdateFailure(failure)"
+              >重试档案更新</button>
+            </div>
+            <p v-if="!profileUpdateFailures.length" class="ops-empty">暂无识别后档案更新失败。</p>
+          </div>
           <div v-for="log in filteredAuditLogs" :key="log.id" class="ops-notice-row">
             <strong>{{ log.actionLabel || actionLabel(log.action) }}</strong>
             <span>{{ auditGroupLabel(log.actionGroup) }} · {{ log.targetTypeLabel || targetTypeLabel(log.targetType) }} {{ log.targetId || '' }}</span>
@@ -2189,7 +2290,7 @@
           <div class="ops-panel-head">
             <div>
               <h2>系统健康</h2>
-              <p>展示故障和恢复情况，连续失败后转手动刷新。</p>
+              <p>企业微信表格访问状态与写入队列分开显示，避免把历史队列记录误判为断连。</p>
             </div>
             <button class="secondary small" type="button" @click="loadHealth(true)">手动刷新</button>
           </div>
@@ -2214,6 +2315,39 @@
               <small>{{ item.help }}</small>
             </div>
           </div>
+          <div class="ops-table-write-failures">
+            <div class="ops-panel-head">
+              <div>
+                <h3>智能表格写入失败记录</h3>
+                <p>只显示已停止自动重试的记录。可恢复的问题重新排队；确认无法恢复时可关闭，原失败原因和操作审计会保留。</p>
+              </div>
+              <button class="secondary small" type="button" :disabled="loading" @click="loadTableWriteFailures">刷新失败记录</button>
+            </div>
+            <div v-if="tableWriteFailures.length" class="ops-table">
+              <div class="ops-table-row head table-write-failure">
+                <span>记录</span>
+                <span>客户</span>
+                <span>动作</span>
+                <span>已重试</span>
+                <span>最后失败</span>
+                <span>失败原因</span>
+                <span>操作</span>
+              </div>
+              <div v-for="item in tableWriteFailures" :key="item.id" class="ops-table-row table-write-failure">
+                <span>#{{ item.id }}</span>
+                <span>{{ tableWriteCustomerLabel(item) }}</span>
+                <span>{{ tableWriteActionLabel(item.actionType) }}</span>
+                <span>{{ item.retryCount ?? 0 }} 次</span>
+                <span>{{ formatDate(item.updatedAt || item.createdAt) }}</span>
+                <span class="ops-table-write-error" :title="tableWriteErrorLabel(item.errorMsg)">{{ tableWriteErrorLabel(item.errorMsg) }}</span>
+                <span class="ops-row-actions">
+                  <button class="secondary small" type="button" :disabled="loading" @click="retryTableWriteFailure(item)">重新排队</button>
+                  <button class="secondary small" type="button" :disabled="loading" @click="resolveTableWriteFailure(item)">关闭</button>
+                </span>
+              </div>
+            </div>
+            <p v-else class="ops-empty">暂无已停止自动重试的智能表格写入记录。</p>
+          </div>
           <div v-if="filteredHealthAlerts.length" class="ops-card-grid">
             <article v-for="alert in filteredHealthAlerts" :key="alert.id || alert.createdAt" class="ops-content-card">
               <strong>{{ healthAlertTitle(alert) }}</strong>
@@ -2228,6 +2362,70 @@
         </article>
       </section>
     </main>
+
+    <div v-if="customerMasterSearchOpen" class="ops-drawer-backdrop ops-modal-backdrop" @click.self="closeCustomerMasterSearch">
+      <section class="ops-drawer ops-modal-form customer-master-search-modal" role="dialog" aria-modal="true" aria-labelledby="customer-master-search-title">
+        <header>
+          <div>
+            <h2 id="customer-master-search-title">查找客户</h2>
+            <p>可按客户昵称、手机号、微信号或客户编号搜索；出现多条结果时选择对应客户。</p>
+          </div>
+          <button class="icon-close-button" type="button" aria-label="关闭客户搜索" title="关闭客户搜索" @click="closeCustomerMasterSearch">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <form class="ops-filter-bar customer-master-search-form" @submit.prevent="searchCustomerMaster">
+          <input v-model="customerMasterSearchKeyword" type="search" aria-label="搜索客户" placeholder="昵称、手机号、微信号或客户编号" autocomplete="off" />
+          <button class="primary" type="button" :disabled="!customerMasterSearchKeyword.trim()" @click="searchCustomerMaster">搜索</button>
+        </form>
+        <p v-if="customerMasterSearchMessage" class="customer-master-search-message" aria-live="polite">{{ customerMasterSearchMessage }}</p>
+        <div v-if="customerMasterCandidates.length" class="customer-master-candidate-list" aria-label="客户搜索结果">
+          <button v-for="candidate in customerMasterCandidates" :key="candidate.id" class="customer-master-candidate" type="button" :disabled="loading" @click="selectCustomerMasterCandidate(candidate)">
+            <strong>{{ candidate.nickname || '未填写昵称' }}</strong>
+            <span>客户编号 {{ candidate.id }}</span>
+            <small>{{ candidate.phone || '未填写手机号' }}{{ candidate.wechatId ? ` · 微信号 ${candidate.wechatId}` : '' }}</small>
+          </button>
+        </div>
+        <footer>
+          <button class="secondary" type="button" @click="closeCustomerMasterSearch">关闭</button>
+        </footer>
+      </section>
+    </div>
+
+    <div v-if="customerMasterHistoryOpen" class="ops-drawer-backdrop ops-modal-backdrop" @click.self="closeCustomerMasterHistory">
+      <section class="ops-drawer ops-modal-form customer-master-history-modal" role="dialog" aria-modal="true" aria-labelledby="customer-master-history-title">
+        <header>
+          <div>
+            <h2 id="customer-master-history-title">{{ customerMasterHistoryField?.label || customerMasterHistoryField?.fieldName || '字段' }}历史</h2>
+            <p>查看该字段每次值变化、来源和操作人；当前最新记录也会保留在列表中。</p>
+          </div>
+          <button class="icon-close-button" type="button" aria-label="关闭字段历史" title="关闭字段历史" @click="closeCustomerMasterHistory">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <p v-if="customerMasterHistoryMessage" class="customer-master-search-message" aria-live="polite">{{ customerMasterHistoryMessage }}</p>
+        <div v-if="customerMasterHistory.length" class="ops-table customer-master-history-table">
+          <div class="ops-table-row head">
+            <span>时间</span>
+            <span>值</span>
+            <span>来源</span>
+            <span>来源字段</span>
+            <span>操作人</span>
+          </div>
+          <div v-for="entry in customerMasterHistory" :key="String(entry.id)" class="ops-table-row">
+            <span>{{ formatDate(entry.changedAt) }}</span>
+            <span :class="{ 'customer-master-empty-value': customerMasterValue(entry.value) === '' }">{{ customerMasterValue(entry.value) || '空' }}</span>
+            <span>{{ customerMasterValue(entry.source) || '-' }}</span>
+            <span>{{ customerMasterValue(entry.sourceField) || '-' }}</span>
+            <span>{{ customerMasterValue(entry.operator) || '-' }}</span>
+          </div>
+        </div>
+        <p v-else class="ops-empty">该字段暂时没有已记录的历史变化。</p>
+        <footer>
+          <button class="secondary" type="button" @click="closeCustomerMasterHistory">关闭</button>
+        </footer>
+      </section>
+    </div>
 
     <div v-if="activeLlmCapabilityConfig" class="ops-drawer-backdrop ops-modal-backdrop" @click.self="closeLlmCapabilityConfig">
       <form class="ops-drawer ops-modal-form ops-llm-capability-modal" @submit.prevent="saveActiveLlmCapabilityConfig">
@@ -2659,6 +2857,7 @@ type SectionKey =
   | 'skill-scenes'
   | 'configuration-center'
   | 'data-integration'
+  | 'single-source-of-truth'
   | 'quick-search-content'
   | 'template-promotion-candidates'
   | 'account-permissions'
@@ -2745,7 +2944,7 @@ type AdminSection = {
   description: string;
   primaryAction: string;
 };
-type AnalyticsKey = 'overview' | 'funnels' | 'staff' | 'sources' | 'stages' | 'health' | 'lifecycle' | 'risks' | 'contentRanking';
+type AnalyticsKey = 'overview' | 'funnels' | 'staff' | 'sources' | 'stages' | 'health' | 'lifecycle' | 'risks' | 'contentRanking' | 'replyConfirmations';
 type AdminNavGroup = {
   key: SectionGroupKey;
   title: string;
@@ -2847,6 +3046,7 @@ const sections: AdminSection[] = [
   { key: 'skill-scenes', groupKey: 'config-center', group: '运营 A', module: 'A', title: 'Skill 场景管理', subtitle: '场景绑定、测试、调用监控', description: '按业务场景和线索类型维护 AI 路由，测试真实话术效果并观察调用质量。', primaryAction: '新增 Skill 绑定' },
   { key: 'configuration-center', groupKey: 'config-center', group: '运营 B', module: 'B', title: '配置中心', subtitle: 'AI、LLM、识图、提示词', description: '集中管理 Skill 环境、LLM 模型环境、识图模型环境、提示词模板、企业红线和降级回复。', primaryAction: '新增 Skill 环境' },
   { key: 'data-integration', groupKey: 'data-content', group: '运营 C', module: 'C', title: '客户数据对接', subtitle: '三张表、字段映射、同步', description: '先连通客户主表、分配表、到店表，再维护字段映射和同步状态。', primaryAction: '配置表格' },
+  { key: 'single-source-of-truth', groupKey: 'data-content', group: '运营 C1', module: 'C1', title: '唯一事实数据库', subtitle: '字段、真实值、客户查找', description: '只读查看客户主档案的全部字段及当前真实值，按客户切换查看。', primaryAction: '查找客户' },
   { key: 'quick-search-content', groupKey: 'data-content', group: '运营 D', module: 'D', title: '速搜内容管理', subtitle: '模板、知识、图片、小程序', description: '维护桌面端速搜可用的话术、知识片段、门店定位、图片素材和小程序引导。', primaryAction: '新增内容' },
   { key: 'template-promotion-candidates', groupKey: 'data-content', group: '运营 D1', module: 'D1', title: '可推广模板', subtitle: '员工候选、团队发布', description: '查阅员工保存的调整稿和使用情况，决定是否发布为全员可用模板。', primaryAction: '刷新候选' },
   { key: 'account-permissions', groupKey: 'org-rules-tags', group: '运营 E', module: 'E', title: '账号与权限', subtitle: '账号、角色、组长关系', description: '管理 ADMIN、LEADER、KEEPER 的账号权限和直属组长关系。', primaryAction: '新增账号' },
@@ -2899,9 +3099,9 @@ const CUSTOMER_STAGE_FLOWS = [
   }
 ] as const;
 const SMART_SHEET_ROLES = [
-  { value: 'PRIMARY', label: '客户主表', configKey: 'table.document_url', help: '客户资料、标签和跟进记录的主视图' },
-  { value: 'ASSIGNMENT', label: '分配表', configKey: 'table.assignment_document_url', help: '线索分配、负责人和分组流转' },
-  { value: 'ARRIVAL', label: '到店表', configKey: 'table.arrival_document_url', help: '预约、到店和成交转化' }
+  { value: 'PRIMARY', label: '客户主表', configKey: 'table.document_url', prefix: 'table.primary', help: '客户资料、标签和跟进记录的主视图' },
+  { value: 'ASSIGNMENT', label: '分配表', configKey: 'table.assignment_document_url', prefix: 'table.assignment', help: '线索分配、负责人和分组流转' },
+  { value: 'ARRIVAL', label: '到店表', configKey: 'table.arrival_document_url', prefix: 'table.arrival', help: '预约、到店和成交转化' }
 ] as const;
 const FUNNEL_STAGE_LABELS: Record<string, string> = {
   ASSIGNED: '已分配',
@@ -2913,6 +3113,11 @@ const FUNNEL_STAGE_LABELS: Record<string, string> = {
 };
 
 const CUSTOMER_FIELD_LABELS: Record<string, string> = {
+  wechatId: '微信号',
+  leadCaptureType: '留资类型',
+  leadCaptureMethod: '留资方式',
+  platformLeadAt: '平台留资时间',
+  assignedAt: '分配日期',
   phone: '手机号',
   nickname: '客户昵称',
   leadType: '线索类型',
@@ -3059,7 +3264,6 @@ const activeLlmCapability = ref<LlmCapabilityKey | null>(null);
 const advancedConfigurationExpanded = ref(false);
 const activeAdvancedConfiguration = ref<AdvancedConfigurationKey | null>(null);
 const promptRulesExpanded = ref(false);
-const tableServerSettingsExpanded = ref(false);
 const datasourceAdvancedExpanded = ref(false);
 const llmCapabilityPromptExpanded = ref(false);
 const selectedImageEnvironmentId = ref('');
@@ -3067,6 +3271,8 @@ const llmProfileTestEnvironment = ref<AnyRecord | null>(null);
 const selectedPromptType = ref('format');
 const datasourceColumns = ref<Array<AnyRecord | string>>([]);
 const datasourceColumnStatus = ref<AnyRecord | null>(null);
+const activeDatasourceColumns = computed(() => datasourceColumns.value.filter((column) => !columnIsStale(column)));
+const staleDatasourceColumns = computed(() => datasourceColumns.value.filter((column) => columnIsStale(column)));
 const mappingCompare = ref<AnyRecord | null>(null);
 const customerSearchKeyword = ref('');
 const customerTagGroupLogic = ref<'AND' | 'OR'>('AND');
@@ -3177,6 +3383,15 @@ const importLogs = ref<AnyRecord[]>([]);
 const customerSearchItems = ref<AnyRecord[]>([]);
 const selectedAdminCustomer = ref<AnyRecord | null>(null);
 const customerSearchTable = ref<HTMLElement | null>(null);
+const customerMasterRecord = ref<AnyRecord | null>(null);
+const customerMasterSearchOpen = ref(false);
+const customerMasterSearchKeyword = ref('');
+const customerMasterCandidates = ref<AnyRecord[]>([]);
+const customerMasterSearchMessage = ref('');
+const customerMasterHistoryOpen = ref(false);
+const customerMasterHistoryField = ref<AnyRecord | null>(null);
+const customerMasterHistory = ref<AnyRecord[]>([]);
+const customerMasterHistoryMessage = ref('');
 const quickSearchItems = ref<AnyRecord[]>([]);
 const templatePromotionCandidates = ref<AnyRecord[]>([]);
 type CandidatePublishDraft = { title: string; shortcutCode: string; leadType: string; enabled: boolean; scopeType: 'ALL' | 'GROUP'; groupIds: string[] };
@@ -3198,7 +3413,8 @@ const analyticsStatus = reactive<Record<AnalyticsKey, { loading: boolean; error:
   health: { loading: false, error: '' },
   lifecycle: { loading: false, error: '' },
   risks: { loading: false, error: '' },
-  contentRanking: { loading: false, error: '' }
+  contentRanking: { loading: false, error: '' },
+  replyConfirmations: { loading: false, error: '' }
 });
 const analyticsLabels: Record<AnalyticsKey, string> = {
   overview: '使用量概览',
@@ -3209,7 +3425,8 @@ const analyticsLabels: Record<AnalyticsKey, string> = {
   health: '健康趋势',
   lifecycle: '生命周期',
   risks: '风险客户',
-  contentRanking: '内容排行'
+  contentRanking: '内容排行',
+  replyConfirmations: '回复确认状态'
 };
 const tagAnalytics = ref<TagAnalyticsResponse | null>(null);
 const tagAnalyticsStatus = reactive({ loading: false, error: '' });
@@ -3229,6 +3446,7 @@ const analyticsTagMatchModes = reactive<Record<string, 'ANY' | 'ALL'>>({});
 const versions = ref<AnyRecord[]>([]);
 const notices = ref<AnyRecord[]>([]);
 const auditLogs = ref<AnyRecord[]>([]);
+const profileUpdateFailures = ref<AnyRecord[]>([]);
 const auditActions = ref<AnyRecord[]>([]);
 const auditTargetTypes = ref<AnyRecord[]>([]);
 const auditPageInfo = reactive({
@@ -3288,6 +3506,7 @@ const noticePageInfo = reactive({
   totalPages: 1
 });
 const health = ref<AnyRecord | null>(null);
+const tableWriteFailures = ref<AnyRecord[]>([]);
 const promptVersions = ref<AnyRecord[]>([]);
 const promptDraft = reactive({
   format: '',
@@ -3400,19 +3619,12 @@ const activeLlmCapabilityConfig = computed<{
   };
   return null;
 });
-const tableRuntimeDraft = reactive({
-  apiBaseUrl: '',
-  apiKey: '',
-  writeTimeoutMs: 10000,
-  retryMaxCount: 5,
-  retryIntervalS: 60,
-  alertFailureHours: 1,
-  alertNotifyTarget: 'ADMIN',
-  queueWarnThreshold: 100,
-  queueAlertThreshold: 1000
-});
 const smartSheetConnectionDraft = reactive({
   documentUrl: '',
+  documentId: '',
+  sheetId: '',
+  viewId: '',
+  uniqueFieldTitle: '',
   connectedName: '',
   role: 'PRIMARY',
   checkMessage: '',
@@ -3493,6 +3705,11 @@ const activeMetrics = computed(() => {
       { label: '数据源', value: datasources.value.length, help: '企微表格与 CSV 导入' },
       { label: '同步异常', value: syncStatuses.value.filter((item) => String(item.syncStatus || item.status || '').includes('FAIL')).length, help: '失败项需人工检查' },
       { label: '映射版本', value: mappingVersions.value.length, help: selectedDatasource.value ? selectedDatasource.value.name : '选择数据源后查看' }
+    ],
+    'single-source-of-truth': [
+      { label: '当前客户', value: customerMasterRecord.value?.customer?.id ?? '暂无', help: customerMasterRecord.value?.customer?.nickname || '数据库中的最近更新记录' },
+      { label: '字段数', value: customerMasterFields.value.length, help: '包含业务字段和记录来源信息' },
+      { label: '查看方式', value: '只读', help: '不会修改客户主档案' }
     ],
     'quick-search-content': [
       { label: '速搜内容', value: quickSearchPageInfo.total, help: '推送到桌面端快线模板' },
@@ -3653,6 +3870,15 @@ const analyticsRingMetrics = computed(() => {
     analyticsRingMetric('采纳率', summary.adoptionRate, 'AI 回复被采纳的占比'),
     analyticsRingMetric('漏斗完成率', funnelLastStage?.rateRaw, '最后阶段相对起点的转化占比'),
     analyticsRingMetric('到店率', sourceTotal > 0 && hasArrivedValues ? arrivedTotal / sourceTotal : null, '来源数据中的到店占比')
+  ];
+});
+const replyConfirmationMetrics = computed(() => {
+  const summary = analytics.replyConfirmations ?? {};
+  return [
+    { label: '待确认', value: analyticsNumberLabel(summary.awaitingDecisionCount), help: '员工尚未点击三个结果按钮' },
+    { label: '明确未发送', value: analyticsNumberLabel(summary.unsentCount), help: '员工点击“未发送”的回复' },
+    { label: '重新识别', value: analyticsNumberLabel(summary.recognitionRetryCount), help: '员工选择重新识别后不再发送原回复' },
+    { label: '已确认发送', value: analyticsNumberLabel(summary.sentCount), help: `已确认发送率 ${analyticsRateLabel(summary.confirmedSendRate)}` }
   ];
 });
 const analyticsRankingItems = computed(() => listFrom(analytics.contentRanking, 'items')
@@ -3886,7 +4112,8 @@ const healthCards = computed(() => {
     { key: 'redis', label: '缓存', help: '影响会话和实时状态' },
     { key: 'skill', label: 'Skill 通道', help: '影响回复生成' },
     { key: 'imageRecognition', label: '识图通道', help: '影响截图识别' },
-    { key: 'wecomTable', label: '企微智能表格写入', help: '影响保存到企业微信智能表格' }
+    { key: 'wecomTableConnection', label: '企业微信智能表格连通性', help: '实时读取已配置表格，验证企业微信通道和表格访问' },
+    { key: 'wecomTableQueue', label: '企业微信表格写入队列', help: '显示待写入和已停止重试的历史记录，不代表连通性' }
   ];
   return cards.map((card) => {
     const component = components[card.key] ?? {};
@@ -3908,6 +4135,14 @@ const accountSummary = computed(() => [
   { label: '标签管理授权', value: accounts.value.filter((account) => hasTagManagementPermission(account)).length }
 ]);
 const customerSearchTotalPages = computed(() => Math.max(1, Number(customerSearchPageInfo.totalPages || Math.ceil(customerSearchPageInfo.total / Math.max(1, customerSearchPageInfo.size)) || 1)));
+const customerMasterFields = computed(() => Array.isArray(customerMasterRecord.value?.fields)
+  ? customerMasterRecord.value.fields as AnyRecord[]
+  : []);
+const customerMasterCustomerLabel = computed(() => {
+  const customer = customerMasterRecord.value?.customer as AnyRecord | undefined;
+  if (!customer) return '未选择客户';
+  return customer.nickname || `客户 #${customer.id}`;
+});
 const customerFilterCategories = computed(() => tagCategoryOptionsCache.value.filter((category) => {
   const values = Array.isArray(category.values) ? category.values : [];
   return category.isEnabled !== false
@@ -3964,17 +4199,36 @@ const quickSearchVariables = QUICK_SEARCH_TEMPLATE_VARIABLES.map((variable) => (
 const selectedSkillTestBinding = computed(() => skillBindings.value.find((item) => String(item.id) === selectedSkillTestBindingId.value) || null);
 const smartSheetCards = computed(() => SMART_SHEET_ROLES.map((role) => {
   const configuredUrl = configValue(role.configKey);
+  const documentId = configValue(`${role.prefix}.document_id`);
+  const sheetId = configValue(`${role.prefix}.sheet_id`);
+  const viewId = configValue(`${role.prefix}.view_id`);
+  const uniqueFieldTitle = configValue(`${role.prefix}.unique_field_title`);
   const datasource = datasourceForSmartSheetRole(role);
   const isActive = smartSheetConnectionDraft.role === role.value;
-  const connected = Boolean(configuredUrl || datasource || (role.value === 'PRIMARY' && smartSheetConnectionDraft.connectedName));
+  const ready = Boolean(configuredUrl && documentId && sheetId && viewId && uniqueFieldTitle && datasource);
+  const hasPartialConfiguration = Boolean(configuredUrl || documentId || sheetId || viewId || datasource);
+  const status = ready
+    ? '已接入，可配置字段映射'
+    : configuredUrl && documentId && sheetId && viewId && uniqueFieldTitle
+      ? '正在准备字段映射'
+    : !configuredUrl && datasource
+      ? '待补网址'
+      : hasPartialConfiguration
+        ? '待补识别信息'
+        : '未配置';
   const datasourceName = datasource
     ? String(datasource.name || datasource.sourceTable || datasource.sheetId || '已接入数据源')
     : '';
   return {
     ...role,
     configuredUrl,
+    documentId,
+    sheetId,
+    viewId,
+    uniqueFieldTitle,
+    ready,
     datasource,
-    status: connected ? '已接入' : '未配置',
+    status,
     name: datasourceName || (role.value === 'PRIMARY' && smartSheetConnectionDraft.connectedName
       ? smartSheetConnectionDraft.connectedName
       : configuredUrl ? '已保存链接' : '等待配置'),
@@ -4035,11 +4289,20 @@ const datasourceColumnStatusLabel = computed(() => {
   if (status === 'UNAVAILABLE') return '真实表格暂不可用';
   return '等待识别';
 });
+const mappingSchemaReadable = computed(() => {
+  const status = datasourceColumnStatus.value;
+  if (!status) return false;
+  if (status.schemaReadable === true) return true;
+  return String(status.fetchStatus ?? '').toUpperCase() === 'OK' && status.fallback !== true;
+});
 const datasourceColumnStatusDetail = computed(() => {
   const status = datasourceColumnStatus.value;
   if (!status) return '点击“识别列名”后会显示取样来源和失败原因。';
-  if (status.fetchError) return `取样失败：${status.fetchError}。系统已保留现有映射列名作为兜底。`;
-  if (status.fallback) return `当前列名来自 ${status.source || '现有映射'}，未能直接从企微表格取样。`;
+  if (String(status.fetchError ?? '').includes('Missing required relay configuration')) {
+    return '当前电脑尚未连通企业微信中转服务，暂时只显示系统已保存的表格列。完成中转服务配置后，点击“识别列名”即可读取客户主表的完整列清单。';
+  }
+  if (status.fetchError) return `取样失败：${status.fetchError}。当前仅显示已保存的映射列，编辑和保存已锁定，避免覆盖其他字段。`;
+  if (status.fallback) return `当前列名来自 ${status.source || '现有映射'}，未能直接从企微表格取样。编辑和保存已锁定，避免覆盖其他字段。`;
   return `来源：${status.source || 'SHEET_SAMPLE'}，共识别 ${datasourceColumns.value.length} 个列名。`;
 });
 const mappingDiffGroups = computed(() => {
@@ -4093,7 +4356,8 @@ function selectSection(section: SectionKey) {
 
 async function refreshActiveSection() {
   if (activeSection.value.groupKey === 'config-center') await loadSkillAi();
-  if (activeSection.value.groupKey === 'data-content') await loadDataContent();
+  if (activeSectionKey.value === 'single-source-of-truth') await loadCustomerMasterDefault();
+  else if (activeSection.value.groupKey === 'data-content') await loadDataContent();
   if (activeSection.value.groupKey === 'org-rules-tags') await loadOrgRulesTags();
   if (activeSectionKey.value === 'supervision-dashboard') await loadSupervisionDashboard();
   else if (activeSectionKey.value === 'governance-settings') await loadGovernanceSettings();
@@ -4104,6 +4368,7 @@ function startPrimaryAction() {
   if (activeSectionKey.value === 'skill-scenes') openForm('skill');
   if (activeSectionKey.value === 'configuration-center') openForm('skillEnv');
   if (activeSectionKey.value === 'data-integration') goToSmartSheetSetup();
+  if (activeSectionKey.value === 'single-source-of-truth') openCustomerMasterSearch();
   if (activeSectionKey.value === 'quick-search-content') openForm('quickSearch');
   if (activeSectionKey.value === 'template-promotion-candidates') void refreshTemplatePromotionCandidates();
   if (activeSectionKey.value === 'account-permissions') openForm('account');
@@ -4308,13 +4573,15 @@ async function loadTagAnalytics() {
 
 async function loadInsightOps() {
   await runWithNotice(async () => {
-    const [accountList, versionList, noticeList, auditList, actionList, healthPayload] = await Promise.all([
+    const [accountList, versionList, noticeList, auditList, actionList, healthPayload, failedWritesPayload, profileFailuresPayload] = await Promise.all([
       getJson<unknown>(withQuery('/admin/api/v1/accounts', { page: 1, page_size: 50 })),
       getJson<unknown>(versionListPath()),
       getJson<unknown>(noticeListPath()),
       getJson<unknown>(auditLogPath()),
       getJson<unknown>('/admin/api/v1/audit-logs/actions'),
-      getJson<unknown>('/admin/api/v1/health')
+      getJson<unknown>('/admin/api/v1/health'),
+      getJson<unknown>('/admin/api/v1/table-writes/failed'),
+      getJson<unknown>('/admin/api/v1/profile-update-failures?limit=50')
     ]);
     analyticsAccounts.value = listFromResponse(accountList);
     applyVersionList(versionList);
@@ -4322,6 +4589,8 @@ async function loadInsightOps() {
     applyAuditList(auditList);
     applyAuditDictionary(actionList);
     health.value = dataFromResponse(healthPayload) as AnyRecord;
+    tableWriteFailures.value = listFromResponse(failedWritesPayload);
+    profileUpdateFailures.value = listFromResponse(profileFailuresPayload);
     applyHealthMetadata();
     healthLastRefreshAt.value = formatDate((health.value as AnyRecord)?.timestamp ?? new Date().toISOString());
     healthConsecutiveFailures.value = 0;
@@ -4564,7 +4833,8 @@ async function loadAnalyticsDashboard(options: { silent?: boolean } = {}) {
     { key: 'health', path: '/admin/api/v1/analytics/health', query: analyticsQuery },
     { key: 'lifecycle', path: '/admin/api/v1/analytics/lifecycle', query: analyticsQuery },
     { key: 'risks', path: '/admin/api/v1/analytics/risks', query: analyticsQuery },
-    { key: 'contentRanking', path: '/admin/api/v1/analytics/content-ranking', query: contentRankingQuery }
+    { key: 'contentRanking', path: '/admin/api/v1/analytics/content-ranking', query: contentRankingQuery },
+    { key: 'replyConfirmations', path: '/admin/api/v1/reply-confirmations/summary', query: { days: skillAnalyticsDays.value, operator: analyticsCallerFilter.value } }
   ];
   const run = async () => {
     endpoints.forEach(({ key }) => {
@@ -4615,7 +4885,12 @@ async function loadHealth(force = false) {
   if (force) healthConsecutiveFailures.value = 0;
   await runWithNotice(async () => {
     try {
-      health.value = dataFromResponse(await getJson<unknown>('/admin/api/v1/health')) as AnyRecord;
+      const [healthResponse, failedWritesResponse] = await Promise.all([
+        getJson<unknown>('/admin/api/v1/health'),
+        getJson<unknown>('/admin/api/v1/table-writes/failed')
+      ]);
+      health.value = dataFromResponse(healthResponse) as AnyRecord;
+      tableWriteFailures.value = listFromResponse(failedWritesResponse);
       applyHealthMetadata();
       healthLastRefreshAt.value = formatDate((health.value as AnyRecord)?.timestamp ?? new Date().toISOString());
       healthConsecutiveFailures.value = 0;
@@ -4624,6 +4899,138 @@ async function loadHealth(force = false) {
       throw error;
     }
   }, '健康状态已刷新');
+}
+
+async function loadCustomerMasterDefault() {
+  await runWithNotice(async () => {
+    const response = await getJson<unknown>('/admin/api/v1/customer-master/default');
+    customerMasterRecord.value = recordFromResponse(response).record as AnyRecord | null;
+  }, '唯一事实数据库已刷新');
+}
+
+function openCustomerMasterSearch() {
+  customerMasterSearchOpen.value = true;
+  customerMasterSearchKeyword.value = '';
+  customerMasterCandidates.value = [];
+  customerMasterSearchMessage.value = '';
+}
+
+function closeCustomerMasterSearch() {
+  customerMasterSearchOpen.value = false;
+  customerMasterCandidates.value = [];
+  customerMasterSearchMessage.value = '';
+}
+
+async function openCustomerMasterHistory(field: AnyRecord) {
+  const customerId = customerMasterRecord.value?.customer?.id;
+  const fieldName = String(field?.fieldName ?? '').trim();
+  if (!customerId || !fieldName) return;
+  customerMasterHistoryField.value = field;
+  customerMasterHistory.value = [];
+  customerMasterHistoryMessage.value = '';
+  customerMasterHistoryOpen.value = true;
+  await runWithNotice(async () => {
+    const response = await getJson<unknown>(
+      `/admin/api/v1/customer-master/${encodeURIComponent(String(customerId))}/fields/${encodeURIComponent(fieldName)}/history`);
+    customerMasterHistory.value = listFrom(dataFromResponse(response));
+    customerMasterHistoryMessage.value = customerMasterHistory.value.length
+      ? `共 ${customerMasterHistory.value.length} 条历史记录。`
+      : '该字段暂时没有已记录的历史变化。';
+  }, '字段历史已刷新');
+}
+
+function closeCustomerMasterHistory() {
+  customerMasterHistoryOpen.value = false;
+  customerMasterHistoryField.value = null;
+  customerMasterHistory.value = [];
+  customerMasterHistoryMessage.value = '';
+}
+
+async function searchCustomerMaster() {
+  const keyword = customerMasterSearchKeyword.value.trim();
+  if (!keyword) return;
+  await runWithNotice(async () => {
+    const response = await getJson<unknown>(withQuery('/admin/api/v1/customer-master/search', { q: keyword }));
+    customerMasterCandidates.value = listFrom(recordFromResponse(response), 'items');
+    customerMasterSearchMessage.value = customerMasterCandidates.value.length
+      ? `找到 ${customerMasterCandidates.value.length} 位客户，请选择要查看的记录。`
+      : '没有找到匹配客户，请检查输入内容。';
+  }, '客户搜索完成');
+}
+
+async function selectCustomerMasterCandidate(candidate: AnyRecord) {
+  await runWithNotice(async () => {
+    const response = await getJson<unknown>(`/admin/api/v1/customer-master/${candidate.id}`);
+    customerMasterRecord.value = recordFromResponse(response);
+    closeCustomerMasterSearch();
+  }, '已切换客户记录');
+}
+
+function customerMasterValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+async function retryProfileUpdateFailure(failure: AnyRecord) {
+  await runWithNotice(async () => {
+    await postJson<unknown>(`/admin/api/v1/profile-update-failures/${encodeURIComponent(String(failure.id))}/retry`, {});
+    const payload = await getJson<unknown>('/admin/api/v1/profile-update-failures?limit=50');
+    profileUpdateFailures.value = listFromResponse(payload);
+  }, '档案更新已重新排队');
+}
+
+async function loadTableWriteFailures() {
+  await runWithNotice(async () => {
+    tableWriteFailures.value = listFromResponse(await getJson<unknown>('/admin/api/v1/table-writes/failed'));
+  }, '智能表格失败记录已刷新');
+}
+
+async function retryTableWriteFailure(item: AnyRecord) {
+  const id = Number(item.id);
+  if (!Number.isInteger(id) || id <= 0) return;
+  if (!window.confirm(`确认重新排队智能表格写入记录 #${id} 吗？系统会按原数据再次尝试。`)) return;
+  await runWithNotice(async () => {
+    await postJson<unknown>(`/admin/api/v1/table-writes/${id}/requeue`, {});
+    // Apply the confirmed server state locally before optional refreshes. A
+    // failed health refresh must not make a successful queue action look stuck.
+    tableWriteFailures.value = tableWriteFailures.value.filter((failure) => Number(failure.id) !== id);
+    try {
+      tableWriteFailures.value = listFromResponse(await getJson<unknown>('/admin/api/v1/table-writes/failed'));
+    } catch (_) {
+      // The queue action already succeeded; keep the local result and show the success notice.
+    }
+    try {
+      health.value = dataFromResponse(await getJson<unknown>('/admin/api/v1/health')) as AnyRecord;
+      applyHealthMetadata();
+    } catch (_) {
+      // Health is supplementary to the queue action.
+    }
+  }, '已重新加入智能表格写入队列');
+}
+
+async function resolveTableWriteFailure(item: AnyRecord) {
+  const id = Number(item.id);
+  if (!Number.isInteger(id) || id <= 0) return;
+  if (!window.confirm(`确认关闭智能表格写入记录 #${id} 吗？这只适用于确认无需重试的问题；原失败原因会保留在审计中。`)) return;
+  await runWithNotice(async () => {
+    await postJson<unknown>(`/admin/api/v1/table-writes/${id}/resolve`, {});
+    // Remove it immediately after the server confirms RESOLVED. Refreshes are
+    // best-effort and cannot undo a completed close action in the UI.
+    tableWriteFailures.value = tableWriteFailures.value.filter((failure) => Number(failure.id) !== id);
+    try {
+      tableWriteFailures.value = listFromResponse(await getJson<unknown>('/admin/api/v1/table-writes/failed'));
+    } catch (_) {
+      // Keep the locally updated list when a follow-up read is unavailable.
+    }
+    try {
+      health.value = dataFromResponse(await getJson<unknown>('/admin/api/v1/health')) as AnyRecord;
+      applyHealthMetadata();
+    } catch (_) {
+      // Health is supplementary to the queue action.
+    }
+  }, '已关闭智能表格失败记录，不会再次自动重试');
 }
 
 async function loadAuditLogs() {
@@ -5678,18 +6085,12 @@ function hydrateRuntimeDrafts() {
   llmSummaryDraft.maxTokens = intConfigValue('llm.summary.max_tokens', 500);
   llmSummaryDraft.systemPrompt = configValue('llm.summary.system_prompt');
 
-  tableRuntimeDraft.apiBaseUrl = configValue('table.api_base_url');
-  smartSheetConnectionDraft.documentUrl = configValue('table.document_url');
-  tableRuntimeDraft.apiKey = '';
-  tableRuntimeDraft.writeTimeoutMs = intConfigValue('table.write_timeout_ms', 10000);
-  tableRuntimeDraft.retryMaxCount = intConfigValue('table.retry_max_count', 5);
-  tableRuntimeDraft.retryIntervalS = intConfigValue('table.retry_interval_s', 60);
-  tableRuntimeDraft.alertFailureHours = intConfigValue('table.alert_failure_hours', 1);
-  tableRuntimeDraft.alertNotifyTarget = configValue('table.alert_notify_target') || 'ADMIN';
-  tableRuntimeDraft.queueWarnThreshold = intConfigValue('table.queue_warn_threshold', 100);
-  tableRuntimeDraft.queueAlertThreshold = intConfigValue('table.queue_alert_threshold', 1000);
+  hydrateSmartSheetTarget(smartSheetConnectionDraft.role);
   wecomConnectionDraft.mode = configValue('wecom.connection_mode') === 'DIRECT' ? 'DIRECT' : 'RELAY';
-  wecomConnectionDraft.relayBaseUrl = configValue('wecom.relay_base_url');
+  wecomConnectionDraft.relayBaseUrl = configValue('wecom.relay_base_url')
+    .replace(/\/+$/, '')
+    .replace(/\/wecom$/, '')
+    .replace(/\/v1\/wecom\/api$/, '');
 
   datasourceRuntimeDraft.syncCron = configValue('cache.sync_cron') || '0 */30 * * * *';
   datasourceRuntimeDraft.ttlSeconds = intConfigValue('cache.ttl_seconds', 900);
@@ -5757,20 +6158,47 @@ async function verifyAndSaveSmartSheet() {
   await runWithNotice(async () => {
     const result = recordFromResponse(await postJson<unknown>('/admin/api/v1/datasources/smart-sheet-connection', {
       documentUrl,
-      role: smartSheetConnectionDraft.role
+      role: smartSheetConnectionDraft.role,
+      documentId: smartSheetConnectionDraft.documentId.trim(),
+      sheetId: smartSheetConnectionDraft.sheetId.trim(),
+      viewId: smartSheetConnectionDraft.viewId.trim(),
+      uniqueFieldTitle: smartSheetConnectionDraft.uniqueFieldTitle.trim()
     }));
     smartSheetConnectionDraft.documentUrl = String(result.documentUrl || documentUrl);
+    smartSheetConnectionDraft.documentId = String(result.documentId || smartSheetConnectionDraft.documentId);
+    smartSheetConnectionDraft.sheetId = String(result.sheetId || smartSheetConnectionDraft.sheetId);
+    smartSheetConnectionDraft.viewId = String(result.viewId || smartSheetConnectionDraft.viewId);
+    smartSheetConnectionDraft.uniqueFieldTitle = String(result.uniqueFieldTitle || smartSheetConnectionDraft.uniqueFieldTitle);
     smartSheetConnectionDraft.connectedName = String(result.tableName || 'API 创建的智能表格');
     smartSheetConnectionDraft.checkKind = 'success';
     smartSheetConnectionDraft.checkMessage = `${role?.label || '这张表'}已检测通过并保存，后续会按系统已有同步流程使用。`;
+    await loadDataContent();
     const configList = await getJson<unknown>('/admin/api/v1/configs');
     configs.value = configEntries(configList);
     hydrateRuntimeDrafts();
   }, '企业微信 API 表格已检测并保存');
   if (noticeKind.value === 'error') {
     smartSheetConnectionDraft.checkKind = 'error';
-    smartSheetConnectionDraft.checkMessage = notice.value || '检测失败，请检查表格链接、服务器转发地址和企微权限。';
+    smartSheetConnectionDraft.checkMessage = notice.value || '检测失败，请确认粘贴的是这张表的完整链接，然后重试。';
   }
+}
+
+function selectSmartSheetRole(roleValue: string) {
+  const role = SMART_SHEET_ROLES.find((item) => item.value === roleValue) ?? SMART_SHEET_ROLES[0];
+  smartSheetConnectionDraft.role = role.value;
+  hydrateSmartSheetTarget(role.value);
+  smartSheetConnectionDraft.connectedName = '';
+  smartSheetConnectionDraft.checkMessage = '';
+  smartSheetConnectionDraft.checkKind = '';
+}
+
+function hydrateSmartSheetTarget(roleValue: string) {
+  const role = SMART_SHEET_ROLES.find((item) => item.value === roleValue) ?? SMART_SHEET_ROLES[0];
+  smartSheetConnectionDraft.documentUrl = configValue(role.configKey);
+  smartSheetConnectionDraft.documentId = configValue(`${role.prefix}.document_id`);
+  smartSheetConnectionDraft.sheetId = configValue(`${role.prefix}.sheet_id`);
+  smartSheetConnectionDraft.viewId = configValue(`${role.prefix}.view_id`);
+  smartSheetConnectionDraft.uniqueFieldTitle = configValue(`${role.prefix}.unique_field_title`) || '';
 }
 
 async function saveLlmReplySettings() {
@@ -5827,24 +6255,6 @@ function isValidClipboardScreenshotConfirmPromptSeconds(value: unknown): boolean
   }
   const integer = Math.trunc(parsed);
   return parsed === integer && (integer === 0 || (integer >= 3 && integer <= 60));
-}
-
-async function saveTableRuntimeSettings() {
-  const entries: Array<[string, string | number]> = [
-    ['table.api_base_url', tableRuntimeDraft.apiBaseUrl],
-    ['table.write_timeout_ms', tableRuntimeDraft.writeTimeoutMs],
-    ['table.retry_max_count', tableRuntimeDraft.retryMaxCount],
-    ['table.retry_interval_s', tableRuntimeDraft.retryIntervalS],
-    ['table.alert_failure_hours', tableRuntimeDraft.alertFailureHours],
-    ['table.alert_notify_target', tableRuntimeDraft.alertNotifyTarget],
-    ['table.queue_warn_threshold', tableRuntimeDraft.queueWarnThreshold],
-    ['table.queue_alert_threshold', tableRuntimeDraft.queueAlertThreshold]
-  ];
-  if (tableRuntimeDraft.apiKey.trim()) {
-    entries.push(['table.api_key', tableRuntimeDraft.apiKey.trim()]);
-  }
-  await saveConfigGroup(entries, '企微表格网关参数已保存');
-  tableRuntimeDraft.apiKey = '';
 }
 
 async function saveDatasourceRuntimeSettings() {
@@ -6132,22 +6542,85 @@ async function selectDatasource(item: AnyRecord) {
       if (target) mappingEnabledDraft[target] = mapping.enabled !== false;
     }
     for (const field of customerFields.value) {
-      if (field.key && mappingEnabledDraft[field.key] === undefined) mappingEnabledDraft[field.key] = true;
+      if (field.key && mappingEnabledDraft[field.key] === undefined) {
+        mappingEnabledDraft[field.key] = Boolean(mappingDraft[field.key]);
+      }
     }
+    // Opening a mapping always re-reads the live Smart Sheet schema. Do not
+    // let a browser/proxy cache make the operator work from an old column list.
+    await loadDatasourceColumns(false, true);
   }, '字段映射已加载');
 }
 
-async function loadDatasourceColumns() {
+async function loadDatasourceColumns(showNotice = true, forceRefresh = false) {
   const datasource = selectedDatasource.value;
   if (!datasource) return;
-  await runWithNotice(async () => {
-    const payload = recordFromResponse(await getJson<unknown>(`/admin/api/v1/datasources/${datasource.id}/columns`));
+  const load = async () => {
+    const refreshQuery = forceRefresh ? `?refresh=${Date.now()}` : '';
+    const payload = recordFromResponse(await getJson<unknown>(`/admin/api/v1/datasources/${datasource.id}/columns${refreshQuery}`));
     datasourceColumnStatus.value = payload;
     datasourceColumns.value = listFrom(payload, 'columns');
-    if (!datasourceColumns.value.length) {
-      throw new Error(payload.fetchError || '没有识别到可用列名，请检查数据源连接或先保存字段映射');
+    applyAutomaticMappings();
+    if (payload.schemaReadable !== true) {
+      throw new Error(String(payload.fetchError || '无法读取企业微信表格的完整列名'));
     }
-  }, '列名已识别');
+  };
+  if (showNotice) {
+    await runWithNotice(load, '列名已识别');
+  } else {
+    await load();
+  }
+}
+
+function applyAutomaticMappings() {
+  const columns = datasourceColumns.value.map(columnName).filter(Boolean);
+  if (!columns.length) return;
+  for (const field of customerFields.value) {
+    if (!field.key || mappingDraft[field.key]) continue;
+    const labels = [field.label, CUSTOMER_FIELD_LABELS[field.key], field.key]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean);
+    const matched = columns.find((column) => labels.includes(column));
+    if (matched) {
+      mappingDraft[field.key] = matched;
+      mappingEnabledDraft[field.key] = true;
+    }
+  }
+}
+
+function mappingTargetForColumn(sourceColumn: string): string {
+  return Object.entries(mappingDraft)
+    .find(([, mappedColumn]) => mappedColumn === sourceColumn)?.[0] ?? '';
+}
+
+function mappingEnabledForColumn(sourceColumn: string): boolean {
+  const targetField = mappingTargetForColumn(sourceColumn);
+  return Boolean(targetField && mappingEnabledDraft[targetField] !== false);
+}
+
+function mapColumnToCustomerField(sourceColumn: string, event: Event) {
+  const targetField = (event.target as HTMLSelectElement).value;
+  const previousTarget = mappingTargetForColumn(sourceColumn);
+
+  if (previousTarget) {
+    mappingDraft[previousTarget] = '';
+    mappingEnabledDraft[previousTarget] = false;
+  }
+  if (!targetField) return;
+
+  // A system field can only receive data from one column in this table.
+  mappingDraft[targetField] = sourceColumn;
+  mappingEnabledDraft[targetField] = true;
+}
+
+function setMappingEnabledForColumn(sourceColumn: string, event: Event) {
+  const targetField = mappingTargetForColumn(sourceColumn);
+  if (!targetField) return;
+  mappingEnabledDraft[targetField] = (event.target as HTMLInputElement).checked;
+}
+
+function syncMappingEnabled(fieldKey: string) {
+  mappingEnabledDraft[fieldKey] = Boolean(mappingDraft[fieldKey]);
 }
 
 async function compareMappings() {
@@ -6192,13 +6665,19 @@ function confirmDeleteDatasource(item: AnyRecord) {
 async function saveMappings() {
   const datasource = selectedDatasource.value;
   if (!datasource) return;
+  if (!mappingSchemaReadable.value) {
+    notice.value = '无法读取企业微信表格的完整列名，映射未保存。请先恢复连接并重新识别列名。';
+    noticeKind.value = 'error';
+    return;
+  }
   await runWithNotice(async () => {
     const payload = {
       mappings: Object.entries(mappingDraft)
         .filter(([, sourceField]) => sourceField.trim())
         .map(([targetField, sourceField]) => ({ targetField, sourceField, enabled: mappingEnabledDraft[targetField] !== false }))
     };
-    await putJson(`/admin/api/v1/datasources/${datasource.id}/mappings`, payload);
+    const result = recordFromResponse(await putJson<unknown>(`/admin/api/v1/datasources/${datasource.id}/mappings`, payload));
+    updateDatasourceMappingCount(datasource.id, Number(result.mappingCount ?? 0));
     await selectDatasource(datasource);
   }, '字段映射已保存并生成版本');
 }
@@ -6262,7 +6741,9 @@ async function uploadQuickSearchImage(event: Event, item: AnyRecord) {
 }
 
 async function saveWecomConnectionSettings() {
-  const relayBaseUrl = wecomConnectionDraft.relayBaseUrl.trim();
+  let relayBaseUrl = wecomConnectionDraft.relayBaseUrl.trim().replace(/\/+$/, '');
+  relayBaseUrl = relayBaseUrl.replace(/\/wecom$/, '').replace(/\/v1\/wecom\/api$/, '');
+  wecomConnectionDraft.relayBaseUrl = relayBaseUrl;
   const entries: Array<[string, string]> = wecomConnectionDraft.mode === 'RELAY'
     ? relayBaseUrl
       ? [['wecom.relay_base_url', relayBaseUrl], ['wecom.connection_mode', 'RELAY']]
@@ -7710,11 +8191,27 @@ function syncStatusFor(id: unknown) {
 
 function mappingCountFor(id: unknown) {
   const status = syncStatuses.value.find((item) => String(item.datasourceId ?? item.id) === String(id));
-  return status?.mappingCount ?? '-';
+  if (status?.mappingCount !== undefined) return status.mappingCount;
+  return datasources.value.find((item) => String(item.id) === String(id))?.mappingCount ?? '-';
+}
+
+function updateDatasourceMappingCount(id: unknown, mappingCount: number) {
+  const normalizedCount = Number.isFinite(mappingCount) ? mappingCount : 0;
+  datasources.value = datasources.value.map((item) => String(item.id) === String(id)
+    ? { ...item, mappingCount: normalizedCount }
+    : item);
+  const statusIndex = syncStatuses.value.findIndex((item) => String(item.datasourceId ?? item.id) === String(id));
+  if (statusIndex >= 0) {
+    syncStatuses.value[statusIndex] = { ...syncStatuses.value[statusIndex], mappingCount: normalizedCount };
+  }
 }
 
 function columnName(column: AnyRecord | string) {
   return typeof column === 'string' ? column : String(column.name ?? column.columnName ?? '');
+}
+
+function columnIsStale(column: AnyRecord | string) {
+  return typeof column !== 'string' && column.stale === true;
 }
 
 function columnMapped(column: AnyRecord | string) {
@@ -7762,6 +8259,11 @@ function analyticsNumber(value: unknown): number | null {
 function analyticsNumberLabel(value: unknown): string {
   const parsed = analyticsNumber(value);
   return parsed === null ? '暂无数据' : String(parsed);
+}
+
+function analyticsRateLabel(value: unknown): string {
+  const rate = analyticsRate(value);
+  return rate === null ? '暂无数据' : `${Math.round(rate * 10) / 10}%`;
 }
 
 function analyticsDurationLabel(value: unknown): string {
@@ -7869,15 +8371,44 @@ function healthAlertTitle(alert: AnyRecord) {
 }
 
 function healthComponentHelp(key: string, component: AnyRecord, fallback: string) {
-  if (key !== 'wecomTable') {
+  if (key === 'wecomTableConnection') {
+    const detail = (component.detail ?? {}) as AnyRecord;
+    const checkedTables = Number(detail.checkedTableCount ?? 0);
+    return checkedTables > 0
+      ? `已实际检查 ${checkedTables} 张已配置智能表格的访问权限。`
+      : '尚未完成企业微信智能表格访问检查。';
+  }
+  if (key !== 'wecomTableQueue') {
     return fallback;
   }
   const detail = (component.detail ?? {}) as AnyRecord;
   const staleFailedCount = Number(detail.staleFailedCount ?? 0);
   if (Number.isFinite(staleFailedCount) && staleFailedCount > 0) {
-    return `写入队列中有 ${staleFailedCount} 条过期失败记录，需要检查失败原因或重新处理；这不代表服务器转发地址是否连通。`;
+    return `写入队列中有 ${staleFailedCount} 条过期失败记录，需要检查失败原因或重新处理；这不代表企业微信表格是否连通。`;
   }
-  return '当前检查智能表格写入队列；服务器转发地址是否连通需单独检测。';
+  return '当前没有超过处理时限的失败写入记录。';
+}
+
+function tableWriteErrorLabel(error: unknown) {
+  const raw = String(error ?? '').trim();
+  if (!raw) return '未返回失败原因';
+  const labels: Array<[RegExp, string]> = [
+    [/queued table write contains fields without mappings/i, '有字段未配置企业微信表格映射'],
+    [/new customer write contains fields without mappings/i, '新客户写入包含未配置映射的字段'],
+    [/table write contains fields without mappings/i, '有字段未配置企业微信表格映射'],
+    [/no enabled field mappings configured/i, '尚未配置可写入的字段映射'],
+    [/table write queue alert threshold reached/i, '写入队列已达到告警上限'],
+    [/table write queue health unavailable/i, '写入队列状态暂时无法获取'],
+    [/timeout|timed out/i, '企业微信表格请求超时'],
+    [/connection refused|connect failed|connection reset/i, '无法连接企业微信表格'],
+    [/invalid value for field/i, '企业微信表格字段值不符合要求'],
+    [/phone.*empty|empty.*phone/i, '手机号为空']
+  ];
+  const match = labels.find(([pattern]) => pattern.test(raw));
+  if (match) return match[1];
+  // Keep Chinese backend messages as-is; hide unknown provider English from the UI.
+  if (/[\u4e00-\u9fff]/.test(raw) && !/^[\x00-\x7F]+$/.test(raw)) return raw;
+  return '企业微信表格写入失败，请查看详情或重新排队';
 }
 
 function healthAlertStatusLabel(alert: AnyRecord) {
@@ -7919,6 +8450,16 @@ function environmentDisplayName(environment: AnyRecord, fallback: string) {
     return model;
   }
   return fallback;
+}
+
+function tableWriteCustomerLabel(item: AnyRecord) {
+  const customerId = item.customerId ? `客户 #${item.customerId}` : '未绑定客户';
+  const phoneLast4 = String(item.phoneLast4 ?? '').trim();
+  return phoneLast4 ? `${customerId} · 尾号 ${phoneLast4}` : customerId;
+}
+
+function tableWriteActionLabel(value: unknown) {
+  return String(value ?? '').toUpperCase() === 'INSERT' ? '新建行' : '更新行';
 }
 
 function displaySafeName(value: unknown, fallback: string) {

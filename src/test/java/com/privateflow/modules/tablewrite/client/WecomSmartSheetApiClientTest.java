@@ -107,6 +107,22 @@ class WecomSmartSheetApiClientTest {
   }
 
   @Test
+  void auxiliaryTargetCanUseDirectTransportWithoutCompletePrimaryTableConfiguration() throws Exception {
+    try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
+      server.respond(GET_FIELDS_PATH, 200, "{\"errcode\":0,\"fields\":[]}");
+      WecomSmartSheetConfig credentialsOnly = new WecomSmartSheetConfig(
+          server.baseUrl(), "corp-1", "app-secret-value", "", "", "", "", "", ZoneId.of("Asia/Shanghai"));
+      WecomSmartSheetApiClient client = new WecomSmartSheetApiClient(
+          new ObjectMapper(), credentialsOnly, tokens("token-one"));
+
+      assertThat(client.postForTarget("get_fields", Map.of(
+          "docid", "aux-doc", "sheet_id", "aux-sheet"), Duration.ofSeconds(2), false))
+          .isNotNull();
+      assertThat(server.requestCount()).isEqualTo(1);
+    }
+  }
+
+  @Test
   void retriesOnceWithANewTokenAfter42001() throws Exception {
     try (WecomTestHttpServer server = WecomTestHttpServer.start()) {
       server.respondInOrder(GET_FIELDS_PATH,

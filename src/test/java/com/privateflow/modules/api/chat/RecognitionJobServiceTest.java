@@ -25,6 +25,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,6 +59,7 @@ class RecognitionJobServiceTest {
         executor,
         orchestrationService,
         taskConfig,
+        null,
         Clock.fixed(Instant.parse("2026-07-24T10:00:00Z"), ZoneOffset.UTC));
   }
 
@@ -103,6 +105,38 @@ class RecognitionJobServiceTest {
         .isInstanceOf(ApiException.class)
         .satisfies(error -> assertThat(((ApiException) error).getErrorCode())
             .isEqualTo(ApiErrorCodes.FORBIDDEN));
+  }
+
+  @Test
+  void returnsThePersistedRestartFailureToTheOriginalTaskOwnerAfterRestart() {
+    RecognitionJobRecoveryRepository recovery = mock(RecognitionJobRecoveryRepository.class);
+    Instant createdAt = Instant.parse("2026-07-24T10:00:00Z");
+    when(recovery.find("restarted-job")).thenReturn(Optional.of(
+        new RecognitionJobRecoveryRepository.RecoveredRecognitionJob(
+            "restarted-job",
+            "keeper-a",
+            "reply-1",
+            RecognitionJobStatus.FAILED,
+            RecognitionJobRecoveryRepository.BACKEND_RESTARTED,
+            createdAt,
+            createdAt.plusSeconds(1))));
+    service = new RecognitionJobService(
+        new RecognitionJobRepository(),
+        imageStore,
+        imageValidator,
+        imagePreprocessor,
+        supervisionConfig,
+        executor,
+        orchestrationService,
+        taskConfig,
+        recovery,
+        Clock.fixed(createdAt.plusSeconds(2), ZoneOffset.UTC));
+
+    RecognitionJobView job = service.getOwned("restarted-job", "keeper-a");
+
+    assertThat(job.status()).isEqualTo(RecognitionJobStatus.FAILED);
+    assertThat(job.errorCode()).isEqualTo(RecognitionJobRecoveryRepository.BACKEND_RESTARTED);
+    assertThat(job.response()).isNull();
   }
 
   @Test
@@ -240,6 +274,7 @@ class RecognitionJobServiceTest {
         executor,
         orchestrationService,
         taskConfig,
+        null,
         mutableClock);
     RecognitionJobView ready = service.submit("keeper-a", imageRequest("reply-1"));
     service.completeForWorker(ready.jobId(), response(), RecognitionJobStatus.READY);
@@ -265,6 +300,7 @@ class RecognitionJobServiceTest {
         executor,
         orchestrationService,
         taskConfig,
+        null,
         mutableClock);
     List<RecognitionJobView> jobs = new ArrayList<>();
     for (int index = 0; index < 20; index++) {

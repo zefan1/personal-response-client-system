@@ -133,6 +133,20 @@ const apiData: Record<string, unknown> = {
     'skill.subscription_expire_at': '',
     'table.api_base_url': 'https://table.example.com',
     'table.document_url': 'https://doc.weixin.qq.com/smartsheet/doc-api-owned',
+    'table.primary.document_id': 'doc-api-owned',
+    'table.primary.sheet_id': 'sheet-api-owned',
+    'table.primary.view_id': 'view-api-owned',
+    'table.primary.unique_field_title': '联系方式',
+    'table.assignment_document_url': 'https://doc.weixin.qq.com/smartsheet/s3_APgA7xRqAB0CNrQ1UhsSTQXykhFvt_a?scode=AH8A3wd1ABArdRWh2eAPgA7xRqAB0',
+    'table.assignment.document_id': 'assignment-doc',
+    'table.assignment.sheet_id': 'assignment-sheet',
+    'table.assignment.view_id': 'assignment-view',
+    'table.assignment.unique_field_title': '联系方式',
+    'table.arrival_document_url': 'https://doc.weixin.qq.com/smartsheet/s3_APgA7xRqAB0CNRDGrbZAMSpK7ytM5_a?scode=AH8A3wd1ABArRb1alLAPgA7xRqAB0',
+    'table.arrival.document_id': 'arrival-doc',
+    'table.arrival.sheet_id': 'arrival-sheet',
+    'table.arrival.view_id': 'arrival-view',
+    'table.arrival.unique_field_title': '手机号码',
     'table.api_key': '****4321',
     'table.write_timeout_ms': '10000',
     'table.retry_max_count': '5',
@@ -229,11 +243,11 @@ const apiData: Record<string, unknown> = {
       { name: 'nickname', mapped: true, targetField: 'nickname', enabled: false },
       { name: 'store', mapped: false }
     ],
-    source: 'MAPPING_CONFIG',
-    fetchStatus: 'UNAVAILABLE',
-    externalFetchAvailable: false,
-    fallback: true,
-    fetchError: 'sheet timeout'
+    source: 'SHEET_SAMPLE',
+    fetchStatus: 'OK',
+    externalFetchAvailable: true,
+    schemaReadable: true,
+    fallback: false
   },
   '/admin/api/v1/datasources/10/mappings/compare': {
     summary: { currentCount: 2, baselineCount: 2, added: 1, removed: 1, changed: 1, unchanged: 0 },
@@ -441,6 +455,44 @@ const apiData: Record<string, unknown> = {
   '/admin/api/v1/analytics/lifecycle': { list: [{ leadType: 'TUAN_GOU', allocationToFirstContact: 1.5, allocationToArrival: 4.2, estimateSource: 'customers.updated_at' }] },
   '/admin/api/v1/analytics/risks': { customers: [{ phone: '18800001111', nickname: '张三', leadType: 'TUAN_GOU', customerStage: 'PENDING', assignedKeeper: '18800000001', lastFollowupAt: '2026-07-03T09:00:00Z' }], alerts: [] },
   '/admin/api/v1/analytics/content-ranking': { list: [{ action: 'COPY_REPLY', targetType: 'template', targetId: 'hi', useCount: 9, sampleDetail: '开场话术' }], leadTypeFilterApplied: null },
+  '/admin/api/v1/reply-confirmations/summary': {
+    copiedCount: 18,
+    awaitingDecisionCount: 2,
+    confirmingCount: 0,
+    unsentCount: 3,
+    recognitionRetryCount: 1,
+    sentCount: 12,
+    decidedCount: 16,
+    confirmedSendRate: 0.75
+  },
+  '/admin/api/v1/customer-master/default': {
+    record: {
+      customer: { id: 42, nickname: '王女士', phone: '13800000042', wechatId: 'wx-wang' },
+      fields: [
+        { fieldName: 'id', label: '客户编号', value: 42 },
+        { fieldName: 'nickname', label: '客户昵称', value: '王女士', source: '人工编辑', sourceField: '后台客户档案 · nickname' },
+        { fieldName: 'internalNote', label: '备注', value: null }
+      ]
+    }
+  },
+  '/admin/api/v1/customer-master/42/fields/nickname/history': [
+    { id: 101, changedAt: '2026-08-18T09:10:00', value: '王女士', source: '会话识别', sourceField: '客户对话文本 · nickname', operator: 'SYSTEM' },
+    { id: 102, changedAt: '2026-08-18T09:20:00', value: '王女士', source: '人工编辑', sourceField: '后台客户档案 · nickname', operator: 'keeper-1' }
+  ],
+  '/admin/api/v1/customer-master/search?q=1001': {
+    items: [
+      { id: 1001, nickname: '李女士', phone: '13800001001', wechatId: 'wx-li' },
+      { id: 1002, nickname: '李女士', phone: '13800001002', wechatId: 'wx-li-2' }
+    ]
+  },
+  '/admin/api/v1/customer-master/1001': {
+    customer: { id: 1001, nickname: '李女士', phone: '13800001001', wechatId: 'wx-li' },
+    fields: [
+      { fieldName: 'id', label: '客户编号', value: 1001 },
+      { fieldName: 'nickname', label: '客户昵称', value: '李女士' },
+      { fieldName: 'internalNote', label: '备注', value: null }
+    ]
+  },
   '/admin/api/v1/analytics/tags': {
     summary: {
       matchedCustomerCount: 4,
@@ -537,10 +589,14 @@ const apiData: Record<string, unknown> = {
       redis: { status: 'UP', duration: 'PT1M' },
       skill: { status: 'UP', duration: 'PT1M' },
       imageRecognition: { status: 'UP', duration: 'PT1M' },
-      wecomTable: { status: 'DOWN', duration: 'PT1M', detail: { pendingCount: 0, staleFailedCount: 1 } }
+      wecomTableConnection: { status: 'UP', duration: 'PT1M', detail: { checkedTableCount: 3 } },
+      wecomTableQueue: { status: 'DOWN', duration: 'PT1M', detail: { pendingCount: 0, staleFailedCount: 1 } }
     },
     recentAlerts: [{ id: 90, alertType: 'IMAGE_DOWN', level: 'WARN', status: 'OPEN', message: '识图异常', occurredAt: '2026-07-03T09:00:00Z', detail: '{"lastError":"timeout"}' }]
-  }
+  },
+  '/admin/api/v1/table-writes/failed': [
+    { id: 71, customerId: 11, phoneLast4: '1111', actionType: 'UPDATE', retryCount: 5, errorMsg: 'queued table write contains fields without mappings', updatedAt: '2026-07-03T09:00:00Z' }
+  ]
 };
 
 async function flushUi() {
@@ -661,6 +717,7 @@ describe('AdminConsole product surface', () => {
       'Skill 场景管理',
       '配置中心',
       '客户数据对接',
+      '唯一事实数据库',
       '速搜内容管理',
       '可推广模板',
       '账号与权限',
@@ -859,11 +916,8 @@ describe('AdminConsole product surface', () => {
     expect(mainText(host)).not.toContain('温度覆盖');
     expect(mainText(host)).not.toContain('队列提醒阈值');
 
-    findButton(host, '展开服务器部署配置').click();
-    await flushUi();
-    expect(mainText(host)).toContain('表格连接服务地址');
-    expect(mainText(host)).toContain('等待写入超过多少条时提醒');
-    expect(mainText(host)).toContain('等待写入达到多少条时暂停新增');
+    expect(mainText(host)).not.toContain('服务器部署配置');
+    expect(mainText(host)).not.toContain('表格连接密钥');
 
     findButton(host, 'Skill 运行保护').click();
     await flushUi();
@@ -944,17 +998,10 @@ describe('AdminConsole product surface', () => {
     findButton(capabilityModal, '关闭').click();
     await flushUi();
 
-    findButton(host, '保存服务器部署配置').click();
-    await flushSave();
-    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/table.api_base_url', { value: 'https://table.example.com' });
-    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/table.retry_max_count', { value: '5' });
-    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/table.queue_alert_threshold', { value: '1000' });
-    expect(apiMocks.putJson).not.toHaveBeenCalledWith('/admin/api/v1/configs/table.api_key', expect.anything());
-
     const relayUrlInput = host.querySelector('input[aria-label="企业微信服务器转发地址"]') as HTMLInputElement;
     expect(mainText(host)).toContain('在哪里找？');
-    expect(mainText(host)).toContain('wecom.relay_base_url');
-    expect(mainText(host)).toContain('WECOM_API_BASE_URL');
+    expect(mainText(host)).toContain('WECOM_RELAY_BASE_URL');
+    expect(mainText(host)).toContain('WECOM_RELAY_KEY_ID');
     const beforeBlankRelaySaveCalls = apiMocks.putJson.mock.calls.length;
     findButton(host, '保存企业微信连接').click();
     await flushSave();
@@ -967,15 +1014,6 @@ describe('AdminConsole product surface', () => {
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/wecom.relay_base_url', { value: 'https://wecom-relay.example.com' });
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/configs/wecom.connection_mode', { value: 'RELAY' });
-    const beforeTableKeySaveCalls = apiMocks.putJson.mock.calls.length;
-
-    const tableKeyInput = host.querySelector('input[aria-label="企微表格网关 API 密钥"]') as HTMLInputElement;
-    setInputValue(tableKeyInput, 'new-table-secret');
-    await flushUi();
-    findButton(host, '保存服务器部署配置').click();
-    await flushSave();
-    expect(apiMocks.putJson.mock.calls.slice(beforeTableKeySaveCalls)).toContainEqual(['/admin/api/v1/configs/table.api_key', { value: 'new-table-secret' }]);
-
     const advancedGroups = host.querySelector('.ops-advanced-config-groups') as HTMLElement;
     findButton(advancedGroups, '数据同步').click();
     await flushUi();
@@ -1126,7 +1164,7 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
-  it('shows beginner instructions, verified Smart Sheet linking, and progressive technical settings', async () => {
+  it('shows beginner instructions and verifies each fixed Smart Sheet without technical settings', async () => {
     apiMocks.postJson.mockImplementation(async (path: string) => path === '/admin/api/v1/datasources/smart-sheet-connection'
       ? {
           success: true,
@@ -1157,31 +1195,39 @@ describe('AdminConsole product surface', () => {
 
     expect(mainText(host)).toContain('连接企业微信智能表格');
     expect(mainText(host)).toContain('打开目标表格，复制浏览器地址栏里的完整链接');
-    expect(mainText(host)).toContain('必须是本系统通过企业微信 API 创建并纳入管理的智能表格');
-    expect(mainText(host)).toContain('你在企微中手动新建的智能表格不能连接');
+    expect(mainText(host)).toContain('系统会立即使用这里的配置进行读取和写入');
+    expect(mainText(host)).toContain('更换为另一张表时使用');
     expect(host.querySelectorAll('.ops-smart-sheet-card')).toHaveLength(3);
     expect(mainText(host)).toContain('客户主表');
     expect(mainText(host)).toContain('分配表');
     expect(mainText(host)).toContain('到店表');
+    expect(mainText(host)).toContain('https://doc.weixin.qq.com/smartsheet/doc-api-owned');
+    expect(mainText(host)).toContain('s3_APgA7xRqAB0CNrQ1UhsSTQXykhFvt_a');
+    expect(mainText(host)).toContain('s3_APgA7xRqAB0CNRDGrbZAMSpK7ytM5_a');
 
     const smartSheetInput = host.querySelector('input[aria-label="企业微信智能表格链接"]') as HTMLInputElement;
     expect(smartSheetInput.value).toBe('https://doc.weixin.qq.com/smartsheet/doc-api-owned');
     expect(host.querySelector('input[aria-label="企微表格网关 API 密钥"]')).toBeFalsy();
-    setInputValue(smartSheetInput, 'https://doc.weixin.qq.com/smartsheet/doc-api-owned');
     const smartSheetRoleSelect = host.querySelector('select[aria-label="连接表格角色"]') as HTMLSelectElement;
     expect(smartSheetRoleSelect).toBeTruthy();
-    setInputValue(smartSheetRoleSelect, 'ASSIGNMENT');
+    const assignmentCard = [...host.querySelectorAll('.ops-smart-sheet-card')]
+      .find((card) => card.textContent?.includes('分配表')) as HTMLElement;
+    findButton(assignmentCard, '配置这张表').click();
+    await flushUi();
+    expect(smartSheetRoleSelect.value).toBe('ASSIGNMENT');
+    expect(smartSheetInput.value).toBe('https://doc.weixin.qq.com/smartsheet/s3_APgA7xRqAB0CNrQ1UhsSTQXykhFvt_a?scode=AH8A3wd1ABArdRWh2eAPgA7xRqAB0');
     findButton(host, '保存并检测这张表').click();
     await flushSave();
     expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/datasources/smart-sheet-connection', {
-      documentUrl: 'https://doc.weixin.qq.com/smartsheet/doc-api-owned',
-      role: 'ASSIGNMENT'
+      documentUrl: 'https://doc.weixin.qq.com/smartsheet/s3_APgA7xRqAB0CNrQ1UhsSTQXykhFvt_a?scode=AH8A3wd1ABArdRWh2eAPgA7xRqAB0',
+      role: 'ASSIGNMENT',
+      documentId: 'assignment-doc',
+      sheetId: 'assignment-sheet',
+      viewId: 'assignment-view',
+      uniqueFieldTitle: '联系方式'
     });
     expect(mainText(host)).toContain('已连接：客户资料表');
-
-    findButton(host, '展开服务器部署配置').click();
-    await flushUi();
-    expect(host.querySelector('input[aria-label="企微表格网关 API 密钥"]')).toBeTruthy();
+    expect(host.querySelector('input[aria-label="企微表格网关 API 密钥"]')).toBeFalsy();
 
     expect(mainText(host)).not.toContain('自动同步 Cron');
     expect(mainText(host)).not.toContain('客户缓存 TTL');
@@ -1210,6 +1256,30 @@ describe('AdminConsole product surface', () => {
     expect(promptEditor.textContent).toContain('已有默认内容时通常无需修改');
 
     app.unmount();
+  });
+
+  it('does not call a datasource connected when its browser URL is missing', async () => {
+    const configs = apiData['/admin/api/v1/configs'] as Record<string, string>;
+    const savedDocumentUrl = configs['table.document_url'];
+    configs['table.document_url'] = '';
+    try {
+      const { app, host } = await mountConsole();
+      findSubnavButton(host, '配置中心').click();
+      await flushSave();
+
+      const primaryCard = [...host.querySelectorAll('.ops-smart-sheet-card')]
+        .find((card) => card.textContent?.includes('客户主表')) as HTMLElement;
+      expect(primaryCard.textContent).toContain('待补网址');
+      expect(primaryCard.textContent).toContain('未保存网址');
+
+      findButton(primaryCard, '配置这张表').click();
+      await flushUi();
+      const smartSheetInput = host.querySelector('input[aria-label="企业微信智能表格链接"]') as HTMLInputElement;
+      expect(smartSheetInput.value).toBe('');
+      app.unmount();
+    } finally {
+      configs['table.document_url'] = savedDocumentUrl;
+    }
   });
 
   it('uses readable fallbacks for broken environment names and an empty image selector state', async () => {
@@ -1610,11 +1680,41 @@ describe('AdminConsole product surface', () => {
     expect(mainText(host)).toContain('字段映射');
     expect(mainText(host)).toContain('CSV 导入');
     expect(mainText(host)).not.toContain('速搜内容');
-    expect(host.querySelector('.ops-mapping-grid input')).toBeTruthy();
+    findButton(host, '字段映射').click();
+    await flushUi();
+    expect(host.querySelector('.ops-mapping-grid select')).toBeTruthy();
+    expect(apiMocks.getJson.mock.calls.some(([path]) =>
+      String(path).startsWith('/admin/api/v1/datasources/10/columns?refresh='))).toBe(true);
+    expect(mainText(host)).toContain('每个表格列选择对应的系统内容');
+    expect(mainText(host)).toContain('设置表格列写入的系统内容');
+    expect(host.querySelector('select[aria-label="phone对应系统内容"]')).toBeTruthy();
+    apiMocks.getJson.mockImplementation(async (path: string) => ({
+      success: true,
+      data: path.split('?')[0] === '/admin/api/v1/datasources/10/columns'
+        ? {
+            datasourceId: 10,
+            sourceTable: 'leads',
+            columns: [
+              { name: 'phone', mapped: true, targetField: 'phone', enabled: true },
+              { name: 'nickname', mapped: true, targetField: 'nickname', enabled: false },
+              { name: 'store', mapped: false }
+            ],
+            source: 'MAPPING_CONFIG',
+            fetchStatus: 'UNAVAILABLE',
+            externalFetchAvailable: false,
+            schemaReadable: false,
+            fallback: true,
+            fetchError: 'sheet timeout'
+          }
+        : apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] },
+      errorCode: null,
+      message: null
+    }));
     findButton(host, '识别列名').click();
     await flushUi();
     expect(mainText(host)).toContain('真实表格暂不可用');
     expect(mainText(host)).toContain('取样失败：sheet timeout');
+    expect(mainText(host)).toContain('映射已锁定');
     findButton(host, '对比最新版本').click();
     await flushUi();
     expect(mainText(host)).toContain('新增映射（1）');
@@ -1639,12 +1739,7 @@ describe('AdminConsole product surface', () => {
 
     findButton(host, '保存映射').click();
     await flushUi();
-    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/datasources/10/mappings', {
-      mappings: [
-        { targetField: 'phone', sourceField: 'phone', enabled: true },
-        { targetField: 'nickname', sourceField: 'nickname', enabled: false }
-      ]
-    });
+    expect(apiMocks.putJson).not.toHaveBeenCalledWith('/admin/api/v1/datasources/10/mappings', expect.anything());
 
     findSubnavButton(host, '速搜内容管理').click();
     await flushUi();
@@ -1652,6 +1747,49 @@ describe('AdminConsole product surface', () => {
     expect(mainText(host)).toContain('开场话术');
     expect(mainText(host)).not.toContain('客户数据源');
     expect(host.querySelector('.ops-filter-bar input')).toBeTruthy();
+
+    app.unmount();
+  });
+
+  it('lets an administrator choose which system content each table column writes', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户数据对接').click();
+    await flushUi();
+    findButton(host, '字段映射').click();
+    await flushUi();
+
+    const storeMapping = host.querySelector('select[aria-label="store对应系统内容"]') as HTMLSelectElement;
+    expect(storeMapping).toBeTruthy();
+    setInputValue(storeMapping, 'phone');
+    await flushUi();
+    expect(mainText(host)).toContain('将写入系统：手机号');
+
+    findButton(host, '保存映射').click();
+    await flushUi();
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/datasources/10/mappings', {
+      mappings: [
+        { targetField: 'phone', sourceField: 'store', enabled: true },
+        { targetField: 'nickname', sourceField: 'nickname', enabled: false }
+      ]
+    });
+
+    app.unmount();
+  });
+
+  it('updates the datasource mapping count immediately after saving', async () => {
+    apiMocks.putJson.mockResolvedValueOnce({ success: true, data: { mappingCount: 1, version: 4 }, errorCode: null, message: null });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户数据对接').click();
+    await flushUi();
+    await flushUi();
+    findButton(host, '保存映射').click();
+    await flushUi();
+
+    const datasourceRow = [...host.querySelectorAll('.ops-table-row')]
+      .find((row) => row.textContent?.includes('企微客资表')) as HTMLElement;
+    expect(datasourceRow.children[3]?.textContent).toBe('1');
 
     app.unmount();
   });
@@ -2097,6 +2235,9 @@ describe('AdminConsole product surface', () => {
     expect(mainText(host)).toContain('企微');
     expect(mainText(host)).toContain('张三');
     expect(mainText(host)).toContain('开场话术');
+    expect(mainText(host)).toContain('回复确认状态');
+    expect(mainText(host)).toContain('明确未发送');
+    expect(mainText(host)).toContain('已确认发送率 75%');
     expect([...host.querySelectorAll('option')].map((option) => option.getAttribute('value'))).toContain('GENERAL');
 
     findSubnavButton(host, '版本管理').click();
@@ -2131,7 +2272,14 @@ describe('AdminConsole product surface', () => {
     expect(mainText(host)).toContain('数据库');
     expect(mainText(host)).toContain('自动刷新 45 秒');
     expect(mainText(host)).toContain('识图服务不可用');
+    expect(mainText(host)).toContain('企业微信智能表格连通性');
+    expect(mainText(host)).toContain('已实际检查 3 张已配置智能表格的访问权限');
+    expect(mainText(host)).toContain('企业微信表格写入队列');
     expect(mainText(host)).toContain('写入队列中有 1 条过期失败记录');
+    expect(mainText(host)).toContain('智能表格写入失败记录');
+    expect(mainText(host)).toContain('有字段未配置企业微信表格映射');
+    expect(mainText(host)).not.toContain('queued table write contains fields without mappings');
+    expect(mainText(host)).toContain('尾号 1111');
 
     app.unmount();
   });
@@ -2168,6 +2316,75 @@ describe('AdminConsole product surface', () => {
       permissions: ['TAG_MANAGEMENT']
     });
 
+    app.unmount();
+  });
+
+  it('shows a read-only customer master record and lets duplicate search results be selected in one dialog', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '唯一事实数据库').click();
+    await flushSave();
+    expect(mainText(host)).toContain('客户唯一事实数据库');
+    expect(mainText(host)).toContain('王女士');
+    expect(mainText(host)).toContain('客户编号');
+    expect(mainText(host)).toContain('真实值');
+    expect(mainText(host)).toContain('最新来源');
+    expect(mainText(host)).toContain('人工编辑');
+
+    findButton(host, '查找客户').click();
+    await flushUi();
+    const searchInput = host.querySelector('input[aria-label="搜索客户"]') as HTMLInputElement;
+    setInputValue(searchInput, '1001');
+    await flushUi();
+    const searchButton = host.querySelector('.customer-master-search-form button') as HTMLButtonElement;
+    expect(searchButton.disabled).toBe(false);
+    searchButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await flushUi();
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/customer-master/search?q=1001');
+    expect(host.querySelectorAll('.customer-master-candidate')).toHaveLength(2);
+
+    (host.querySelector('.customer-master-candidate') as HTMLButtonElement).click();
+    await flushUi();
+    expect(mainText(host)).toContain('李女士');
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    app.unmount();
+  });
+
+  it('opens a field history dialog with every recorded value change', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '唯一事实数据库').click();
+    await flushSave();
+    const nicknameRow = [...host.querySelectorAll('.ops-table-row.customer-master-fields')]
+      .find((row) => row.textContent?.includes('客户昵称')) as HTMLElement;
+    findButton(nicknameRow, '查看历史').click();
+    await flushUi();
+
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/customer-master/42/fields/nickname/history');
+    const dialog = host.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.textContent).toContain('客户昵称历史');
+    expect(dialog.textContent).toContain('时间');
+    expect(dialog.textContent).toContain('会话识别');
+    expect(dialog.textContent).toContain('人工编辑');
+    expect(dialog.textContent).toContain('keeper-1');
+    app.unmount();
+  });
+
+  it('closes a permanently invalid table write failure after confirmation', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '系统健康监控').click();
+    await flushSave();
+    const failureRow = [...host.querySelectorAll('.ops-table-row.table-write-failure')]
+      .find((row) => row.textContent?.includes('#71')) as HTMLElement;
+    const closeButton = findButton(failureRow, '关闭');
+    await vi.waitFor(() => expect(closeButton.disabled).toBe(false));
+    closeButton.click();
+    await flushSave();
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('确认关闭智能表格写入记录 #71'));
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/table-writes/71/resolve', {});
     app.unmount();
   });
 

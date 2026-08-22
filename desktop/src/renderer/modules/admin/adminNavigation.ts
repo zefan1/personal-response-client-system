@@ -4,6 +4,7 @@ export type SectionKey =
   | 'skill-scenes'
   | 'configuration-center'
   | 'data-integration'
+  | 'single-source-of-truth'
   | 'quick-search-content'
   | 'template-promotion-candidates'
   | 'account-permissions'

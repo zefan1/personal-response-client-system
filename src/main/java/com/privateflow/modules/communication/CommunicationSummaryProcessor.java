@@ -4,6 +4,7 @@ import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.modules.llm.LlmSummaryInput;
 import com.privateflow.modules.llm.LlmSummaryService;
 import com.privateflow.modules.profile.infra.ProfileWriter;
+import com.privateflow.modules.customer.history.CustomerFieldHistoryContext;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -86,7 +87,8 @@ public class CommunicationSummaryProcessor {
           phone,
           Map.of("customerProfileSummary", summary),
           null,
-          true);
+          true,
+          CustomerFieldHistoryContext.of("沟通汇总", "客户沟通消息", "SYSTEM"));
     } catch (RuntimeException ex) {
       repository.markSummaryFailed(
           customerId,

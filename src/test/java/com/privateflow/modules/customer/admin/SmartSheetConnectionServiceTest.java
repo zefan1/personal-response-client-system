@@ -1,113 +1,95 @@
 package com.privateflow.modules.customer.admin;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.config.ConfigAdminService;
 import com.privateflow.modules.tablewrite.client.WecomSmartSheetApiClient;
+import com.privateflow.modules.tablewrite.client.WecomSmartSheetFieldCatalog;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTargets;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
 import java.time.Duration;
-import java.util.Map;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class SmartSheetConnectionServiceTest {
 
-  private static final String DOCUMENT_ID = "doc-api-owned";
-  private static final String SHEET_ID = "sheet-api-owned";
-  private static final String VIEW_ID = "view-api-owned";
-  private static final String DOCUMENT_URL = "https://doc.weixin.qq.com/smartsheet/doc-api-owned";
-
-  private final ObjectMapper objectMapper = new ObjectMapper();
-  private final WecomSmartSheetApiClient apiClient = mock(WecomSmartSheetApiClient.class);
-  private final ConfigAdminService configAdminService = mock(ConfigAdminService.class);
-  private SmartSheetConnectionService service;
-
-  @BeforeEach
-  void setUp() {
-    WecomSmartSheetConfig config = new WecomSmartSheetConfig(
-        "https://qyapi.weixin.qq.com",
-        "corp-id",
-        "app-secret",
-        DOCUMENT_ID,
-        SHEET_ID,
-        VIEW_ID,
-        "customer_api_sheet",
-        "联系方式");
-    service = new SmartSheetConnectionService(config, apiClient, configAdminService);
-  }
+  private final ObjectMapper mapper = new ObjectMapper();
 
   @Test
-  void rejectsBlankOrNonHttpLinks() {
-    assertThatThrownBy(() -> service.verifyAndSave(new SmartSheetConnectionRequest("")))
-        .isInstanceOf(ApiException.class)
-        .hasMessageContaining("完整链接");
-    assertThatThrownBy(() -> service.verifyAndSave(new SmartSheetConnectionRequest("file:///tmp/table")))
-        .isInstanceOf(ApiException.class)
-        .hasMessageContaining("完整链接");
-  }
+  void pastedBrowserUrlUsesExistingApiDocumentAndDiscoversFields() throws Exception {
+    WecomSmartSheetApiClient client = mock(WecomSmartSheetApiClient.class);
+    ConfigAdminService configs = mock(ConfigAdminService.class);
+    WecomSmartSheetConfig smartSheetConfig = new WecomSmartSheetConfig(
+        "https://qyapi.weixin.qq.com", "corp", "secret", "doc-1", "", "", "", "");
+    SmartSheetConnectionService service = new SmartSheetConnectionService(
+        smartSheetConfig, new AuxiliarySmartSheetTargets(), client, configs);
+    when(client.postWithApplicationCredentials(eq("get_sheet"), any(), any(Duration.class)))
+        .thenReturn(json("{\"sheet_list\":[{\"sheet_id\":\"sheet-1\",\"title\":\"customer\"}]}"));
+    when(client.postWithApplicationCredentials(eq("get_views"), any(), any(Duration.class)))
+        .thenReturn(json("{\"views\":[{\"view_id\":\"view-1\",\"view_name\":\"default\"}]}"));
+    when(client.postWithApplicationCredentials(eq("get_fields"), any(), any(Duration.class)))
+        .thenReturn(json("{\"fields\":[{\"field_id\":\"f-1\",\"field_title\":\"\\u8054\\u7cfb\\u65b9\\u5f0f\"}]}"));
 
-  @Test
-  void rejectsTablesThatAreNotTheConfiguredApiOwnedDocument() {
-    assertThatThrownBy(() -> service.verifyAndSave(new SmartSheetConnectionRequest(
-        "https://doc.weixin.qq.com/smartsheet/manually-created")))
-        .isInstanceOf(ApiException.class)
-        .hasMessageContaining("不是本系统通过企业微信 API 创建并纳入的数据表");
-  }
-
-  @Test
-  void rejectsConfiguredDocumentsWithoutTheExpectedChildSheet() throws Exception {
-    when(apiClient.post(eq("get_sheet"), any(), any(Duration.class)))
-        .thenReturn(json("{\"sheet_list\":[{\"sheet_id\":\"other-sheet\",\"sheet_name\":\"其他表\"}]}"));
-
-    assertThatThrownBy(() -> service.verifyAndSave(new SmartSheetConnectionRequest(DOCUMENT_URL)))
-        .isInstanceOf(ApiException.class)
-        .hasMessageContaining("没有找到本系统创建的子表");
-  }
-
-  @Test
-  void rejectsConfiguredDocumentsWithoutTheExpectedView() throws Exception {
-    when(apiClient.post(eq("get_sheet"), any(), any(Duration.class)))
-        .thenReturn(sheetResponse(SHEET_ID, "客户资料表"));
-    when(apiClient.post(eq("get_views"), any(), any(Duration.class)))
-        .thenReturn(json("{\"views\":[{\"view_id\":\"other-view\",\"view_name\":\"其他视图\"}]}"));
-
-    assertThatThrownBy(() -> service.verifyAndSave(new SmartSheetConnectionRequest(DOCUMENT_URL)))
-        .isInstanceOf(ApiException.class)
-        .hasMessageContaining("没有找到本系统创建的表格视图");
-  }
-
-  @Test
-  void verifiesAndStoresTheConfiguredApiOwnedDocumentUrl() throws Exception {
-    when(apiClient.post(eq("get_sheet"), any(), any(Duration.class)))
-        .thenReturn(sheetResponse(SHEET_ID, "客户资料表"));
-    when(apiClient.post(eq("get_views"), any(), any(Duration.class)))
-        .thenReturn(json("{\"views\":[{\"view_id\":\"" + VIEW_ID + "\",\"view_name\":\"默认视图\"}]}"));
-
-    SmartSheetConnectionResult result = service.verifyAndSave(new SmartSheetConnectionRequest(DOCUMENT_URL));
+    SmartSheetConnectionResult result = service.verifyAndSave(new SmartSheetConnectionRequest(
+        "https://doc.weixin.qq.com/smartsheet/s3_document?tab=sheet-1&viewId=view-1"));
 
     assertThat(result.connected()).isTrue();
-    assertThat(result.tableName()).isEqualTo("客户资料表");
-    assertThat(result.documentId()).isEqualTo(DOCUMENT_ID);
-    assertThat(result.sheetId()).isEqualTo(SHEET_ID);
-    assertThat(result.viewId()).isEqualTo(VIEW_ID);
-    assertThat(result.documentUrl()).isEqualTo(DOCUMENT_URL);
-    verify(configAdminService).update("table.document_url", Map.of("value", DOCUMENT_URL));
+    assertThat(result.documentId()).isEqualTo("doc-1");
+    assertThat(result.sheetId()).isEqualTo("sheet-1");
+    assertThat(result.viewId()).isEqualTo("view-1");
+    assertThat(result.uniqueFieldTitle()).isEqualTo("\u8054\u7cfb\u65b9\u5f0f");
   }
 
-  private JsonNode sheetResponse(String sheetId, String sheetName) throws Exception {
-    return json("{\"sheet_list\":[{\"sheet_id\":\"" + sheetId + "\",\"sheet_name\":\"" + sheetName + "\"}]}");
+  @Test
+  void savesUniqueFieldWhenTheApiReturnsTitleVariantInsteadOfFieldTitle() throws Exception {
+    WecomSmartSheetApiClient client = mock(WecomSmartSheetApiClient.class);
+    ConfigAdminService configs = mock(ConfigAdminService.class);
+    WecomSmartSheetConfig smartSheetConfig = new WecomSmartSheetConfig(
+        "https://qyapi.weixin.qq.com", "corp", "secret", "doc-1", "", "", "", "");
+    SmartSheetConnectionService service = new SmartSheetConnectionService(
+        smartSheetConfig, new AuxiliarySmartSheetTargets(), client, configs);
+    when(client.postWithApplicationCredentials(eq("get_sheet"), any(), any(Duration.class)))
+        .thenReturn(json("{\"sheet_list\":[{\"sheet_id\":\"sheet-1\",\"title\":\"customer\"}]}"));
+    when(client.postWithApplicationCredentials(eq("get_views"), any(), any(Duration.class)))
+        .thenReturn(json("{\"views\":[{\"view_id\":\"view-1\"}]}"));
+    when(client.postWithApplicationCredentials(eq("get_fields"), any(), any(Duration.class)))
+        .thenReturn(json("{\"fields\":[{\"field_id\":\"f-1\",\"title\":\"手机号码\"}]}"));
+
+    SmartSheetConnectionResult result = service.verifyAndSave(new SmartSheetConnectionRequest(
+        "https://doc.weixin.qq.com/smartsheet/s3_document?tab=sheet-1"));
+
+    assertThat(result.connected()).isTrue();
+    assertThat(result.uniqueFieldTitle()).isEqualTo("手机号码");
+  }
+
+  @Test
+  void invalidatesFieldDirectoryAfterConnectionIsSaved() throws Exception {
+    WecomSmartSheetApiClient client = mock(WecomSmartSheetApiClient.class);
+    ConfigAdminService configs = mock(ConfigAdminService.class);
+    WecomSmartSheetFieldCatalog catalog = mock(WecomSmartSheetFieldCatalog.class);
+    WecomSmartSheetConfig smartSheetConfig = new WecomSmartSheetConfig(
+        "https://qyapi.weixin.qq.com", "corp", "secret", "doc-1", "", "", "", "");
+    SmartSheetConnectionService service = new SmartSheetConnectionService(
+        smartSheetConfig, new AuxiliarySmartSheetTargets(), client, configs, null, catalog);
+    when(client.postWithApplicationCredentials(eq("get_sheet"), any(), any(Duration.class)))
+        .thenReturn(json("{\"sheet_list\":[{\"sheet_id\":\"sheet-1\"}]}"));
+    when(client.postWithApplicationCredentials(eq("get_views"), any(), any(Duration.class)))
+        .thenReturn(json("{\"views\":[{\"view_id\":\"view-1\"}]}"));
+    when(client.postWithApplicationCredentials(eq("get_fields"), any(), any(Duration.class)))
+        .thenReturn(json("{\"fields\":[{\"field_id\":\"f-1\",\"field_title\":\"手机号码\"}]}"));
+
+    service.verifyAndSave(new SmartSheetConnectionRequest(
+        "https://doc.weixin.qq.com/smartsheet/s3_document?tab=sheet-1"));
+
+    org.mockito.Mockito.verify(catalog).invalidate();
   }
 
   private JsonNode json(String value) throws Exception {
-    return objectMapper.readTree(value);
+    return mapper.readTree(value);
   }
 }

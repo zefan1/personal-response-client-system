@@ -3,6 +3,7 @@ param(
   [ValidateSet('Status', 'Configure', 'Provision', 'Accept', 'Start')]
   [string]$Mode = 'Status',
   [string]$Path = (Join-Path $env:LOCALAPPDATA 'PrivateDomainAssistant\wecom-smartsheet.clixml'),
+  [string]$RelayPath = (Join-Path $env:LOCALAPPDATA 'PrivateDomainAssistant\wecom-relay.clixml'),
   [string]$SmartSheetLink,
   [string]$CorpId,
   [string]$DraftSecretPath = (Join-Path $env:LOCALAPPDATA 'PrivateDomainAssistant\wecom-smartsheet-secret-draft.clixml'),
@@ -38,6 +39,23 @@ switch ($Mode) {
       WECOM_CORP_ID = $CorpId.Trim()
       WECOM_APP_SECRET = [System.Net.NetworkCredential]::new('', $draft.Value).Password
     }
+    # Provisioning creates a separate document, but must use the same configured relay
+    # as the application. Do not fall back to direct WeCom calls when a relay is present.
+    $relayNames = @('WECOM_TRANSPORT_MODE', 'WECOM_RELAY_BASE_URL', 'WECOM_RELAY_KEY_ID', 'WECOM_RELAY_SECRET')
+    if (Test-Path -LiteralPath $RelayPath -PathType Leaf) {
+      $relayStored = Import-Clixml -LiteralPath $RelayPath -ErrorAction Stop
+      foreach ($name in $relayNames) {
+        $property = $relayStored.Values.PSObject.Properties[$name]
+        if ($null -eq $property -or $property.Value -isnot [System.Security.SecureString]) {
+          throw "Encrypted WeCom relay configuration is incomplete: $name"
+        }
+        $plainValue = [System.Net.NetworkCredential]::new('', $property.Value).Password
+        if ([string]::IsNullOrWhiteSpace($plainValue)) {
+          throw "Encrypted WeCom relay configuration is incomplete: $name"
+        }
+        $settings[$name] = $plainValue
+      }
+    }
     if ($null -eq $CreateDocument -or $null -eq $PrepareSheet) {
       $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
       $jarPath = Join-Path $projectRoot 'target\private-domain-assistant-0.1.0-SNAPSHOT.jar'
@@ -59,7 +77,11 @@ switch ($Mode) {
           'WECOM_SMARTSHEET_DOCUMENT_NAME',
           'WECOM_SMARTSHEET_PROVISIONING_MODE',
           'WECOM_SMARTSHEET_DOC_ID',
-          'WECOM_SMARTSHEET_DOCUMENT_URL'
+          'WECOM_SMARTSHEET_DOCUMENT_URL',
+          'WECOM_TRANSPORT_MODE',
+          'WECOM_RELAY_BASE_URL',
+          'WECOM_RELAY_KEY_ID',
+          'WECOM_RELAY_SECRET'
         )
         $previous = @{}
         try {
@@ -70,6 +92,13 @@ switch ($Mode) {
           $env:WECOM_APP_SECRET = [string]$connection['WECOM_APP_SECRET']
           $env:WECOM_SMARTSHEET_DOCUMENT_NAME = $name
           $env:WECOM_SMARTSHEET_PROVISIONING_MODE = $mode
+          foreach ($relayName in @('WECOM_TRANSPORT_MODE', 'WECOM_RELAY_BASE_URL', 'WECOM_RELAY_KEY_ID', 'WECOM_RELAY_SECRET')) {
+            if ($connection.ContainsKey($relayName)) {
+              Set-Item -Path "Env:$relayName" -Value ([string]$connection[$relayName])
+            } else {
+              Remove-Item -Path "Env:$relayName" -ErrorAction SilentlyContinue
+            }
+          }
           if ($null -ne $created) {
             $env:WECOM_SMARTSHEET_DOC_ID = [string]$created.documentId
             $env:WECOM_SMARTSHEET_DOCUMENT_URL = [string]$created.documentUrl
@@ -266,7 +295,7 @@ switch ($Mode) {
         }
       }.GetNewClosure()
     }
-    Invoke-WithWecomSmartSheetEnvironment -Path $Path -Command $RunCommand
+    Invoke-WithWecomSmartSheetEnvironment -Path $Path -RelayPath $RelayPath -Command $RunCommand
   }
   'Start' {
     $status = Get-WecomSmartSheetConfigurationStatus -Path $Path
@@ -301,8 +330,9 @@ switch ($Mode) {
         'WECOM_SMARTSHEET_SOURCE_TABLE',
         'WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE'
       )
+      $entries += @('WECOM_TRANSPORT_MODE', 'WECOM_RELAY_BASE_URL', 'WECOM_RELAY_KEY_ID', 'WECOM_RELAY_SECRET')
       $env:WSLENV = (@($entries | Select-Object -Unique) -join ':')
-      Invoke-WithWecomSmartSheetEnvironment -Path $Path -Command $RunCommand
+      Invoke-WithWecomSmartSheetEnvironment -Path $Path -RelayPath $RelayPath -Command $RunCommand
     } finally {
       if ($null -eq $previousWslEnv) {
         Remove-Item Env:WSLENV -ErrorAction SilentlyContinue

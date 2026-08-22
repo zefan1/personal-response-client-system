@@ -3,7 +3,9 @@ package com.privateflow.modules.customer.booking;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.profile.infra.ProfileWriter;
-import com.privateflow.modules.tablewrite.client.WecomTableClient;
+import com.privateflow.modules.tablewrite.client.AuxiliarySmartSheetWriter;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTargets;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import com.privateflow.modules.tablewrite.infra.TableFieldMappingResolver;
 import java.time.Duration;
@@ -14,19 +16,20 @@ import org.springframework.stereotype.Service;
 @Service
 public class CustomerBookingService {
 
-  private static final String ARRIVAL_TABLE = "新客到店衔接表（辅助）";
   private final CustomerQueryService customers;
   private final ProfileWriter writer;
-  private final WecomTableClient tableClient;
+  private final AuxiliarySmartSheetWriter smartSheetWriter;
+  private final AuxiliarySmartSheetTargets smartSheetTargets;
   private final TableConfigProvider configProvider;
   private final TableFieldMappingResolver mappingResolver;
 
   public CustomerBookingService(CustomerQueryService customers, ProfileWriter writer,
-      WecomTableClient tableClient, TableConfigProvider configProvider,
-      TableFieldMappingResolver mappingResolver) {
+      AuxiliarySmartSheetWriter smartSheetWriter, AuxiliarySmartSheetTargets targets,
+      TableConfigProvider configProvider, TableFieldMappingResolver mappingResolver) {
     this.customers = customers;
     this.writer = writer;
-    this.tableClient = tableClient;
+    this.smartSheetWriter = smartSheetWriter;
+    this.smartSheetTargets = targets;
     this.configProvider = configProvider;
     this.mappingResolver = mappingResolver;
   }
@@ -42,27 +45,43 @@ public class CustomerBookingService {
     fields.put("appointmentStore", request.appointmentStore());
     fields.put("appointmentItem", request.appointmentItem());
     fields.put("appointmentStatus", "待确认");
-    writer.write(phone, fields, customer.getVersion(), true);
-    return new BookingConfirmResult("待确认", template(request));
+    int bookedVersion = writer.write(phone, fields, customer.getVersion(), true);
+    complete(customer, request.appointmentDate(), request.appointmentStore(), request.appointmentItem(),
+        bookedVersion);
+    return new BookingConfirmResult("已预约", template(request));
   }
 
   public void completeAfterSuggestion(String phone) {
     Customer customer = requireCustomer(phone);
-    if (!"待确认".equals(customer.getAppointmentStatus()) || blank(customer.getNickname())
-        || !blank(customer.getArrivalSourceRowId())) {
+    if (!"待确认".equals(customer.getAppointmentStatus())) {
       return;
     }
+    complete(customer, customer.getAppointmentDate(), customer.getAppointmentStore(),
+        customer.getAppointmentItem(), customer.getVersion());
+  }
+
+  private void complete(
+      Customer customer,
+      Object appointmentDate,
+      String appointmentStore,
+      String appointmentItem,
+      int expectedVersion) {
     Map<String, Object> fields = new LinkedHashMap<>();
     fields.put("nickname", customer.getNickname());
     fields.put("phone", customer.getPhone());
-    fields.put("appointmentDate", customer.getAppointmentDate());
-    fields.put("appointmentStore", customer.getAppointmentStore());
-    fields.put("appointmentItem", customer.getAppointmentItem());
-    String rowId = tableClient.createRow(ARRIVAL_TABLE,
-        mappingResolver.toSourceFields(ARRIVAL_TABLE, fields),
+    fields.put("appointmentDate", appointmentDate);
+    fields.put("appointmentStore", appointmentStore);
+    fields.put("intendedProject", appointmentItem);
+    fields.put("assignedKeeper", customer.getAssignedKeeper());
+    AuxiliarySmartSheetTarget arrivalTarget = smartSheetTargets.arrival()
+        .orElseThrow(() -> new IllegalStateException("到店表尚未配置"));
+    String sourceTable = "ARRIVAL:" + arrivalTarget.sheetId();
+    String rowId = smartSheetWriter.upsert(arrivalTarget,
+        mappingResolver.toSourceFields(sourceTable, fields),
+        mappingResolver.sourceFieldFor(sourceTable, "phone"),
         Duration.ofMillis(configProvider.get().writeTimeoutMs()));
-    writer.write(phone, Map.of("appointmentStatus", "已预约", "arrivalSourceRowId", rowId),
-        customer.getVersion(), true);
+    writer.write(customer.getPhone(), Map.of("appointmentStatus", "已预约", "arrivalSourceRowId", rowId),
+        expectedVersion, true);
   }
 
   private Customer requireCustomer(String phone) {

@@ -60,7 +60,6 @@
           <span>{{ rowDescription(item) }}</span>
         </button>
         <div class="followup-row-actions">
-          <span v-if="item.assignedKeeper" class="keeper">{{ item.assignedKeeper }}</span>
           <button
             class="secondary small followup-profile-button"
             type="button"
@@ -165,7 +164,7 @@ function rowDescription(item: FollowupItem): string {
   if (item.reminderType === 'APPOINTMENT') {
     return `${item.appointmentTime || formatDate(item.appointmentDate)} · ${item.appointmentStore || '-'}`;
   }
-  return `${item.sourceTable || '-'} · ${formatDate(item.arrivedAt)}`;
+  return `手机号 ${formatPhone(item.phoneFull ?? item.phone)} · 来源 ${sourceLabel(item.sourceTable)} · ${formatDate(item.arrivedAt)}`;
 }
 
 function rowClass(item: FollowupItem): string {
@@ -187,6 +186,18 @@ function formatDate(value?: string | null): string {
     return '-';
   }
   return value.replace('T', ' ').slice(0, 16);
+}
+
+function formatPhone(value?: string | null): string {
+  return value || '-';
+}
+
+function sourceLabel(value?: string | null): string {
+  if (!value) return '-';
+  if (value.startsWith('ASSIGNMENT:')) return '分配表';
+  if (value.startsWith('ARRIVAL:')) return '到店表';
+  if (value === 'th1zyU') return '客户主表';
+  return value;
 }
 
 function leadTypeLabel(value?: string | null): string {

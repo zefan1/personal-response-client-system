@@ -75,7 +75,10 @@ public class NewCustomerRowCreator {
         : exchangeService.prepareOutbound(TagExchangeSourceType.TABLE_WRITE, null, internal);
     Map<String, Object> sourceFields = mappingResolver.toSourceFields(sourceTable, exchange.acceptedFields());
     if (sourceFields.isEmpty()) {
-      throw new TableWriteException(TableWriteErrorCodes.TABLE_WRITE_FAILED, "no fields remain after tag validation");
+      // No outbound mapping means no Smart Sheet write is authorized. The facts
+      // have already been handled by the system-of-record path.
+      persistWithoutTableRow(event, internal);
+      return;
     }
     String rowId = tableClient.createRow(
         sourceTable,
@@ -100,6 +103,20 @@ public class NewCustomerRowCreator {
       customerRepository.upsert(customer, exchange, TagExchangeSourceType.TABLE_WRITE, rowId);
     }
     eventPublisher.publishEvent(new ProfileUpdatedEvent(event.phone(), List.copyOf(internal.keySet())));
+  }
+
+  private void persistWithoutTableRow(CustomerMessageSentEvent event, Map<String, Object> fields) {
+    if (event.customerId() != null && event.customerId() > 0) {
+      return;
+    }
+    Customer customer = new Customer();
+    customer.setPhone(event.phone());
+    customer.setNickname(event.nickname());
+    customer.setLeadType(LeadTypes.normalize(event.leadType()));
+    applyAnalysisFields(customer, fields);
+    customer.setSyncedAt(LocalDateTime.now());
+    customerRepository.upsert(customer);
+    eventPublisher.publishEvent(new ProfileUpdatedEvent(event.phone(), List.copyOf(fields.keySet())));
   }
 
   public Map<String, Object> newCustomerFields(CustomerMessageSentEvent event) {

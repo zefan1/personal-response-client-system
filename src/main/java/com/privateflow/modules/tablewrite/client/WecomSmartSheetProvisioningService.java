@@ -18,6 +18,7 @@ public final class WecomSmartSheetProvisioningService {
       field("姓名", "FIELD_TYPE_TEXT"),
       field("客资类型", "FIELD_TYPE_TEXT"),
       field("客户阶段", "FIELD_TYPE_TEXT"),
+      field("购买项目", "FIELD_TYPE_TEXT"),
       field("备注", "FIELD_TYPE_TEXT"),
       field("下次跟进方向", "FIELD_TYPE_TEXT"),
       field("下次跟进时间", "FIELD_TYPE_TEXT"));

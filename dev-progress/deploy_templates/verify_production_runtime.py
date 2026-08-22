@@ -6,6 +6,35 @@ import urllib.request
 
 BASE_URL = "http://127.0.0.1:8080"
 CREDENTIAL_FILE = pathlib.Path("/root/private-domain-assistant-initial-admin.txt")
+ENV_FILE = pathlib.Path("/opt/private-domain-assistant/config/production.env")
+
+
+def environment():
+  values = {}
+  for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+    if not line or line.startswith("#") or "=" not in line:
+      continue
+    key, value = line.split("=", 1)
+    values[key] = value.strip()
+  return values
+
+
+def require_production_environment():
+  values = environment()
+  failures = []
+  if values.get("MOCK_EXTERNALS", "").lower() != "false":
+    failures.append("mock_externals_must_be_false")
+  jwt_secret = values.get("SYSTEM_JWT_SECRET", "")
+  if len(jwt_secret) < 64 or jwt_secret == "change-me-in-production":
+    failures.append("jwt_secret_is_not_production_ready")
+  if values.get("WECOM_TRANSPORT_MODE", "").upper() != "RELAY":
+    failures.append("wecom_transport_mode_must_be_relay")
+  for key in ("WECOM_RELAY_BASE_URL", "WECOM_RELAY_KEY_ID", "WECOM_RELAY_SECRET"):
+    value = values.get(key, "")
+    if not value or value == "replace-me":
+      failures.append(f"missing_{key.lower()}")
+  if failures:
+    raise SystemExit("production_environment_failed=" + ",".join(failures))
 
 
 def request(method, path, body=None, token=None):
@@ -22,6 +51,7 @@ def request(method, path, body=None, token=None):
 
 
 def main():
+  require_production_environment()
   credentials = {}
   for line in CREDENTIAL_FILE.read_text(encoding="utf-8").splitlines():
     key, value = line.split("=", 1)

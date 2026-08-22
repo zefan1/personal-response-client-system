@@ -143,6 +143,21 @@ describe('ChatRecognitionPanel', () => {
     app.unmount();
   });
 
+  it('shows a retryable restart message when a polled recognition job was interrupted by backend restart', async () => {
+    mocks.postJson.mockResolvedValueOnce({
+      success: true,
+      data: { jobId: 'job-restarted', status: 'FAILED', errorCode: 'RECOGNITION_BACKEND_RESTARTED' }
+    });
+    const { app, host } = await mountPanel();
+
+    (host.querySelector('.toolbar .primary') as HTMLButtonElement | null)?.click();
+    await waitForPostJson();
+    await flushUi();
+
+    expect(host.textContent).toContain('后端重启导致识图任务失败，请重新识别聊天后重试');
+    app.unmount();
+  });
+
   it('ends the capture session when the desktop screenshot bridge throws', async () => {
     mocks.captureScreenshot.mockRejectedValueOnce(new Error('ipc unavailable'));
     const { app, host, eventBus } = await mountPanel();

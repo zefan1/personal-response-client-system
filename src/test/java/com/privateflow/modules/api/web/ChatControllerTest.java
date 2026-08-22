@@ -205,6 +205,24 @@ class ChatControllerTest {
   }
 
   @Test
+  void pendingSendStatusEndpointsBindTheEmployeeDecision() throws Exception {
+    when(service.registerPendingSend(any())).thenReturn(Map.of("accepted", true));
+    when(service.updatePendingSend(any())).thenReturn(Map.of("accepted", true, "status", "UNSENT"));
+
+    mockMvc.perform(post("/api/v1/chat/send-pending")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"confirmationId\":\"confirm-1\",\"copiedText\":\"Reply A\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.accepted").value(true));
+
+    mockMvc.perform(post("/api/v1/chat/send-pending/status")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"confirmationId\":\"confirm-1\",\"status\":\"UNSENT\",\"reminderCount\":0}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("UNSENT"));
+  }
+
+  @Test
   void aiUsageRecordsCopiedReplyWithoutCallingSendConfirmFlow() throws Exception {
     when(supervisionEventService.recordAiUsage(any())).thenReturn(Map.of(
         "recorded", true,

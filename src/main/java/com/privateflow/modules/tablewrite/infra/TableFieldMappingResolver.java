@@ -7,9 +7,12 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.LinkedHashSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.event.EventListener;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -27,11 +30,8 @@ public class TableFieldMappingResolver {
 
   public Map<String, Object> toSourceFields(String sourceTable, Map<String, Object> internalFields) {
     Map<String, String> reverse = mappings.getOrDefault(sourceTable, Map.of());
-    if (reverse.isEmpty()) {
-      throw new TableWriteException(
-          TableWriteErrorCodes.CONFIG_MISSING,
-          "no enabled field mappings configured for source table: " + sourceTable);
-    }
+    // An outbound mapping is an allow-list. An empty mapping means no Smart Sheet
+    // field is authorized for write; the caller must leave the facts in MariaDB.
     Map<String, Object> mapped = new HashMap<>();
     internalFields.forEach((field, value) -> {
       if (value != null) {
@@ -44,6 +44,31 @@ public class TableFieldMappingResolver {
       }
     });
     return mapped;
+  }
+
+  /** Returns non-null internal fields that cannot be written to the target table. */
+  public Set<String> unmappedInternalFields(String sourceTable, Map<String, Object> internalFields) {
+    Map<String, String> reverse = mappings.getOrDefault(sourceTable, Map.of());
+    Set<String> missing = new LinkedHashSet<>();
+    if (internalFields != null) {
+      internalFields.forEach((field, value) -> {
+        if (value != null && (reverse.get(field) == null || reverse.get(field).isBlank())) {
+          missing.add(field);
+        }
+      });
+    }
+    return Set.copyOf(missing);
+  }
+
+  public String sourceFieldFor(String sourceTable, String targetField) {
+    Map<String, String> tableMappings = mappings.getOrDefault(sourceTable, Map.of());
+    String sourceField = tableMappings.get(targetField);
+    if (sourceField == null || sourceField.isBlank()) {
+      throw new TableWriteException(
+          TableWriteErrorCodes.CONFIG_MISSING,
+          "no enabled field mapping configured for " + targetField + " on source table: " + sourceTable);
+    }
+    return sourceField;
   }
 
   public Map<String, Object> toInternalFields(String sourceTable, Map<String, Object> sourceFields) {
@@ -101,7 +126,7 @@ public class TableFieldMappingResolver {
     return merged;
   }
 
-  @EventListener
+  @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
   public void onConfigChanged(ConfigChangedEvent event) {
     if ("datasource.field_mappings".equals(event.configKey())) {
       reload();

@@ -2,13 +2,19 @@ package com.privateflow.modules.tablewrite.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.common.events.CustomerFollowupAnalysisCompletedEvent;
+import com.privateflow.common.events.ManualProfileUpdatedEvent;
+import com.privateflow.common.events.RecognizedProfileFactsUpdatedEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.tablewrite.PendingWritePayload;
@@ -115,6 +121,143 @@ class TableWriteOrchestratorTest {
         TableWriteActionType.INSERT,
         new PendingWritePayload("private_customers", null, queuedFields),
         "table down");
+  }
+
+  @Test
+  void projectsRecognizedFactsToTheExistingSourceRow() {
+    Customer customer = new Customer();
+    customer.setId(42L);
+    customer.setPhone("18800001111");
+    customer.setSourceTable("私域客资管理表");
+    customer.setSourceRowId("row-42");
+    customer.setBodyConcerns("腰痛");
+    customer.setPrevRepairExp("做过骨盆修复");
+    when(customerQueryService.getById(42L)).thenReturn(customer);
+
+    orchestrator.onRecognizedProfileFactsUpdated(new RecognizedProfileFactsUpdatedEvent(
+        42L, java.util.Map.of("bodyConcerns", "腰痛", "prevRepairExp", "做过骨盆修复")));
+
+    verify(existingCustomerUpdater).updateFields(customer, java.util.Map.of(
+        "bodyConcerns", "腰痛",
+        "prevRepairExp", "做过骨盆修复"));
+    verify(queueManager, never()).enqueue(
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void assignmentRecognitionFailureQueuesTheCustomerMasterTargetForRetry() {
+    Customer customer = new Customer();
+    customer.setId(44L);
+    customer.setPhone("18800001111");
+    customer.setSourceTable("ASSIGNMENT:sheet-a");
+    customer.setSourceRowId("assignment-row");
+    when(customerQueryService.getById(44L)).thenReturn(customer);
+    java.util.Map<String, Object> fields = java.util.Map.of("bodyConcerns", "腰痛");
+    doThrow(new IllegalStateException("master relay down"))
+        .when(existingCustomerUpdater).updateFields(customer, fields);
+
+    orchestrator.onRecognizedProfileFactsUpdated(new RecognizedProfileFactsUpdatedEvent(44L, fields));
+
+    verify(queueManager).enqueue(44L, "18800001111", TableWriteActionType.UPDATE,
+        new PendingWritePayload("PRIMARY", null, fields), "master relay down");
+  }
+
+  @Test
+  void doesNotProjectRecognizedFactsWithoutAnExistingSourceRow() {
+    Customer customer = new Customer();
+    customer.setId(43L);
+    customer.setPhone("18800001112");
+    customer.setBodyConcerns("腰痛");
+    when(customerQueryService.getById(43L)).thenReturn(customer);
+
+    orchestrator.onRecognizedProfileFactsUpdated(new RecognizedProfileFactsUpdatedEvent(
+        43L, java.util.Map.of("bodyConcerns", "腰痛")));
+
+    verify(existingCustomerUpdater, never()).updateFields(
+        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    verify(queueManager, never()).enqueue(
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void manualEditFromAssignmentProjectsMasterAndArrivalButNeverWritesAssignmentSource() {
+    CustomerMasterProjectionService master = mock(CustomerMasterProjectionService.class);
+    AuxiliarySmartSheetProjectionService arrival = mock(AuxiliarySmartSheetProjectionService.class);
+    AuditLogger audit = mock(AuditLogger.class);
+    TableWriteOrchestrator handler = new TableWriteOrchestrator(
+        customerQueryService, newCustomerRowCreator, existingCustomerUpdater, queueManager,
+        master, arrival, audit, new ObjectMapper());
+    Customer customer = customer(7L, "ASSIGNMENT:sheet-a", "assignment-row");
+    java.util.Map<String, Object> fields = java.util.Map.of("nickname", "新昵称");
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(customer);
+
+    handler.onManualProfileUpdated(new ManualProfileUpdatedEvent("18800001111", fields, "admin"));
+
+    verify(customerQueryService).refreshCache("18800001111");
+    verify(existingCustomerUpdater, never()).updateFields(customer, fields);
+    verify(master).projectFields(customer, fields);
+    verify(arrival).project(customer);
+    verify(audit).log(eq("SAVE_TO_TABLE"), eq("admin"), eq("customer"), eq("18800001111"),
+        org.mockito.ArgumentMatchers.contains("MASTER_SUCCESS"));
+  }
+
+  @Test
+  void manualEditFromArrivalUpdatesArrivalSourceAndCustomerMaster() {
+    CustomerMasterProjectionService master = mock(CustomerMasterProjectionService.class);
+    AuxiliarySmartSheetProjectionService arrival = mock(AuxiliarySmartSheetProjectionService.class);
+    AuditLogger audit = mock(AuditLogger.class);
+    TableWriteOrchestrator handler = new TableWriteOrchestrator(
+        customerQueryService, newCustomerRowCreator, existingCustomerUpdater, queueManager,
+        master, arrival, audit, new ObjectMapper());
+    Customer customer = customer(8L, "ARRIVAL:sheet-r", "arrival-row");
+    java.util.Map<String, Object> fields = java.util.Map.of("appointmentStore", "E2店");
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(customer);
+
+    handler.onManualProfileUpdated(new ManualProfileUpdatedEvent("18800001111", fields, "admin"));
+
+    verify(existingCustomerUpdater).updateFields(customer, fields);
+    verify(master).projectFields(customer, fields);
+    verify(arrival).project(customer);
+    verify(audit, times(2)).log(eq("SAVE_TO_TABLE"), eq("admin"), eq("customer"), eq("18800001111"),
+        org.mockito.ArgumentMatchers.anyString());
+  }
+
+  @Test
+  void manualEditSourceFailureQueuesExactSourceAndRecordsQueuedStatus() {
+    CustomerMasterProjectionService master = mock(CustomerMasterProjectionService.class);
+    AuxiliarySmartSheetProjectionService arrival = mock(AuxiliarySmartSheetProjectionService.class);
+    AuditLogger audit = mock(AuditLogger.class);
+    TableWriteOrchestrator handler = new TableWriteOrchestrator(
+        customerQueryService, newCustomerRowCreator, existingCustomerUpdater, queueManager,
+        master, arrival, audit, new ObjectMapper());
+    Customer customer = customer(9L, "PRIMARY", "primary-row");
+    java.util.Map<String, Object> fields = java.util.Map.of("nickname", "新昵称");
+    when(customerQueryService.getByPhone("18800001111")).thenReturn(customer);
+    doThrow(new IllegalStateException("relay timeout")).when(existingCustomerUpdater).updateFields(customer, fields);
+
+    handler.onManualProfileUpdated(new ManualProfileUpdatedEvent("18800001111", fields, "admin"));
+
+    verify(queueManager).enqueue(9L, "18800001111", TableWriteActionType.UPDATE,
+        new PendingWritePayload("PRIMARY", "primary-row", fields), "relay timeout");
+    verify(audit).log(eq("SAVE_TO_TABLE"), eq("admin"), eq("customer"), eq("18800001111"),
+        org.mockito.ArgumentMatchers.contains("SOURCE_QUEUED"));
+  }
+
+  private Customer customer(long id, String sourceTable, String sourceRowId) {
+    Customer customer = new Customer();
+    customer.setId(id);
+    customer.setPhone("18800001111");
+    customer.setSourceTable(sourceTable);
+    customer.setSourceRowId(sourceRowId);
+    return customer;
   }
 
   private CustomerMessageSentEvent sentEvent() {

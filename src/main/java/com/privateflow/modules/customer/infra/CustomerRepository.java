@@ -152,7 +152,8 @@ public class CustomerRepository {
     String leadType = LeadTypes.normalize(customer.getLeadType());
     int updated = jdbcTemplate.update("""
         INSERT INTO customers (
-          phone, nickname, source_channel, lead_type, personality_type, assigned_keeper,
+          phone, nickname, wechat_id, source_channel, lead_type, lead_capture_type,
+          lead_capture_method, platform_lead_at, personality_type, assigned_keeper, assigned_at,
           intended_store, intended_project, purchased_project, postpartum_months, parity,
           delivery_method, breastfeeding, lochia_period, pregnancy_weight, current_weight,
           body_concerns, diastasis_recti, urine_leakage, pubic_lumbago, prev_repair_exp,
@@ -160,12 +161,15 @@ public class CustomerRepository {
           internal_note, customer_profile_summary, first_tracking_capture,
           second_tracking_capture, third_tracking_capture,
           last_followup_at, followup_notes, next_followup_at, next_followup_dir,
-          appointment_date, appointment_store, appointment_item, arrived, source_table,
+          appointment_date, appointment_store, appointment_item, arrived, appointment_status,
+          appointment_time, arrival_source_row_id, source_table,
           source_row_id, synced_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON DUPLICATE KEY UPDATE
-          nickname=VALUES(nickname), source_channel=VALUES(source_channel), lead_type=VALUES(lead_type),
-          personality_type=VALUES(personality_type), assigned_keeper=VALUES(assigned_keeper),
+          nickname=VALUES(nickname), wechat_id=VALUES(wechat_id), source_channel=VALUES(source_channel),
+          lead_type=VALUES(lead_type), lead_capture_type=VALUES(lead_capture_type),
+          lead_capture_method=VALUES(lead_capture_method), platform_lead_at=VALUES(platform_lead_at),
+          personality_type=VALUES(personality_type), assigned_keeper=VALUES(assigned_keeper), assigned_at=VALUES(assigned_at),
           intended_store=VALUES(intended_store), intended_project=VALUES(intended_project),
           purchased_project=VALUES(purchased_project), postpartum_months=VALUES(postpartum_months),
           parity=VALUES(parity), delivery_method=VALUES(delivery_method), breastfeeding=VALUES(breastfeeding),
@@ -182,15 +186,22 @@ public class CustomerRepository {
           last_followup_at=VALUES(last_followup_at), followup_notes=VALUES(followup_notes),
           next_followup_at=VALUES(next_followup_at), next_followup_dir=VALUES(next_followup_dir),
           appointment_date=VALUES(appointment_date), appointment_store=VALUES(appointment_store),
-          appointment_item=VALUES(appointment_item), arrived=VALUES(arrived), source_table=VALUES(source_table),
+          appointment_item=VALUES(appointment_item), arrived=VALUES(arrived),
+          appointment_status=VALUES(appointment_status), appointment_time=VALUES(appointment_time),
+          arrival_source_row_id=VALUES(arrival_source_row_id), source_table=VALUES(source_table),
           source_row_id=VALUES(source_row_id), synced_at=VALUES(synced_at), version=version+1
         """,
         customer.getPhone(),
         customer.getNickname(),
+        customer.getWechatId(),
         customer.getSourceChannel(),
         leadType,
+        customer.getLeadCaptureType(),
+        customer.getLeadCaptureMethod(),
+        customer.getPlatformLeadAt() == null ? null : Timestamp.valueOf(customer.getPlatformLeadAt()),
         customer.getPersonalityType(),
         customer.getAssignedKeeper(),
+        customer.getAssignedAt() == null ? null : Timestamp.valueOf(customer.getAssignedAt()),
         customer.getIntendedStore(),
         customer.getIntendedProject(),
         customer.getPurchasedProject(),
@@ -224,10 +235,14 @@ public class CustomerRepository {
         customer.getAppointmentStore(),
         customer.getAppointmentItem(),
         customer.getArrived(),
+        customer.getAppointmentStatus(),
+        customer.getAppointmentTime(),
+        customer.getArrivalSourceRowId(),
         customer.getSourceTable(),
         customer.getSourceRowId(),
         customer.getSyncedAt() == null ? null : Timestamp.valueOf(customer.getSyncedAt()));
     if (updated > 0) {
+      updateExtendedBusinessFields(customer);
       if (exchangeResult == null) {
         Map<String, Object> legacyFields = new LinkedHashMap<>();
         legacyFields.put("personalityType", customer.getPersonalityType());
@@ -244,6 +259,61 @@ public class CustomerRepository {
       }
     }
     return updated > 0;
+  }
+
+  private void updateExtendedBusinessFields(Customer customer) {
+    Map<String, Object> fields = new LinkedHashMap<>();
+    put(fields, "customer_name", customer.getCustomerName());
+    put(fields, "advertising_type", customer.getAdvertisingType());
+    put(fields, "global_advertisement_id", customer.getGlobalAdvertisementId());
+    put(fields, "standard_advertisement_id", customer.getStandardAdvertisementId());
+    put(fields, "content_id", customer.getContentId());
+    put(fields, "video_id", customer.getVideoId());
+    put(fields, "order_number", customer.getOrderNumber());
+    put(fields, "conversion_trace", customer.getConversionTrace());
+    put(fields, "previous_assigned_keeper", customer.getPreviousAssignedKeeper());
+    put(fields, "previous_platform_lead_at", timestamp(customer.getPreviousPlatformLeadAt()));
+    put(fields, "assignment_month", customer.getAssignmentMonth());
+    put(fields, "experience_card_type", customer.getExperienceCardType());
+    put(fields, "pending_order_status", customer.getPendingOrderStatus());
+    put(fields, "purchase_date", customer.getPurchaseDate() == null ? null : Date.valueOf(customer.getPurchaseDate()));
+    put(fields, "customer_level", customer.getCustomerLevel());
+    put(fields, "arrival_handover_record", customer.getArrivalHandoverRecord());
+    put(fields, "arrival_project_type", customer.getArrivalProjectType());
+    put(fields, "arrival_experience_project", customer.getArrivalExperienceProject());
+    put(fields, "historical_experience_count", customer.getHistoricalExperienceCount());
+    put(fields, "customer_report", customer.getCustomerReport());
+    put(fields, "reception_teacher", customer.getReceptionTeacher());
+    put(fields, "reception_consultant", customer.getReceptionConsultant());
+    put(fields, "voucher_redeemed", customer.getVoucherRedeemed());
+    put(fields, "transaction_amount", customer.getTransactionAmount());
+    put(fields, "transaction_at", timestamp(customer.getTransactionAt()));
+    put(fields, "transaction_primary_reason", customer.getTransactionPrimaryReason());
+    if (fields.isEmpty()) {
+      return;
+    }
+    List<Object> args = new ArrayList<>();
+    StringBuilder sql = new StringBuilder("UPDATE customers SET ");
+    fields.forEach((column, value) -> {
+      if (args.size() > 0) {
+        sql.append(", ");
+      }
+      sql.append(column).append(" = ?");
+      args.add(value);
+    });
+    sql.append(" WHERE phone = ?");
+    args.add(customer.getPhone());
+    jdbcTemplate.update(sql.toString(), args.toArray());
+  }
+
+  private static void put(Map<String, Object> fields, String column, Object value) {
+    if (value != null && (!(value instanceof String text) || !text.isBlank())) {
+      fields.put(column, value);
+    }
+  }
+
+  private static Timestamp timestamp(LocalDateTime value) {
+    return value == null ? null : Timestamp.valueOf(value);
   }
 
   public int warmupBatch(long lastId, int limit, CustomerBatchConsumer consumer) {

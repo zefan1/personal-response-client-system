@@ -192,6 +192,42 @@ class WecomSmartSheetFieldCatalogTest {
   }
 
   @Test
+  void explicitInvalidationForcesAFieldReloadBeforeTheTtlExpires() throws Exception {
+    MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+    ScriptedClient api = client(
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"old-id\",\"field_title\":\"手机号\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"new-id\",\"field_title\":\"手机号\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}" );
+    WecomSmartSheetFieldCatalog catalog = catalog(api, clock);
+
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1)).get("手机号").fieldId()).isEqualTo("old-id");
+    catalog.invalidate();
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1)).get("手机号").fieldId()).isEqualTo("new-id");
+    assertThat(api.bodies).hasSize(2);
+  }
+
+  @Test
+  void acceptsTheSameTitleAndNameFieldVariantsAsConnectionVerification() throws Exception {
+    WecomSmartSheetFieldCatalog catalog = catalog(client("""
+        {"errcode":0,"total":2,"fields":[
+          {"field_id":"fTitle","title":"备用手机号","field_type":"FIELD_TYPE_TEXT"},
+          {"field_id":"fName","name":"客户昵称","field_type":"FIELD_TYPE_TEXT"}
+        ]}"""), Clock.systemUTC());
+
+    assertThat(catalog.visibleFields(Duration.ofSeconds(1))).containsKeys("备用手机号", "客户昵称");
+  }
+
+  @Test
+  void keepsFieldVisibleWhenOptionLabelsAreDuplicatedButDoesNotMapAmbiguousLabel() throws Exception {
+    WecomSmartSheetField field = catalog(client("""
+        {"errcode":0,"total":1,"fields":[{"field_id":"fTeacher","field_title":"Teacher","field_type":"FIELD_TYPE_SINGLE_SELECT","property_single_select":{"options":[{"id":"o1","text":"Same","style":1},{"id":"o2","text":"Same","style":1},{"id":"o3","text":"Unique","style":1}]}}]}"""), Clock.systemUTC())
+        .visibleFields(Duration.ofSeconds(1)).get("Teacher");
+
+    assertThat(field).isNotNull();
+    assertThat(field.optionId("Same")).isEmpty();
+    assertThat(field.optionId("Unique")).contains("o3");
+  }
+
+  @Test
   void rejectsDuplicateFieldIdsAcrossPages() throws Exception {
     WecomSmartSheetFieldCatalog catalog = catalog(client(
         "{\"errcode\":0,\"total\":2,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"One\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
@@ -533,7 +569,7 @@ class WecomSmartSheetFieldCatalogTest {
   void rejectsInvalidAndStalledCatalogPagesWithoutResponseContents() throws Exception {
     List<String> invalidResponses = List.of(
         "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Same\",\"field_type\":\"FIELD_TYPE_TEXT\"},{\"field_id\":\"f2\",\"field_title\":\"Same\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
-        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Pick\",\"field_type\":\"FIELD_TYPE_SELECT\",\"property_select\":{\"options\":[{\"id\":\"o1\",\"text\":\"A\",\"style\":\"x\"},{\"id\":\"o2\",\"text\":\"A\",\"style\":\"y\"}]}}]}",
+        "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\"f1\",\"field_title\":\"Pick\",\"field_type\":\"FIELD_TYPE_SELECT\",\"property_select\":{\"options\":[{\"id\":\"o1\",\"text\":\"A\",\"style\":\"x\"},{\"id\":\"o1\",\"text\":\"B\",\"style\":\"y\"}]}}]}",
         "{\"errcode\":0,\"total\":1,\"fields\":[{\"field_id\":\" \",\"field_title\":\"Bad\",\"field_type\":\"FIELD_TYPE_TEXT\"}]}",
         "{\"errcode\":0,\"total\":\"one\",\"fields\":[]}",
         "{\"errcode\":0,\"total\":1,\"fields\":{}}");

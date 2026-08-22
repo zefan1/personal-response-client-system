@@ -15,6 +15,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -123,7 +125,7 @@ public class CustomerQueryServiceImpl implements CustomerQueryService {
     }
   }
 
-  @EventListener
+  @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
   public void onProfileUpdated(ProfileUpdatedEvent event) {
     refreshCache(event.phone());
   }
@@ -133,7 +135,7 @@ public class CustomerQueryServiceImpl implements CustomerQueryService {
     refreshCache(event.phone());
   }
 
-  @EventListener
+  @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
   public void onConfigChanged(ConfigChangedEvent event) {
     if (event.configKey() != null && event.configKey().startsWith("cache.")) {
       log.info("module A received cache config change: {}", event.configKey());

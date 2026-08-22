@@ -25,6 +25,9 @@
       <p v-if="state.pendingSendDecision.errorMessage" class="send-confirm-error" role="alert">
         {{ state.pendingSendDecision.errorMessage }}
       </p>
+      <p v-if="state.pendingSendDecision.reminderCount > 0" class="send-confirm-reminder">
+        已提醒 {{ state.pendingSendDecision.reminderCount }} / 5 次
+      </p>
 
       <div class="send-confirm-actions">
         <button
@@ -36,11 +39,17 @@
         <button
           class="primary send-confirm-submit"
           type="button"
-          :disabled="state.pendingSendDecision.status === 'SUBMITTING' || !state.pendingSendDecision.customerId"
+          :disabled="state.pendingSendDecision.status === 'SUBMITTING'"
           @click="submitConfirmedSend"
         >
           {{ confirmButtonLabel }}
         </button>
+        <button
+          class="secondary"
+          type="button"
+          :disabled="state.pendingSendDecision.status === 'SUBMITTING'"
+          @click="retryRecognition"
+        >重新识别</button>
       </div>
     </section>
   </div>
@@ -56,6 +65,8 @@ import {
   copyBackfillState as state,
   discardPendingSendDecision,
   handleReplySelected,
+  resumePendingSendReminder,
+  retryRecognitionFromPending,
 } from './copyBackfillStore';
 import type { ReplySelectedPayload } from './types';
 
@@ -63,11 +74,12 @@ const disposers: Array<() => void> = [];
 const confirmButtonLabel = computed(() => {
   if (state.pendingSendDecision?.status === 'SUBMITTING') return '正在确认';
   if (state.pendingSendDecision?.status === 'SUBMIT_FAILED') return '重试确认已发送';
-  return '确认已发送';
+  return '已发送';
 });
 
 
 onMounted(() => {
+  resumePendingSendReminder();
   disposers.push(eventBus.on<ReplySelectedPayload>('reply:selected', (payload) => {
     void handleReplySelected(payload);
   }));
@@ -81,6 +93,10 @@ onBeforeUnmount(() => {
 
 async function submitConfirmedSend(): Promise<void> {
   await confirmPendingSendDecision();
+}
+
+function retryRecognition(): void {
+  retryRecognitionFromPending();
 }
 
 function maskPhone(phone: string): string {
@@ -169,6 +185,12 @@ function maskPhone(phone: string): string {
 .send-confirm-error {
   margin: 14px 0 0;
   font-size: 14px;
+}
+
+.send-confirm-reminder {
+  margin: 12px 0 0;
+  color: #8a4b08;
+  font-size: 13px;
 }
 
 .send-confirm-search {

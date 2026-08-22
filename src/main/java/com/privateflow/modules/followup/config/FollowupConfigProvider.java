@@ -6,7 +6,8 @@ import jakarta.annotation.PostConstruct;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.event.EventListener;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -60,7 +61,7 @@ public class FollowupConfigProvider {
     return current.get();
   }
 
-  @EventListener
+  @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
   public void onConfigChanged(ConfigChangedEvent event) {
     if (event.configKey() != null && event.configKey().startsWith("followup.")) {
       refresh();

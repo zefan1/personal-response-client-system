@@ -237,6 +237,12 @@ export function handleImageServiceStatus(payload: { status?: string; message?: s
 }
 
 function handleError(errorCode: string | null, sessionId: string, message?: string | null): void {
+  if (errorCode === 'RECOGNITION_BACKEND_RESTARTED') {
+    const detail = '后端重启导致识图任务失败，请重新识别聊天后重试';
+    recognitionState.toast = detail;
+    eventBus.emit('recognize:failed', { sessionId, errorCode, message: detail });
+    return;
+  }
   if (errorCode === '30-10001') {
     const detail = message?.trim() || '图片识别失败，请粘贴客户标识和聊天内容';
     recognitionState.toast = detail;

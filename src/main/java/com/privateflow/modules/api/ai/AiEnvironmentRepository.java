@@ -217,11 +217,13 @@ public class AiEnvironmentRepository {
   }
 
   private static String table(AiEnvironmentType type) {
-    return switch (type) {
-      case SKILL -> "skill_environments";
-      case IMAGE -> "image_environments";
-      case LLM -> "llm_environments";
-    };
+    if (type == AiEnvironmentType.SKILL) {
+      return "skill_environments";
+    }
+    if (type == AiEnvironmentType.IMAGE) {
+      return "image_environments";
+    }
+    return "llm_environments";
   }
 
   private RowMapper<AiEnvironment> mapper(AiEnvironmentType type) {

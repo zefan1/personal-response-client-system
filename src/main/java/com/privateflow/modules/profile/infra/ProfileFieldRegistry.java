@@ -19,10 +19,31 @@ public class ProfileFieldRegistry {
 
   static {
     register("nickname", "nickname", String.class);
+    register("customerName", "customer_name", String.class);
     register("sourceChannel", "source_channel", String.class);
+    register("leadType", "lead_type", String.class);
+    register("wechatId", "wechat_id", String.class);
+    register("leadCaptureMethod", "lead_capture_method", String.class);
+    register("platformLeadAt", "platform_lead_at", LocalDateTime.class);
+    register("advertisingType", "advertising_type", String.class);
+    register("globalAdvertisementId", "global_advertisement_id", String.class);
+    register("standardAdvertisementId", "standard_advertisement_id", String.class);
+    register("contentId", "content_id", String.class);
+    register("videoId", "video_id", String.class);
+    register("orderNumber", "order_number", String.class);
+    register("conversionTrace", "conversion_trace", String.class);
+    register("previousAssignedKeeper", "previous_assigned_keeper", String.class);
+    register("previousPlatformLeadAt", "previous_platform_lead_at", LocalDateTime.class);
+    register("assignedKeeper", "assigned_keeper", String.class);
+    register("assignedAt", "assigned_at", LocalDateTime.class);
+    register("assignmentMonth", "assignment_month", String.class);
     register("intendedStore", "intended_store", String.class);
     register("intendedProject", "intended_project", String.class);
     register("purchasedProject", "purchased_project", String.class);
+    register("experienceCardType", "experience_card_type", String.class);
+    register("pendingOrderStatus", "pending_order_status", String.class);
+    register("purchaseDate", "purchase_date", LocalDate.class);
+    register("customerLevel", "customer_level", String.class);
     register("personalityType", "personality_type", String.class);
     register("postpartumMonths", "postpartum_months", BigDecimal.class);
     register("parity", "parity", String.class);
@@ -37,7 +58,6 @@ public class ProfileFieldRegistry {
     register("postpartumCheck", "postpartum_check", String.class);
     register("exerciseHabits", "exercise_habits", String.class);
     register("intentLevel", "intent_level", String.class);
-    register("worries", "worries", String.class);
     register("customerStage", "customer_stage", String.class);
     register("internalNote", "internal_note", String.class);
     register("customerProfileSummary", "customer_profile_summary", String.class);
@@ -55,6 +75,17 @@ public class ProfileFieldRegistry {
     register("appointmentStatus", "appointment_status", String.class);
     register("appointmentTime", "appointment_time", String.class);
     register("arrivalSourceRowId", "arrival_source_row_id", String.class);
+    register("arrivalHandoverRecord", "arrival_handover_record", String.class);
+    register("arrivalProjectType", "arrival_project_type", String.class);
+    register("arrivalExperienceProject", "arrival_experience_project", String.class);
+    register("historicalExperienceCount", "historical_experience_count", String.class);
+    register("customerReport", "customer_report", String.class);
+    register("receptionTeacher", "reception_teacher", String.class);
+    register("receptionConsultant", "reception_consultant", String.class);
+    register("voucherRedeemed", "voucher_redeemed", String.class);
+    register("transactionAmount", "transaction_amount", BigDecimal.class);
+    register("transactionAt", "transaction_at", LocalDateTime.class);
+    register("transactionPrimaryReason", "transaction_primary_reason", String.class);
   }
 
   public Set<String> supportedFields() {

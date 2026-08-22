@@ -23,12 +23,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   private static final Set<String> PUBLIC_POSTS = Set.of(
       "/api/v1/auth/login",
       "/admin/api/v1/auth/login",
-      "/api/v1/auth/logout");
+      "/api/v1/auth/logout",
+      "/api/v1/wecom/smartsheet/callback");
   private static final Set<String> ALLOWED_CORS_ORIGINS = Set.of(
+      "file://",
       "http://localhost:5173",
       "http://127.0.0.1:5173",
       "http://localhost:5174",
-      "http://127.0.0.1:5174");
+      "http://127.0.0.1:5174",
+      "http://localhost:5175",
+      "http://127.0.0.1:5175");
   private final JwtService jwtService;
   private final AccountRepository accountRepository;
   private final AccountPermissionRepository permissionRepository;
@@ -57,6 +61,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       return true;
     }
     if ("GET".equalsIgnoreCase(request.getMethod()) && "/api/v1/auth/config".equals(path)) {
+      return true;
+    }
+    if ("GET".equalsIgnoreCase(request.getMethod()) && "/api/v1/wecom/smartsheet/callback".equals(path)) {
       return true;
     }
     return !path.startsWith("/api/v1/") && !path.startsWith("/admin/api/v1/")

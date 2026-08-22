@@ -33,18 +33,40 @@ public class CustomerMergeEngine {
       if (merged.getNickname() == null) {
         merged.setNickname(incoming.getNickname());
       }
+    } else if (sourceTable != null && sourceTable.startsWith("ASSIGNMENT:")) {
+      // Assignment intake is authoritative for lead ownership and attribution
+      // fields, while profile/follow-up facts remain owned by the master table.
+      applyBasicInfo(merged, incoming);
     }
-    merged.setSourceTable(incoming.getSourceTable());
-    merged.setSourceRowId(incoming.getSourceRowId());
-    merged.setSyncedAt(incoming.getSyncedAt());
+    copyExtendedFactsIfPresent(merged, incoming);
+    if (!isAuxiliaryTable(sourceTable)) {
+      merged.setSourceTable(incoming.getSourceTable());
+      merged.setSourceRowId(incoming.getSourceRowId());
+      merged.setSyncedAt(incoming.getSyncedAt());
+    }
     return merged;
+  }
+
+  private static boolean isAuxiliaryTable(String sourceTable) {
+    return sourceTable != null
+        && (sourceTable.startsWith("ASSIGNMENT:") || sourceTable.startsWith("ARRIVAL:"));
+  }
+
+  /** Makes a detached working copy without changing customer lineage. */
+  public Customer copyOf(Customer source) {
+    return copy(source);
   }
 
   private void applyBasicInfo(Customer target, Customer source) {
     target.setNickname(coalesce(source.getNickname(), target.getNickname()));
+    target.setWechatId(coalesce(source.getWechatId(), target.getWechatId()));
     target.setSourceChannel(coalesce(source.getSourceChannel(), target.getSourceChannel()));
     target.setLeadType(coalesce(source.getLeadType(), target.getLeadType()));
+    target.setLeadCaptureType(coalesce(source.getLeadCaptureType(), target.getLeadCaptureType()));
+    target.setLeadCaptureMethod(coalesce(source.getLeadCaptureMethod(), target.getLeadCaptureMethod()));
+    target.setPlatformLeadAt(coalesce(source.getPlatformLeadAt(), target.getPlatformLeadAt()));
     target.setAssignedKeeper(coalesce(source.getAssignedKeeper(), target.getAssignedKeeper()));
+    target.setAssignedAt(coalesce(source.getAssignedAt(), target.getAssignedAt()));
     target.setIntendedStore(coalesce(source.getIntendedStore(), target.getIntendedStore()));
     target.setIntendedProject(coalesce(source.getIntendedProject(), target.getIntendedProject()));
     target.setPurchasedProject(coalesce(source.getPurchasedProject(), target.getPurchasedProject()));
@@ -83,6 +105,35 @@ public class CustomerMergeEngine {
     }
   }
 
+  private void copyExtendedFactsIfPresent(Customer target, Customer source) {
+    target.setCustomerName(coalesce(source.getCustomerName(), target.getCustomerName()));
+    target.setAdvertisingType(coalesce(source.getAdvertisingType(), target.getAdvertisingType()));
+    target.setGlobalAdvertisementId(coalesce(source.getGlobalAdvertisementId(), target.getGlobalAdvertisementId()));
+    target.setStandardAdvertisementId(coalesce(source.getStandardAdvertisementId(), target.getStandardAdvertisementId()));
+    target.setContentId(coalesce(source.getContentId(), target.getContentId()));
+    target.setVideoId(coalesce(source.getVideoId(), target.getVideoId()));
+    target.setOrderNumber(coalesce(source.getOrderNumber(), target.getOrderNumber()));
+    target.setConversionTrace(coalesce(source.getConversionTrace(), target.getConversionTrace()));
+    target.setPreviousAssignedKeeper(coalesce(source.getPreviousAssignedKeeper(), target.getPreviousAssignedKeeper()));
+    target.setPreviousPlatformLeadAt(coalesce(source.getPreviousPlatformLeadAt(), target.getPreviousPlatformLeadAt()));
+    target.setAssignmentMonth(coalesce(source.getAssignmentMonth(), target.getAssignmentMonth()));
+    target.setExperienceCardType(coalesce(source.getExperienceCardType(), target.getExperienceCardType()));
+    target.setPendingOrderStatus(coalesce(source.getPendingOrderStatus(), target.getPendingOrderStatus()));
+    target.setPurchaseDate(coalesce(source.getPurchaseDate(), target.getPurchaseDate()));
+    target.setCustomerLevel(coalesce(source.getCustomerLevel(), target.getCustomerLevel()));
+    target.setArrivalHandoverRecord(coalesce(source.getArrivalHandoverRecord(), target.getArrivalHandoverRecord()));
+    target.setArrivalProjectType(coalesce(source.getArrivalProjectType(), target.getArrivalProjectType()));
+    target.setArrivalExperienceProject(coalesce(source.getArrivalExperienceProject(), target.getArrivalExperienceProject()));
+    target.setHistoricalExperienceCount(coalesce(source.getHistoricalExperienceCount(), target.getHistoricalExperienceCount()));
+    target.setCustomerReport(coalesce(source.getCustomerReport(), target.getCustomerReport()));
+    target.setReceptionTeacher(coalesce(source.getReceptionTeacher(), target.getReceptionTeacher()));
+    target.setReceptionConsultant(coalesce(source.getReceptionConsultant(), target.getReceptionConsultant()));
+    target.setVoucherRedeemed(coalesce(source.getVoucherRedeemed(), target.getVoucherRedeemed()));
+    target.setTransactionAmount(coalesce(source.getTransactionAmount(), target.getTransactionAmount()));
+    target.setTransactionAt(coalesce(source.getTransactionAt(), target.getTransactionAt()));
+    target.setTransactionPrimaryReason(coalesce(source.getTransactionPrimaryReason(), target.getTransactionPrimaryReason()));
+  }
+
   private static <T> T coalesce(T incoming, T existing) {
     if (incoming instanceof String text && text.isBlank()) {
       return existing;
@@ -95,13 +146,33 @@ public class CustomerMergeEngine {
     c.setId(source.getId());
     c.setPhone(source.getPhone());
     c.setNickname(source.getNickname());
+    c.setCustomerName(source.getCustomerName());
+    c.setWechatId(source.getWechatId());
     c.setSourceChannel(source.getSourceChannel());
     c.setLeadType(source.getLeadType());
+    c.setLeadCaptureType(source.getLeadCaptureType());
+    c.setLeadCaptureMethod(source.getLeadCaptureMethod());
+    c.setPlatformLeadAt(source.getPlatformLeadAt());
+    c.setAdvertisingType(source.getAdvertisingType());
+    c.setGlobalAdvertisementId(source.getGlobalAdvertisementId());
+    c.setStandardAdvertisementId(source.getStandardAdvertisementId());
+    c.setContentId(source.getContentId());
+    c.setVideoId(source.getVideoId());
+    c.setOrderNumber(source.getOrderNumber());
+    c.setConversionTrace(source.getConversionTrace());
     c.setPersonalityType(source.getPersonalityType());
     c.setAssignedKeeper(source.getAssignedKeeper());
+    c.setAssignedAt(source.getAssignedAt());
+    c.setPreviousAssignedKeeper(source.getPreviousAssignedKeeper());
+    c.setPreviousPlatformLeadAt(source.getPreviousPlatformLeadAt());
+    c.setAssignmentMonth(source.getAssignmentMonth());
     c.setIntendedStore(source.getIntendedStore());
     c.setIntendedProject(source.getIntendedProject());
     c.setPurchasedProject(source.getPurchasedProject());
+    c.setExperienceCardType(source.getExperienceCardType());
+    c.setPendingOrderStatus(source.getPendingOrderStatus());
+    c.setPurchaseDate(source.getPurchaseDate());
+    c.setCustomerLevel(source.getCustomerLevel());
     c.setPostpartumMonths(source.getPostpartumMonths());
     c.setParity(source.getParity());
     c.setDeliveryMethod(source.getDeliveryMethod());
@@ -132,6 +203,20 @@ public class CustomerMergeEngine {
     c.setAppointmentStore(source.getAppointmentStore());
     c.setAppointmentItem(source.getAppointmentItem());
     c.setArrived(source.getArrived());
+    c.setAppointmentStatus(source.getAppointmentStatus());
+    c.setAppointmentTime(source.getAppointmentTime());
+    c.setArrivalSourceRowId(source.getArrivalSourceRowId());
+    c.setArrivalHandoverRecord(source.getArrivalHandoverRecord());
+    c.setArrivalProjectType(source.getArrivalProjectType());
+    c.setArrivalExperienceProject(source.getArrivalExperienceProject());
+    c.setHistoricalExperienceCount(source.getHistoricalExperienceCount());
+    c.setCustomerReport(source.getCustomerReport());
+    c.setReceptionTeacher(source.getReceptionTeacher());
+    c.setReceptionConsultant(source.getReceptionConsultant());
+    c.setVoucherRedeemed(source.getVoucherRedeemed());
+    c.setTransactionAmount(source.getTransactionAmount());
+    c.setTransactionAt(source.getTransactionAt());
+    c.setTransactionPrimaryReason(source.getTransactionPrimaryReason());
     c.setSourceTable(source.getSourceTable());
     c.setSourceRowId(source.getSourceRowId());
     c.setSyncedAt(source.getSyncedAt());

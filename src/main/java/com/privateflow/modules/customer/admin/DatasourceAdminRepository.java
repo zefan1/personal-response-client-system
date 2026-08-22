@@ -11,6 +11,7 @@ import com.privateflow.modules.customer.sync.SheetSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public class DatasourceAdminRepository {
@@ -28,7 +29,9 @@ public class DatasourceAdminRepository {
     return jdbcTemplate.query("""
         SELECT d.*,
                (SELECT COUNT(*) FROM datasource_field_mappings m WHERE m.source_table = d.source_table AND m.is_enabled = 1) AS mapping_count,
-               (SELECT MAX(c.synced_at) FROM customers c WHERE c.source_table = d.source_table) AS last_sync_at,
+               (SELECT w.last_successful_sync_at
+                  FROM datasource_sync_watermarks w
+                 WHERE w.source_table = d.source_table) AS last_sync_at,
                CASE
                  WHEN EXISTS(SELECT 1 FROM sync_failure_log f WHERE f.source_table = d.source_table AND f.resolved = 0) THEN 'ERROR'
                  ELSE 'OK'
@@ -43,6 +46,7 @@ public class DatasourceAdminRepository {
         SELECT id, sheet_id, source_table
         FROM datasources
         WHERE is_enabled = 1
+          AND description LIKE 'SYSTEM_MANAGED_SMART_SHEET:%'
         ORDER BY id ASC
         """, (rs, rowNum) -> new SheetSource(
         rs.getLong("id"),
@@ -58,7 +62,9 @@ public class DatasourceAdminRepository {
     return jdbcTemplate.query("""
         SELECT d.*,
                (SELECT COUNT(*) FROM datasource_field_mappings m WHERE m.source_table = d.source_table AND m.is_enabled = 1) AS mapping_count,
-               (SELECT MAX(c.synced_at) FROM customers c WHERE c.source_table = d.source_table) AS last_sync_at,
+               (SELECT w.last_successful_sync_at
+                  FROM datasource_sync_watermarks w
+                 WHERE w.source_table = d.source_table) AS last_sync_at,
                CASE
                  WHEN EXISTS(SELECT 1 FROM sync_failure_log f WHERE f.source_table = d.source_table AND f.resolved = 0) THEN 'ERROR'
                  ELSE 'OK'
@@ -112,10 +118,114 @@ public class DatasourceAdminRepository {
     jdbcTemplate.update("UPDATE datasources SET is_enabled = ?, updated_at = NOW() WHERE id = ?", enabled ? 1 : 0, id);
   }
 
+  public Optional<LocalDateTime> lastSuccessfulSync(String sourceTable) {
+    return jdbcTemplate.query(
+        "SELECT last_successful_sync_at FROM datasource_sync_watermarks WHERE source_table = ?",
+        (rs, rowNum) -> rs.getTimestamp("last_successful_sync_at").toLocalDateTime(),
+        sourceTable).stream().findFirst();
+  }
+
+  public void saveSuccessfulSync(String sourceTable, LocalDateTime completedAt) {
+    jdbcTemplate.update("""
+        INSERT INTO datasource_sync_watermarks (source_table, last_successful_sync_at)
+        VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE last_successful_sync_at = VALUES(last_successful_sync_at)
+        """, sourceTable, java.sql.Timestamp.valueOf(completedAt));
+  }
+
+  /** Records a completed remote Smart Sheet read before individual row validation begins. */
+  public void saveSuccessfulRemoteRead(String sourceTable, LocalDateTime readAt) {
+    jdbcTemplate.update("""
+        INSERT INTO datasource_sync_watermarks (source_table, last_successful_sync_at, last_successful_remote_read_at)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE last_successful_remote_read_at = VALUES(last_successful_remote_read_at)
+        """, sourceTable, java.sql.Timestamp.valueOf(readAt), java.sql.Timestamp.valueOf(readAt));
+  }
+
+  public Optional<LocalDateTime> lastSuccessfulRemoteRead(String sourceTable) {
+    return jdbcTemplate.query(
+        "SELECT last_successful_remote_read_at FROM datasource_sync_watermarks WHERE source_table = ? AND last_successful_remote_read_at IS NOT NULL",
+        (rs, rowNum) -> rs.getTimestamp("last_successful_remote_read_at").toLocalDateTime(),
+        sourceTable).stream().findFirst();
+  }
+
   public String replace(long id, String sheetId) {
     String old = jdbcTemplate.queryForObject("SELECT sheet_id FROM datasources WHERE id = ?", String.class, id);
     jdbcTemplate.update("UPDATE datasources SET sheet_id = ?, updated_at = NOW() WHERE id = ?", sheetId, id);
     return old;
+  }
+
+  @Transactional
+  public void updateApiOwnedSmartSheetTarget(String documentId, String sourceTable) {
+    List<String> existingSourceTables = jdbcTemplate.query(
+        "SELECT source_table FROM datasources WHERE name = ? LIMIT 1",
+        (rs, rowNum) -> rs.getString("source_table"),
+        "PrivateDomainAssistant-API");
+    if (existingSourceTables.isEmpty()) {
+      return;
+    }
+    String previousSourceTable = existingSourceTables.get(0);
+    if (!previousSourceTable.equals(sourceTable)) {
+      jdbcTemplate.update(
+          "UPDATE datasource_field_mappings SET source_table = ? WHERE source_table = ?",
+          sourceTable, previousSourceTable);
+    }
+    jdbcTemplate.update("""
+        UPDATE datasources
+        SET name = '客户主表', sheet_id = ?, source_table = ?,
+            description = 'SYSTEM_MANAGED_SMART_SHEET:PRIMARY', updated_at = NOW()
+        WHERE name = ?
+        """, documentId, sourceTable, "PrivateDomainAssistant-API");
+  }
+
+  /**
+   * Registers the three administrator-managed Smart Sheets as mapping targets.
+   * Projection tables deliberately stay out of the customer-master sync reader.
+   */
+  @Transactional
+  public void ensureManagedSmartSheetDatasource(String role, String documentId, String sheetId) {
+    String normalizedRole = role == null ? "" : role.trim().toUpperCase();
+    String name = switch (normalizedRole) {
+      case "ASSIGNMENT" -> "分配表";
+      case "ARRIVAL" -> "到店表";
+      default -> "客户主表";
+    };
+    String description = "SYSTEM_MANAGED_SMART_SHEET:" + normalizedRole;
+    String sourceTable = "PRIMARY".equals(normalizedRole)
+        ? sheetId.trim()
+        : normalizedRole + ":" + sheetId.trim();
+    List<ManagedDatasourceRow> previous = jdbcTemplate.query(
+        "SELECT id, source_table FROM datasources WHERE description = ? LIMIT 1",
+        (rs, rowNum) -> new ManagedDatasourceRow(rs.getLong("id"), rs.getString("source_table")), description);
+    if (previous.isEmpty() && "PRIMARY".equals(normalizedRole)) {
+      previous = jdbcTemplate.query(
+          "SELECT id, source_table FROM datasources WHERE name = 'PrivateDomainAssistant-API' LIMIT 1",
+          (rs, rowNum) -> new ManagedDatasourceRow(rs.getLong("id"), rs.getString("source_table")));
+    }
+    if (previous.isEmpty()) {
+      jdbcTemplate.update("""
+          INSERT INTO datasources (name, sheet_id, source_table, description, is_enabled, created_by)
+          VALUES (?, ?, ?, ?, 1, 'system')
+          """, name, documentId.trim(), sourceTable, description);
+      return;
+    }
+    ManagedDatasourceRow existing = previous.get(0);
+    if (!existing.sourceTable().equals(sourceTable)) {
+      jdbcTemplate.update("UPDATE datasource_field_mappings SET source_table = ? WHERE source_table = ?", sourceTable, existing.sourceTable());
+    }
+    jdbcTemplate.update("""
+        UPDATE datasources
+        SET name = ?, sheet_id = ?, source_table = ?, description = ?, updated_at = NOW()
+        WHERE id = ?
+        """, name, documentId.trim(), sourceTable, description, existing.id());
+  }
+
+  private record ManagedDatasourceRow(long id, String sourceTable) {}
+
+  public Optional<String> managedSourceTable(String role) {
+    String description = "SYSTEM_MANAGED_SMART_SHEET:" + (role == null ? "" : role.trim().toUpperCase());
+    return jdbcTemplate.query("SELECT source_table FROM datasources WHERE description = ? LIMIT 1",
+        (rs, rowNum) -> rs.getString("source_table"), description).stream().findFirst();
   }
 
   public List<FieldMappingDto> mappings(String sourceTable) {
@@ -205,6 +315,14 @@ public class DatasourceAdminRepository {
         ORDER BY created_at DESC
         LIMIT 100
         """, (rs, rowNum) -> rs.getString("fail_reason"), sourceTable);
+  }
+
+  public int resolveFailuresBefore(String sourceTable, LocalDateTime before) {
+    return jdbcTemplate.update("""
+        UPDATE sync_failure_log
+        SET resolved = 1
+        WHERE source_table = ? AND resolved = 0 AND created_at < ?
+        """, sourceTable, java.sql.Timestamp.valueOf(before));
   }
 
   public void logImport(String fileName, CsvImportResult result, String operator) {

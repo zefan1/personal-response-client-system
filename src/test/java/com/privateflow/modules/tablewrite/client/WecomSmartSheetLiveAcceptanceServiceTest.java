@@ -36,7 +36,7 @@ class WecomSmartSheetLiveAcceptanceServiceTest {
     assertThat(report.rereadSucceeded()).isTrue();
     assertThat(report.formulaProtectionConfirmed()).isTrue();
     assertThat(api.operations).containsExactly(
-        "get_fields", "get_records", "get_records", "add_records", "update_records", "get_records", "get_records");
+        "get_fields", "get_records", "get_fields", "get_records", "add_records", "update_records", "get_records", "get_records");
     assertThat(api.addCalls).isEqualTo(1);
     assertThat(api.updateCalls).isEqualTo(1);
     assertThat(api.addedUniqueValue).matches("198\\d{8}");

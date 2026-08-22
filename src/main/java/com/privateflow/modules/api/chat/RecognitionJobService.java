@@ -37,6 +37,7 @@ public class RecognitionJobService {
   private final Executor executor;
   private final ChatOrchestrationService orchestrationService;
   private final ChatTaskConfig taskConfig;
+  private final RecognitionJobRecoveryRepository recoveryRepository;
   private final Clock clock;
   private final Object monitor = new Object();
 
@@ -49,7 +50,8 @@ public class RecognitionJobService {
       SupervisionConfig supervisionConfig,
       @Qualifier("chatRecognitionExecutor") Executor executor,
       ChatOrchestrationService orchestrationService,
-      ChatTaskConfig taskConfig) {
+      ChatTaskConfig taskConfig,
+      RecognitionJobRecoveryRepository recoveryRepository) {
     this(
         repository,
         imageStore,
@@ -59,6 +61,7 @@ public class RecognitionJobService {
         executor,
         orchestrationService,
         taskConfig,
+        recoveryRepository,
         Clock.systemUTC());
   }
 
@@ -80,6 +83,7 @@ public class RecognitionJobService {
         executor,
         null,
         null,
+        null,
         clock);
   }
 
@@ -92,6 +96,7 @@ public class RecognitionJobService {
       Executor executor,
       ChatOrchestrationService orchestrationService,
       ChatTaskConfig taskConfig,
+      RecognitionJobRecoveryRepository recoveryRepository,
       Clock clock) {
     this.repository = repository;
     this.imageStore = imageStore;
@@ -101,6 +106,7 @@ public class RecognitionJobService {
     this.executor = executor;
     this.orchestrationService = orchestrationService;
     this.taskConfig = taskConfig;
+    this.recoveryRepository = recoveryRepository;
     this.clock = clock;
   }
 
@@ -130,6 +136,7 @@ public class RecognitionJobService {
           withoutImagePayload(request),
           clock.instant());
       repository.save(job);
+      persist(job);
       drainQueue();
       return job.view();
     }
@@ -137,7 +144,12 @@ public class RecognitionJobService {
 
   public RecognitionJobView getOwned(String jobId, String username) {
     synchronized (monitor) {
-      return owned(jobId, username).view();
+      RecognitionJob active = repository.find(jobId).orElse(null);
+      if (active != null) {
+        assertOwner(active.username(), username);
+        return active.view();
+      }
+      return recoveredOwned(jobId, username);
     }
   }
 
@@ -145,6 +157,7 @@ public class RecognitionJobService {
     synchronized (monitor) {
       RecognitionJob job = owned(jobId, username);
       boolean deleteImmediately = job.cancel(clock.instant());
+      persist(job);
       if (deleteImmediately) {
         imageStore.delete(job.imageToken());
         pruneTerminalHistory();
@@ -169,6 +182,7 @@ public class RecognitionJobService {
       if (!job.replaceResponse(completed, clock.instant())) {
         throw new ApiException(ApiErrorCodes.CONFLICT, "recognition task is no longer available");
       }
+      persist(job);
     }
     return completed;
   }
@@ -183,6 +197,7 @@ public class RecognitionJobService {
       if (job == null || !job.complete(response, completedStatus, clock.instant())) {
         return;
       }
+      persist(job);
       imageStore.delete(job.imageToken());
       pruneTerminalHistory();
       drainQueue();
@@ -196,6 +211,7 @@ public class RecognitionJobService {
       if (job == null || !job.fail(publicErrorCode, clock.instant())) {
         return;
       }
+      persist(job);
       imageStore.delete(job.imageToken());
       pruneTerminalHistory();
       drainQueue();
@@ -212,6 +228,7 @@ public class RecognitionJobService {
           if (!job.expire(clock.instant())) {
             continue;
           }
+          persist(job);
           imageStore.delete(job.imageToken());
         }
       }
@@ -227,10 +244,12 @@ public class RecognitionJobService {
         return;
       }
       next.start(clock.instant());
+      persist(next);
       try {
         executor.execute(() -> runWorker(next.jobId()));
       } catch (RejectedExecutionException ex) {
         next.fail("RECOGNITION_QUEUE_UNAVAILABLE", clock.instant());
+        persist(next);
         imageStore.delete(next.imageToken());
         pruneTerminalHistory();
       }
@@ -276,12 +295,14 @@ public class RecognitionJobService {
       RecognitionJob job, ChatResponse response, RecognitionJobStatus completedStatus) {
     synchronized (monitor) {
       job.complete(response, completedStatus, clock.instant());
+      persist(job);
     }
   }
 
   private void failFromRunningWorker(RecognitionJob job, String publicErrorCode) {
     synchronized (monitor) {
       job.fail(publicErrorCode, clock.instant());
+      persist(job);
     }
   }
 
@@ -300,6 +321,9 @@ public class RecognitionJobService {
 
   private void pruneTerminalHistory() {
     repository.pruneTerminalHistory(supervisionConfig.recentTaskDisplayCap());
+    if (recoveryRepository != null) {
+      recoveryRepository.deleteTerminalBefore(clock.instant().minus(taskRetention()));
+    }
   }
 
   private RecognitionJob owned(String jobId, String username) {
@@ -308,10 +332,33 @@ public class RecognitionJobService {
     }
     RecognitionJob job = repository.find(jobId)
         .orElseThrow(() -> new ApiException(ApiErrorCodes.CONFLICT, "recognition job is no longer available"));
-    if (!username.equals(job.username())) {
+    assertOwner(job.username(), username);
+    return job;
+  }
+
+  private RecognitionJobView recoveredOwned(String jobId, String username) {
+    if (blank(jobId) || blank(username)) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "recognition job is required");
+    }
+    RecognitionJobRecoveryRepository.RecoveredRecognitionJob recovered = recoveryRepository == null
+        ? null : recoveryRepository.find(jobId).orElse(null);
+    if (recovered == null) {
+      throw new ApiException(ApiErrorCodes.CONFLICT, "recognition job is no longer available");
+    }
+    assertOwner(recovered.username(), username);
+    return recovered.view();
+  }
+
+  private void assertOwner(String owner, String username) {
+    if (!username.equals(owner)) {
       throw new ApiException(ApiErrorCodes.FORBIDDEN, "无权操作该识图任务");
     }
-    return job;
+  }
+
+  private void persist(RecognitionJob job) {
+    if (recoveryRepository != null) {
+      recoveryRepository.save(job.view(), job.username());
+    }
   }
 
   private void validateSubmission(AuthUser employee, ChatRecognizeRequest request) {

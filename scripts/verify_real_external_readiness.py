@@ -23,13 +23,19 @@ CHECKS = [
     {
         "name": "wecom_sheet_real_client",
         "path": "src/main/java/com/privateflow/modules/tablewrite/client/HttpWecomTableClient.java",
-        "required": ["implements WecomTableClient, SheetClient", "fetchIncrementalRows", "table.api_base_url", "table.api_key"],
+        "required": ["implements WecomTableClient, SheetClient", "WecomSmartSheetRecordClient", "fetchIncrementalRows", "createRow", "updateRow"],
         "blocking": True,
     },
     {
         "name": "wecom_table_write_real_client",
-        "path": "src/main/java/com/privateflow/modules/tablewrite/client/HttpWecomTableClient.java",
-        "required": ["createRow", "updateRow", "HttpClient", "Authorization"],
+        "path": "src/main/java/com/privateflow/modules/tablewrite/client/WecomSmartSheetRecordClient.java",
+        "required": ["GET_OPERATION", "ADD_OPERATION", "UPDATE_OPERATION", "fetchIncrementalRows", "createRow", "updateRow", "postForTarget"],
+        "blocking": True,
+    },
+    {
+        "name": "wecom_relay_transport",
+        "path": "src/main/java/com/privateflow/modules/tablewrite/client/WecomRelayClient.java",
+        "required": ["RELAY_PATH", "httpTransport.send", "X-Relay-Key-Id", "X-Relay-Signature", "HmacSHA256", "requireConfigured"],
         "blocking": True,
     },
     {
@@ -65,6 +71,8 @@ CONFIG_KEYS = {
     "image.api_key": ["src/main/java/com/privateflow/modules/image/config/ImageConfigProvider.java", "src/main/resources/db/migration"],
     "table.api_base_url": ["src/main/java/com/privateflow/modules/tablewrite/config/TableConfigProvider.java", "src/main/resources/db/migration"],
     "table.api_key": ["src/main/java/com/privateflow/modules/tablewrite/config/TableConfigProvider.java", "src/main/resources/db/migration"],
+    "wecom.connection_mode": ["src/main/java/com/privateflow/modules/tablewrite/config/WecomApiEndpointProvider.java", "src/main/resources/db/migration"],
+    "wecom.relay_base_url": ["src/main/java/com/privateflow/modules/tablewrite/config/WecomApiEndpointProvider.java", "src/main/resources/db/migration"],
     "llm.api_base_url": ["src/main/java/com/privateflow/modules/llm/LlmConfigProvider.java", "src/main/resources/db/migration"],
     "llm.api_key": ["src/main/java/com/privateflow/modules/llm/LlmConfigProvider.java", "src/main/resources/db/migration"],
     "llm.model": ["src/main/java/com/privateflow/modules/llm/LlmConfigProvider.java", "src/main/resources/db/migration"],

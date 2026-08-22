@@ -84,6 +84,22 @@ class JwtAuthenticationFilterTest {
   }
 
   @Test
+  void authFailureIncludesCorsHeadersForDesktopClient() throws Exception {
+    JwtService jwtService = mock(JwtService.class);
+    JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtService, mock(AccountRepository.class), new ObjectMapper());
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/customers");
+    request.addHeader("Origin", "file://");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    FilterChain chain = mock(FilterChain.class);
+
+    filter.doFilter(request, response, chain);
+
+    assertThat(response.getStatus()).isEqualTo(401);
+    assertThat(response.getHeader("Access-Control-Allow-Origin")).isEqualTo("file://");
+    verify(chain, never()).doFilter(any(), any());
+  }
+
+  @Test
   void leaderCannotAccessAdminApis() throws Exception {
     JwtService jwtService = mock(JwtService.class);
     AccountRepository accountRepository = mock(AccountRepository.class);

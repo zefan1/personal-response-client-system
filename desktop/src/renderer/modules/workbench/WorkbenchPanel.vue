@@ -89,7 +89,7 @@
         >
           <button class="workbench-row-main" @click="openWorkbenchCustomer(lead.phoneFull ?? lead.phone, lead.leadType)">
             <strong>{{ lead.nickname || `客户 ${lead.phone.slice(-4)}` }}</strong>
-            <span>{{ maskPhone(lead.phoneFull ?? lead.phone) }} · {{ leadTypeLabel(lead.leadType) }} · {{ lead.sourceTable || '-' }}</span>
+            <span>手机号 {{ formatPhone(lead.phoneFull ?? lead.phone) }} · 来源 {{ sourceLabel(lead.sourceTable) }}</span>
           </button>
           <button class="secondary small" @click="openWorkbenchCustomer(lead.phoneFull ?? lead.phone, lead.leadType)">查看</button>
         </article>
@@ -176,6 +176,18 @@ function followupText(item: { reminderType: string; overdueHours?: number | null
 
 function maskPhone(phone: string): string {
   return phone.length >= 7 ? `${phone.slice(0, 3)}****${phone.slice(-4)}` : `****${phone.slice(-4)}`;
+}
+
+function formatPhone(phone: string): string {
+  return phone || '-';
+}
+
+function sourceLabel(value?: string | null): string {
+  if (!value) return '-';
+  if (value.startsWith('ASSIGNMENT:')) return '分配表';
+  if (value.startsWith('ARRIVAL:')) return '到店表';
+  if (value === 'th1zyU') return '客户主表';
+  return value;
 }
 
 function formatDateTime(timestamp: number): string {

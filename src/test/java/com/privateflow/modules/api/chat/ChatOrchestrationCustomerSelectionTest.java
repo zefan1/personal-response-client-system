@@ -1,12 +1,14 @@
 package com.privateflow.modules.api.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.privateflow.modules.api.audit.AuditLogger;
+import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.service.CustomerAccessService;
@@ -16,6 +18,8 @@ import com.privateflow.modules.llm.LlmFollowupAnalysisService;
 import com.privateflow.modules.llm.LlmReplyGenerationService;
 import com.privateflow.modules.match.Confidence;
 import com.privateflow.modules.match.CustomerMatchService;
+import com.privateflow.modules.match.CustomerMatchException;
+import com.privateflow.modules.match.CustomerMatchErrorCodes;
 import com.privateflow.modules.match.CustomerSummary;
 import com.privateflow.modules.match.MatchResult;
 import com.privateflow.modules.match.MatchType;
@@ -82,6 +86,37 @@ class ChatOrchestrationCustomerSelectionTest {
     assertThat(response.match().matchType()).isEqualTo(MatchType.MULTIPLE);
     assertThat(response.skill()).isNull();
     verifyNoInteractions(archiveService, skillGatewayService);
+  }
+
+  @Test
+  void matchingFailureIsReturnedAsAnErrorInsteadOfBeingTreatedAsNoCustomer() {
+    CustomerMatchService matchService = mock(CustomerMatchService.class);
+    when(matchService.match(any())).thenThrow(new CustomerMatchException(
+        CustomerMatchErrorCodes.MATCH_FAILED, "客户匹配服务暂不可用"));
+    ChatOrchestrationService service = new ChatOrchestrationService(
+        mock(ImageRecognitionService.class),
+        matchService,
+        mock(SkillGatewayService.class),
+        mock(CustomerQueryService.class),
+        mock(CustomerAccessService.class),
+        mock(ReplyTagSnapshotBuilder.class),
+        mock(RequestContextStore.class),
+        mock(ApplicationEventPublisher.class),
+        mock(AuditLogger.class),
+        mock(SkillConfigProvider.class),
+        llmReplyServiceReturningNoReply(),
+        mock(LlmFollowupAnalysisService.class),
+        mock(FollowupAnalysisFieldMerger.class),
+        mock(FollowupAnalysisRetryService.class),
+        mock(FollowupConfirmationService.class),
+        mock(SupervisionEventService.class),
+        mock(SendConfirmationRepository.class),
+        mock(RecognitionCommunicationArchiveService.class));
+
+    assertThatThrownBy(() -> service.recognize(new ChatRecognizeRequest(
+        null, "聊天内容", "小雨", "XIAN_SUO", "new-leads", List.of())))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("客户匹配服务暂不可用");
   }
 
   private Customer customer(String phone) {

@@ -2,6 +2,7 @@ package com.privateflow.modules.profile.service;
 
 import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.history.CustomerFieldHistoryContext;
 import com.privateflow.modules.profile.infra.ProfileWriter;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -58,10 +59,20 @@ public class FollowupConfirmationService {
 
   private void writeCustomer(Customer customer, Map<String, Object> fields) {
     if (!blank(customer.getPhone())) {
-      profileWriter.write(customer.getPhone(), fields, customer.getVersion(), true);
+      profileWriter.write(
+          customer.getPhone(),
+          fields,
+          customer.getVersion(),
+          true,
+          CustomerFieldHistoryContext.of("跟进流程", "跟进记录", "SYSTEM"));
       return;
     }
-    profileWriter.writeByCustomerId(customer.getId(), fields, customer.getVersion(), true);
+    profileWriter.writeByCustomerId(
+        customer.getId(),
+        fields,
+        customer.getVersion(),
+        true,
+        CustomerFieldHistoryContext.of("跟进流程", "跟进记录", "SYSTEM"));
   }
 
   private boolean blank(String value) {

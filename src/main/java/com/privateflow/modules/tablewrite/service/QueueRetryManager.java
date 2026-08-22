@@ -6,7 +6,10 @@ import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.tablewrite.PendingTableWrite;
 import com.privateflow.modules.tablewrite.PendingWritePayload;
 import com.privateflow.modules.tablewrite.TableWriteActionType;
+import com.privateflow.modules.tablewrite.client.AuxiliarySmartSheetWriter;
 import com.privateflow.modules.tablewrite.client.WecomTableClient;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTargets;
 import com.privateflow.modules.tablewrite.config.TableConfig;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import com.privateflow.modules.tablewrite.infra.PendingTableWriteRepository;
@@ -16,6 +19,8 @@ import com.privateflow.modules.tags.TagExchangeService;
 import com.privateflow.modules.tags.TagExchangeSourceType;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -34,6 +39,11 @@ public class QueueRetryManager {
   private final NewCustomerRowCreator newCustomerRowCreator;
   private final TableFieldMappingResolver mappingResolver;
   private final TagExchangeService exchangeService;
+  private final AuxiliarySmartSheetWriter auxiliaryWriter;
+  private final AuxiliarySmartSheetTargets auxiliaryTargets;
+  private final Optional<AuxiliarySmartSheetTarget> assignmentTarget;
+  private final Optional<AuxiliarySmartSheetTarget> arrivalTarget;
+  private final CustomerMasterProjectionService customerMasterProjectionService;
 
   @Autowired
   public QueueRetryManager(
@@ -44,7 +54,10 @@ public class QueueRetryManager {
       CustomerQueryService customerQueryService,
       NewCustomerRowCreator newCustomerRowCreator,
       TableFieldMappingResolver mappingResolver,
-      TagExchangeService exchangeService) {
+      TagExchangeService exchangeService,
+      AuxiliarySmartSheetWriter auxiliaryWriter,
+      AuxiliarySmartSheetTargets auxiliaryTargets,
+      CustomerMasterProjectionService customerMasterProjectionService) {
     this.repository = repository;
     this.tableClient = tableClient;
     this.configProvider = configProvider;
@@ -53,6 +66,70 @@ public class QueueRetryManager {
     this.newCustomerRowCreator = newCustomerRowCreator;
     this.mappingResolver = mappingResolver;
     this.exchangeService = exchangeService;
+    this.auxiliaryWriter = auxiliaryWriter;
+    this.auxiliaryTargets = auxiliaryTargets;
+    this.assignmentTarget = Optional.empty();
+    this.arrivalTarget = Optional.empty();
+    this.customerMasterProjectionService = customerMasterProjectionService;
+  }
+
+  QueueRetryManager(
+      PendingTableWriteRepository repository,
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      ObjectMapper objectMapper,
+      CustomerQueryService customerQueryService,
+      NewCustomerRowCreator newCustomerRowCreator,
+      TableFieldMappingResolver mappingResolver,
+      TagExchangeService exchangeService,
+      AuxiliarySmartSheetWriter auxiliaryWriter,
+      Optional<AuxiliarySmartSheetTarget> assignmentTarget,
+      Optional<AuxiliarySmartSheetTarget> arrivalTarget) {
+    this(repository, tableClient, configProvider, objectMapper, customerQueryService,
+        newCustomerRowCreator, mappingResolver, exchangeService, auxiliaryWriter,
+        assignmentTarget, arrivalTarget, null);
+  }
+
+  QueueRetryManager(
+      PendingTableWriteRepository repository,
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      ObjectMapper objectMapper,
+      CustomerQueryService customerQueryService,
+      NewCustomerRowCreator newCustomerRowCreator,
+      TableFieldMappingResolver mappingResolver,
+      TagExchangeService exchangeService,
+      AuxiliarySmartSheetWriter auxiliaryWriter,
+      Optional<AuxiliarySmartSheetTarget> assignmentTarget,
+      Optional<AuxiliarySmartSheetTarget> arrivalTarget,
+      CustomerMasterProjectionService customerMasterProjectionService) {
+    this.repository = repository;
+    this.tableClient = tableClient;
+    this.configProvider = configProvider;
+    this.objectMapper = objectMapper;
+    this.customerQueryService = customerQueryService;
+    this.newCustomerRowCreator = newCustomerRowCreator;
+    this.mappingResolver = mappingResolver;
+    this.exchangeService = exchangeService;
+    this.auxiliaryWriter = auxiliaryWriter;
+    this.auxiliaryTargets = null;
+    this.assignmentTarget = assignmentTarget;
+    this.arrivalTarget = arrivalTarget;
+    this.customerMasterProjectionService = customerMasterProjectionService;
+  }
+
+  public QueueRetryManager(
+      PendingTableWriteRepository repository,
+      WecomTableClient tableClient,
+      TableConfigProvider configProvider,
+      ObjectMapper objectMapper,
+      CustomerQueryService customerQueryService,
+      NewCustomerRowCreator newCustomerRowCreator,
+      TableFieldMappingResolver mappingResolver,
+      TagExchangeService exchangeService) {
+    this(repository, tableClient, configProvider, objectMapper, customerQueryService,
+        newCustomerRowCreator, mappingResolver, exchangeService, null,
+        Optional.empty(), Optional.empty());
   }
 
   public QueueRetryManager(
@@ -71,6 +148,11 @@ public class QueueRetryManager {
     for (PendingTableWrite item : repository.due(100)) {
       try {
         PendingWritePayload payload = objectMapper.readValue(item.getPayload(), PendingWritePayload.class);
+        if (retryAuxiliary(payload, item.getCustomerId(), item.getPhone(),
+            Duration.ofMillis(config.writeTimeoutMs()))) {
+          repository.markResolved(item.getId());
+          continue;
+        }
         TagExchangeResult exchange = exchangeService == null
             ? new TagExchangeResult(payload.fields(), java.util.List.of(), java.util.List.of())
             : exchangeService.prepareOutbound(
@@ -113,6 +195,57 @@ public class QueueRetryManager {
     if (staleFailed > 0) {
       log.warn("table write has {} stale FAILED records, notify target {}", staleFailed, config.alertNotifyTarget());
     }
+  }
+
+  private boolean retryAuxiliary(PendingWritePayload payload, Long customerId, String phone, Duration timeout) {
+    if ("PRIMARY".equals(payload.sourceTable())) {
+      if (customerMasterProjectionService == null) {
+        return false;
+      }
+      Customer customer = customerId != null && customerId > 0
+          ? customerQueryService.getById(customerId)
+          : customerQueryService.getByPhone(phone);
+      if (customer == null) {
+        throw new IllegalStateException("PRIMARY retry customer not found");
+      }
+      customerMasterProjectionService.projectFields(customer, payload.fields());
+      return true;
+    }
+    if ("ASSIGNMENT".equals(payload.sourceTable())) {
+      writeAuxiliary(currentAssignmentTarget(), payload, timeout);
+      return true;
+    }
+    if ("ARRIVAL".equals(payload.sourceTable())) {
+      writeAuxiliary(currentArrivalTarget(), payload, timeout);
+      return true;
+    }
+    return false;
+  }
+
+  private Optional<AuxiliarySmartSheetTarget> currentAssignmentTarget() {
+    return auxiliaryTargets == null ? assignmentTarget : auxiliaryTargets.assignment();
+  }
+
+  private Optional<AuxiliarySmartSheetTarget> currentArrivalTarget() {
+    return auxiliaryTargets == null ? arrivalTarget : auxiliaryTargets.arrival();
+  }
+
+  private void writeAuxiliary(
+      Optional<AuxiliarySmartSheetTarget> target,
+      PendingWritePayload payload,
+      Duration timeout) {
+    if (auxiliaryWriter == null) {
+      throw new IllegalStateException("辅助表写入组件不可用");
+    }
+    AuxiliarySmartSheetTarget resolvedTarget = target.orElseThrow(
+        () -> new IllegalStateException("辅助表尚未配置"));
+    Map<String, Object> mappedFields = mappingResolver == null
+        ? payload.fields()
+        : mappingResolver.toSourceFields(resolvedTarget.role() + ":" + resolvedTarget.sheetId(), payload.fields());
+    String sourceTable = resolvedTarget.role() + ":" + resolvedTarget.sheetId();
+    String identityField = mappingResolver == null
+        ? resolvedTarget.uniqueFieldTitle() : mappingResolver.sourceFieldFor(sourceTable, "phone");
+    auxiliaryWriter.upsert(resolvedTarget, mappedFields, identityField, timeout);
   }
 
   private PendingWritePayload resolveExistingRow(Long customerId, String phone, PendingWritePayload payload) {

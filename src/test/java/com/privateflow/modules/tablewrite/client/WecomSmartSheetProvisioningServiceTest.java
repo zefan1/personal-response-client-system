@@ -62,7 +62,7 @@ class WecomSmartSheetProvisioningServiceTest {
     ArgumentCaptor<Map<String, Object>> add = requestCaptor();
     ordered.verify(apiClient).postWithApplicationCredentials(eq("add_fields"), add.capture(), eq(timeout));
     assertThat(add.getValue().toString())
-        .contains("姓名", "客资类型", "客户阶段", "备注", "下次跟进方向", "下次跟进时间")
+        .contains("姓名", "客资类型", "客户阶段", "购买项目", "备注", "下次跟进方向", "下次跟进时间")
         .doesNotContain("客户姓名", "手机号", "微信昵称", "客户类型", "跟进状态", "最近跟进时间");
   }
 
@@ -81,6 +81,7 @@ class WecomSmartSheetProvisioningServiceTest {
               {"field_id":"f-name","field_title":"姓名","field_type":"FIELD_TYPE_TEXT"},
               {"field_id":"f-lead","field_title":"客资类型","field_type":"FIELD_TYPE_TEXT"},
               {"field_id":"f-stage","field_title":"客户阶段","field_type":"FIELD_TYPE_TEXT"},
+              {"field_id":"f-purchased","field_title":"购买项目","field_type":"FIELD_TYPE_TEXT"},
               {"field_id":"f-note","field_title":"备注","field_type":"FIELD_TYPE_TEXT"},
               {"field_id":"f-next-dir","field_title":"下次跟进方向","field_type":"FIELD_TYPE_TEXT"},
               {"field_id":"f-next-at","field_title":"下次跟进时间","field_type":"FIELD_TYPE_TEXT"},

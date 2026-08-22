@@ -12,13 +12,26 @@ DESKTOP_REPORT = ROOT / ".tools" / "desktop" / "package_verify_report.json"
 LIVE_REPORT = REPORT_DIR / "real_external_live.json"
 OUTPUT = REPORT_DIR / "production_blockers.json"
 
-LIVE_ENV_KEYS = [
+LIVE_PROVIDER_ENV_KEYS = [
     "PDA_LIVE_SKILL_BASE_URL",
     "PDA_LIVE_SKILL_API_KEY",
     "PDA_LIVE_IMAGE_BASE_URL",
     "PDA_LIVE_IMAGE_API_KEY",
-    "PDA_LIVE_TABLE_BASE_URL",
-    "PDA_LIVE_TABLE_API_KEY",
+    "PDA_LIVE_LLM_BASE_URL",
+    "PDA_LIVE_LLM_API_KEY",
+    "PDA_LIVE_LLM_MODEL",
+]
+LIVE_WECOM_ENV_KEYS = [
+    "WECOM_TRANSPORT_MODE",
+    "WECOM_SMARTSHEET_DOC_ID",
+    "WECOM_SMARTSHEET_SHEET_ID",
+    "WECOM_SMARTSHEET_VIEW_ID",
+    "WECOM_SMARTSHEET_SOURCE_TABLE",
+    "WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE",
+]
+LIVE_ACCEPTANCE_ENV_KEYS = [
+    "PDA_LIVE_ACCEPTANCE_SCREENSHOT_PATH",
+    "PDA_LIVE_ACCEPTANCE_CONFIRM",
 ]
 
 
@@ -28,13 +41,30 @@ def read_json(path: Path) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def live_env_presence() -> dict[str, bool]:
+    keys = LIVE_PROVIDER_ENV_KEYS + LIVE_WECOM_ENV_KEYS + LIVE_ACCEPTANCE_ENV_KEYS
+    mode = os.environ.get("WECOM_TRANSPORT_MODE", "").strip().upper()
+    if mode == "RELAY":
+        keys += ["WECOM_RELAY_BASE_URL", "WECOM_RELAY_KEY_ID", "WECOM_RELAY_SECRET"]
+    elif mode == "DIRECT":
+        keys += ["WECOM_CORP_ID", "WECOM_APP_SECRET"]
+    result = {key: bool(os.environ.get(key, "").strip()) for key in keys}
+    screenshot = os.environ.get("PDA_LIVE_ACCEPTANCE_SCREENSHOT_PATH", "").strip()
+    if screenshot:
+        result["PDA_LIVE_ACCEPTANCE_SCREENSHOT_PATH"] = Path(screenshot).is_file()
+    result["PDA_LIVE_ACCEPTANCE_CONFIRM"] = (
+        os.environ.get("PDA_LIVE_ACCEPTANCE_CONFIRM", "").strip() == "ISOLATED_WECOM_SHEET"
+    )
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--require-production-ready", action="store_true", help="return non-zero when production blockers remain")
     args = parser.parse_args()
 
     blockers: list[dict[str, object]] = []
-    live_env_present = {key: bool(os.environ.get(key, "").strip()) for key in LIVE_ENV_KEYS}
+    live_env_present = live_env_presence()
     missing_live_env = [key for key, present in live_env_present.items() if not present]
     live_report = read_json(LIVE_REPORT)
     package_report = read_json(DESKTOP_REPORT)

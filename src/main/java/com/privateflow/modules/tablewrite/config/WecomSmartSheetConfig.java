@@ -1,5 +1,6 @@
 package com.privateflow.modules.tablewrite.config;
 
+import com.privateflow.modules.customer.infra.SystemConfigRepository;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,6 +21,11 @@ public final class WecomSmartSheetConfig {
   private final String uniqueFieldTitle;
   private final ZoneId zoneId;
   private final WecomApiEndpointProvider endpointProvider;
+  private final String relayBaseUrl;
+  private final String relayKeyId;
+  private final String relaySecret;
+  private final WecomTransportMode configuredTransportMode;
+  private final SystemConfigRepository runtimeConfigRepository;
 
   @Autowired
   public WecomSmartSheetConfig(
@@ -31,9 +37,15 @@ public final class WecomSmartSheetConfig {
       @Value("${WECOM_SMARTSHEET_VIEW_ID:}") String viewId,
       @Value("${WECOM_SMARTSHEET_SOURCE_TABLE:}") String sourceTable,
       @Value("${WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE:}") String uniqueFieldTitle,
-      WecomApiEndpointProvider endpointProvider) {
+      @Value("${WECOM_TRANSPORT_MODE:DIRECT}") String transportMode,
+      @Value("${WECOM_RELAY_BASE_URL:}") String relayBaseUrl,
+      @Value("${WECOM_RELAY_KEY_ID:}") String relayKeyId,
+      @Value("${WECOM_RELAY_SECRET:}") String relaySecret,
+      WecomApiEndpointProvider endpointProvider,
+      SystemConfigRepository runtimeConfigRepository) {
     this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle,
-        ZoneId.of("Asia/Shanghai"), endpointProvider);
+        ZoneId.of("Asia/Shanghai"), endpointProvider, WecomTransportMode.from(transportMode), relayBaseUrl,
+        relayKeyId, relaySecret, runtimeConfigRepository);
   }
 
   public WecomSmartSheetConfig(
@@ -59,7 +71,8 @@ public final class WecomSmartSheetConfig {
       String sourceTable,
       String uniqueFieldTitle,
       ZoneId zoneId) {
-    this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle, zoneId, null);
+    this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle, zoneId,
+        null, WecomTransportMode.DIRECT, "", "", "", null);
   }
 
   WecomSmartSheetConfig(
@@ -73,6 +86,42 @@ public final class WecomSmartSheetConfig {
       String uniqueFieldTitle,
       ZoneId zoneId,
       WecomApiEndpointProvider endpointProvider) {
+    this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle, zoneId,
+        endpointProvider, WecomTransportMode.DIRECT, "", "", "", null);
+  }
+
+  public WecomSmartSheetConfig(
+      String apiBaseUrl,
+      String corpId,
+      String appSecret,
+      String documentId,
+      String sheetId,
+      String viewId,
+      String sourceTable,
+      String uniqueFieldTitle,
+      ZoneId zoneId,
+      WecomTransportMode transportMode,
+      WecomRelayConfig relayConfig) {
+    this(apiBaseUrl, corpId, appSecret, documentId, sheetId, viewId, sourceTable, uniqueFieldTitle, zoneId,
+        null, transportMode, relayConfig.baseUrl(), relayConfig.keyId(), relayConfig.secret(), null);
+  }
+
+  private WecomSmartSheetConfig(
+      String apiBaseUrl,
+      String corpId,
+      String appSecret,
+      String documentId,
+      String sheetId,
+      String viewId,
+      String sourceTable,
+      String uniqueFieldTitle,
+      ZoneId zoneId,
+      WecomApiEndpointProvider endpointProvider,
+      WecomTransportMode transportMode,
+      String relayBaseUrl,
+      String relayKeyId,
+      String relaySecret,
+      SystemConfigRepository runtimeConfigRepository) {
     this.apiBaseUrl = normalizedBaseUrl(apiBaseUrl);
     this.corpId = trimmed(corpId);
     this.appSecret = trimmed(appSecret);
@@ -83,16 +132,21 @@ public final class WecomSmartSheetConfig {
     this.uniqueFieldTitle = trimmed(uniqueFieldTitle);
     this.zoneId = zoneId;
     this.endpointProvider = endpointProvider;
+    this.configuredTransportMode = transportMode == null ? WecomTransportMode.DIRECT : transportMode;
+    this.relayBaseUrl = normalizedBaseUrl(relayBaseUrl);
+    this.relayKeyId = trimmed(relayKeyId);
+    this.relaySecret = trimmed(relaySecret);
+    this.runtimeConfigRepository = runtimeConfigRepository;
   }
 
   public void requireConfigured() {
     List<String> missing = new ArrayList<>();
     addMissingApplicationCredentials(missing);
-    require(missing, documentId, "WECOM_SMARTSHEET_DOC_ID");
-    require(missing, sheetId, "WECOM_SMARTSHEET_SHEET_ID");
-    require(missing, viewId, "WECOM_SMARTSHEET_VIEW_ID");
-    require(missing, sourceTable, "WECOM_SMARTSHEET_SOURCE_TABLE");
-    require(missing, uniqueFieldTitle, "WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE");
+    require(missing, documentId(), "WECOM_SMARTSHEET_DOC_ID");
+    require(missing, sheetId(), "WECOM_SMARTSHEET_SHEET_ID");
+    require(missing, viewId(), "WECOM_SMARTSHEET_VIEW_ID");
+    require(missing, sourceTable(), "WECOM_SMARTSHEET_SOURCE_TABLE");
+    require(missing, uniqueFieldTitle(), "WECOM_SMARTSHEET_UNIQUE_FIELD_TITLE");
     if (!missing.isEmpty()) {
       throw new IllegalStateException("Missing required environment variables: " + String.join(", ", missing));
     }
@@ -108,10 +162,10 @@ public final class WecomSmartSheetConfig {
 
   public void requireTarget(String requestedDocumentId, String requestedSourceTable) {
     requireConfigured();
-    if (!documentId.equals(trimmed(requestedDocumentId))) {
+    if (!documentId().equals(trimmed(requestedDocumentId))) {
       throw new IllegalArgumentException("Requested document does not match configured document");
     }
-    if (!sourceTable.equals(trimmed(requestedSourceTable))) {
+    if (!sourceTable().equals(trimmed(requestedSourceTable))) {
       throw new IllegalArgumentException("Requested source table does not match configured source table");
     }
   }
@@ -129,27 +183,38 @@ public final class WecomSmartSheetConfig {
   }
 
   public String documentId() {
-    return documentId;
+    return runtimeValue("table.primary.document_id", documentId);
   }
 
   public String sheetId() {
-    return sheetId;
+    return runtimeValue("table.primary.sheet_id", sheetId);
   }
 
   public String viewId() {
-    return viewId;
+    return runtimeValue("table.primary.view_id", viewId);
   }
 
   public String sourceTable() {
-    return sourceTable;
+    return runtimeValue("table.primary.source_table", sourceTable);
   }
 
   public String uniqueFieldTitle() {
-    return uniqueFieldTitle;
+    return runtimeValue("table.primary.unique_field_title", uniqueFieldTitle);
   }
 
   public ZoneId zoneId() {
     return zoneId;
+  }
+
+  public WecomTransportMode transportMode() {
+    return endpointProvider == null ? configuredTransportMode : endpointProvider.currentMode();
+  }
+
+  public WecomRelayConfig relayConfig() {
+    String baseUrl = endpointProvider == null
+        ? relayBaseUrl
+        : endpointProvider.currentRelayBaseUrl(relayBaseUrl);
+    return new WecomRelayConfig(baseUrl, relayKeyId, relaySecret);
   }
 
   private static void require(List<String> missing, String value, String environmentVariable) {
@@ -173,5 +238,15 @@ public final class WecomSmartSheetConfig {
 
   private static String trimmed(String value) {
     return value == null ? "" : value.trim();
+  }
+
+  private String runtimeValue(String key, String fallback) {
+    if (runtimeConfigRepository == null) {
+      return fallback;
+    }
+    return runtimeConfigRepository.findValue(key)
+        .map(WecomSmartSheetConfig::trimmed)
+        .filter(value -> !value.isBlank())
+        .orElse(fallback);
   }
 }

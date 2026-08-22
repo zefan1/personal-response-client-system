@@ -15,13 +15,19 @@ public final class WecomApiEndpointProvider {
   }
 
   public String currentBaseUrl(String deploymentBaseUrl) {
-    String mode = configRepository.findValue("wecom.connection_mode")
-        .map(String::trim)
-        .map(String::toUpperCase)
-        .orElse("RELAY");
-    if ("DIRECT".equals(mode)) {
+    if (currentMode() == WecomTransportMode.DIRECT) {
       return DIRECT_ENDPOINT;
     }
+    return currentRelayBaseUrl(deploymentBaseUrl);
+  }
+
+  public WecomTransportMode currentMode() {
+    return configRepository.findValue("wecom.connection_mode")
+        .map(WecomTransportMode::from)
+        .orElse(WecomTransportMode.RELAY);
+  }
+
+  public String currentRelayBaseUrl(String deploymentBaseUrl) {
     return configRepository.findValue("wecom.relay_base_url")
         .map(WecomApiEndpointProvider::normalized)
         .filter(value -> !value.isBlank())
@@ -32,6 +38,11 @@ public final class WecomApiEndpointProvider {
     String result = value == null ? "" : value.trim();
     while (result.endsWith("/")) {
       result = result.substring(0, result.length() - 1);
+    }
+    if (result.endsWith("/v1/wecom/api")) {
+      result = result.substring(0, result.length() - "/v1/wecom/api".length());
+    } else if (result.endsWith("/wecom")) {
+      result = result.substring(0, result.length() - "/wecom".length());
     }
     return result;
   }

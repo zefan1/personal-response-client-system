@@ -13,6 +13,8 @@ public class PendingTableWrite {
   private TableWriteStatus status;
   private LocalDateTime nextRetryAt;
   private String errorMsg;
+  private LocalDateTime createdAt;
+  private LocalDateTime updatedAt;
 
   public Long getId() { return id; }
   public void setId(Long id) { this.id = id; }
@@ -32,4 +34,8 @@ public class PendingTableWrite {
   public void setNextRetryAt(LocalDateTime nextRetryAt) { this.nextRetryAt = nextRetryAt; }
   public String getErrorMsg() { return errorMsg; }
   public void setErrorMsg(String errorMsg) { this.errorMsg = errorMsg; }
+  public LocalDateTime getCreatedAt() { return createdAt; }
+  public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+  public LocalDateTime getUpdatedAt() { return updatedAt; }
+  public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

@@ -65,6 +65,28 @@ public class RecognitionCommunicationArchiveService {
   }
 
   @Transactional
+  public Customer createPendingSendCustomer(SendConfirmRequest request) {
+    if (request == null) {
+      throw new IllegalArgumentException("send confirmation request is required");
+    }
+    String phone = blank(request.phone()) ? null : request.phone().trim();
+    if (phone != null) {
+      Customer existing = customerRepository.findByPhone(phone).orElse(null);
+      if (existing != null) {
+        return existing;
+      }
+    }
+    Customer customer = new Customer();
+    customer.setPhone(phone);
+    customer.setNickname(blank(request.nickname()) ? null : request.nickname().trim());
+    customer.setLeadType(request.leadType());
+    customer.setSourceTable(request.sourceTable());
+    customer.setAssignedKeeper(AuthContext.username());
+    customer.setCustomerStage("待联系");
+    return customerRepository.createRecognitionCustomer(customer);
+  }
+
+  @Transactional
   public void archiveConfirmedEmployeeMessage(Customer customer, String sentText, String username) {
     if (customer == null || customer.getId() == null || blank(sentText) || blank(username)) {
       throw new IllegalArgumentException("customer, operator, and sent text are required");

@@ -89,6 +89,14 @@ public class ConfigAdminService {
     return Map.of("updated", true, "configKey", key);
   }
 
+  @Transactional
+  public void updateAll(Map<String, String> values) {
+    if (values == null || values.isEmpty()) {
+      return;
+    }
+    values.forEach((key, value) -> update(key, Map.of("value", value == null ? "" : value)));
+  }
+
   private void validate(String key, String value) {
     if (key.startsWith("system.") || key.startsWith("cache.") || key.startsWith("skill.") || key.startsWith("llm.")
         || key.startsWith("image.") || key.startsWith("match.") || key.startsWith("profile.")

@@ -2,6 +2,7 @@ package com.privateflow.modules.tablewrite.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -13,6 +14,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.LongSupplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -30,6 +32,7 @@ public class WecomSmartSheetFieldCatalog {
   private final LongSupplier ticker;
   private volatile Snapshot snapshot;
   private InFlight inFlight;
+  private final Map<String, Snapshot> targetSnapshots = new ConcurrentHashMap<>();
 
   @Autowired
   public WecomSmartSheetFieldCatalog(WecomSmartSheetApiClient apiClient, WecomSmartSheetConfig config) {
@@ -127,19 +130,68 @@ public class WecomSmartSheetFieldCatalog {
     return field;
   }
 
+  public Map<String, WecomSmartSheetField> visibleFields(
+      AuxiliarySmartSheetTarget target, Duration timeout) {
+    if (target == null || !target.configured()) {
+      throw new IllegalArgumentException("Smart Sheet target is not configured");
+    }
+    String key = target.documentId() + "\u0000" + target.sheetId() + "\u0000" + target.viewId();
+    Snapshot current = targetSnapshots.get(key);
+    Instant now = clock.instant();
+    if (isFresh(current, now)) {
+      return current.fields();
+    }
+    WecomRequestDeadline deadline = WecomRequestDeadline.start(timeout, LOAD_OPERATION, ticker);
+    Map<String, WecomSmartSheetField> fields = load(target, deadline);
+    deadline.remaining();
+    Snapshot loaded = new Snapshot(Map.copyOf(fields), clock.instant());
+    targetSnapshots.put(key, loaded);
+    return loaded.fields();
+  }
+
+  public WecomSmartSheetField requireWritable(
+      AuxiliarySmartSheetTarget target, String title, Duration timeout) {
+    String requested = title == null ? "" : title.trim();
+    if (requested.isEmpty()) {
+      throw new IllegalArgumentException("Field title is required");
+    }
+    WecomSmartSheetField field = visibleFields(target, timeout).get(requested);
+    if (field == null) {
+      throw new IllegalArgumentException("Unknown visible field: " + requested);
+    }
+    if (!field.writable()) {
+      throw new IllegalArgumentException("Field is visible but read-only: " + requested);
+    }
+    return field;
+  }
+
+  /** Clears all cached field IDs after a Smart Sheet target configuration changes. */
+  public synchronized void invalidate() {
+    snapshot = null;
+    targetSnapshots.clear();
+  }
+
   private Map<String, WecomSmartSheetField> load(WecomRequestDeadline deadline) {
+    return load(new AuxiliarySmartSheetTarget(
+        "PRIMARY", config.documentId(), config.sheetId(), config.viewId(),
+        config.uniqueFieldTitle(), ""), deadline);
+  }
+
+  private Map<String, WecomSmartSheetField> load(
+      AuxiliarySmartSheetTarget target, WecomRequestDeadline deadline) {
     Map<String, WecomSmartSheetField> fieldsByTitle = new LinkedHashMap<>();
     Set<String> fieldIds = new HashSet<>();
     int offset = 0;
     Integer expectedTotal = null;
     while (expectedTotal == null || offset < expectedTotal) {
       Map<String, Object> request = new LinkedHashMap<>();
-      request.put("docid", config.documentId());
-      request.put("sheet_id", config.sheetId());
-      request.put("view_id", config.viewId());
+      request.put("docid", target.documentId());
+      request.put("sheet_id", target.sheetId());
+      request.put("view_id", target.viewId());
       request.put("offset", offset);
       request.put("limit", PAGE_SIZE);
-      JsonNode response = apiClient.post(LOAD_OPERATION, request, deadline.remaining());
+      JsonNode response = apiClient.postForTarget(LOAD_OPERATION, request, deadline.remaining(),
+          "PRIMARY".equals(target.role()));
       Page page = page(response);
       if (expectedTotal == null) {
         expectedTotal = page.total();
@@ -194,7 +246,7 @@ public class WecomSmartSheetFieldCatalog {
       throw invalidCatalog();
     }
     String fieldId = requiredText(node.get("field_id"));
-    String title = requiredText(node.get("field_title"));
+    String title = WecomSmartSheetFieldMetadata.requireTitle(node);
     String type = requiredText(node.get("field_type"));
     boolean includesTime = "FIELD_TYPE_DATE_TIME".equals(type) && dateTimeIncludesTime(node.get("property_date_time"));
     Map<String, String> options = options(node, type);
@@ -228,14 +280,22 @@ public class WecomSmartSheetFieldCatalog {
     }
     Map<String, String> idsByText = new LinkedHashMap<>();
     Set<String> optionIds = new HashSet<>();
+    Set<String> ambiguousTexts = new HashSet<>();
     for (JsonNode option : options) {
       if (option == null || !option.isObject()) {
         throw invalidCatalog();
       }
       String id = requiredText(option.get("id"));
       String text = requiredText(option.get("text"));
-      if (idsByText.putIfAbsent(text, id) != null) {
-        throw invalidCatalog();
+      if (ambiguousTexts.contains(text)) {
+        // Already known to be ambiguous; do not re-introduce it.
+      } else if (idsByText.containsKey(text)) {
+        // A duplicate label cannot be encoded safely; keep the field visible but
+        // remove the ambiguous label so a write fails closed for that value.
+        idsByText.remove(text);
+        ambiguousTexts.add(text);
+      } else {
+        idsByText.put(text, id);
       }
       if (!optionIds.add(id)) {
         throw invalidCatalog();

@@ -45,7 +45,7 @@ function loadedItems(): FollowupItem[] {
     item({ phone: '18800000001', nickname: 'Overdue', reminderType: 'OVERDUE', overdueHours: 3 }),
     item({ phone: '18800000002', nickname: 'Today', reminderType: 'DUE_TODAY' }),
     item({ phone: '18800000003', nickname: 'Appointment', reminderType: 'APPOINTMENT', appointmentTime: '14:30' }),
-    item({ phone: '18800000004', nickname: 'New Lead', reminderType: 'NEW_LEAD', sourceTable: 'sheet-a' })
+    item({ phone: '18800000004', phoneFull: '18800000004', nickname: 'New Lead', reminderType: 'NEW_LEAD', sourceTable: 'sheet-a', assignedKeeper: 'admin' })
   ];
 }
 
@@ -116,6 +116,9 @@ describe('FollowupListPanel', () => {
     eventBus.emit('followup:switch-tab', { tab: 'NEW_LEAD' });
     await flushUi();
     expect(host.textContent).toContain('New Lead');
+    expect(host.textContent).toContain('手机号 18800000004');
+    expect(host.textContent).toContain('来源 sheet-a');
+    expect(host.textContent).not.toContain('admin');
 
     eventBus.emit('followup:switch-tab', { tab: 'NOT_A_TAB' });
     await flushUi();

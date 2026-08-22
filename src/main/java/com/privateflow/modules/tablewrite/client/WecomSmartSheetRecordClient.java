@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.privateflow.modules.customer.sync.SheetRow;
 import com.privateflow.modules.customer.sync.SheetSource;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTargets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -20,11 +22,15 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
 public class WecomSmartSheetRecordClient {
+
+  private static final Logger log = LoggerFactory.getLogger(WecomSmartSheetRecordClient.class);
 
   private static final String GET_OPERATION = "get_records";
   private static final String ADD_OPERATION = "add_records";
@@ -40,6 +46,7 @@ public class WecomSmartSheetRecordClient {
   private final WecomSmartSheetApiClient apiClient;
   private final WecomSmartSheetFieldCatalog fieldCatalog;
   private final WecomSmartSheetValueCodec valueCodec;
+  private final AuxiliarySmartSheetTargets auxiliaryTargets;
   private final Clock clock;
   private final Duration recentSuccessTtl;
   private final int recentSuccessLimit;
@@ -51,8 +58,42 @@ public class WecomSmartSheetRecordClient {
       WecomSmartSheetConfig config,
       WecomSmartSheetApiClient apiClient,
       WecomSmartSheetFieldCatalog fieldCatalog,
+      WecomSmartSheetValueCodec valueCodec,
+      AuxiliarySmartSheetTargets auxiliaryTargets) {
+    this(config, apiClient, fieldCatalog, valueCodec, auxiliaryTargets,
+        Clock.systemUTC(), RECENT_SUCCESS_TTL, RECENT_SUCCESS_LIMIT);
+  }
+
+  public WecomSmartSheetRecordClient(
+      WecomSmartSheetConfig config,
+      WecomSmartSheetApiClient apiClient,
+      WecomSmartSheetFieldCatalog fieldCatalog,
       WecomSmartSheetValueCodec valueCodec) {
-    this(config, apiClient, fieldCatalog, valueCodec, Clock.systemUTC(), RECENT_SUCCESS_TTL, RECENT_SUCCESS_LIMIT);
+    this(config, apiClient, fieldCatalog, valueCodec, null,
+        Clock.systemUTC(), RECENT_SUCCESS_TTL, RECENT_SUCCESS_LIMIT);
+  }
+
+  WecomSmartSheetRecordClient(
+      WecomSmartSheetConfig config,
+      WecomSmartSheetApiClient apiClient,
+      WecomSmartSheetFieldCatalog fieldCatalog,
+      WecomSmartSheetValueCodec valueCodec,
+      AuxiliarySmartSheetTargets auxiliaryTargets,
+      Clock clock,
+      Duration recentSuccessTtl,
+      int recentSuccessLimit) {
+    this.config = Objects.requireNonNull(config, "config is required");
+    this.apiClient = Objects.requireNonNull(apiClient, "apiClient is required");
+    this.fieldCatalog = Objects.requireNonNull(fieldCatalog, "fieldCatalog is required");
+    this.valueCodec = Objects.requireNonNull(valueCodec, "valueCodec is required");
+    this.auxiliaryTargets = auxiliaryTargets;
+    this.clock = Objects.requireNonNull(clock, "clock is required");
+    if (recentSuccessTtl == null || recentSuccessTtl.isZero() || recentSuccessTtl.isNegative()
+        || recentSuccessLimit <= 0) {
+      throw new IllegalArgumentException("Recent success cache settings must be positive");
+    }
+    this.recentSuccessTtl = recentSuccessTtl;
+    this.recentSuccessLimit = recentSuccessLimit;
   }
 
   WecomSmartSheetRecordClient(
@@ -63,24 +104,15 @@ public class WecomSmartSheetRecordClient {
       Clock clock,
       Duration recentSuccessTtl,
       int recentSuccessLimit) {
-    this.config = Objects.requireNonNull(config, "config is required");
-    this.apiClient = Objects.requireNonNull(apiClient, "apiClient is required");
-    this.fieldCatalog = Objects.requireNonNull(fieldCatalog, "fieldCatalog is required");
-    this.valueCodec = Objects.requireNonNull(valueCodec, "valueCodec is required");
-    this.clock = Objects.requireNonNull(clock, "clock is required");
-    if (recentSuccessTtl == null || recentSuccessTtl.isZero() || recentSuccessTtl.isNegative()
-        || recentSuccessLimit <= 0) {
-      throw new IllegalArgumentException("Recent success cache settings must be positive");
-    }
-    this.recentSuccessTtl = recentSuccessTtl;
-    this.recentSuccessLimit = recentSuccessLimit;
+    this(config, apiClient, fieldCatalog, valueCodec, null,
+        clock, recentSuccessTtl, recentSuccessLimit);
   }
 
   public List<SheetRow> fetchIncrementalRows(
       SheetSource source, LocalDateTime modifiedAfter, int limit, Duration timeout) {
     validate(source, modifiedAfter, limit, timeout);
-    config.requireTarget(source.sheetId(), source.sourceTable());
-    Map<String, WecomSmartSheetField> fields = fieldCatalog.visibleFields(timeout);
+    AuxiliarySmartSheetTarget target = targetFor(source);
+    Map<String, WecomSmartSheetField> fields = fieldCatalog.visibleFields(target, timeout);
     List<TimestampedRow> included = new ArrayList<>();
     Set<String> recordIds = new HashSet<>();
     Long expectedTotal = null;
@@ -88,7 +120,8 @@ public class WecomSmartSheetRecordClient {
     long offset = 0;
 
     for (int pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
-      JsonNode response = apiClient.post(GET_OPERATION, request(offset), timeout);
+      JsonNode response = apiClient.postForTarget(GET_OPERATION, request(target, offset), timeout,
+          "PRIMARY".equals(target.role()));
       Page page = page(response);
       expectedTotal = expectedTotal(expectedTotal, page.total());
       loadedCount = add(loadedCount, page.records().size());
@@ -101,11 +134,13 @@ public class WecomSmartSheetRecordClient {
           included.add(row);
         }
       }
-      if (!page.hasMore()) {
-        if (expectedTotal != null && loadedCount != expectedTotal) {
-          throw invalid("total metadata was inconsistent");
-        }
-        return limitedSorted(included, limit);
+        if (!page.hasMore()) {
+          if (expectedTotal != null && loadedCount != expectedTotal) {
+            throw invalid("total metadata was inconsistent");
+          }
+          log.info("WeCom Smart Sheet records read, role={}, returned={}, matchedSince={}, modifiedAfter={}",
+              target.role(), loadedCount, included.size(), modifiedAfter);
+          return limitedSorted(included, limit);
       }
       if (pageNumber == MAX_PAGES - 1) {
         throw invalid("pagination exceeded maximum pages");
@@ -115,23 +150,60 @@ public class WecomSmartSheetRecordClient {
     throw invalid("pagination exceeded maximum pages");
   }
 
+  /** Reads only the records named by a verified WeCom callback. */
+  public List<SheetRow> fetchRecords(
+      AuxiliarySmartSheetTarget target, List<String> recordIds, Duration timeout) {
+    if (target == null || !target.configured() || recordIds == null || recordIds.isEmpty()
+        || timeout == null || timeout.isZero() || timeout.isNegative()) {
+      throw new IllegalArgumentException("Configured target, record identifiers, and positive timeout are required");
+    }
+    List<String> ids = recordIds.stream()
+        .filter(Objects::nonNull)
+        .map(String::trim)
+        .filter(id -> !id.isEmpty())
+        .distinct()
+        .toList();
+    if (ids.isEmpty() || ids.size() > PAGE_SIZE) {
+      throw new IllegalArgumentException("Between 1 and " + PAGE_SIZE + " record identifiers are required");
+    }
+    Map<String, WecomSmartSheetField> fields = fieldCatalog.visibleFields(target, timeout);
+    Map<String, Object> request = request(target, 0);
+    request.put("record_ids", ids);
+    JsonNode response = apiClient.postForTarget(GET_OPERATION, request, timeout,
+        "PRIMARY".equals(target.role()));
+    Page page = page(response);
+    if (page.hasMore()) {
+      throw invalid("callback record response was paginated");
+    }
+    List<SheetRow> rows = new ArrayList<>();
+    Set<String> seen = new HashSet<>();
+    for (int index = 0; index < page.records().size(); index++) {
+      rows.add(row(page.records().get(index), fields, seen, index).row());
+    }
+    if (!seen.equals(new HashSet<>(ids))) {
+      throw invalid("callback record response did not contain every requested record");
+    }
+    return List.copyOf(rows);
+  }
+
   public String createRow(String sourceTable, Map<String, Object> fields, Duration timeout) {
-    validateWrite(sourceTable, fields, timeout);
+    AuxiliarySmartSheetTarget target = targetForSourceTable(sourceTable);
+    validateWrite(target, sourceTable, fields, timeout);
     long deadline = deadline(timeout);
-    String uniqueTitle = config.uniqueFieldTitle();
+    String uniqueTitle = target.uniqueFieldTitle();
     Object uniqueValue = fields.get(uniqueTitle);
     if (!(uniqueValue instanceof String exactValue) || exactValue.isBlank()) {
       throw new IllegalArgumentException("A nonblank value is required for unique field: " + uniqueTitle);
     }
-    String lockKey = normalizedLockKey(exactValue);
+    String lockKey = cacheKey(target, sourceTable, exactValue);
     CreateLock lock = acquireCreateLock(lockKey);
     boolean locked = false;
     try {
       locked = tryCreateLock(lock, deadline);
-      Map<String, JsonNode> encoded = encodeFieldsUntil(fields, deadline);
-      WecomSmartSheetField uniqueField =
-          fieldCatalog.requireWritable(uniqueTitle, remaining(deadline, ADD_OPERATION));
-      Match match = exactMatch(uniqueField, exactValue, deadline);
+      Map<String, JsonNode> encoded = encodeFieldsUntil(target, fields, deadline);
+      WecomSmartSheetField uniqueField = fieldCatalog.requireWritable(
+          target, uniqueTitle, remaining(deadline, ADD_OPERATION));
+      Match match = exactMatch(target, uniqueField, exactValue, deadline);
       if (match.count() > 1) {
         throw invalid(GET_OPERATION, "multiple exact unique-field matches were found");
       }
@@ -148,7 +220,7 @@ public class WecomSmartSheetRecordClient {
         lock.confirmedRecordId = recentRecordId;
         return recentRecordId;
       }
-      String createdRecordId = add(encoded, remaining(deadline, ADD_OPERATION));
+      String createdRecordId = add(target, encoded, remaining(deadline, ADD_OPERATION));
       lock.confirmedRecordId = createdRecordId;
       rememberRecentSuccess(lockKey, createdRecordId);
       return createdRecordId;
@@ -165,7 +237,8 @@ public class WecomSmartSheetRecordClient {
 
   public void updateRow(
       String sourceTable, String sourceRowId, Map<String, Object> fields, Duration timeout) {
-    validateWrite(sourceTable, fields, timeout);
+    AuxiliarySmartSheetTarget target = targetForSourceTable(sourceTable);
+    validateWrite(target, sourceTable, fields, timeout);
     String recordId = sourceRowId == null ? "" : sourceRowId.trim();
     if (recordId.isEmpty()) {
       throw new IllegalArgumentException("Record identifier is required");
@@ -173,29 +246,34 @@ public class WecomSmartSheetRecordClient {
     if (fields.values().stream().allMatch(Objects::isNull)) {
       throw new IllegalArgumentException("At least one non-null field is required");
     }
-    Map<String, JsonNode> encoded = encodeFields(fields, timeout);
+    Map<String, JsonNode> encoded = encodeFields(target, fields, timeout);
     if (encoded.isEmpty()) {
       throw new IllegalArgumentException("At least one non-null field is required");
     }
     Map<String, Object> record = new LinkedHashMap<>();
     record.put("record_id", recordId);
     record.put("values", encoded);
-    JsonNode response = apiClient.post(UPDATE_OPERATION, writeRequest(record), timeout);
+    JsonNode response = apiClient.postForTarget(UPDATE_OPERATION, writeRequest(target, record), timeout,
+        "PRIMARY".equals(target.role()));
     confirmUpdated(response, recordId);
   }
 
-  private Map<String, Object> request(long offset) {
+  private Map<String, Object> request(AuxiliarySmartSheetTarget target, long offset) {
     Map<String, Object> request = new LinkedHashMap<>();
-    request.put("docid", config.documentId());
-    request.put("sheet_id", config.sheetId());
-    request.put("view_id", config.viewId());
+    request.put("docid", target.documentId());
+    request.put("sheet_id", target.sheetId());
+    request.put("view_id", target.viewId());
     request.put("key_type", FIELD_TITLE_KEY_TYPE);
     request.put("offset", offset);
     request.put("limit", PAGE_SIZE);
     return request;
   }
 
-  private Match exactMatch(WecomSmartSheetField uniqueField, String exactValue, long deadline) {
+  private Match exactMatch(
+      AuxiliarySmartSheetTarget target,
+      WecomSmartSheetField uniqueField,
+      String exactValue,
+      long deadline) {
     Set<String> recordIds = new HashSet<>();
     Long expectedTotal = null;
     long loadedCount = 0;
@@ -205,7 +283,7 @@ public class WecomSmartSheetRecordClient {
 
     for (int pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
       JsonNode response = apiClient.post(
-          GET_OPERATION, lookupRequest(uniqueField.fieldId(), offset), remaining(deadline, GET_OPERATION));
+          GET_OPERATION, lookupRequest(target, uniqueField.fieldId(), offset), remaining(deadline, GET_OPERATION));
       Page page = page(response);
       expectedTotal = expectedTotal(expectedTotal, page.total());
       loadedCount = add(loadedCount, page.records().size());
@@ -235,11 +313,12 @@ public class WecomSmartSheetRecordClient {
     throw invalid("pagination exceeded maximum pages");
   }
 
-  private Map<String, Object> lookupRequest(String uniqueFieldId, long offset) {
+  private Map<String, Object> lookupRequest(
+      AuxiliarySmartSheetTarget target, String uniqueFieldId, long offset) {
     Map<String, Object> request = new LinkedHashMap<>();
-    request.put("docid", config.documentId());
-    request.put("sheet_id", config.sheetId());
-    request.put("view_id", config.viewId());
+    request.put("docid", target.documentId());
+    request.put("sheet_id", target.sheetId());
+    request.put("view_id", target.viewId());
     request.put("key_type", FIELD_ID_KEY_TYPE);
     request.put("field_ids", List.of(uniqueFieldId));
     request.put("offset", offset);
@@ -271,33 +350,38 @@ public class WecomSmartSheetRecordClient {
     }
   }
 
-  private Map<String, JsonNode> encodeFields(Map<String, Object> fields, Duration timeout) {
+  private Map<String, JsonNode> encodeFields(
+      AuxiliarySmartSheetTarget target, Map<String, Object> fields, Duration timeout) {
     Map<String, JsonNode> encoded = new LinkedHashMap<>();
     for (Map.Entry<String, Object> entry : fields.entrySet()) {
       if (entry.getValue() == null) {
         continue;
       }
-      WecomSmartSheetField field = fieldCatalog.requireWritable(entry.getKey(), timeout);
+      WecomSmartSheetField field = fieldCatalog.requireWritable(target, entry.getKey(), timeout);
       encoded.put(field.fieldId(), valueCodec.encode(field, entry.getValue()));
     }
     return encoded;
   }
 
-  private Map<String, JsonNode> encodeFieldsUntil(Map<String, Object> fields, long deadline) {
+  private Map<String, JsonNode> encodeFieldsUntil(
+      AuxiliarySmartSheetTarget target, Map<String, Object> fields, long deadline) {
     Map<String, JsonNode> encoded = new LinkedHashMap<>();
     for (Map.Entry<String, Object> entry : fields.entrySet()) {
       if (entry.getValue() == null) {
         continue;
       }
       WecomSmartSheetField field =
-          fieldCatalog.requireWritable(entry.getKey(), remaining(deadline, ADD_OPERATION));
+          fieldCatalog.requireWritable(target, entry.getKey(), remaining(deadline, ADD_OPERATION));
       encoded.put(field.fieldId(), valueCodec.encode(field, entry.getValue()));
     }
     return encoded;
   }
 
-  private String add(Map<String, JsonNode> encoded, Duration timeout) {
-    JsonNode response = apiClient.post(ADD_OPERATION, writeRequest(Map.of("values", encoded)), timeout);
+  private String add(
+      AuxiliarySmartSheetTarget target, Map<String, JsonNode> encoded, Duration timeout) {
+    JsonNode response = apiClient.postForTarget(
+        ADD_OPERATION, writeRequest(target, Map.of("values", encoded)), timeout,
+        "PRIMARY".equals(target.role()));
     if (response == null || !response.isObject()) {
       throw invalid(ADD_OPERATION, "response confirmation was invalid");
     }
@@ -316,10 +400,11 @@ public class WecomSmartSheetRecordClient {
     return recordId.textValue().trim();
   }
 
-  private Map<String, Object> writeRequest(Map<String, ?> record) {
+  private Map<String, Object> writeRequest(
+      AuxiliarySmartSheetTarget target, Map<String, ?> record) {
     Map<String, Object> request = new LinkedHashMap<>();
-    request.put("docid", config.documentId());
-    request.put("sheet_id", config.sheetId());
+    request.put("docid", target.documentId());
+    request.put("sheet_id", target.sheetId());
     request.put("key_type", FIELD_ID_KEY_TYPE);
     request.put("records", List.of(record));
     return request;
@@ -351,6 +436,17 @@ public class WecomSmartSheetRecordClient {
       }
     }
     return normalized.toString();
+  }
+
+  private static String cacheKey(
+      AuxiliarySmartSheetTarget target, String sourceTable, String uniqueValue) {
+    return String.join("\u0000",
+        target.role(),
+        target.documentId(),
+        target.sheetId(),
+        target.viewId(),
+        sourceTable == null ? "" : sourceTable.trim(),
+        normalizedLockKey(uniqueValue));
   }
 
   private static long deadline(Duration timeout) {
@@ -565,11 +661,52 @@ public class WecomSmartSheetRecordClient {
     }
   }
 
-  private void validateWrite(String sourceTable, Map<String, Object> fields, Duration timeout) {
+  private AuxiliarySmartSheetTarget targetFor(SheetSource source) {
+    return targetForSourceTable(source.sourceTable(), source.sheetId());
+  }
+
+  private AuxiliarySmartSheetTarget targetForSourceTable(String sourceTable) {
+    return targetForSourceTable(sourceTable, null);
+  }
+
+  private AuxiliarySmartSheetTarget targetForSourceTable(String sourceTable, String requestedDocumentId) {
+    String normalized = sourceTable == null ? "" : sourceTable.trim();
+    String primarySource = config.sourceTable();
+    if (normalized.equals(primarySource)) {
+      if (requestedDocumentId != null && !requestedDocumentId.isBlank()
+          && !config.documentId().equals(requestedDocumentId.trim())) {
+        throw new IllegalArgumentException("Requested document does not match configured document");
+      }
+      return new AuxiliarySmartSheetTarget(
+          "PRIMARY", config.documentId(), config.sheetId(), config.viewId(),
+          config.uniqueFieldTitle(), "");
+    }
+    int separator = normalized.indexOf(':');
+    String role = separator > 0 ? normalized.substring(0, separator).trim().toUpperCase() : "";
+    String childSheetId = separator > 0 ? normalized.substring(separator + 1).trim() : "";
+    if (auxiliaryTargets != null) {
+      AuxiliarySmartSheetTarget target = auxiliaryTargets.forRole(role).orElse(null);
+      if (target != null && (childSheetId.isBlank() || target.sheetId().equals(childSheetId))) {
+        if (requestedDocumentId == null || requestedDocumentId.isBlank()
+            || target.documentId().equals(requestedDocumentId.trim())) {
+          return target;
+        }
+      }
+    }
+    throw new IllegalArgumentException("No Smart Sheet target configured for source table: " + normalized);
+  }
+
+  private void validateWrite(
+      AuxiliarySmartSheetTarget target,
+      String sourceTable,
+      Map<String, Object> fields,
+      Duration timeout) {
     if (fields == null || timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw new IllegalArgumentException("Fields and a positive timeout are required");
     }
-    config.requireTarget(config.documentId(), sourceTable);
+    if (target == null || !target.configured() || sourceTable == null || sourceTable.isBlank()) {
+      throw new IllegalArgumentException("Smart Sheet target is not configured");
+    }
   }
 
   private static WecomSmartSheetException invalid(String reason) {

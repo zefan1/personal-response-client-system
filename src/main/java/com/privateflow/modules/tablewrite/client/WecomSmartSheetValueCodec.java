@@ -185,6 +185,7 @@ public class WecomSmartSheetValueCodec {
     }
     if (!field.dateTimeIncludesTime()) {
       LocalDate date = value instanceof LocalDate localDate ? localDate
+          : value instanceof LocalDateTime localDateTime ? localDateTime.toLocalDate()
           : value instanceof String text ? LocalDate.parse(text.trim()) : null;
       if (date == null) {
         throw invalid(field);

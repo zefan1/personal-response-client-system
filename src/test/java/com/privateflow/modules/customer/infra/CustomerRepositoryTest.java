@@ -34,8 +34,9 @@ class CustomerRepositoryTest {
         CREATE TABLE customers (
           id BIGINT AUTO_INCREMENT PRIMARY KEY,
           phone VARCHAR(20),
-          nickname VARCHAR(100), source_channel VARCHAR(50), lead_type VARCHAR(20),
-          personality_type VARCHAR(50), assigned_keeper VARCHAR(50), intended_store VARCHAR(100),
+          nickname VARCHAR(100), wechat_id VARCHAR(100), source_channel VARCHAR(50), lead_type VARCHAR(20),
+          lead_capture_type VARCHAR(100), lead_capture_method VARCHAR(100), platform_lead_at DATETIME,
+          personality_type VARCHAR(50), assigned_keeper VARCHAR(50), assigned_at DATETIME, intended_store VARCHAR(100),
           intended_project VARCHAR(100), purchased_project VARCHAR(200), postpartum_months DECIMAL(4,1),
           parity VARCHAR(10), delivery_method VARCHAR(20), breastfeeding VARCHAR(20), lochia_period VARCHAR(50),
           pregnancy_weight DECIMAL(5,1), current_weight DECIMAL(5,1), body_concerns VARCHAR(500),
@@ -179,5 +180,25 @@ class CustomerRepositoryTest {
     assertThat(saved.getFirstTrackingCapture()).isEqualTo("首次关注恢复周期");
     assertThat(saved.getSecondTrackingCapture()).isEqualTo("明确周一上午可联系");
     assertThat(saved.getThirdTrackingCapture()).isEqualTo("希望先了解门店评估流程");
+  }
+
+  @Test
+  void upsertAndReadKeepLeadCaptureAndAssignmentFacts() {
+    Customer customer = new Customer();
+    customer.setPhone("13800000002");
+    customer.setWechatId("wxid_test");
+    customer.setLeadCaptureType("表单留资");
+    customer.setLeadCaptureMethod("落地页");
+    customer.setPlatformLeadAt(java.time.LocalDateTime.of(2026, 8, 14, 10, 30));
+    customer.setAssignedAt(java.time.LocalDateTime.of(2026, 8, 14, 11, 0));
+
+    assertThat(repository.upsert(customer)).isTrue();
+
+    Customer saved = repository.findByPhone("13800000002").orElseThrow();
+    assertThat(saved.getWechatId()).isEqualTo("wxid_test");
+    assertThat(saved.getLeadCaptureType()).isEqualTo("表单留资");
+    assertThat(saved.getLeadCaptureMethod()).isEqualTo("落地页");
+    assertThat(saved.getPlatformLeadAt()).isEqualTo(java.time.LocalDateTime.of(2026, 8, 14, 10, 30));
+    assertThat(saved.getAssignedAt()).isEqualTo(java.time.LocalDateTime.of(2026, 8, 14, 11, 0));
   }
 }

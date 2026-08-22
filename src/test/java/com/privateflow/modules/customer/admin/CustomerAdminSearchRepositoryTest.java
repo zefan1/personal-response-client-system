@@ -29,10 +29,15 @@ class CustomerAdminSearchRepositoryTest {
           id BIGINT PRIMARY KEY,
           phone VARCHAR(20) NOT NULL,
           nickname VARCHAR(100),
+          wechat_id VARCHAR(100),
           source_channel VARCHAR(50),
           lead_type VARCHAR(20),
+          lead_capture_type VARCHAR(100),
+          lead_capture_method VARCHAR(100),
+          platform_lead_at DATETIME,
           personality_type VARCHAR(50),
           assigned_keeper VARCHAR(50),
+          assigned_at DATETIME,
           intended_store VARCHAR(100),
           intended_project VARCHAR(100),
           purchased_project VARCHAR(200),
@@ -207,5 +212,21 @@ class CustomerAdminSearchRepositoryTest {
     assertThat(options.intendedProjects()).containsExactly("产后修复");
     assertThat(options.customerStages()).containsExactly("跟进中");
     assertThat(options.arrivedValues()).containsExactly("是");
+  }
+
+  @Test
+  void masterSearchSupportsNicknamePhoneWechatAndCustomerIdWithinScope() {
+    jdbcTemplate.update("UPDATE customers SET wechat_id = 'wx-alice' WHERE id = 1");
+    CustomerAccessScope keeperOne = new CustomerAccessScope(false, List.of("keeper-1"), true);
+
+    assertThat(repository.searchMasterCandidates("Alice", keeperOne, 20))
+        .extracting(customer -> customer.getId()).containsExactly(1L);
+    assertThat(repository.searchMasterCandidates("13800000001", keeperOne, 20))
+        .extracting(customer -> customer.getId()).containsExactly(1L);
+    assertThat(repository.searchMasterCandidates("wx-alice", keeperOne, 20))
+        .extracting(customer -> customer.getId()).containsExactly(1L);
+    assertThat(repository.searchMasterCandidates("1", keeperOne, 20))
+        .extracting(customer -> customer.getId()).contains(1L);
+    assertThat(repository.findByIdInScope(3L, keeperOne)).isEmpty();
   }
 }

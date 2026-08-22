@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
+import com.privateflow.modules.tablewrite.config.WecomTransportMode;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -35,15 +36,28 @@ public class WecomSmartSheetApiClient {
   private final ObjectMapper objectMapper;
   private final WecomSmartSheetConfig config;
   private final WecomAccessTokenProvider tokenProvider;
+  private final WecomRelayClient relayClient;
   private final WecomHttpTransport httpTransport;
   private final LongSupplier ticker;
+
+  public WecomSmartSheetApiClient(
+      ObjectMapper objectMapper,
+      WecomSmartSheetConfig config,
+      WecomAccessTokenProvider tokenProvider,
+      WecomRelayClient relayClient) {
+    this(objectMapper, config, tokenProvider, relayClient, new WecomUrlConnectionTransport(), System::nanoTime);
+  }
 
   @Autowired
   public WecomSmartSheetApiClient(
       ObjectMapper objectMapper,
       WecomSmartSheetConfig config,
       WecomAccessTokenProvider tokenProvider) {
-    this(objectMapper, config, tokenProvider, new WecomUrlConnectionTransport(), System::nanoTime);
+    this(objectMapper, config, tokenProvider,
+        new WecomRelayClient(objectMapper, config::relayConfig, new WecomUrlConnectionTransport(),
+            java.time.Clock.systemUTC(), () -> java.util.UUID.randomUUID().toString(),
+            () -> java.util.UUID.randomUUID().toString()),
+        new WecomUrlConnectionTransport(), System::nanoTime);
   }
 
   WecomSmartSheetApiClient(
@@ -51,7 +65,11 @@ public class WecomSmartSheetApiClient {
       WecomSmartSheetConfig config,
       WecomAccessTokenProvider tokenProvider,
       HttpClient httpClient) {
-    this(objectMapper, config, tokenProvider, WecomHttpTransport.from(httpClient), System::nanoTime);
+    this(objectMapper, config, tokenProvider,
+        new WecomRelayClient(objectMapper, config.relayConfig(), WecomHttpTransport.from(httpClient),
+            java.time.Clock.systemUTC(), () -> java.util.UUID.randomUUID().toString(),
+            () -> java.util.UUID.randomUUID().toString()),
+        WecomHttpTransport.from(httpClient), System::nanoTime);
   }
 
   WecomSmartSheetApiClient(
@@ -60,18 +78,24 @@ public class WecomSmartSheetApiClient {
       WecomAccessTokenProvider tokenProvider,
       HttpClient httpClient,
       LongSupplier ticker) {
-    this(objectMapper, config, tokenProvider, WecomHttpTransport.from(httpClient), ticker);
+    this(objectMapper, config, tokenProvider,
+        new WecomRelayClient(objectMapper, config.relayConfig(), WecomHttpTransport.from(httpClient),
+            java.time.Clock.systemUTC(), () -> java.util.UUID.randomUUID().toString(),
+            () -> java.util.UUID.randomUUID().toString()),
+        WecomHttpTransport.from(httpClient), ticker);
   }
 
   private WecomSmartSheetApiClient(
       ObjectMapper objectMapper,
       WecomSmartSheetConfig config,
       WecomAccessTokenProvider tokenProvider,
+      WecomRelayClient relayClient,
       WecomHttpTransport httpTransport,
       LongSupplier ticker) {
     this.objectMapper = objectMapper;
     this.config = config;
     this.tokenProvider = tokenProvider;
+    this.relayClient = relayClient;
     this.httpTransport = httpTransport;
     this.ticker = ticker;
   }
@@ -84,6 +108,27 @@ public class WecomSmartSheetApiClient {
     return post(operation, body, timeout, false);
   }
 
+  /**
+   * Sends a request whose body already contains a datasource-specific Smart Sheet target.
+   * Target validation is performed by the caller because the legacy global config only
+   * describes the primary customer table.
+   */
+  public JsonNode postForTarget(String operation, Object body, Duration timeout) {
+    if (body instanceof Map<?, ?> request
+        && config.documentId().equals(String.valueOf(request.get("docid")))
+        && config.sheetId().equals(String.valueOf(request.get("sheet_id")))) {
+      return post(operation, body, timeout);
+    }
+    return postWithApplicationCredentials(operation, body, timeout);
+  }
+
+  /** Sends a request for a known target without requiring primary-table configuration. */
+  public JsonNode postForTarget(
+      String operation, Object body, Duration timeout, boolean primaryTarget) {
+    return primaryTarget ? post(operation, body, timeout)
+        : postWithApplicationCredentials(operation, body, timeout);
+  }
+
   private JsonNode post(String operation, Object body, Duration timeout, boolean requireTargetConfiguration) {
     if (operation == null) {
       throw failure(SAFE_OPERATION, "unsupported operation");
@@ -94,6 +139,9 @@ public class WecomSmartSheetApiClient {
     }
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw failure(operation, "request timeout must be positive");
+    }
+    if (config.transportMode() == WecomTransportMode.RELAY) {
+      return relayClient.post(operation, body, timeout);
     }
     WecomRequestDeadline deadline = WecomRequestDeadline.start(timeout, operation, ticker);
     try {

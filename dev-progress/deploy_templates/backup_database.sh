@@ -18,6 +18,7 @@ mysqldump \
   --single-transaction \
   --routines \
   --triggers \
+  --events \
   --default-character-set=utf8mb4 \
   -h"$DB_HOST" \
   -u"$DB_USER" \

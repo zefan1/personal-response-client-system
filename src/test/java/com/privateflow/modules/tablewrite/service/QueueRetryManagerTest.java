@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class QueueRetryManagerTest {
@@ -104,5 +105,43 @@ class QueueRetryManagerTest {
 
     verify(creator).insertCustomerAfterQueuedCreate(42L, null, "table_a", "row-42", accepted.acceptedFields());
     verify(repository).markResolved(8L);
+  }
+
+  @Test
+  void retriesPrimaryProjectionWithoutResolvingAnOldSourceRow() throws Exception {
+    PendingTableWriteRepository repository = mock(PendingTableWriteRepository.class);
+    WecomTableClient client = mock(WecomTableClient.class);
+    TableConfigProvider config = mock(TableConfigProvider.class);
+    CustomerQueryService customerQuery = mock(CustomerQueryService.class);
+    CustomerMasterProjectionService master = mock(CustomerMasterProjectionService.class);
+    PendingTableWrite item = new PendingTableWrite();
+    item.setId(9L);
+    item.setCustomerId(42L);
+    item.setPhone("13800000000");
+    item.setActionType(TableWriteActionType.UPDATE);
+    item.setRetryCount(0);
+    Map<String, Object> fields = Map.of("nickname", "新昵称");
+    item.setPayload(new ObjectMapper().writeValueAsString(new PendingWritePayload("PRIMARY", null, fields)));
+    item.setNextRetryAt(LocalDateTime.now());
+    when(repository.due(100)).thenReturn(List.of(item));
+    when(repository.countStaleFailed(1)).thenReturn(0);
+    when(config.get()).thenReturn(new TableConfig("", "", 5000, 3, 30, 1, "ADMIN", 50, 500));
+    com.privateflow.modules.customer.Customer customer = new com.privateflow.modules.customer.Customer();
+    customer.setId(42L);
+    customer.setPhone("13800000000");
+    when(customerQuery.getById(42L)).thenReturn(customer);
+
+    QueueRetryManager manager = new QueueRetryManager(
+        repository, client, config, new ObjectMapper(), customerQuery,
+        mock(NewCustomerRowCreator.class), null, null, null,
+        Optional.empty(), Optional.empty(), master);
+
+    manager.retryDueWrites();
+
+    verify(master).projectFields(customer, fields);
+    verify(client, org.mockito.Mockito.never()).updateRow(
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyMap(), org.mockito.ArgumentMatchers.any(Duration.class));
+    verify(repository).markResolved(9L);
   }
 }

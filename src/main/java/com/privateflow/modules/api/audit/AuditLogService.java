@@ -24,7 +24,7 @@ public class AuditLogService {
 
   private static final List<String> ACTIONS = List.of(
       "CALL_SKILL", "COPY_REPLY", "SEND_MESSAGE", "BATCH_TEMPLATE",
-      "UPDATE_PROFILE", "UPDATE_STAGE", "UPDATE_TAG", "SAVE_TO_TABLE",
+      "UPDATE_PROFILE", "PROFILE_UPDATE_FAILED", "PROFILE_UPDATE_RETRY", "UPDATE_STAGE", "UPDATE_TAG", "SAVE_TO_TABLE",
       "ASK_FOR_HELP", "RESOLVE_HELP", "UPDATE_CONFIG",
       "CREATE_NOTICE", "STOP_NOTICE", "DELETE_NOTICE", "PUBLISH_NOTICE",
       "VERSION_PUBLISH", "VERSION_REVOKE",
@@ -279,6 +279,8 @@ public class AuditLogService {
       case "SEND_MESSAGE" -> "发送消息";
       case "BATCH_TEMPLATE" -> "批量模板发送";
       case "UPDATE_PROFILE" -> "更新客户档案";
+      case "PROFILE_UPDATE_FAILED" -> "档案更新失败";
+      case "PROFILE_UPDATE_RETRY" -> "重试档案更新";
       case "UPDATE_STAGE" -> "更新客户阶段";
       case "UPDATE_TAG" -> "更新客户标签";
       case "SAVE_TO_TABLE" -> "保存到表格";
@@ -322,7 +324,7 @@ public class AuditLogService {
     return switch (action) {
       case "CALL_SKILL" -> "AI 操作";
       case "COPY_REPLY", "SEND_MESSAGE", "BATCH_TEMPLATE" -> "回复操作";
-      case "UPDATE_PROFILE", "UPDATE_STAGE", "UPDATE_TAG", "SAVE_TO_TABLE" -> "客户操作";
+      case "UPDATE_PROFILE", "PROFILE_UPDATE_FAILED", "PROFILE_UPDATE_RETRY", "UPDATE_STAGE", "UPDATE_TAG", "SAVE_TO_TABLE" -> "客户操作";
       case "ASK_FOR_HELP", "RESOLVE_HELP" -> "求助操作";
       case "UPDATE_CONFIG" -> "配置操作";
       case "CREATE_NOTICE", "STOP_NOTICE", "DELETE_NOTICE", "PUBLISH_NOTICE" -> "公告操作";

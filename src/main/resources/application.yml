@@ -32,7 +32,9 @@ app:
   environment: ${APP_ENV:${ENVIRONMENT:}}
 
 cache:
-  sync-cron: "0 */30 * * * *"
+  # One completed three-table read is followed by a 60-second pause. This is the
+  # shortest stable interval used for the real WeCom Smart Sheet acceptance flow.
+  sync-interval-ms: ${CACHE_SYNC_INTERVAL_MS:60000}
   ttl-seconds: 900
   load-batch-size: 500
   sync-timeout-ms: 10000
@@ -106,6 +108,18 @@ table:
   alert-notify-target: ADMIN
   queue-warn-threshold: 100
   queue-alert-threshold: 1000
+
+wecom:
+  assignment-smartsheet:
+    doc-id: ${WECOM_ASSIGNMENT_SMARTSHEET_DOC_ID:}
+    sheet-id: ${WECOM_ASSIGNMENT_SMARTSHEET_SHEET_ID:}
+    view-id: ${WECOM_ASSIGNMENT_SMARTSHEET_VIEW_ID:}
+    document-url: ${WECOM_ASSIGNMENT_SMARTSHEET_DOCUMENT_URL:}
+  arrival-smartsheet:
+    doc-id: ${WECOM_ARRIVAL_SMARTSHEET_DOC_ID:}
+    sheet-id: ${WECOM_ARRIVAL_SMARTSHEET_SHEET_ID:}
+    view-id: ${WECOM_ARRIVAL_SMARTSHEET_VIEW_ID:}
+    document-url: ${WECOM_ARRIVAL_SMARTSHEET_DOCUMENT_URL:}
 
 system:
   jwt-secret: ${SYSTEM_JWT_SECRET:change-me-in-production-private-domain-assistant}

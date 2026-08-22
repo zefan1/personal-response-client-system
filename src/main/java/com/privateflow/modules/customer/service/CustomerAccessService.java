@@ -32,7 +32,7 @@ public class CustomerAccessService {
       return false;
     }
     if (user.role() == Role.KEEPER) {
-      return assignedKeeper.equals(normalize(user.username()));
+      return matchesUserIdentity(assignedKeeper, user);
     }
     if (user.role() == Role.LEADER) {
       return permittedKeeperPhones(user).contains(assignedKeeper);
@@ -49,16 +49,36 @@ public class CustomerAccessService {
     if (!username.isBlank()) {
       phones.add(username);
     }
+    String displayName = normalize(user.displayName());
+    if (!displayName.isBlank()) {
+      phones.add(displayName);
+    }
     if (user.role() != Role.LEADER) {
       return phones;
     }
     accountRepository.findByPhone(user.username())
         .map(Account::id)
-        .ifPresent(leaderId -> phones.addAll(accountRepository.findEnabledKeeperPhonesByLeaderId(leaderId).stream()
-            .map(this::normalize)
-            .filter(value -> !value.isBlank())
-            .toList()));
+        .ifPresent(leaderId -> accountRepository.findEnabledKeepersByLeaderId(leaderId).forEach(account -> {
+          String keeperPhone = normalize(account.username());
+          String keeperName = normalize(account.displayName());
+          if (!keeperPhone.isBlank()) {
+            phones.add(keeperPhone);
+          }
+          if (!keeperName.isBlank()) {
+            phones.add(keeperName);
+          }
+        }));
     return phones;
+  }
+
+  private boolean matchesUserIdentity(String assignedKeeper, AuthUser user) {
+    if (assignedKeeper.equals(normalize(user.username()))
+        || assignedKeeper.equals(normalize(user.displayName()))) {
+      return true;
+    }
+    return accountRepository.resolveEnabledUsername(assignedKeeper)
+        .map(username -> username.equals(normalize(user.username())))
+        .orElse(false);
   }
 
   private String normalize(String value) {

@@ -4,7 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "cache")
 public class CustomerCacheProperties {
-  private String syncCron = "0 */30 * * * *";
+  private String syncCron = "0 * * * * *";
   private int ttlSeconds = 900;
   private int loadBatchSize = 500;
   private int syncTimeoutMs = 10000;

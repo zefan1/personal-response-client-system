@@ -35,6 +35,15 @@ public class WriteQueueManager {
   }
 
   public void enqueue(Long customerId, String phone, TableWriteActionType actionType, PendingWritePayload payload, String errorMsg) {
+    if (actionType == TableWriteActionType.INSERT && blank(phone)) {
+      log.warn("skip table write queue item without unique phone, action=INSERT, customerId={}", customerId);
+      return;
+    }
+    if (actionType == TableWriteActionType.UPDATE && cannotResolveUpdate(payload, customerId, phone)) {
+      log.warn("skip table write queue item without resolvable source row, customerId={}, phoneLast4={}",
+          customerId, last4(phone));
+      return;
+    }
     int pending = repository.countPending();
     int warnThreshold = configProvider.get().queueWarnThreshold();
     int alertThreshold = configProvider.get().queueAlertThreshold();
@@ -55,5 +64,29 @@ public class WriteQueueManager {
     } catch (JsonProcessingException ex) {
       throw new TableWriteException(TableWriteErrorCodes.BAD_REQUEST, "table write payload cannot be serialized");
     }
+  }
+
+  private boolean cannotResolveUpdate(PendingWritePayload payload, Long customerId, String phone) {
+    if (payload == null) {
+      return true;
+    }
+    if (!blank(payload.sourceRowId())) {
+      return false;
+    }
+    // Auxiliary projections deliberately upsert by phone and do not have a source row id.
+    if ("ASSIGNMENT".equals(payload.sourceTable()) || "ARRIVAL".equals(payload.sourceTable())) {
+      return blank(phone);
+    }
+    return customerId == null && blank(phone);
+  }
+
+  private boolean blank(String value) {
+    return value == null || value.isBlank();
+  }
+
+  private String last4(String value) {
+    if (blank(value)) return "";
+    String normalized = value.trim();
+    return normalized.length() <= 4 ? normalized : normalized.substring(normalized.length() - 4);
   }
 }

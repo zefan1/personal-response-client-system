@@ -102,8 +102,17 @@ public class DatasourceAdminController {
   }
 
   @PostMapping("/admin/api/v1/datasources/{id}/sync")
-  public ApiResponse<Map<String, Object>> sync(@PathVariable("id") long id) {
-    return ApiResponse.ok(service.sync(id));
+  public ApiResponse<Map<String, Object>> sync(
+      @PathVariable("id") long id,
+      @RequestParam(value = "full", defaultValue = "false") boolean full) {
+    return ApiResponse.ok(full ? service.sync(id, true) : service.sync(id));
+  }
+
+  @PostMapping("/admin/api/v1/datasources/{id}/sync-failures/resolve")
+  public ApiResponse<Map<String, Object>> resolveHistoricalFailures(
+      @PathVariable("id") long id,
+      @RequestBody HistoricalSyncFailureResolveRequest request) {
+    return ApiResponse.ok(service.resolveHistoricalFailures(id, request));
   }
 
   @PostMapping("/admin/api/v1/datasources/import")

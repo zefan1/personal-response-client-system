@@ -379,7 +379,7 @@ const intentItems = computed<Array<[string, unknown]>>(() => [
 ]);
 
 const intentSummaryItems = computed<Array<[string, string]>>(() => [
-  ['来源、留资类型', joinValues(customer.value.sourceChannel, leadTypeLabel(customer.value.leadType))],
+  ['来源、客资类型', joinValues(customer.value.sourceChannel, leadTypeLabel(customer.value.leadType))],
   ['意向门店、项目', joinValues(customer.value.intendedStore, customer.value.intendedProject)],
   ['已购项目、意向等级', joinValues(customer.value.purchasedProject, customer.value.intentLevel)],
   ['担忧点', customer.value.worries || customer.value.bodyConcerns || '-'],
@@ -389,10 +389,14 @@ const intentSummaryItems = computed<Array<[string, string]>>(() => [
 
 const identityItems = computed<Array<[string, unknown]>>(() => [
   ['微信昵称', editField('nickname')],
+  ['微信号', editField('wechatId')],
   ['手机号', customer.value.phoneFull || customer.value.phone || '-'],
   ['当前阶段', editField('customerStage')],
   ['归属员工', editField('assignedKeeper')],
-  ['线索类型', leadTypeLabel(customer.value.leadType)],
+  ['客资类型', editField('leadType')],
+  ['留资方式', editField('leadCaptureMethod')],
+  ['平台留资时间', editField('platformLeadAt')],
+  ['转化追溯', editField('conversionTrace')],
   ['性格', editField('personalityType')],
   ['来源渠道', editField('sourceChannel')],
   ['来源表', customer.value.sourceTable || '-'],
@@ -402,10 +406,14 @@ const identityItems = computed<Array<[string, unknown]>>(() => [
 
 const identitySummaryItems = computed<Array<[string, string]>>(() => [
   ['微信昵称', customer.value.nickname || '-'],
+  ['微信号', customer.value.wechatId || '-'],
   ['手机号', customer.value.phoneFull || customer.value.phone || '-'],
   ['当前阶段', customer.value.customerStage || '-'],
   ['归属员工', customer.value.assignedKeeper || '-'],
-  ['线索类型', leadTypeLabel(customer.value.leadType)],
+  ['客资类型', leadTypeLabel(customer.value.leadType)],
+  ['留资方式', customer.value.leadCaptureMethod || '-'],
+  ['平台留资时间', formatDate(customer.value.platformLeadAt)],
+  ['转化追溯', customer.value.conversionTrace || '-'],
   ['性格', customer.value.personalityType || '-'],
   ['来源渠道', customer.value.sourceChannel || '-'],
   ['来源表', customer.value.sourceTable || '-'],
