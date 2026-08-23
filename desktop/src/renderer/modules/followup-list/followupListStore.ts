@@ -1,5 +1,5 @@
 import { computed, reactive } from 'vue';
-import { getJson } from '../../shared/apiClient';
+import { getJson, postJson } from '../../shared/apiClient';
 import { loadDesktopConfig } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
 import type { FollowupItem, FollowupReminderPayload, FollowupTab, FollowupTodayResponse, NewLeadAlertPayload, ReminderType } from './types';
@@ -20,11 +20,15 @@ export const followupListState = reactive({
   },
   selectedPhones: new Set<string>(),
   newReminderCount: 0,
+  pendingNewLeadCount: 0,
+  retainedNewLeadCount: 0,
   newReminderTab: 'DUE_TODAY' as FollowupTab,
   lastLoadedAt: 0,
   error: '',
   stale: false
 });
+
+export const leadValidityUpdatingPhones = reactive(new Set<string>());
 
 export const activeFollowupItems = computed(() => followupListState.groups[followupListState.activeTab]);
 export const selectedFollowupItems = computed(() =>
@@ -51,6 +55,13 @@ export async function loadTodayFollowups(): Promise<void> {
         followupListState.groups[tab].push({ ...item, selected: false });
       }
     });
+    const newLeadItems = followupListState.groups.NEW_LEAD;
+    followupListState.pendingNewLeadCount = response.data.pendingNewLeadCount
+      ?? newLeadItems.filter((item) => !item.leadProcessed).length;
+    followupListState.retainedNewLeadCount = response.data.retainedNewLeadCount
+      ?? newLeadItems.filter((item) => item.leadProcessed).length;
+    followupListState.newReminderCount = followupListState.pendingNewLeadCount;
+    followupListState.newReminderTab = 'NEW_LEAD';
     followupListState.loaded = true;
     followupListState.lastLoadedAt = Date.now();
     followupListState.stale = false;
@@ -112,6 +123,9 @@ export function handleNewLeadAlert(payload: NewLeadAlertPayload): void {
     sourceTable: payload.sourceTable,
     assignedKeeper: payload.assignedKeeper,
     arrivedAt: payload.arrivedAt,
+    leadProcessed: payload.leadProcessed,
+    leadInvalid: payload.leadInvalid,
+    leadRetainedUntil: payload.leadRetainedUntil,
     flashUntil
   });
   followupListState.newReminderCount += 1;
@@ -166,6 +180,99 @@ export function startBatchTemplate(): void {
 export function openNewReminderBanner(): void {
   setActiveFollowupTab(followupListState.newReminderTab);
   followupListState.newReminderCount = 0;
+}
+
+export function markNewLeadProcessed(item: FollowupItem, nickname: string): void {
+  const phone = item.phoneFull ?? item.phone;
+  const index = followupListState.groups.NEW_LEAD.findIndex((candidate) => (candidate.phoneFull ?? candidate.phone) === phone);
+  if (index < 0) return;
+  const current = followupListState.groups.NEW_LEAD[index];
+  followupListState.groups.NEW_LEAD.splice(index, 1, {
+    ...current,
+    nickname: nickname || current.nickname,
+    leadProcessed: true,
+    leadInvalid: false,
+    leadRetainedUntil: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+  });
+  followupListState.newReminderCount = Math.max(0, followupListState.newReminderCount - 1);
+  followupListState.pendingNewLeadCount = Math.max(0, followupListState.pendingNewLeadCount - 1);
+  followupListState.retainedNewLeadCount += 1;
+}
+
+export type LeadValidityTarget = {
+  phone: string;
+  phoneFull?: string | null;
+  customerVersion?: number | null;
+  leadInvalid?: boolean;
+};
+
+export function isLeadValidityUpdating(target: LeadValidityTarget): boolean {
+  return leadValidityUpdatingPhones.has(target.phoneFull ?? target.phone);
+}
+
+export async function toggleLeadInvalid(target: LeadValidityTarget): Promise<void> {
+  const phone = target.phoneFull ?? target.phone;
+  const invalid = !Boolean(target.leadInvalid);
+  if (!phone || leadValidityUpdatingPhones.has(phone)) return;
+  if (typeof target.customerVersion !== 'number') {
+    followupListState.error = '客户档案版本缺失，请刷新后重试';
+    return;
+  }
+  leadValidityUpdatingPhones.add(phone);
+  try {
+    const response = await postJson<{ version: number; invalid: boolean; retainedUntil?: string | null }>(
+      `/api/v1/customers/${encodeURIComponent(phone)}/lead-validity`,
+      { version: target.customerVersion, invalid, operator: 'desktop' },
+      FOLLOWUP_TIMEOUT_MS
+    );
+    if (!response.success || !response.data) {
+      followupListState.error = response.message || (invalid ? '标记无效失败，请刷新后重试' : '撤回无效失败，请刷新后重试');
+      return;
+    }
+    applyLeadValidityChange({
+      phone,
+      invalid: response.data.invalid,
+      retainedUntil: response.data.retainedUntil ?? null,
+      version: response.data.version
+    });
+    eventBus.emit('new-lead:validity-changed', {
+      phone,
+      invalid: response.data.invalid,
+      retainedUntil: response.data.retainedUntil ?? null,
+      version: response.data.version
+    });
+  } catch {
+    followupListState.error = invalid ? '标记无效失败，请检查网络后重试' : '撤回无效失败，请检查网络后重试';
+  } finally {
+    leadValidityUpdatingPhones.delete(phone);
+  }
+}
+
+export function applyLeadValidityChange(payload: {
+  phone: string;
+  invalid: boolean;
+  retainedUntil?: string | null;
+  version?: number | null;
+}): void {
+  const phone = payload.phone;
+  const group = followupListState.groups.NEW_LEAD;
+  const item = group.find((candidate) => (candidate.phoneFull ?? candidate.phone) === phone);
+  if (!item) return;
+  const wasProcessed = Boolean(item.leadProcessed);
+  item.leadInvalid = payload.invalid;
+  item.leadProcessed = payload.invalid;
+  item.leadRetainedUntil = payload.retainedUntil ?? null;
+  if (typeof payload.version === 'number') item.customerVersion = payload.version;
+  if (wasProcessed !== item.leadProcessed) {
+    if (item.leadProcessed) {
+      followupListState.pendingNewLeadCount = Math.max(0, followupListState.pendingNewLeadCount - 1);
+      followupListState.retainedNewLeadCount += 1;
+      followupListState.newReminderCount = Math.max(0, followupListState.newReminderCount - 1);
+    } else {
+      followupListState.pendingNewLeadCount += 1;
+      followupListState.retainedNewLeadCount = Math.max(0, followupListState.retainedNewLeadCount - 1);
+    }
+  }
 }
 
 function choosePrimaryReminder(payload: FollowupReminderPayload): FollowupReminderPayload['reminders'][number] | null {

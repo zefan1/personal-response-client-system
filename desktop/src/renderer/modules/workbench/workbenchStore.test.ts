@@ -108,7 +108,7 @@ describe('workbenchStore', () => {
     expect(workbench.urgentFollowups.value.map((item) => item.phone)).toEqual(['4', '1', '2']);
   });
 
-  it('uses shared new-lead queues first and falls back to followup data', async () => {
+  it('uses the followup API data as the new-lead source and keeps toast queues as a cold-start fallback', async () => {
     const { workbench, newLeadToast } = await freshStore();
     workbench.workbenchState.followups = [
       followup({ phone: 'fallback-old', reminderType: 'NEW_LEAD', arrivedAt: '2026-07-03T08:00:00Z' }),
@@ -125,6 +125,9 @@ describe('workbenchStore', () => {
       newLead({ id: 'p2', phone: 'pending-limited-out', arrivedAt: '2026-07-03T07:00:00Z' })
     ];
 
+    expect(workbench.recentNewLeads.value.map((item) => item.phone)).toEqual(['fallback-new', 'fallback-old']);
+    workbench.workbenchState.followups = [];
+    workbench.workbenchState.loaded = false;
     expect(workbench.recentNewLeads.value.map((item) => item.phone)).toEqual(['pending-new', 'visible-old']);
   });
 

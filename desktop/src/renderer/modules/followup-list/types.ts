@@ -25,6 +25,12 @@ export type FollowupItem = {
   alertLevel?: AlertLevel | null;
   tagSuggestion?: TagSuggestionPayload | null;
   arrivedAt?: string | null;
+  contactValue?: string | null;
+  contactType?: 'PHONE' | 'WECHAT' | string | null;
+  leadProcessed?: boolean;
+  leadInvalid?: boolean;
+  leadRetainedUntil?: string | null;
+  customerVersion?: number | null;
   assignedKeeper?: string | null;
   priority?: string | null;
   flashUntil?: number;
@@ -35,6 +41,8 @@ export type FollowupTodayResponse = {
   keeperId?: string;
   totalCount: number;
   items: FollowupItem[];
+  pendingNewLeadCount?: number;
+  retainedNewLeadCount?: number;
 };
 
 export type FollowupReminderPayload = {
@@ -59,4 +67,10 @@ export type NewLeadAlertPayload = {
   sourceTable?: string;
   assignedKeeper?: string;
   arrivedAt?: string;
+  contactValue?: string;
+  contactType?: 'PHONE' | 'WECHAT' | string;
+  customerVersion?: number | null;
+  leadProcessed?: boolean;
+  leadInvalid?: boolean;
+  leadRetainedUntil?: string;
 };

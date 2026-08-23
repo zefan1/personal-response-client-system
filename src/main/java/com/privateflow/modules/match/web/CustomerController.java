@@ -1,6 +1,7 @@
 package com.privateflow.modules.match.web;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.booking.BookingConfirmRequest;
 import com.privateflow.modules.customer.booking.BookingConfirmResult;
 import com.privateflow.modules.customer.booking.CustomerBookingService;
@@ -33,6 +34,9 @@ import com.privateflow.modules.tags.ManualCustomerTagUpdateRequest;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -57,6 +61,7 @@ public class CustomerController {
   private final ManualSaveHandler manualSaveHandler;
   private final CustomerTagUpdateService customerTagUpdateService;
   private final CustomerBookingService customerBookingService;
+  private final CustomerQueryService customerQueryService;
 
   @Autowired
   public CustomerController(
@@ -66,7 +71,8 @@ public class CustomerController {
       SuggestionQueueManager suggestionQueueManager,
       ManualSaveHandler manualSaveHandler,
       CustomerTagUpdateService customerTagUpdateService,
-      CustomerBookingService customerBookingService) {
+      CustomerBookingService customerBookingService,
+      CustomerQueryService customerQueryService) {
     this.customerSearchService = customerSearchService;
     this.customerProfileService = customerProfileService;
     this.manualEditHandler = manualEditHandler;
@@ -74,6 +80,19 @@ public class CustomerController {
     this.manualSaveHandler = manualSaveHandler;
     this.customerTagUpdateService = customerTagUpdateService;
     this.customerBookingService = customerBookingService;
+    this.customerQueryService = customerQueryService;
+  }
+
+  public CustomerController(
+      CustomerSearchService customerSearchService,
+      CustomerProfileService customerProfileService,
+      ManualEditHandler manualEditHandler,
+      SuggestionQueueManager suggestionQueueManager,
+      ManualSaveHandler manualSaveHandler,
+      CustomerTagUpdateService customerTagUpdateService,
+      CustomerBookingService customerBookingService) {
+    this(customerSearchService, customerProfileService, manualEditHandler, suggestionQueueManager,
+        manualSaveHandler, customerTagUpdateService, customerBookingService, null);
   }
 
   public CustomerController(
@@ -134,6 +153,71 @@ public class CustomerController {
       @PathVariable("phone") String phone,
       @RequestBody ManualProfileUpdateRequest request) {
     return ApiResponse.ok(manualEditHandler.update(phone, request));
+  }
+
+  @PostMapping("/{phone}/lead-processing")
+  public ApiResponse<LeadProcessingResult> processLead(
+      @PathVariable("phone") String phone,
+      @RequestBody LeadProcessingRequest request) {
+    if (request == null || request.version() == null) {
+      throw new CustomerMatchException(CustomerMatchErrorCodes.BAD_REQUEST, "客户档案版本缺失，请刷新后重试");
+    }
+    LocalDateTime processedAt = LocalDateTime.now();
+    String operator = request.operator() == null || request.operator().isBlank() ? "desktop" : request.operator().trim();
+    Map<String, Object> fields = new LinkedHashMap<>();
+    if (request.nickname() != null && !request.nickname().isBlank()) {
+      fields.put("nickname", request.nickname().trim());
+    }
+    fields.put("leadInitialProcessedAt", processedAt);
+    fields.put("leadInitialProcessedBy", operator);
+    fields.put("leadRetainedUntil", processedAt.plusDays(1));
+    fields.put("leadInvalid", false);
+    ManualProfileUpdateResult result = manualEditHandler.update(
+        phone,
+        new ManualProfileUpdateRequest(request.version(), fields, operator));
+    return ApiResponse.ok(new LeadProcessingResult(
+        result.version(),
+        request.nickname(),
+        processedAt,
+        processedAt.plusDays(1)));
+  }
+
+  @PostMapping("/{phone}/lead-validity")
+  public ApiResponse<LeadValidityResult> updateLeadValidity(
+      @PathVariable("phone") String phone,
+      @RequestBody LeadValidityRequest request) {
+    if (request == null || request.version() == null) {
+      throw new CustomerMatchException(CustomerMatchErrorCodes.BAD_REQUEST, "客户档案版本缺失，请刷新后重试");
+    }
+    Customer current = customerQueryService == null ? null : customerQueryService.getByPhone(phone);
+    LocalDateTime now = LocalDateTime.now();
+    if (customerQueryService != null && current == null) {
+      throw new CustomerMatchException(CustomerMatchErrorCodes.CUSTOMER_NOT_FOUND, "客户未找到");
+    }
+    if (!request.invalid() && current != null
+        && (!current.isLeadInvalid()
+            || current.getLeadRetainedUntil() == null
+            || !current.getLeadRetainedUntil().isAfter(now))) {
+      throw new CustomerMatchException(CustomerMatchErrorCodes.BAD_REQUEST, "无效客资已超过一天，不能撤回");
+    }
+    String operator = request.operator() == null || request.operator().isBlank() ? "desktop" : request.operator().trim();
+    Map<String, Object> fields = new LinkedHashMap<>();
+    LocalDateTime retainedUntil = request.invalid() ? now.plusDays(1) : null;
+    fields.put("leadInvalid", request.invalid());
+    // Keep the customer-stage field aligned with the explicit validity action so
+    // the authoritative customer master carries the same business state as MariaDB.
+    if (request.invalid()) {
+      fields.put("customerStage", "无效");
+    } else if (current != null && "无效".equals(current.getCustomerStage())) {
+      fields.put("customerStage", "待联系");
+    }
+    fields.put("leadInitialProcessedAt", request.invalid() ? now : null);
+    fields.put("leadInitialProcessedBy", request.invalid() ? operator : null);
+    fields.put("leadRetainedUntil", retainedUntil);
+    ManualProfileUpdateResult result = manualEditHandler.update(
+        phone,
+        new ManualProfileUpdateRequest(request.version(), fields, operator));
+    return ApiResponse.ok(new LeadValidityResult(result.version(), request.invalid(), retainedUntil));
   }
 
   @PostMapping("/{phone}/booking")
@@ -207,5 +291,21 @@ public class CustomerController {
       status = HttpStatus.TOO_MANY_REQUESTS;
     }
     return ResponseEntity.status(status).body(ApiResponse.error(ex.getErrorCode(), ex.getMessage()));
+  }
+
+  public record LeadProcessingRequest(Integer version, String nickname, String operator) {
+  }
+
+  public record LeadProcessingResult(
+      int version,
+      String nickname,
+      LocalDateTime processedAt,
+      LocalDateTime retainedUntil) {
+  }
+
+  public record LeadValidityRequest(Integer version, boolean invalid, String operator) {
+  }
+
+  public record LeadValidityResult(int version, boolean invalid, LocalDateTime retainedUntil) {
   }
 }

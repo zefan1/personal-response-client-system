@@ -116,13 +116,48 @@ describe('FollowupListPanel', () => {
     eventBus.emit('followup:switch-tab', { tab: 'NEW_LEAD' });
     await flushUi();
     expect(host.textContent).toContain('New Lead');
-    expect(host.textContent).toContain('手机号 18800000004');
+    expect(host.textContent).toContain('手机号 188****0004');
     expect(host.textContent).toContain('来源 sheet-a');
     expect(host.textContent).not.toContain('admin');
 
     eventBus.emit('followup:switch-tab', { tab: 'NOT_A_TAB' });
     await flushUi();
     expect(host.textContent).toContain('New Lead');
+
+    app.unmount();
+  });
+
+  it('renders each new-lead status group once when items arrive interleaved', async () => {
+    apiMocks.getJson.mockResolvedValueOnce({
+      success: true,
+      data: {
+        keeperId: 'keeper-a',
+        totalCount: 3,
+        items: [
+          item({ phone: '18800000011', nickname: 'Pending A', reminderType: 'NEW_LEAD', leadProcessed: false }),
+          item({ phone: '18800000012', nickname: 'Processed', reminderType: 'NEW_LEAD', leadProcessed: true }),
+          item({ phone: '18800000013', nickname: 'Pending B', reminderType: 'NEW_LEAD', leadProcessed: false })
+        ]
+      },
+      errorCode: null,
+      message: null
+    });
+
+    const { app, host, eventBus } = await mountPanel();
+    eventBus.emit('followup:switch-tab', { tab: 'NEW_LEAD' });
+    await flushUi();
+
+    const groupToggles = [...host.querySelectorAll('.followup-group-toggle')] as HTMLButtonElement[];
+    expect(groupToggles).toHaveLength(2);
+    expect(groupToggles.map((button) => button.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      '未处理 2收起',
+      '已处理 1展开'
+    ]);
+    expect(host.querySelectorAll('.followup-row')).toHaveLength(2);
+
+    groupToggles[1].click();
+    await flushUi();
+    expect(host.querySelectorAll('.followup-row')).toHaveLength(3);
 
     app.unmount();
   });

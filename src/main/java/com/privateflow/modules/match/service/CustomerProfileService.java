@@ -173,6 +173,11 @@ public class CustomerProfileService {
     target.setLeadType(source.getLeadType());
     target.setPersonalityType(source.getPersonalityType());
     target.setAssignedKeeper(source.getAssignedKeeper());
+    target.setAssignedAt(source.getAssignedAt());
+    target.setLeadInitialProcessedAt(source.getLeadInitialProcessedAt());
+    target.setLeadInitialProcessedBy(source.getLeadInitialProcessedBy());
+    target.setLeadRetainedUntil(source.getLeadRetainedUntil());
+    target.setLeadInvalid(source.isLeadInvalid());
     target.setIntendedStore(source.getIntendedStore());
     target.setIntendedProject(source.getIntendedProject());
     target.setPurchasedProject(source.getPurchasedProject());

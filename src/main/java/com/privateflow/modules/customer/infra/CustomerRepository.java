@@ -166,7 +166,9 @@ public class CustomerRepository {
           source_row_id, synced_at
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON DUPLICATE KEY UPDATE
-          nickname=VALUES(nickname), wechat_id=VALUES(wechat_id), source_channel=VALUES(source_channel),
+          nickname=CASE WHEN VALUES(nickname) IS NULL OR VALUES(nickname) = '' THEN nickname ELSE VALUES(nickname) END,
+          wechat_id=CASE WHEN VALUES(wechat_id) IS NULL OR VALUES(wechat_id) = '' THEN wechat_id ELSE VALUES(wechat_id) END,
+          source_channel=VALUES(source_channel),
           lead_type=VALUES(lead_type), lead_capture_type=VALUES(lead_capture_type),
           lead_capture_method=VALUES(lead_capture_method), platform_lead_at=VALUES(platform_lead_at),
           personality_type=VALUES(personality_type), assigned_keeper=VALUES(assigned_keeper), assigned_at=VALUES(assigned_at),

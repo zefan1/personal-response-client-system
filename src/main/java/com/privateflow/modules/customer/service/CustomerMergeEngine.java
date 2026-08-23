@@ -163,6 +163,10 @@ public class CustomerMergeEngine {
     c.setPersonalityType(source.getPersonalityType());
     c.setAssignedKeeper(source.getAssignedKeeper());
     c.setAssignedAt(source.getAssignedAt());
+    c.setLeadInitialProcessedAt(source.getLeadInitialProcessedAt());
+    c.setLeadInitialProcessedBy(source.getLeadInitialProcessedBy());
+    c.setLeadRetainedUntil(source.getLeadRetainedUntil());
+    c.setLeadInvalid(source.isLeadInvalid());
     c.setPreviousAssignedKeeper(source.getPreviousAssignedKeeper());
     c.setPreviousPlatformLeadAt(source.getPreviousPlatformLeadAt());
     c.setAssignmentMonth(source.getAssignmentMonth());

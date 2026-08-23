@@ -1187,6 +1187,41 @@
             </div>
             <button class="secondary small" type="button" :disabled="loading" @click="refreshTemplatePromotionCandidates">刷新候选</button>
           </div>
+          <section class="friend-request-template-panel">
+            <div class="ops-panel-head">
+              <div>
+                <h3>添加好友申请话术</h3>
+                <p>从“速搜内容管理”的话术模板中选择，启用后才会在桌面工作台复制收集号时显示。</p>
+              </div>
+            </div>
+            <div class="friend-request-template-picker">
+              <label>
+                选择速搜内容管理里的模板
+                <select v-model="friendRequestTemplateSelection" aria-label="选择添加好友申请话术模板">
+                  <option value="" disabled>请选择一个模板</option>
+                  <option v-for="item in friendRequestSourceTemplates" :key="item.id" :value="String(item.id)">
+                    {{ item.title || `模板 #${item.id}` }} · {{ item.shortcutCode || '无快捷码' }}
+                  </option>
+                </select>
+                <small v-if="!friendRequestSourceTemplates.length">暂无启用的速搜话术模板，请先到“速搜内容管理”新增并启用。</small>
+              </label>
+              <button class="secondary small" type="button" :disabled="!friendRequestTemplateSelection" @click="void addSelectedFriendRequestTemplates()">添加话术</button>
+            </div>
+            <div class="friend-request-template-list">
+              <article v-for="(template, index) in friendRequestTemplates" :key="template.id" class="friend-request-template-row">
+                <div class="friend-request-template-row-head">
+                  <div>
+                    <strong>{{ template.name }}</strong>
+                    <small>{{ template.quickSearchItemId ? '来源：速搜内容管理' : '旧版手动话术，请重新选择速搜模板' }}</small>
+                  </div>
+                  <label class="ops-checkline"><input v-model="template.enabled" class="ops-switch" type="checkbox" @change="void saveFriendRequestTemplates()" /> 工作台显示话术</label>
+                  <button class="secondary small danger" type="button" @click="void removeFriendRequestTemplate(index)">移除</button>
+                </div>
+                <p class="friend-request-template-preview">{{ template.text || '该速搜模板暂无正文' }}</p>
+              </article>
+            </div>
+            <p v-if="!friendRequestTemplates.length" class="ops-empty">还没有选择添加好友话术。</p>
+          </section>
           <div class="ops-filter-bar three template-candidate-filters">
             <input v-model="templatePromotionKeyword" placeholder="搜索标题、员工或正文" />
             <select v-model="templatePromotionLeadTypeFilter" aria-label="筛选线索类型">
@@ -3374,6 +3409,10 @@ const llmRoutes = ref<AnyRecord[]>([]);
 const llmRouteScenes = ref<string[]>([]);
 const llmAnalytics = ref<AnyRecord | null>(null);
 const configs = ref<AnyRecord[]>([]);
+type FriendRequestTemplateDraft = { id: string; name: string; text: string; enabled: boolean; quickSearchItemId?: number | null };
+const friendRequestTemplates = ref<FriendRequestTemplateDraft[]>([]);
+const friendRequestSourceTemplates = ref<AnyRecord[]>([]);
+const friendRequestTemplateSelection = ref('');
 const datasources = ref<AnyRecord[]>([]);
 const syncStatuses = ref<AnyRecord[]>([]);
 const customerFields = ref<AnyRecord[]>([]);
@@ -4430,6 +4469,7 @@ async function loadSkillAi() {
     llmRouteScenes.value = listFromResponse(llmSceneList).map((item) => String(item.value ?? item.name ?? item.scene ?? item)).filter(Boolean);
     llmAnalytics.value = recordFromResponse(llmCallAnalytics);
     configs.value = configEntries(configList);
+    hydrateFriendRequestTemplates();
     datasources.value = listFromResponse(dsList);
     syncStatuses.value = listFromResponse(syncList);
     hydratePromptDraft();
@@ -4456,7 +4496,7 @@ async function loadLlmAnalytics() {
 
 async function loadDataContent() {
   await runWithNotice(async () => {
-    const [dsList, fieldList, syncList, importList, customerList, filterOptions, quickList, candidateList] = await Promise.all([
+    const [dsList, fieldList, syncList, importList, customerList, filterOptions, quickList, candidateList, friendRequestList, configList] = await Promise.all([
       getJson<unknown>('/admin/api/v1/datasources'),
       getJson<unknown>('/admin/api/v1/customer-fields'),
       getJson<unknown>('/admin/api/v1/datasources/sync-status'),
@@ -4464,7 +4504,9 @@ async function loadDataContent() {
       requestPostJson<unknown>('/admin/api/v1/customers/search', customerSearchRequest()),
       getJson<unknown>('/admin/api/v1/customers/filter-options'),
       getJson<unknown>(quickSearchListPath()),
-      getJson<unknown>(withQuery('/admin/api/v1/template-promotion-candidates', { status: 'CANDIDATE' }))
+      getJson<unknown>(withQuery('/admin/api/v1/template-promotion-candidates', { status: 'CANDIDATE' })),
+      getJson<unknown>(withQuery('/admin/api/v1/quick-search/items', { contentType: 'TEMPLATE', enabled: true, page: 1, size: 50 })),
+      getJson<unknown>('/admin/api/v1/configs')
     ]);
     void refreshTagCategoryOptionsCache();
     datasources.value = listFromResponse(dsList);
@@ -4475,6 +4517,10 @@ async function loadDataContent() {
     customerFilterOptions.value = recordFromResponse(filterOptions);
     applyQuickSearchList(quickList);
     applyTemplatePromotionCandidates(candidateList);
+    friendRequestSourceTemplates.value = listFromResponse(friendRequestList);
+    configs.value = configEntries(configList);
+    hydrateFriendRequestTemplates();
+    reconcileFriendRequestTemplates();
     if (!selectedDatasource.value && datasources.value.length) {
       selectDatasource(datasources.value[0]);
     }
@@ -4899,6 +4945,90 @@ async function loadHealth(force = false) {
       throw error;
     }
   }, '健康状态已刷新');
+}
+
+function hydrateFriendRequestTemplates(): void {
+  const raw = configValue('followup.friend_request_templates_json');
+  if (!raw) {
+    friendRequestTemplates.value = [];
+    friendRequestTemplateSelection.value = '';
+    return;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const list = Array.isArray(parsed) ? parsed : [];
+    friendRequestTemplates.value = list.map((entry, index) => {
+      const value = typeof entry === 'string' ? { text: entry } : (entry as AnyRecord);
+      const quickSearchItemId = Number(value.quickSearchItemId ?? value.sourceTemplateId ?? 0);
+      return {
+        id: String(value.id ?? `template-${index + 1}`),
+        name: String(value.name ?? `话术 ${index + 1}`),
+        text: String(value.text ?? '').trim(),
+        enabled: value.enabled !== false,
+        quickSearchItemId: Number.isInteger(quickSearchItemId) && quickSearchItemId > 0 ? quickSearchItemId : null
+      };
+    }).filter((entry) => entry.text || entry.quickSearchItemId);
+    friendRequestTemplateSelection.value = '';
+  } catch {
+    friendRequestTemplates.value = [];
+    friendRequestTemplateSelection.value = '';
+  }
+}
+
+function reconcileFriendRequestTemplates(): void {
+  for (const template of friendRequestTemplates.value) {
+    if (!template.quickSearchItemId) continue;
+    const source = friendRequestSourceTemplates.value.find((item) => Number(item.id) === template.quickSearchItemId);
+    if (!source) continue;
+    template.name = String(source.title || template.name);
+    template.text = String(source.content || '').trim();
+  }
+}
+
+async function addSelectedFriendRequestTemplates(): Promise<void> {
+  const existingIds = new Set(friendRequestTemplates.value.map((template) => template.quickSearchItemId).filter(Boolean));
+  const selectedId = friendRequestTemplateSelection.value;
+  const source = friendRequestSourceTemplates.value.find((item) => String(item.id) === selectedId);
+  const quickSearchItemId = Number(selectedId);
+  if (!source || !Number.isInteger(quickSearchItemId) || existingIds.has(quickSearchItemId)) return;
+  friendRequestTemplates.value.push({
+    id: `quick-search-${quickSearchItemId}`,
+    name: String(source.title || `模板 #${quickSearchItemId}`),
+    text: String(source.content || '').trim(),
+    enabled: true,
+    quickSearchItemId
+  });
+  friendRequestTemplateSelection.value = '';
+  await saveFriendRequestTemplates();
+}
+
+async function removeFriendRequestTemplate(index: number): Promise<void> {
+  friendRequestTemplates.value.splice(index, 1);
+  await saveFriendRequestTemplates();
+}
+
+async function saveFriendRequestTemplates(): Promise<void> {
+  const entries = friendRequestTemplates.value
+    .map((template, index) => ({
+      id: template.id || `quick-search-${template.quickSearchItemId ?? index + 1}`,
+      quickSearchItemId: template.quickSearchItemId,
+      enabled: template.enabled
+    }))
+    .filter((template) => typeof template.quickSearchItemId === 'number');
+  await runWithNotice(async () => {
+    await putJson('/admin/api/v1/configs/followup.friend_request_templates_json', { value: JSON.stringify(entries) });
+    friendRequestTemplates.value = entries.map((entry) => {
+      const source = friendRequestSourceTemplates.value.find((item) => Number(item.id) === entry.quickSearchItemId);
+      return {
+        id: entry.id,
+        name: String(source?.title || `模板 #${entry.quickSearchItemId}`),
+        text: String(source?.content || '').trim(),
+        enabled: entry.enabled,
+        quickSearchItemId: entry.quickSearchItemId
+      };
+    });
+    configs.value = configEntries(await getJson<unknown>('/admin/api/v1/configs'));
+  }, '添加好友申请话术已保存');
 }
 
 async function loadCustomerMasterDefault() {

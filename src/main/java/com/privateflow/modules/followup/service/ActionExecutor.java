@@ -139,7 +139,13 @@ public class ActionExecutor {
             "TUAN_GOU".equals(customer.getLeadType()) ? "HIGH" : "NORMAL",
             sourceTable == null ? customer.getSourceTable() : sourceTable,
             customer.getAssignedKeeper(),
-            LocalDateTime.now())));
+            LocalDateTime.now(),
+            contactValue(customer),
+            isPhone(customer.getPhone()) ? "PHONE" : "WECHAT",
+            customer.getLeadInitialProcessedAt() != null,
+            customer.isLeadInvalid(),
+            customer.getLeadRetainedUntil(),
+            customer.getVersion())));
   }
 
   private JsonNode readJson(String json) {
@@ -177,4 +183,14 @@ public class ActionExecutor {
     }
     return Duration.between(customer.getLastFollowupAt(), LocalDateTime.now()).toHours();
   }
+
+  private String contactValue(Customer customer) {
+    if (isPhone(customer.getPhone())) return customer.getPhone();
+    return customer.getWechatId() == null || customer.getWechatId().isBlank() ? customer.getPhone() : customer.getWechatId();
+  }
+
+  private boolean isPhone(String value) {
+    return value != null && value.matches("\\d{11}");
+  }
+
 }

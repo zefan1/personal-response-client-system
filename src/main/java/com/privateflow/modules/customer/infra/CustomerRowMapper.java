@@ -30,6 +30,10 @@ public class CustomerRowMapper implements RowMapper<Customer> {
     customer.setPersonalityType(rs.getString("personality_type"));
     customer.setAssignedKeeper(rs.getString("assigned_keeper"));
     customer.setAssignedAt(rs.getTimestamp("assigned_at") == null ? null : rs.getTimestamp("assigned_at").toLocalDateTime());
+    customer.setLeadInitialProcessedAt(rs.getTimestamp("lead_initial_processed_at") == null ? null : rs.getTimestamp("lead_initial_processed_at").toLocalDateTime());
+    customer.setLeadInitialProcessedBy(rs.getString("lead_initial_processed_by"));
+    customer.setLeadRetainedUntil(rs.getTimestamp("lead_retained_until") == null ? null : rs.getTimestamp("lead_retained_until").toLocalDateTime());
+    customer.setLeadInvalid(rs.getBoolean("lead_invalid"));
     customer.setPreviousAssignedKeeper(rs.getString("previous_assigned_keeper"));
     customer.setPreviousPlatformLeadAt(rs.getTimestamp("previous_platform_lead_at") == null ? null : rs.getTimestamp("previous_platform_lead_at").toLocalDateTime());
     customer.setAssignmentMonth(rs.getString("assignment_month"));

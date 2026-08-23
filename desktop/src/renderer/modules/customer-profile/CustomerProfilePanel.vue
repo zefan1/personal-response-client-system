@@ -82,10 +82,26 @@
           ><span aria-hidden="true">⧉</span></button>
           <span v-if="customer.customerStage" class="profile-stage">{{ customer.customerStage }}</span>
           <p class="profile-identity-meta">
-            {{ maskPhone(customer.phone) }} · 微信{{ customer.nickname ? '已关联' : '待关联' }} · 分配管家：{{ customer.assignedKeeper || '-' }} · 来源：{{ customer.sourceChannel || leadTypeLabel(customer.leadType) }}
+            <span>{{ maskPhone(customer.phone) }}</span>
+            <button
+              v-if="profilePhoneValue"
+              class="secondary profile-copy-contact"
+              type="button"
+              aria-label="复制客户手机号"
+              title="复制客户手机号"
+              @click="copyCustomerPhone"
+            ><span aria-hidden="true">⧉</span></button>
+            <span> · 微信{{ customer.nickname ? '已关联' : '待关联' }} · 分配管家：{{ customer.assignedKeeper || '-' }} · 来源：{{ customer.sourceChannel || leadTypeLabel(customer.leadType) }}</span>
           </p>
         </div>
         <div v-if="!readOnly" class="profile-actions">
+          <button
+            v-if="customer.assignedKeeper"
+            class="secondary small profile-lead-validity-button"
+            type="button"
+            :disabled="state.leadValiditySaving || !customer.phone"
+            @click="toggleProfileLeadInvalid"
+          >{{ customer.leadInvalid ? '有效' : '无效' }}</button>
           <button class="primary small" :disabled="state.generating || !customer.phone" @click="generateReplyFromProfile">
             {{ state.generating ? '生成中...' : '生成回复' }}
           </button>
@@ -313,6 +329,7 @@ import {
   confirmBooking,
   confirmTableSync,
   copyCustomerNickname,
+  copyCustomerPhone,
   customerProfileState as state,
   enterEditMode,
   generateReplyFromProfile,
@@ -328,8 +345,10 @@ import {
   scheduleSearch,
   searchImmediately,
   skipTableSync,
-  updateCustomerTagLock
+  updateCustomerTagLock,
+  toggleProfileLeadInvalid
 } from './customerProfileStore';
+import { normalizeFullPhone } from './customerPhone';
 import type {
   AbnormalAlertPayload,
   Customer,
@@ -353,6 +372,7 @@ const props = withDefaults(defineProps<{
 const readOnly = computed(() => props.readOnly);
 const embedded = computed(() => props.embedded);
 const customer = computed(() => state.profile?.customer ?? {} as Customer);
+const profilePhoneValue = computed(() => normalizeFullPhone(state.profile?.phoneFull || customer.value.phoneFull || customer.value.phone));
 const summaryText = computed(() => `${customer.value.nickname || '-'} · ${maskPhone(customer.value.phone || '')} · ${customer.value.customerStage || '-'}`);
 const appointmentOverview = computed(() => {
   const date = formatDate(customer.value.appointmentDate);
@@ -498,6 +518,17 @@ onMounted(() => {
   disposers.push(eventBus.on<{ phone?: string; newStage?: string }>('stage:updated', handleStageUpdated));
   disposers.push(eventBus.on<{ phone?: string; customerId?: number | null }>('reply:send-confirmed', handleSendConfirmed));
   disposers.push(eventBus.on<CustomerTagsUpdatedPayload>('CUSTOMER_TAGS_UPDATED', handleCustomerTagsUpdated));
+  disposers.push(eventBus.on<{ phone: string; invalid: boolean; retainedUntil?: string | null; version?: number | null }>('new-lead:validity-changed', (payload) => {
+    const current = state.profile?.customer;
+    if (!current || !payload.phone) return;
+    const currentPhone = state.profile?.phoneFull || current.phoneFull || current.phone;
+    if (normalizeFullPhone(currentPhone) !== normalizeFullPhone(payload.phone)) return;
+    current.leadInvalid = payload.invalid;
+    current.leadInitialProcessedAt = payload.invalid ? new Date().toISOString() : null;
+    current.leadInitialProcessedBy = payload.invalid ? 'desktop' : null;
+    current.leadRetainedUntil = payload.retainedUntil ?? null;
+    if (typeof payload.version === 'number') current.version = payload.version;
+  }));
 });
 
 onBeforeUnmount(() => {

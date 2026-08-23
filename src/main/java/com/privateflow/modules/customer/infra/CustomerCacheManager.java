@@ -144,6 +144,10 @@ public class CustomerCacheManager {
     put(map, "personalityType", c.getPersonalityType());
     put(map, "assignedKeeper", c.getAssignedKeeper());
     put(map, "assignedAt", c.getAssignedAt());
+    put(map, "leadInitialProcessedAt", c.getLeadInitialProcessedAt());
+    put(map, "leadInitialProcessedBy", c.getLeadInitialProcessedBy());
+    put(map, "leadRetainedUntil", c.getLeadRetainedUntil());
+    put(map, "leadInvalid", c.isLeadInvalid());
     put(map, "previousAssignedKeeper", c.getPreviousAssignedKeeper());
     put(map, "previousPlatformLeadAt", c.getPreviousPlatformLeadAt());
     put(map, "assignmentMonth", c.getAssignmentMonth());
@@ -227,6 +231,10 @@ public class CustomerCacheManager {
     c.setPersonalityType(str(raw.get("personalityType")));
     c.setAssignedKeeper(str(raw.get("assignedKeeper")));
     c.setAssignedAt(parseDateTime(raw.get("assignedAt")));
+    c.setLeadInitialProcessedAt(parseDateTime(raw.get("leadInitialProcessedAt")));
+    c.setLeadInitialProcessedBy(str(raw.get("leadInitialProcessedBy")));
+    c.setLeadRetainedUntil(parseDateTime(raw.get("leadRetainedUntil")));
+    c.setLeadInvalid(Boolean.parseBoolean(String.valueOf(raw.getOrDefault("leadInvalid", false))));
     c.setPreviousAssignedKeeper(str(raw.get("previousAssignedKeeper")));
     c.setPreviousPlatformLeadAt(parseDateTime(raw.get("previousPlatformLeadAt")));
     c.setAssignmentMonth(str(raw.get("assignmentMonth")));

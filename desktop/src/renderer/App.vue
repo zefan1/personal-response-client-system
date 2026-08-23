@@ -159,6 +159,7 @@
       <OfflineStatusBar v-if="!topGlobalAlert" />
       <CopyBackfillAgent />
       <NewLeadToastAgent />
+      <NewLeadContactDialog />
       <TemplateLibraryOverlay />
       <PersonalTemplateEditor />
       <BatchTemplateOverlay />
@@ -213,6 +214,7 @@ import { customerProfileState } from './modules/customer-profile/customerProfile
 import FollowupListPanel from './modules/followup-list/FollowupListPanel.vue';
 import HelpModeAgent from './modules/help-mode/HelpModeAgent.vue';
 import NewLeadToastAgent from './modules/new-lead-toast/NewLeadToastAgent.vue';
+import NewLeadContactDialog from './modules/new-lead-flow/NewLeadContactDialog.vue';
 import OfflineStatusBar from './modules/offline/OfflineStatusBar.vue';
 import TemplateLibraryOverlay from './modules/templates/TemplateLibraryOverlay.vue';
 import PersonalTemplateEditor from './modules/templates/PersonalTemplateEditor.vue';

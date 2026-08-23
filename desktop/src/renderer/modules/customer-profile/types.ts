@@ -14,6 +14,11 @@ export type CustomerSummary = {
   platformLeadAt?: string | null;
   conversionTrace?: string | null;
   assignedKeeper?: string | null;
+  assignedAt?: string | null;
+  leadInitialProcessedAt?: string | null;
+  leadInitialProcessedBy?: string | null;
+  leadRetainedUntil?: string | null;
+  leadInvalid?: boolean;
   lastFollowupAt?: string | null;
   intendedStore?: string | null;
   confidence?: string | null;
@@ -32,6 +37,11 @@ export type Customer = {
   conversionTrace?: string | null;
   personalityType?: string | null;
   assignedKeeper?: string | null;
+  assignedAt?: string | null;
+  leadInitialProcessedAt?: string | null;
+  leadInitialProcessedBy?: string | null;
+  leadRetainedUntil?: string | null;
+  leadInvalid?: boolean;
   intendedStore?: string | null;
   intendedProject?: string | null;
   purchasedProject?: string | null;

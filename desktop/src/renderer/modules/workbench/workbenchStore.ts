@@ -41,7 +41,7 @@ export const workbenchMetrics = computed<WorkbenchMetrics>(() => {
       incrementMetric(next.pendingFollowup, item.leadType);
     } else if (item.reminderType === 'APPOINTMENT') {
       incrementMetric(next.appointment, item.leadType);
-    } else if (item.reminderType === 'NEW_LEAD') {
+    } else if (item.reminderType === 'NEW_LEAD' && !item.leadProcessed) {
       incrementMetric(next.newLead, item.leadType);
     }
   });
@@ -58,13 +58,7 @@ export const urgentFollowups = computed<WorkbenchFollowupItem[]>(() => {
 
 export const recentNewLeads = computed<NewLeadAlertPayload[]>(() => {
   const limit = loadDesktopConfig().workbenchNewLeadListLimit;
-  const shared = [...newLeadToastState.visibleQueue, ...newLeadToastState.pendingQueue]
-    .sort((left, right) => (right.arrivedAt ?? '').localeCompare(left.arrivedAt ?? ''))
-    .slice(0, limit);
-  if (shared.length > 0) {
-    return shared;
-  }
-  return workbenchState.followups
+  const fromDatabase = workbenchState.followups
     .filter((item) => item.reminderType === 'NEW_LEAD')
     .sort((left, right) => (right.arrivedAt ?? '').localeCompare(left.arrivedAt ?? ''))
     .slice(0, limit)
@@ -76,8 +70,18 @@ export const recentNewLeads = computed<NewLeadAlertPayload[]>(() => {
       priority: item.priority ?? undefined,
       sourceTable: item.sourceTable ?? undefined,
       assignedKeeper: item.assignedKeeper ?? undefined,
-      arrivedAt: item.arrivedAt ?? undefined
+      arrivedAt: item.arrivedAt ?? undefined,
+      contactValue: item.contactValue ?? undefined,
+      contactType: item.contactType ?? undefined,
+      customerVersion: item.customerVersion ?? undefined,
+      leadProcessed: item.leadProcessed,
+      leadInvalid: item.leadInvalid,
+      leadRetainedUntil: item.leadRetainedUntil ?? undefined
     }));
+  if (fromDatabase.length > 0 || workbenchState.loaded) return fromDatabase;
+  return [...newLeadToastState.visibleQueue, ...newLeadToastState.pendingQueue]
+    .sort((left, right) => (right.arrivedAt ?? '').localeCompare(left.arrivedAt ?? ''))
+    .slice(0, limit);
 });
 
 export const visibleWorkbenchNotices = computed(() => {
@@ -187,7 +191,10 @@ export function handleWorkbenchNewLead(payload: NewLeadAlertPayload): void {
     sourceTable: payload.sourceTable,
     assignedKeeper: payload.assignedKeeper,
     priority: payload.priority,
-    arrivedAt: payload.arrivedAt
+    arrivedAt: payload.arrivedAt,
+    leadProcessed: payload.leadProcessed,
+    leadInvalid: payload.leadInvalid,
+    leadRetainedUntil: payload.leadRetainedUntil
   });
 }
 
@@ -240,6 +247,15 @@ export function openAllFollowups(): void {
 
 export function openAllNewLeads(): void {
   eventBus.emit('followup:switch-tab', { tab: 'NEW_LEAD' });
+}
+
+export function markWorkbenchNewLeadProcessed(phone: string, nickname?: string): void {
+  const normalized = phone.trim();
+  workbenchState.followups = workbenchState.followups.map((item) =>
+    item.reminderType === 'NEW_LEAD' && (item.phoneFull ?? item.phone) === normalized
+      ? { ...item, nickname: nickname || item.nickname, leadProcessed: true, leadRetainedUntil: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }
+      : item);
+  markWorkbenchDirty();
 }
 
 export function startWorkbenchCapture(): void {

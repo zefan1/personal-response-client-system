@@ -191,6 +191,10 @@ public class TableWriteOrchestrator {
         customerMasterProjectionService.projectFields(customer, fields);
         audit(event, "MASTER_SUCCESS", null, customer);
       } catch (RuntimeException ex) {
+        if (isWriteBlocked(ex)) {
+          audit(event, "MASTER_SKIPPED", message(ex), customer);
+          return;
+        }
         queueManager.enqueue(customer.getId(), customer.getPhone(), TableWriteActionType.UPDATE,
             new PendingWritePayload("PRIMARY", null, fields), message(ex));
         audit(event, "MASTER_QUEUED", message(ex), customer);
@@ -210,6 +214,10 @@ public class TableWriteOrchestrator {
       existingCustomerUpdater.updateFields(customer, fields);
       audit(event, "SOURCE_SUCCESS", null, customer);
     } catch (RuntimeException ex) {
+      if (isWriteBlocked(ex)) {
+        audit(event, "SOURCE_SKIPPED", message(ex), customer);
+        return;
+      }
       queueManager.enqueue(customer.getId(), customer.getPhone(), TableWriteActionType.UPDATE,
           new PendingWritePayload(retrySourceTable(customer), retrySourceRowId(customer), fields), message(ex));
       audit(event, "SOURCE_QUEUED", message(ex), customer);
@@ -279,6 +287,11 @@ public class TableWriteOrchestrator {
 
   private String message(RuntimeException ex) {
     return blank(ex.getMessage()) ? ex.getClass().getSimpleName() : ex.getMessage();
+  }
+
+  private boolean isWriteBlocked(RuntimeException ex) {
+    return ex instanceof TableWriteException tableWriteException
+        && TableWriteErrorCodes.TABLE_WRITE_BLOCKED.equals(tableWriteException.getErrorCode());
   }
 
   private String retrySourceTable(Customer customer) {

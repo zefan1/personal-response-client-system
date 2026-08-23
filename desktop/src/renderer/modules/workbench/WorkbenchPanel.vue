@@ -89,8 +89,15 @@
         >
           <button class="workbench-row-main" @click="openWorkbenchCustomer(lead.phoneFull ?? lead.phone, lead.leadType)">
             <strong>{{ lead.nickname || `客户 ${lead.phone.slice(-4)}` }}</strong>
-            <span>手机号 {{ formatPhone(lead.phoneFull ?? lead.phone) }} · 来源 {{ sourceLabel(lead.sourceTable) }}</span>
+            <span>{{ lead.contactType === 'WECHAT' ? '微信号' : '手机号' }} {{ formatContact(lead) }} · 来源 {{ sourceLabel(lead.sourceTable) }}</span>
           </button>
+          <button class="secondary small icon-button" type="button" :aria-label="`复制${lead.contactType === 'WECHAT' ? '微信号' : '手机号'}`" :title="`复制${lead.contactType === 'WECHAT' ? '微信号' : '手机号'}`" @click.stop="requestLeadContact(lead)">⧉</button>
+          <button
+            class="secondary small workbench-invalid-button"
+            type="button"
+            :disabled="isLeadValidityUpdating(lead)"
+            @click.stop="void toggleLeadInvalid(lead)"
+          >{{ lead.leadInvalid ? '有效' : '无效' }}</button>
           <button class="secondary small" @click="openWorkbenchCustomer(lead.phoneFull ?? lead.phone, lead.leadType)">查看</button>
         </article>
         <p v-if="recentNewLeads.length === 0" class="empty-panel visual-empty">暂无新客资</p>
@@ -124,6 +131,8 @@ import {
 } from './workbenchStore';
 import type { FollowupReminderPayload, NewLeadAlertPayload, WorkbenchNoticePayload } from './types';
 import type { WorkbenchMetricKey } from './types';
+import { requestLeadContact } from '../new-lead-flow/newLeadFlowStore';
+import { isLeadValidityUpdating, toggleLeadInvalid } from '../followup-list/followupListStore';
 
 const metricCards = computed<Array<{ key: WorkbenchMetricKey; label: string; icon: string; metric: { total: number; tuanGou: number; xianSuo: number } }>>(() => [
   { key: 'pendingFollowup', label: '待跟进', icon: '跟', metric: workbenchMetrics.value.pendingFollowup },
@@ -143,6 +152,18 @@ onMounted(() => {
   disposers.push(eventBus.on<WorkbenchNoticePayload>('SYSTEM_NOTICE', handleWorkbenchNotice));
   disposers.push(eventBus.on<{ phone: string; reminderType?: string | null }>('followup:completed', (payload) => {
     completeWorkbenchFollowup(payload.phone, payload.reminderType);
+  }));
+  disposers.push(eventBus.on<{ phone: string; nickname?: string }>('new-lead:processed', (payload) => {
+    state.followups = state.followups.map((item) =>
+      item.reminderType === 'NEW_LEAD' && (item.phoneFull ?? item.phone) === payload.phone
+        ? { ...item, nickname: payload.nickname || item.nickname, leadProcessed: true, leadInvalid: false }
+        : item);
+  }));
+  disposers.push(eventBus.on<{ phone: string; invalid: boolean; retainedUntil?: string | null; version?: number | null }>('new-lead:validity-changed', (payload) => {
+    state.followups = state.followups.map((item) =>
+      item.reminderType === 'NEW_LEAD' && (item.phoneFull ?? item.phone) === payload.phone
+        ? { ...item, leadInvalid: payload.invalid, leadProcessed: payload.invalid, leadRetainedUntil: payload.retainedUntil ?? null, customerVersion: payload.version ?? item.customerVersion }
+        : item);
   }));
   disposers.push(eventBus.on('stage:updated', markWorkbenchDirty));
   disposers.push(eventBus.on('workbench:show', refreshWorkbenchIfNeeded));
@@ -180,6 +201,12 @@ function maskPhone(phone: string): string {
 
 function formatPhone(phone: string): string {
   return phone || '-';
+}
+
+function formatContact(lead: NewLeadAlertPayload): string {
+  const value = lead.contactValue || lead.phoneFull || lead.phone || '';
+  if (lead.contactType === 'WECHAT') return value || '-';
+  return value.length >= 7 ? `${value.slice(0, 3)}****${value.slice(-4)}` : value || '-';
 }
 
 function sourceLabel(value?: string | null): string {

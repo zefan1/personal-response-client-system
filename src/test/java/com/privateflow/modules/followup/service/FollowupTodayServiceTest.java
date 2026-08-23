@@ -39,10 +39,10 @@ class FollowupTodayServiceTest {
   }
 
   @Test
-  void exposesCustomersAssignedTodayEvenWhenReminderLogIsEmpty() {
+  void keepsUnprocessedAssignedCustomersVisibleAcrossDays() {
     LocalDateTime now = LocalDateTime.now();
     Customer assignedToday = customer("13800000000", "今天新客", now.minusHours(1));
-    assignedToday.setAssignedAt(now.minusMinutes(5));
+    assignedToday.setAssignedAt(now.minusDays(2));
 
     CustomerQueryService queryService = mock(CustomerQueryService.class);
     ReminderLogRepository reminderLogs = mock(ReminderLogRepository.class);
@@ -57,6 +57,32 @@ class FollowupTodayServiceTest {
     assertEquals("13800000000", response.items().stream()
         .filter(item -> item.reminderType() == ReminderType.NEW_LEAD)
         .findFirst().orElseThrow().phoneFull());
+    assertEquals(1, response.pendingNewLeadCount());
+  }
+
+  @Test
+  void retainsProcessedLeadForOneDayWithoutCountingItAsPendingWork() {
+    LocalDateTime now = LocalDateTime.now();
+    Customer processed = customer("13800000001", "已填昵称", now.minusHours(1));
+    processed.setAssignedAt(now.minusDays(2));
+    processed.setLeadInitialProcessedAt(now.minusHours(2));
+    processed.setLeadInitialProcessedBy("keeper-a");
+    processed.setLeadRetainedUntil(now.plusHours(20));
+
+    CustomerQueryService queryService = mock(CustomerQueryService.class);
+    ReminderLogRepository reminderLogs = mock(ReminderLogRepository.class);
+    CustomerAccessService accessService = mock(CustomerAccessService.class);
+    when(queryService.scanActiveCustomers(any())).thenReturn(List.of(processed));
+    when(reminderLogs.findTodayPhones(ReminderType.NEW_LEAD)).thenReturn(List.of());
+    when(accessService.canAccess(any())).thenReturn(true);
+
+    FollowupTodayResponse response = new FollowupTodayService(queryService, reminderLogs, accessService).today("keeper-a");
+
+    assertEquals(1, response.items().stream().filter(item -> item.reminderType() == ReminderType.NEW_LEAD).count());
+    assertEquals(0, response.pendingNewLeadCount());
+    assertEquals(1, response.retainedNewLeadCount());
+    assertEquals(true, response.items().stream().filter(item -> item.reminderType() == ReminderType.NEW_LEAD)
+        .findFirst().orElseThrow().leadProcessed());
   }
 
   private Customer customer(String phone, String nickname, LocalDateTime nextFollowupAt) {

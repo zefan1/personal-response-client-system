@@ -7,6 +7,12 @@ export type NewLeadAlertPayload = {
   sourceTable?: string;
   assignedKeeper?: string;
   arrivedAt?: string;
+  contactValue?: string;
+  contactType?: 'PHONE' | 'WECHAT' | string;
+  customerVersion?: number | null;
+  leadProcessed?: boolean;
+  leadInvalid?: boolean;
+  leadRetainedUntil?: string;
   isReconnectBatch?: boolean;
 };
 

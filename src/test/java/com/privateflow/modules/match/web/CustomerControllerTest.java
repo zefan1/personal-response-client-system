@@ -1,6 +1,7 @@
 package com.privateflow.modules.match.web;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.match.Confidence;
 import com.privateflow.modules.match.CustomerMatchErrorCodes;
 import com.privateflow.modules.match.CustomerMatchException;
@@ -50,6 +52,7 @@ class CustomerControllerTest {
   private SuggestionQueueManager suggestionQueueManager;
   private ManualSaveHandler manualSaveHandler;
   private CustomerTagUpdateService customerTagUpdateService;
+  private CustomerQueryService customerQueryService;
   private MockMvc mockMvc;
   private ObjectMapper objectMapper;
 
@@ -61,6 +64,7 @@ class CustomerControllerTest {
     suggestionQueueManager = org.mockito.Mockito.mock(SuggestionQueueManager.class);
     manualSaveHandler = org.mockito.Mockito.mock(ManualSaveHandler.class);
     customerTagUpdateService = org.mockito.Mockito.mock(CustomerTagUpdateService.class);
+    customerQueryService = org.mockito.Mockito.mock(CustomerQueryService.class);
     mockMvc = MockMvcBuilders
         .standaloneSetup(new CustomerController(
             customerSearchService,
@@ -68,7 +72,9 @@ class CustomerControllerTest {
             manualEditHandler,
             suggestionQueueManager,
             manualSaveHandler,
-            customerTagUpdateService))
+            customerTagUpdateService,
+            null,
+            customerQueryService))
         .build();
     objectMapper = new ObjectMapper();
   }
@@ -139,6 +145,24 @@ class CustomerControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.written").value(true))
         .andExpect(jsonPath("$.data.updatedFields[0]").value("nickname"));
+  }
+
+  @Test
+  void invalidLeadAlsoWritesCustomerStage() throws Exception {
+    Customer customer = new Customer();
+    customer.setPhone("13800000000");
+    customer.setVersion(2);
+    when(customerQueryService.getByPhone("13800000000")).thenReturn(customer);
+    when(manualEditHandler.update(eq("13800000000"), argThat(request ->
+        "无效".equals(request.fields().get("customerStage"))
+            && Boolean.TRUE.equals(request.fields().get("leadInvalid")))))
+        .thenReturn(new ManualProfileUpdateResult(3));
+
+    mockMvc.perform(post("/api/v1/customers/13800000000/lead-validity")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"version\":2,\"invalid\":true,\"operator\":\"desktop\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.invalid").value(true));
   }
 
   @Test

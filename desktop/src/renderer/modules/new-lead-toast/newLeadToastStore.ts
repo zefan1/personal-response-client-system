@@ -28,17 +28,18 @@ export function enqueueNewLeadToast(payload: NewLeadAlertPayload): void {
 }
 
 export async function copyNewLeadPhone(item: NewLeadToastItem): Promise<void> {
-  const phone = normalizePhone(item.phoneFull ?? '');
-  if (!phone) {
-    newLeadToastState.toast = '请在推广表查看完整手机号';
+  const contactValue = item.contactValue || item.phoneFull || item.phone;
+  if (!contactValue) {
+    newLeadToastState.toast = '没有可复制的手机号或微信号';
     return;
   }
   try {
-    const result = await writeClipboardText(phone);
+    const result = await writeClipboardText(normalizePhone(contactValue));
     if (!result.success) {
       throw new Error(result.error ?? 'clipboard failed');
     }
     newLeadToastState.toast = '已复制，请在微信搜索添加';
+    eventBus.emit('new-lead:copy-contact', item);
   } catch {
     newLeadToastState.toast = '复制失败，请手动记录手机号';
   }

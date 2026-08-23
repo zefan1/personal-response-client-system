@@ -17,6 +17,7 @@ import {
   handleCustomerProfileLoaded,
   ignoreStageSuggestion
 } from '../stage-suggestion/stageSuggestionHandler';
+import { normalizeFullPhone } from './customerPhone';
 import type { SaveProfileInput } from '../save-to-table/types';
 import type {
   AbnormalAlertPayload,
@@ -83,7 +84,8 @@ export const customerProfileState = reactive({
   toast: '',
   bookingOpen: false,
   bookingTemplate: '',
-  bookingDraft: { appointmentDate: '', appointmentTime: '', appointmentStore: '', appointmentItem: '' }
+  bookingDraft: { appointmentDate: '', appointmentTime: '', appointmentStore: '', appointmentItem: '' },
+  leadValiditySaving: false
 });
 
 let searchTimer: number | null = null;
@@ -476,6 +478,64 @@ export async function copyCustomerNickname(): Promise<void> {
   customerProfileState.toast = result.success
     ? '客户昵称已复制，可到企业微信搜索'
     : '昵称复制失败，请重试';
+}
+
+export async function copyCustomerPhone(): Promise<void> {
+  const phone = customerProfileState.profile?.phoneFull
+    || customerProfileState.profile?.customer.phoneFull
+    || customerProfileState.profile?.customer.phone
+    || '';
+  const normalizedPhone = normalizeFullPhone(phone);
+  if (!normalizedPhone) {
+    customerProfileState.toast = '该客户没有可复制的完整手机号';
+    return;
+  }
+  const result = await writeClipboardText(normalizedPhone);
+  customerProfileState.toast = result.success
+    ? '客户手机号已复制'
+    : '手机号复制失败，请重试';
+}
+
+export async function toggleProfileLeadInvalid(): Promise<void> {
+  const profile = customerProfileState.profile;
+  const customer = profile?.customer;
+  const phone = currentProfilePhone();
+  const version = customer?.version;
+  if (!customer || !phone || typeof version !== 'number') {
+    customerProfileState.toast = '客户档案版本缺失，请刷新后重试';
+    return;
+  }
+  const invalid = !Boolean(customer.leadInvalid);
+  customerProfileState.leadValiditySaving = true;
+  try {
+    const response = await postJson<{ version: number; invalid: boolean; retainedUntil?: string | null }>(
+      `/api/v1/customers/${encodeURIComponent(phone)}/lead-validity`,
+      { version, invalid, operator: 'desktop' },
+      SAVE_TIMEOUT_MS
+    );
+    if (!response.success || !response.data) {
+      customerProfileState.toast = response.message || (invalid ? '标记无效失败，请刷新后重试' : '撤回无效失败，请刷新后重试');
+      return;
+    }
+    customer.leadInvalid = response.data.invalid;
+    customer.leadInitialProcessedAt = response.data.invalid ? new Date().toISOString() : null;
+    customer.leadInitialProcessedBy = response.data.invalid ? 'desktop' : null;
+    customer.leadRetainedUntil = response.data.retainedUntil ?? null;
+    customer.version = response.data.version;
+    eventBus.emit('new-lead:validity-changed', {
+      phone,
+      invalid: response.data.invalid,
+      retainedUntil: response.data.retainedUntil ?? null,
+      version: response.data.version
+    });
+    customerProfileState.toast = response.data.invalid
+      ? '已标记为无效，1天内可点击“有效”撤回'
+      : '已恢复为有效，重新回到未处理';
+  } catch {
+    customerProfileState.toast = invalid ? '标记无效失败，请检查网络后重试' : '撤回无效失败，请检查网络后重试';
+  } finally {
+    customerProfileState.leadValiditySaving = false;
+  }
 }
 
 export function beginTagEdit(categoryId: number): void {

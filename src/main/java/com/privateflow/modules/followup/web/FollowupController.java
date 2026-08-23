@@ -10,6 +10,18 @@ import com.privateflow.modules.followup.RuleRequest;
 import com.privateflow.modules.followup.RuleSearchCriteria;
 import com.privateflow.modules.followup.service.FollowupTodayService;
 import com.privateflow.modules.followup.service.RuleAdminService;
+import com.privateflow.modules.customer.infra.SystemConfigRepository;
+import com.privateflow.modules.quicksearch.ContentType;
+import com.privateflow.modules.quicksearch.QuickSearchItem;
+import com.privateflow.modules.quicksearch.QuickSearchService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.privateflow.modules.match.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -29,15 +41,80 @@ public class FollowupController {
 
   private final FollowupTodayService todayService;
   private final RuleAdminService ruleAdminService;
+  private final SystemConfigRepository systemConfigRepository;
+  private final ObjectMapper objectMapper;
+  private final QuickSearchService quickSearchService;
 
   public FollowupController(FollowupTodayService todayService, RuleAdminService ruleAdminService) {
+    this(todayService, ruleAdminService, null, null, null);
+  }
+
+  @Autowired
+  public FollowupController(
+      FollowupTodayService todayService,
+      RuleAdminService ruleAdminService,
+      SystemConfigRepository systemConfigRepository,
+      ObjectMapper objectMapper,
+      QuickSearchService quickSearchService) {
     this.todayService = todayService;
     this.ruleAdminService = ruleAdminService;
+    this.systemConfigRepository = systemConfigRepository;
+    this.objectMapper = objectMapper;
+    this.quickSearchService = quickSearchService;
   }
 
   @GetMapping("/api/v1/followups/today")
   public ApiResponse<FollowupTodayResponse> today(@RequestParam(value = "keeperId", required = false) String keeperId) {
     return ApiResponse.ok(todayService.today(keeperId));
+  }
+
+  @GetMapping("/api/v1/followups/friend-request-templates")
+  public ApiResponse<FriendRequestTemplatesResponse> friendRequestTemplates() {
+    List<FriendRequestTemplate> templates = new ArrayList<>();
+    String raw = systemConfigRepository == null
+        ? "[\"你好，我是负责跟进你的顾问，方便通过一下好友申请吗？\"]"
+        : systemConfigRepository.findValue("followup.friend_request_templates_json")
+            .orElse(null);
+    boolean fallbackRequired = raw == null;
+    try {
+      JsonNode node = objectMapper == null ? null : objectMapper.readTree(raw);
+      if (node != null && node.isArray()) {
+        fallbackRequired = false;
+        Map<Long, QuickSearchItem> quickSearchTemplates = quickSearchService == null
+            ? Map.of()
+            : quickSearchService.listEnabledItems().stream()
+                .filter(item -> item.contentType() == ContentType.TEMPLATE)
+                .collect(Collectors.toMap(QuickSearchItem::id, Function.identity(), (left, right) -> left));
+        int index = 1;
+        for (JsonNode item : node) {
+          if (!item.isTextual() && !item.path("enabled").asBoolean(true)) {
+            continue;
+          }
+          QuickSearchItem source = item.hasNonNull("quickSearchItemId")
+              ? quickSearchTemplates.get(item.path("quickSearchItemId").asLong())
+              : null;
+          String text = source != null ? source.content() : item.isTextual() ? item.asText() : item.path("text").asText("");
+          if (text.isBlank() || (source == null && item.hasNonNull("quickSearchItemId"))) {
+            continue;
+          }
+          String id = source != null
+              ? "quick-search-" + source.id()
+              : item.isTextual() ? String.valueOf(index) : item.path("id").asText(String.valueOf(index));
+          String name = source != null
+              ? source.title()
+              : item.isTextual() ? "话术 " + index : item.path("name").asText("话术 " + index);
+          templates.add(new FriendRequestTemplate(id, name, text.trim(), true));
+          index++;
+        }
+      }
+    } catch (Exception ignored) {
+      fallbackRequired = true;
+    }
+    if (fallbackRequired) {
+      // Keep the built-in phrase only for an uninitialized or malformed configuration.
+      templates.add(new FriendRequestTemplate("default", "默认话术", "你好，我是负责跟进你的顾问，方便通过一下好友申请吗？", true));
+    }
+    return ApiResponse.ok(new FriendRequestTemplatesResponse(templates));
   }
 
   @GetMapping("/admin/api/v1/rules")
@@ -84,5 +161,11 @@ public class FollowupController {
   }
 
   public record ToggleRequest(boolean enabled) {
+  }
+
+  public record FriendRequestTemplatesResponse(List<FriendRequestTemplate> templates) {
+  }
+
+  public record FriendRequestTemplate(String id, String name, String text, boolean enabled) {
   }
 }

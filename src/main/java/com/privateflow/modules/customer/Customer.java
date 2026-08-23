@@ -26,6 +26,10 @@ public class Customer {
   private String personalityType;
   private String assignedKeeper;
   private LocalDateTime assignedAt;
+  private LocalDateTime leadInitialProcessedAt;
+  private String leadInitialProcessedBy;
+  private LocalDateTime leadRetainedUntil;
+  private boolean leadInvalid;
   private String previousAssignedKeeper;
   private LocalDateTime previousPlatformLeadAt;
   private String assignmentMonth;
@@ -127,6 +131,15 @@ public class Customer {
   public void setAssignedKeeper(String assignedKeeper) { this.assignedKeeper = assignedKeeper; }
   public LocalDateTime getAssignedAt() { return assignedAt; }
   public void setAssignedAt(LocalDateTime assignedAt) { this.assignedAt = assignedAt; }
+  public LocalDateTime getLeadInitialProcessedAt() { return leadInitialProcessedAt; }
+  public void setLeadInitialProcessedAt(LocalDateTime leadInitialProcessedAt) { this.leadInitialProcessedAt = leadInitialProcessedAt; }
+  public String getLeadInitialProcessedBy() { return leadInitialProcessedBy; }
+  public void setLeadInitialProcessedBy(String leadInitialProcessedBy) { this.leadInitialProcessedBy = leadInitialProcessedBy; }
+  public LocalDateTime getLeadRetainedUntil() { return leadRetainedUntil; }
+  public void setLeadRetainedUntil(LocalDateTime leadRetainedUntil) { this.leadRetainedUntil = leadRetainedUntil; }
+  public boolean isLeadInvalid() { return leadInvalid; }
+  public boolean getLeadInvalid() { return leadInvalid; }
+  public void setLeadInvalid(boolean leadInvalid) { this.leadInvalid = leadInvalid; }
   public String getPreviousAssignedKeeper() { return previousAssignedKeeper; }
   public void setPreviousAssignedKeeper(String previousAssignedKeeper) { this.previousAssignedKeeper = previousAssignedKeeper; }
   public LocalDateTime getPreviousPlatformLeadAt() { return previousPlatformLeadAt; }

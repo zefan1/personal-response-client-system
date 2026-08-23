@@ -26,9 +26,14 @@ import com.privateflow.modules.followup.RuleRequest;
 import com.privateflow.modules.followup.RuleSearchCriteria;
 import com.privateflow.modules.followup.service.FollowupTodayService;
 import com.privateflow.modules.followup.service.RuleAdminService;
+import com.privateflow.modules.customer.infra.SystemConfigRepository;
+import com.privateflow.modules.quicksearch.ContentType;
+import com.privateflow.modules.quicksearch.QuickSearchItem;
+import com.privateflow.modules.quicksearch.QuickSearchService;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -149,6 +154,29 @@ class FollowupControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.success").value(false))
         .andExpect(jsonPath("$.errorCode").value(FollowupErrorCodes.CONDITION_PARSE_FAILED));
+  }
+
+  @Test
+  void friendRequestTemplatesResolveSelectedQuickSearchItemsAndSkipDisabledEntries() throws Exception {
+    SystemConfigRepository configRepository = org.mockito.Mockito.mock(SystemConfigRepository.class);
+    QuickSearchService quickSearchService = org.mockito.Mockito.mock(QuickSearchService.class);
+    when(configRepository.findValue("followup.friend_request_templates_json"))
+        .thenReturn(Optional.of("[{\"quickSearchItemId\":7,\"enabled\":true},{\"quickSearchItemId\":8,\"enabled\":false}]"));
+    when(quickSearchService.listEnabledItems()).thenReturn(List.of(
+        new QuickSearchItem(7L, ContentType.TEMPLATE, null, "GENERAL", "加微开场", "ADD01", "你好，方便通过好友申请吗？", null, 1, true, LocalDateTime.now()),
+        new QuickSearchItem(8L, ContentType.TEMPLATE, null, "GENERAL", "停用话术", "ADD02", "不应显示", null, 2, true, LocalDateTime.now())));
+
+    mockMvc = MockMvcBuilders
+        .standaloneSetup(new FollowupController(todayService, ruleAdminService, configRepository, objectMapper, quickSearchService))
+        .setControllerAdvice(new GlobalApiExceptionHandler())
+        .build();
+
+    mockMvc.perform(get("/api/v1/followups/friend-request-templates"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.templates.length()").value(1))
+        .andExpect(jsonPath("$.data.templates[0].id").value("quick-search-7"))
+        .andExpect(jsonPath("$.data.templates[0].name").value("加微开场"))
+        .andExpect(jsonPath("$.data.templates[0].text").value("你好，方便通过好友申请吗？"));
   }
 
   @Test

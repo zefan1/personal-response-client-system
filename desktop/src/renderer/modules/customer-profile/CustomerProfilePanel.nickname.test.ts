@@ -194,4 +194,32 @@ describe('CustomerProfilePanel nickname binding', () => {
 
     app.unmount();
   });
+
+  it('shows a copy button for a complete phone in the profile overview', async () => {
+    customerProfileState.profile = {
+      phoneFull: '13800000000',
+      customer: {
+        phone: '138****0000',
+        phoneFull: '13800000000',
+        nickname: '小雨',
+        version: 3
+      },
+      pendingSuggestions: [],
+      currentTags: [],
+      tagLocks: [],
+      editableTagCategories: []
+    };
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const app = createApp(CustomerProfilePanel);
+    app.mount(host);
+    await nextTick();
+
+    const copyButton = host.querySelector('button[aria-label="复制客户手机号"]');
+    expect(copyButton).not.toBeNull();
+    expect(copyButton?.getAttribute('title')).toBe('复制客户手机号');
+
+    app.unmount();
+  });
 });

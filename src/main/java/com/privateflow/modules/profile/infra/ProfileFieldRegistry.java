@@ -36,6 +36,10 @@ public class ProfileFieldRegistry {
     register("previousPlatformLeadAt", "previous_platform_lead_at", LocalDateTime.class);
     register("assignedKeeper", "assigned_keeper", String.class);
     register("assignedAt", "assigned_at", LocalDateTime.class);
+    register("leadInitialProcessedAt", "lead_initial_processed_at", LocalDateTime.class);
+    register("leadInitialProcessedBy", "lead_initial_processed_by", String.class);
+    register("leadRetainedUntil", "lead_retained_until", LocalDateTime.class);
+    register("leadInvalid", "lead_invalid", Boolean.class);
     register("assignmentMonth", "assignment_month", String.class);
     register("intendedStore", "intended_store", String.class);
     register("intendedProject", "intended_project", String.class);
@@ -119,6 +123,9 @@ public class ProfileFieldRegistry {
         return Date.valueOf(date);
       }
       return Date.valueOf(String.valueOf(value).substring(0, 10));
+    }
+    if (spec.type() == Boolean.class) {
+      return value instanceof Boolean bool ? bool : Boolean.parseBoolean(String.valueOf(value));
     }
     String text = String.valueOf(value);
     return text.length() > 500 ? text.substring(0, 500) : text;
