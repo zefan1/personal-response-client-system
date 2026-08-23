@@ -5,6 +5,7 @@ import com.privateflow.modules.customer.history.CustomerFieldHistoryContext;
 import com.privateflow.modules.customer.history.CustomerFieldHistoryService;
 import com.privateflow.modules.profile.ProfileErrorCodes;
 import com.privateflow.modules.profile.ProfileUpdateException;
+import com.privateflow.modules.customer.admin.CustomerStageOptionService;
 import com.privateflow.modules.tags.LegacyCustomerTagSynchronizer;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -25,6 +26,7 @@ public class ProfileWriter {
   private final ApplicationEventPublisher eventPublisher;
   private final LegacyCustomerTagSynchronizer tagSynchronizer;
   private final CustomerFieldHistoryService historyService;
+  private final CustomerStageOptionService stageOptionService;
 
   @Autowired
   public ProfileWriter(
@@ -32,12 +34,14 @@ public class ProfileWriter {
       ProfileFieldRegistry fieldRegistry,
       ApplicationEventPublisher eventPublisher,
       LegacyCustomerTagSynchronizer tagSynchronizer,
-      CustomerFieldHistoryService historyService) {
+      CustomerFieldHistoryService historyService,
+      CustomerStageOptionService stageOptionService) {
     this.jdbcTemplate = jdbcTemplate;
     this.fieldRegistry = fieldRegistry;
     this.eventPublisher = eventPublisher;
     this.tagSynchronizer = tagSynchronizer;
     this.historyService = historyService;
+    this.stageOptionService = stageOptionService;
   }
 
   public ProfileWriter(
@@ -45,7 +49,7 @@ public class ProfileWriter {
       ProfileFieldRegistry fieldRegistry,
       ApplicationEventPublisher eventPublisher,
       LegacyCustomerTagSynchronizer tagSynchronizer) {
-    this(jdbcTemplate, fieldRegistry, eventPublisher, tagSynchronizer, null);
+    this(jdbcTemplate, fieldRegistry, eventPublisher, tagSynchronizer, null, null);
   }
 
   @Transactional
@@ -60,7 +64,7 @@ public class ProfileWriter {
       Integer expectedVersion,
       boolean publishEvent,
       CustomerFieldHistoryContext historyContext) {
-    Map<String, Object> accepted = acceptedFields(fields);
+    Map<String, Object> accepted = acceptedFields(fields, phone);
     if (accepted.isEmpty()) {
       return currentVersion(phone);
     }
@@ -114,7 +118,8 @@ public class ProfileWriter {
     if (customerId <= 0) {
       throw new ProfileUpdateException(ProfileErrorCodes.VERSION_CONFLICT, "customer id is required");
     }
-    Map<String, Object> accepted = acceptedFields(fields);
+    String phone = currentPhoneByCustomerId(customerId);
+    Map<String, Object> accepted = acceptedFields(fields, phone);
     if (accepted.isEmpty()) {
       return currentVersionByCustomerId(customerId);
     }
@@ -147,7 +152,6 @@ public class ProfileWriter {
     }
     int version = currentVersionByCustomerId(customerId);
     if (publishEvent) {
-      String phone = currentPhoneByCustomerId(customerId);
       eventPublisher.publishEvent(new ProfileUpdatedEvent(phone, List.copyOf(accepted.keySet())));
     }
     return version;
@@ -160,14 +164,16 @@ public class ProfileWriter {
     write(phone, fields, expectedVersion, true);
   }
 
-  private Map<String, Object> acceptedFields(Map<String, Object> fields) {
+  private Map<String, Object> acceptedFields(Map<String, Object> fields, String phone) {
     Map<String, Object> accepted = new LinkedHashMap<>();
     if (fields == null) {
       return accepted;
     }
     fields.forEach((key, value) -> {
       if (fieldRegistry.supports(key)) {
-        accepted.put(key, value);
+        accepted.put(key, "customerStage".equals(key) && stageOptionService != null
+            ? stageOptionService.normalizeByPhone(phone, value == null ? null : String.valueOf(value))
+            : value);
       }
     });
     return accepted;

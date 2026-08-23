@@ -46,6 +46,16 @@ public class CustomerRepository {
     return customers.stream().findFirst();
   }
 
+  public int replaceCustomerStage(String oldStage, String newStage) {
+    if (oldStage == null || oldStage.isBlank() || newStage == null || newStage.isBlank()
+        || oldStage.equals(newStage)) {
+      return 0;
+    }
+    return jdbcTemplate.update(
+        "UPDATE customers SET customer_stage = ?, version = version + 1 WHERE customer_stage = ?",
+        newStage.trim(), oldStage.trim());
+  }
+
   @Transactional
   public Customer createRecognitionCustomer(Customer customer) {
     if (customer == null) {

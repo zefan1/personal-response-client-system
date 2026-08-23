@@ -6848,6 +6848,43 @@ textarea:focus-visible { outline: 3px solid #f4c9a5; outline-offset: 2px; }
 .ops-capability-status.ok-text { color: var(--admin-success); }
 .muted-text { color: var(--admin-muted); }
 
+.ops-stage-option-list,
+.ops-stage-decision-row {
+  display: grid;
+  gap: 10px;
+}
+
+.ops-stage-option-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(120px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--admin-line);
+  background: var(--admin-surface);
+}
+
+.ops-stage-option-row code,
+.ops-stage-decision-row code {
+  color: var(--admin-muted);
+  font-size: 12px;
+}
+
+.ops-stage-decision-row {
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #efd4ac;
+  background: #fffaf2;
+}
+
+@media (max-width: 900px) {
+  .ops-stage-option-row,
+  .ops-stage-decision-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .ops-inline-switch {
   display: inline-flex;
   align-items: center;

@@ -2,6 +2,7 @@ package com.privateflow.modules.tablewrite.service;
 
 import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.admin.CustomerStageOptionService;
 import com.privateflow.modules.tablewrite.TableWriteException;
 import com.privateflow.modules.tablewrite.TableWriteErrorCodes;
 import com.privateflow.modules.tablewrite.client.WecomTableClient;
@@ -30,6 +31,7 @@ public class ExistingCustomerUpdater {
   private final TableFieldMappingResolver mappingResolver;
   private final TagExchangeService exchangeService;
   private final WecomSmartSheetConfig smartSheetConfig;
+  private final CustomerStageOptionService stageOptionService;
 
   @Autowired
   public ExistingCustomerUpdater(
@@ -37,19 +39,21 @@ public class ExistingCustomerUpdater {
       TableConfigProvider configProvider,
       TableFieldMappingResolver mappingResolver,
       TagExchangeService exchangeService,
-      WecomSmartSheetConfig smartSheetConfig) {
+      WecomSmartSheetConfig smartSheetConfig,
+      CustomerStageOptionService stageOptionService) {
     this.tableClient = tableClient;
     this.configProvider = configProvider;
     this.mappingResolver = mappingResolver;
     this.exchangeService = exchangeService;
     this.smartSheetConfig = smartSheetConfig;
+    this.stageOptionService = stageOptionService;
   }
 
   public ExistingCustomerUpdater(
       WecomTableClient tableClient,
       TableConfigProvider configProvider,
       TableFieldMappingResolver mappingResolver) {
-    this(tableClient, configProvider, mappingResolver, null, null);
+    this(tableClient, configProvider, mappingResolver, null, null, null);
   }
 
   public ExistingCustomerUpdater(
@@ -57,7 +61,7 @@ public class ExistingCustomerUpdater {
       TableConfigProvider configProvider,
       TableFieldMappingResolver mappingResolver,
       TagExchangeService exchangeService) {
-    this(tableClient, configProvider, mappingResolver, exchangeService, null);
+    this(tableClient, configProvider, mappingResolver, exchangeService, null, null);
   }
 
   public void update(Customer customer, CustomerMessageSentEvent event) {
@@ -73,6 +77,10 @@ public class ExistingCustomerUpdater {
     Map<String, Object> fields = new LinkedHashMap<>();
     if (requestedFields != null) {
       fields.putAll(requestedFields);
+    }
+    if (fields.get("customerStage") != null && stageOptionService != null) {
+      fields.put("customerStage", stageOptionService.normalizeForCustomer(customer,
+          String.valueOf(fields.get("customerStage"))));
     }
     if (isAssignmentSource(customer.getSourceTable())) {
       fields.put("phone", customer.getPhone());

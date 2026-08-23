@@ -2,6 +2,7 @@ package com.privateflow.modules.customer.sync;
 
 import com.privateflow.common.events.ConfigChangedEvent;
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.admin.CustomerStageOptionService;
 import com.privateflow.modules.customer.LeadTypes;
 import com.privateflow.modules.tags.TagExchangeResult;
 import com.privateflow.modules.tags.TagExchangeService;
@@ -33,13 +34,20 @@ public class FieldMappingResolver {
   private static final Logger log = LoggerFactory.getLogger(FieldMappingResolver.class);
   private final JdbcTemplate jdbcTemplate;
   private final TagExchangeService exchangeService;
+  private final CustomerStageOptionService stageOptionService;
   private volatile Map<String, Map<String, String>> mappings = Map.of();
 
   @Autowired
-  public FieldMappingResolver(JdbcTemplate jdbcTemplate, TagExchangeService exchangeService) {
+  public FieldMappingResolver(JdbcTemplate jdbcTemplate, TagExchangeService exchangeService,
+      CustomerStageOptionService stageOptionService) {
     this.jdbcTemplate = jdbcTemplate;
     this.exchangeService = exchangeService;
+    this.stageOptionService = stageOptionService;
     reload();
+  }
+
+  public FieldMappingResolver(JdbcTemplate jdbcTemplate, TagExchangeService exchangeService) {
+    this(jdbcTemplate, exchangeService, null);
   }
 
   public FieldMappingResolver(JdbcTemplate jdbcTemplate) {
@@ -83,7 +91,11 @@ public class FieldMappingResolver {
             row.rowId(),
             mappedFields);
     for (Map.Entry<String, Object> entry : exchange.acceptedFields().entrySet()) {
-      set(customer, entry.getKey(), String.valueOf(entry.getValue()));
+      String value = String.valueOf(entry.getValue());
+      if ("customerStage".equals(entry.getKey()) && stageOptionService != null) {
+        value = stageOptionService.normalize(sourceTable, value);
+      }
+      set(customer, entry.getKey(), value);
     }
     customer.setLeadType(LeadTypes.normalize(customer.getLeadType()));
     return new FieldMappingResult(customer, exchange);

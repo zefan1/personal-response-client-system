@@ -1072,6 +1072,41 @@
           <p v-if="!selectedDatasource" class="ops-empty">从上方数据源列表选择一项。</p>
         </article>
 
+        <article v-if="activeSection.key === 'data-integration' && selectedDatasource" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>客户阶段选项</h2>
+              <p>企业微信客户阶段列提供可用选项，MariaDB 仍然保存客户事实；删除后重建的选项需要管理员确认。</p>
+            </div>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" @click="() => loadCustomerStageOptions()">查看当前选项</button>
+              <button class="primary small" type="button" @click="() => refreshCustomerStageOptions()">读取企业微信最新选项</button>
+            </div>
+          </div>
+          <p v-if="stageOptionCatalogMessage" class="admin-message" :class="{ error: stageOptionCatalogError }">{{ stageOptionCatalogMessage }}</p>
+          <div v-if="stageOptionCatalog" class="ops-detail-box">
+            <strong>字段：{{ stageOptionCatalog.fieldName || '客户阶段' }}</strong>
+            <p v-if="!stageOptionCatalog.options?.length">还没有保存选项快照，请先读取企业微信最新选项。</p>
+            <div v-else class="ops-stage-option-list">
+              <div v-for="option in stageOptionCatalog.options" :key="`${option.optionId}-${option.status}`" class="ops-stage-option-row">
+                <span>{{ option.optionText }}</span>
+                <code>{{ option.optionId }}</code>
+                <b :class="stageOptionStatusClass(option.status)">{{ stageOptionStatusLabel(option.status) }}</b>
+              </div>
+            </div>
+          </div>
+          <div v-if="stageOptionPending.length" class="ops-detail-box">
+            <strong>需要确认的选项变化</strong>
+            <p>同名但选项 ID 不同，通常表示企业微信删除后重新新增。系统不会自动改客户阶段。</p>
+            <div v-for="option in stageOptionPending" :key="`pending-${option.optionId}`" class="ops-stage-decision-row">
+              <span><b>新选项：</b>{{ option.optionText }} <code>{{ option.optionId }}</code></span>
+              <span v-if="stageOptionPartner(option)"><b>旧选项：</b>{{ stageOptionPartner(option)!.optionText }} <code>{{ stageOptionPartner(option)!.optionId }}</code></span>
+              <button v-if="stageOptionPartner(option)" class="primary small" type="button" @click="decideCustomerStageOption(stageOptionPartner(option), option, 'SAME')">确认是同一阶段</button>
+              <button class="secondary small" type="button" @click="decideCustomerStageOption(stageOptionPartner(option), option, 'NEW')">确认为新阶段</button>
+            </div>
+          </div>
+        </article>
+
         <article v-if="activeSection.key === 'data-integration'" class="ops-panel">
           <div class="ops-panel-head">
             <div>
@@ -3418,6 +3453,11 @@ const syncStatuses = ref<AnyRecord[]>([]);
 const customerFields = ref<AnyRecord[]>([]);
 const mappings = ref<AnyRecord[]>([]);
 const mappingVersions = ref<AnyRecord[]>([]);
+const stageOptionCatalog = ref<AnyRecord | null>(null);
+const stageOptionCatalogMessage = ref('');
+const stageOptionCatalogError = ref(false);
+const stageOptionPending = computed(() => listFrom(stageOptionCatalog.value, 'options').filter((item) => String(item.status || '').toUpperCase() === 'PENDING'));
+const stageOptionOrphaned = computed(() => listFrom(stageOptionCatalog.value, 'options').filter((item) => String(item.status || '').toUpperCase() === 'ORPHANED'));
 const importLogs = ref<AnyRecord[]>([]);
 const customerSearchItems = ref<AnyRecord[]>([]);
 const selectedAdminCustomer = ref<AnyRecord | null>(null);
@@ -6656,6 +6696,9 @@ async function testLlmEnvironment(env: AnyRecord) {
 
 async function selectDatasource(item: AnyRecord) {
   selectedDatasource.value = item;
+  stageOptionCatalog.value = null;
+  stageOptionCatalogMessage.value = '';
+  stageOptionCatalogError.value = false;
   mappingVersions.value = [];
   datasourceColumns.value = [];
   datasourceColumnStatus.value = null;
@@ -6679,7 +6722,76 @@ async function selectDatasource(item: AnyRecord) {
     // Opening a mapping always re-reads the live Smart Sheet schema. Do not
     // let a browser/proxy cache make the operator work from an old column list.
     await loadDatasourceColumns(false, true);
+    await loadCustomerStageOptions(false);
   }, '字段映射已加载');
+}
+
+async function loadCustomerStageOptions(showNotice = true) {
+  const datasource = selectedDatasource.value;
+  if (!datasource) return;
+  const load = async () => {
+    stageOptionCatalog.value = recordFromResponse(await getJson<unknown>(`/admin/api/v1/datasources/${datasource.id}/customer-stage-options`));
+    stageOptionCatalogMessage.value = '';
+    stageOptionCatalogError.value = false;
+  };
+  try {
+    if (showNotice) {
+      await runWithNotice(load, '客户阶段选项已加载');
+    } else {
+      await load();
+    }
+  } catch (error) {
+    stageOptionCatalogError.value = true;
+    stageOptionCatalogMessage.value = error instanceof Error ? error.message : '客户阶段选项暂时无法读取';
+    if (!showNotice) return;
+    throw error;
+  }
+}
+
+async function refreshCustomerStageOptions() {
+  const datasource = selectedDatasource.value;
+  if (!datasource) return;
+  await runWithNotice(async () => {
+    stageOptionCatalog.value = recordFromResponse(await postJson<unknown>(`/admin/api/v1/datasources/${datasource.id}/customer-stage-options/refresh`, {}));
+    stageOptionCatalogMessage.value = '';
+    stageOptionCatalogError.value = false;
+  }, '企业微信阶段选项已刷新');
+}
+
+function stageOptionStatusLabel(status: unknown): string {
+  switch (String(status || '').toUpperCase()) {
+    case 'PENDING': return '待确认';
+    case 'ORPHANED': return '远端已删除';
+    case 'MIGRATED': return '已迁移';
+    default: return '当前有效';
+  }
+}
+
+function stageOptionStatusClass(status: unknown): string {
+  const normalized = String(status || '').toUpperCase();
+  return normalized === 'PENDING' || normalized === 'ORPHANED' ? 'warn-text' : normalized === 'MIGRATED' ? 'muted-text' : 'ok-text';
+}
+
+function stageOptionPartner(option: AnyRecord): AnyRecord | null {
+  const text = String(option.optionText || '').trim();
+  return stageOptionOrphaned.value.find((candidate) => String(candidate.optionText || '').trim() === text) || null;
+}
+
+async function decideCustomerStageOption(oldOption: AnyRecord | null, newOption: AnyRecord, decision: 'SAME' | 'NEW') {
+  const datasource = selectedDatasource.value;
+  if (!datasource || (decision === 'SAME' && !oldOption)) return;
+  const oldText = oldOption ? String(oldOption.optionText || '') : '无旧选项';
+  const newText = String(newOption.optionText || '');
+  if (!window.confirm(decision === 'SAME'
+    ? `确认将「${oldText}」迁移到「${newText}」吗？系统会更新唯一事实数据库中的客户阶段。`
+    : `确认把「${newText}」作为一个全新的客户阶段吗？`)) return;
+  await runWithNotice(async () => {
+    stageOptionCatalog.value = recordFromResponse(await postJson<unknown>(`/admin/api/v1/datasources/${datasource.id}/customer-stage-options/decide`, {
+      oldOptionId: oldOption?.optionId || newOption.optionId,
+      newOptionId: newOption.optionId,
+      decision
+    }));
+  }, decision === 'SAME' ? '阶段选项已确认并完成迁移' : '新阶段选项已确认');
 }
 
 async function loadDatasourceColumns(showNotice = true, forceRefresh = false) {

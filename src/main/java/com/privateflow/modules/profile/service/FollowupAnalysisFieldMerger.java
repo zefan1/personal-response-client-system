@@ -1,6 +1,7 @@
 package com.privateflow.modules.profile.service;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.admin.CustomerStageOptionService;
 import com.privateflow.modules.llm.FollowupAnalysisPayload;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -8,6 +9,17 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class FollowupAnalysisFieldMerger {
+
+  private final CustomerStageOptionService stageOptionService;
+
+  public FollowupAnalysisFieldMerger() {
+    this(null);
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public FollowupAnalysisFieldMerger(CustomerStageOptionService stageOptionService) {
+    this.stageOptionService = stageOptionService;
+  }
 
   public Map<String, Object> merge(Customer customer, FollowupAnalysisPayload payload) {
     Map<String, Object> fields = new LinkedHashMap<>();
@@ -17,7 +29,11 @@ public class FollowupAnalysisFieldMerger {
     putIfPresent(fields, "internalNote", payload.internalNote());
     putIfPresent(fields, "bodyConcerns", payload.bodyConcerns());
     putIfPresent(fields, "customerProfileSummary", payload.customerProfileSummary());
-    putIfPresent(fields, "customerStage", payload.customerStage());
+    String customerStage = payload.customerStage();
+    if (stageOptionService != null) {
+      customerStage = stageOptionService.normalizeForCustomer(customer, customerStage);
+    }
+    putIfPresent(fields, "customerStage", customerStage);
     putIfPresent(fields, "nextFollowupDir", payload.nextFollowupDirection());
     putIfPresent(fields, "nextFollowupAt", payload.nextFollowupAt());
     if (!blank(payload.followupRecord())) {

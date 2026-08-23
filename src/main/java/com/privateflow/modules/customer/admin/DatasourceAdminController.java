@@ -11,18 +11,29 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @RestController
 public class DatasourceAdminController {
 
   private final DatasourceAdminService service;
   private final SmartSheetConnectionService smartSheetConnectionService;
+  private final CustomerStageOptionService customerStageOptionService;
+
+  @Autowired
+  public DatasourceAdminController(
+      DatasourceAdminService service,
+      SmartSheetConnectionService smartSheetConnectionService,
+      CustomerStageOptionService customerStageOptionService) {
+    this.service = service;
+    this.smartSheetConnectionService = smartSheetConnectionService;
+    this.customerStageOptionService = customerStageOptionService;
+  }
 
   public DatasourceAdminController(
       DatasourceAdminService service,
       SmartSheetConnectionService smartSheetConnectionService) {
-    this.service = service;
-    this.smartSheetConnectionService = smartSheetConnectionService;
+    this(service, smartSheetConnectionService, null);
   }
 
   @GetMapping("/admin/api/v1/datasources")
@@ -89,6 +100,32 @@ public class DatasourceAdminController {
   @GetMapping("/admin/api/v1/datasources/{id}/columns")
   public ApiResponse<Map<String, Object>> columns(@PathVariable("id") long id) {
     return ApiResponse.ok(service.columns(id));
+  }
+
+  @GetMapping("/admin/api/v1/datasources/{id}/customer-stage-options")
+  public ApiResponse<Map<String, Object>> customerStageOptions(@PathVariable("id") long id) {
+    requireStageOptionService();
+    return ApiResponse.ok(customerStageOptionService.current(id));
+  }
+
+  @PostMapping("/admin/api/v1/datasources/{id}/customer-stage-options/refresh")
+  public ApiResponse<Map<String, Object>> refreshCustomerStageOptions(@PathVariable("id") long id) {
+    requireStageOptionService();
+    return ApiResponse.ok(customerStageOptionService.refresh(id));
+  }
+
+  @PostMapping("/admin/api/v1/datasources/{id}/customer-stage-options/decide")
+  public ApiResponse<Map<String, Object>> decideCustomerStageOption(
+      @PathVariable("id") long id,
+      @RequestBody CustomerStageOptionDecisionRequest request) {
+    requireStageOptionService();
+    return ApiResponse.ok(customerStageOptionService.decide(id, request));
+  }
+
+  private void requireStageOptionService() {
+    if (customerStageOptionService == null) {
+      throw new IllegalStateException("customer stage option service unavailable");
+    }
   }
 
   @GetMapping("/admin/api/v1/customer-fields")

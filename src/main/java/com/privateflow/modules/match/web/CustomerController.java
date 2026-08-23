@@ -2,6 +2,7 @@ package com.privateflow.modules.match.web;
 
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
+import com.privateflow.modules.customer.admin.CustomerStageOptionService;
 import com.privateflow.modules.customer.booking.BookingConfirmRequest;
 import com.privateflow.modules.customer.booking.BookingConfirmResult;
 import com.privateflow.modules.customer.booking.CustomerBookingService;
@@ -62,6 +63,7 @@ public class CustomerController {
   private final CustomerTagUpdateService customerTagUpdateService;
   private final CustomerBookingService customerBookingService;
   private final CustomerQueryService customerQueryService;
+  private final CustomerStageOptionService stageOptionService;
 
   @Autowired
   public CustomerController(
@@ -72,7 +74,8 @@ public class CustomerController {
       ManualSaveHandler manualSaveHandler,
       CustomerTagUpdateService customerTagUpdateService,
       CustomerBookingService customerBookingService,
-      CustomerQueryService customerQueryService) {
+      CustomerQueryService customerQueryService,
+      CustomerStageOptionService stageOptionService) {
     this.customerSearchService = customerSearchService;
     this.customerProfileService = customerProfileService;
     this.manualEditHandler = manualEditHandler;
@@ -81,6 +84,20 @@ public class CustomerController {
     this.customerTagUpdateService = customerTagUpdateService;
     this.customerBookingService = customerBookingService;
     this.customerQueryService = customerQueryService;
+    this.stageOptionService = stageOptionService;
+  }
+
+  public CustomerController(
+      CustomerSearchService customerSearchService,
+      CustomerProfileService customerProfileService,
+      ManualEditHandler manualEditHandler,
+      SuggestionQueueManager suggestionQueueManager,
+      ManualSaveHandler manualSaveHandler,
+      CustomerTagUpdateService customerTagUpdateService,
+      CustomerBookingService customerBookingService,
+      CustomerQueryService customerQueryService) {
+    this(customerSearchService, customerProfileService, manualEditHandler, suggestionQueueManager,
+        manualSaveHandler, customerTagUpdateService, customerBookingService, customerQueryService, null);
   }
 
   public CustomerController(
@@ -92,7 +109,7 @@ public class CustomerController {
       CustomerTagUpdateService customerTagUpdateService,
       CustomerBookingService customerBookingService) {
     this(customerSearchService, customerProfileService, manualEditHandler, suggestionQueueManager,
-        manualSaveHandler, customerTagUpdateService, customerBookingService, null);
+        manualSaveHandler, customerTagUpdateService, customerBookingService, null, null);
   }
 
   public CustomerController(
@@ -103,7 +120,7 @@ public class CustomerController {
       ManualSaveHandler manualSaveHandler,
       CustomerTagUpdateService customerTagUpdateService) {
     this(customerSearchService, customerProfileService, manualEditHandler, suggestionQueueManager,
-        manualSaveHandler, customerTagUpdateService, null);
+        manualSaveHandler, customerTagUpdateService, null, null, null);
   }
 
   @GetMapping("/search")
@@ -207,9 +224,11 @@ public class CustomerController {
     // Keep the customer-stage field aligned with the explicit validity action so
     // the authoritative customer master carries the same business state as MariaDB.
     if (request.invalid()) {
-      fields.put("customerStage", "无效");
-    } else if (current != null && "无效".equals(current.getCustomerStage())) {
-      fields.put("customerStage", "待联系");
+      fields.put("customerStage", stageOptionService == null
+          ? "无效" : stageOptionService.normalizeForCustomer(current, "无效"));
+    } else if (current != null && ("无效".equals(current.getCustomerStage()) || current.isLeadInvalid())) {
+      fields.put("customerStage", stageOptionService == null
+          ? "待联系" : stageOptionService.normalizeForCustomer(current, "待联系"));
     }
     fields.put("leadInitialProcessedAt", request.invalid() ? now : null);
     fields.put("leadInitialProcessedBy", request.invalid() ? operator : null);
