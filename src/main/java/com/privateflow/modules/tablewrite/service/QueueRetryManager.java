@@ -3,6 +3,7 @@ package com.privateflow.modules.tablewrite.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
+import com.privateflow.modules.customer.admin.CustomerStageOptionService;
 import com.privateflow.modules.tablewrite.PendingTableWrite;
 import com.privateflow.modules.tablewrite.PendingWritePayload;
 import com.privateflow.modules.tablewrite.TableWriteActionType;
@@ -44,6 +45,7 @@ public class QueueRetryManager {
   private final Optional<AuxiliarySmartSheetTarget> assignmentTarget;
   private final Optional<AuxiliarySmartSheetTarget> arrivalTarget;
   private final CustomerMasterProjectionService customerMasterProjectionService;
+  private final CustomerStageOptionService stageOptionService;
 
   @Autowired
   public QueueRetryManager(
@@ -57,7 +59,8 @@ public class QueueRetryManager {
       TagExchangeService exchangeService,
       AuxiliarySmartSheetWriter auxiliaryWriter,
       AuxiliarySmartSheetTargets auxiliaryTargets,
-      CustomerMasterProjectionService customerMasterProjectionService) {
+      CustomerMasterProjectionService customerMasterProjectionService,
+      CustomerStageOptionService stageOptionService) {
     this.repository = repository;
     this.tableClient = tableClient;
     this.configProvider = configProvider;
@@ -71,6 +74,7 @@ public class QueueRetryManager {
     this.assignmentTarget = Optional.empty();
     this.arrivalTarget = Optional.empty();
     this.customerMasterProjectionService = customerMasterProjectionService;
+    this.stageOptionService = stageOptionService;
   }
 
   QueueRetryManager(
@@ -116,6 +120,7 @@ public class QueueRetryManager {
     this.assignmentTarget = assignmentTarget;
     this.arrivalTarget = arrivalTarget;
     this.customerMasterProjectionService = customerMasterProjectionService;
+    this.stageOptionService = null;
   }
 
   public QueueRetryManager(
@@ -148,6 +153,7 @@ public class QueueRetryManager {
     for (PendingTableWrite item : repository.due(100)) {
       try {
         PendingWritePayload payload = objectMapper.readValue(item.getPayload(), PendingWritePayload.class);
+        payload = normalizeStage(payload, item.getCustomerId(), item.getPhone());
         if (retryAuxiliary(payload, item.getCustomerId(), item.getPhone(),
             Duration.ofMillis(config.writeTimeoutMs()))) {
           repository.markResolved(item.getId());
@@ -220,6 +226,22 @@ public class QueueRetryManager {
       return true;
     }
     return false;
+  }
+
+  private PendingWritePayload normalizeStage(PendingWritePayload payload, Long customerId, String phone) {
+    if (stageOptionService == null || payload == null || payload.fields() == null
+        || payload.fields().get("customerStage") == null) {
+      return payload;
+    }
+    Customer customer = customerId != null && customerId > 0
+        ? customerQueryService.getById(customerId) : customerQueryService.getByPhone(phone);
+    if (customer == null) {
+      return payload;
+    }
+    Map<String, Object> fields = new java.util.LinkedHashMap<>(payload.fields());
+    fields.put("customerStage", stageOptionService.normalizeForCustomer(
+        customer, String.valueOf(fields.get("customerStage"))));
+    return new PendingWritePayload(payload.sourceTable(), payload.sourceRowId(), fields);
   }
 
   private Optional<AuxiliarySmartSheetTarget> currentAssignmentTarget() {

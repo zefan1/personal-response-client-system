@@ -37,6 +37,15 @@ public class CustomerMergeEngine {
       // Assignment intake is authoritative for lead ownership and attribution
       // fields, while profile/follow-up facts remain owned by the master table.
       applyBasicInfo(merged, incoming);
+    } else {
+      // Managed Smart Sheets use their sheet ID (for example, th1zyU) as the
+      // source table instead of the legacy Chinese table name. Treat these
+      // ordinary non-auxiliary sources as the customer master so edits to
+      // customer stage and follow-up fields return to MariaDB.
+      merged.setCustomerStage(coalesce(incoming.getCustomerStage(), merged.getCustomerStage()));
+      merged.setFollowupNotes(coalesce(incoming.getFollowupNotes(), merged.getFollowupNotes()));
+      merged.setNextFollowupAt(coalesce(incoming.getNextFollowupAt(), merged.getNextFollowupAt()));
+      merged.setNextFollowupDir(coalesce(incoming.getNextFollowupDir(), merged.getNextFollowupDir()));
     }
     copyExtendedFactsIfPresent(merged, incoming);
     if (!isAuxiliaryTable(sourceTable)) {

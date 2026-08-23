@@ -1,6 +1,7 @@
 package com.privateflow.modules.tablewrite.service;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.admin.CustomerStageOptionService;
 import com.privateflow.modules.tablewrite.client.WecomTableClient;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
@@ -8,6 +9,7 @@ import com.privateflow.modules.tablewrite.infra.TableFieldMappingResolver;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,16 +25,28 @@ public class CustomerMasterProjectionService {
   private final WecomSmartSheetConfig smartSheetConfig;
   private final TableConfigProvider tableConfigProvider;
   private final TableFieldMappingResolver mappingResolver;
+  private final CustomerStageOptionService stageOptionService;
+
+  @Autowired
+  public CustomerMasterProjectionService(
+      WecomTableClient tableClient,
+      WecomSmartSheetConfig smartSheetConfig,
+      TableConfigProvider tableConfigProvider,
+      TableFieldMappingResolver mappingResolver,
+      CustomerStageOptionService stageOptionService) {
+    this.tableClient = tableClient;
+    this.smartSheetConfig = smartSheetConfig;
+    this.tableConfigProvider = tableConfigProvider;
+    this.mappingResolver = mappingResolver;
+    this.stageOptionService = stageOptionService;
+  }
 
   public CustomerMasterProjectionService(
       WecomTableClient tableClient,
       WecomSmartSheetConfig smartSheetConfig,
       TableConfigProvider tableConfigProvider,
       TableFieldMappingResolver mappingResolver) {
-    this.tableClient = tableClient;
-    this.smartSheetConfig = smartSheetConfig;
-    this.tableConfigProvider = tableConfigProvider;
-    this.mappingResolver = mappingResolver;
+    this(tableClient, smartSheetConfig, tableConfigProvider, mappingResolver, null);
   }
 
   public void projectAssignment(Customer customer) {
@@ -48,7 +62,12 @@ public class CustomerMasterProjectionService {
       return;
     }
     String sourceTable = smartSheetConfig.sourceTable();
-    Map<String, Object> sourceFields = mappingResolver.toSourceFields(sourceTable, fields);
+    Map<String, Object> normalizedFields = new LinkedHashMap<>(fields);
+    if (normalizedFields.get("customerStage") != null && stageOptionService != null) {
+      normalizedFields.put("customerStage", stageOptionService.normalizeForCustomer(
+          customer, String.valueOf(normalizedFields.get("customerStage"))));
+    }
+    Map<String, Object> sourceFields = mappingResolver.toSourceFields(sourceTable, normalizedFields);
     if (sourceFields.isEmpty()) {
       return;
     }

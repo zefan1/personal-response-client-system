@@ -56,6 +56,14 @@ public class CustomerStageOptionRepository {
     return count != null && count > 0;
   }
 
+  public boolean hasActive(String sourceTable, String fieldName) {
+    Integer count = jdbcTemplate.queryForObject("""
+        SELECT COUNT(*) FROM customer_stage_options
+        WHERE source_table = ? AND field_name = ? AND status = 'ACTIVE'
+        """, Integer.class, sourceTable, fieldName);
+    return count != null && count > 0;
+  }
+
   public void observe(String sourceTable, String fieldName, String optionId, String optionText, boolean initial) {
     jdbcTemplate.update("""
         INSERT INTO customer_stage_options

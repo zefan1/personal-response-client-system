@@ -28,4 +28,20 @@ class CustomerMergeEngineFollowupAnalysisTest {
     assertThat(merged.getFirstTrackingCapture()).isEqualTo("首次捕捉");
     assertThat(merged.getSecondTrackingCapture()).isEqualTo("第二次捕捉");
   }
+
+  @Test
+  void managedSheetIdMergeUpdatesCustomerStage() {
+    Customer existing = new Customer();
+    existing.setPhone("13800000000");
+    existing.setCustomerStage("待联系");
+
+    Customer incoming = new Customer();
+    incoming.setPhone("13800000000");
+    incoming.setSourceTable("th1zyU");
+    incoming.setCustomerStage("无效线索");
+
+    Customer merged = new CustomerMergeEngine().merge(incoming, existing);
+
+    assertThat(merged.getCustomerStage()).isEqualTo("无效线索");
+  }
 }

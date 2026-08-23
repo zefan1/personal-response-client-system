@@ -86,7 +86,16 @@ public class CustomerStageOptionService {
   }
 
   public String normalizeForCustomer(Customer customer, String value) {
-    return customer == null ? value : normalize(customer.getSourceTable(), value);
+    if (customer == null) {
+      return value;
+    }
+    // Assignment and arrival rows project into the customer master. Their
+    // stage must use the master's select options, otherwise a label such as
+    // "无效" can pass the local database write but be rejected by WeCom as
+    // "无效线索".
+    String sourceTable = smartSheetConfig == null || smartSheetConfig.sourceTable().isBlank()
+        ? customer.getSourceTable() : smartSheetConfig.sourceTable();
+    return normalizeWithRefresh(sourceTable, value);
   }
 
   public String normalizeByPhone(String phone, String value) {
@@ -96,6 +105,25 @@ public class CustomerStageOptionService {
     return customerRepository.findByPhone(phone)
         .map(customer -> normalizeForCustomer(customer, value))
         .orElse(value == null ? null : value.trim());
+  }
+
+  private String normalizeWithRefresh(String sourceTable, String value) {
+    if (value == null || value.isBlank() || sourceTable == null || sourceTable.isBlank()) {
+      return value;
+    }
+    String fieldName = mappedField(sourceTable);
+    if (!optionRepository.hasActive(sourceTable, fieldName)) {
+      datasourceRepository.findBySourceTable(sourceTable).ifPresent(datasource -> {
+        try {
+          refresh(datasource.id());
+        } catch (RuntimeException ex) {
+          // Keep the original write error when the live option catalog cannot
+          // be read. The caller will queue it instead of silently changing the
+          // authoritative value.
+        }
+      });
+    }
+    return normalize(sourceTable, value);
   }
 
   @Transactional

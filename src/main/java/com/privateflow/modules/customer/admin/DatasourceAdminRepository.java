@@ -73,6 +73,24 @@ public class DatasourceAdminRepository {
         """, this::mapDatasource, id).stream().findFirst();
   }
 
+  public Optional<Datasource> findBySourceTable(String sourceTable) {
+    if (sourceTable == null || sourceTable.isBlank()) {
+      return Optional.empty();
+    }
+    return jdbcTemplate.query("""
+        SELECT d.*,
+               (SELECT COUNT(*) FROM datasource_field_mappings m WHERE m.source_table = d.source_table AND m.is_enabled = 1) AS mapping_count,
+               (SELECT w.last_successful_sync_at
+                  FROM datasource_sync_watermarks w
+                 WHERE w.source_table = d.source_table) AS last_sync_at,
+               CASE
+                 WHEN EXISTS(SELECT 1 FROM sync_failure_log f WHERE f.source_table = d.source_table AND f.resolved = 0) THEN 'ERROR'
+                 ELSE 'OK'
+               END AS sync_status
+        FROM datasources d WHERE d.source_table = ? LIMIT 1
+        """, this::mapDatasource, sourceTable).stream().findFirst();
+  }
+
   public long create(DatasourceRequest request, String operator) {
     jdbcTemplate.update("""
         INSERT INTO datasources (name, sheet_id, source_table, description, is_enabled, created_by)
