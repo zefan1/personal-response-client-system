@@ -52,6 +52,8 @@
       </button>
     </div>
 
+    <ArrivalHandoverTasks />
+
     <div class="workbench-columns">
       <section class="workbench-section">
         <header class="section-inline-head">
@@ -133,6 +135,7 @@ import type { FollowupReminderPayload, NewLeadAlertPayload, WorkbenchNoticePaylo
 import type { WorkbenchMetricKey } from './types';
 import { requestLeadContact } from '../new-lead-flow/newLeadFlowStore';
 import { isLeadValidityUpdating, toggleLeadInvalid } from '../followup-list/followupListStore';
+import ArrivalHandoverTasks from './ArrivalHandoverTasks.vue';
 
 const metricCards = computed<Array<{ key: WorkbenchMetricKey; label: string; icon: string; metric: { total: number; tuanGou: number; xianSuo: number } }>>(() => [
   { key: 'pendingFollowup', label: '待跟进', icon: '跟', metric: workbenchMetrics.value.pendingFollowup },
@@ -159,10 +162,10 @@ onMounted(() => {
         ? { ...item, nickname: payload.nickname || item.nickname, leadProcessed: true, leadInvalid: false }
         : item);
   }));
-  disposers.push(eventBus.on<{ phone: string; invalid: boolean; retainedUntil?: string | null; version?: number | null }>('new-lead:validity-changed', (payload) => {
+  disposers.push(eventBus.on<{ phone: string; invalid: boolean; processedAt?: string | null; processedBy?: string | null; retainedUntil?: string | null; version?: number | null }>('new-lead:validity-changed', (payload) => {
     state.followups = state.followups.map((item) =>
       item.reminderType === 'NEW_LEAD' && (item.phoneFull ?? item.phone) === payload.phone
-        ? { ...item, leadInvalid: payload.invalid, leadProcessed: payload.invalid, leadRetainedUntil: payload.retainedUntil ?? null, customerVersion: payload.version ?? item.customerVersion }
+        ? { ...item, leadInvalid: payload.invalid, leadProcessed: true, leadRetainedUntil: payload.retainedUntil ?? null, customerVersion: payload.version ?? item.customerVersion }
         : item);
   }));
   disposers.push(eventBus.on('stage:updated', markWorkbenchDirty));

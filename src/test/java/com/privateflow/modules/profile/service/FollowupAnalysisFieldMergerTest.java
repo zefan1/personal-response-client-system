@@ -3,9 +3,12 @@ package com.privateflow.modules.profile.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.privateflow.modules.customer.Customer;
+import com.privateflow.modules.customer.admin.CustomerStageOptionService;
 import com.privateflow.modules.llm.FollowupAnalysisPayload;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class FollowupAnalysisFieldMergerTest {
 
@@ -55,6 +58,23 @@ class FollowupAnalysisFieldMergerTest {
             "internalNote", "bodyConcerns", "customerProfileSummary", "customerStage",
             "nextFollowupDir", "nextFollowupAt", "firstTrackingCapture",
             "secondTrackingCapture", "thirdTrackingCapture");
+  }
+
+  @Test
+  void skipsAnAiStageThatIsNotInTheCurrentWecomOptionsWithoutDroppingOtherFields() {
+    CustomerStageOptionService stageOptions = mock(CustomerStageOptionService.class);
+    when(stageOptions.normalizeForCustomer(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("AI自定义阶段")))
+        .thenThrow(new IllegalArgumentException("客户阶段不在当前企业微信选项中"));
+    FollowupAnalysisFieldMerger configuredMerger = new FollowupAnalysisFieldMerger(stageOptions);
+
+    Map<String, Object> fields = configuredMerger.merge(existingCustomer(), new FollowupAnalysisPayload(
+        "客户重视安全感", "", "", "已完成首次沟通", "AI自定义阶段", "继续跟进", null, ""));
+
+    assertThat(fields)
+        .containsEntry("internalNote", "客户重视安全感")
+        .containsEntry("followupNotes", "2026-07-31：客户首次咨询\n已完成首次沟通")
+        .containsEntry("nextFollowupDir", "继续跟进")
+        .doesNotContainKey("customerStage");
   }
 
   private Customer existingCustomer() {

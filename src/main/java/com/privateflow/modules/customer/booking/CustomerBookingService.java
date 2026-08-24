@@ -3,85 +3,120 @@ package com.privateflow.modules.customer.booking;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.profile.infra.ProfileWriter;
-import com.privateflow.modules.tablewrite.client.AuxiliarySmartSheetWriter;
-import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget;
-import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTargets;
-import com.privateflow.modules.tablewrite.config.TableConfigProvider;
-import com.privateflow.modules.tablewrite.infra.TableFieldMappingResolver;
-import java.time.Duration;
+import com.privateflow.modules.arrival.ArrivalHandoverService;
+import com.privateflow.modules.customer.history.CustomerFieldHistoryContext;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class CustomerBookingService {
 
   private final CustomerQueryService customers;
   private final ProfileWriter writer;
-  private final AuxiliarySmartSheetWriter smartSheetWriter;
-  private final AuxiliarySmartSheetTargets smartSheetTargets;
-  private final TableConfigProvider configProvider;
-  private final TableFieldMappingResolver mappingResolver;
+  private final ArrivalHandoverService arrivalHandover;
 
-  public CustomerBookingService(CustomerQueryService customers, ProfileWriter writer,
-      AuxiliarySmartSheetWriter smartSheetWriter, AuxiliarySmartSheetTargets targets,
-      TableConfigProvider configProvider, TableFieldMappingResolver mappingResolver) {
+  public CustomerBookingService(CustomerQueryService customers, ProfileWriter writer, ArrivalHandoverService arrivalHandover) {
     this.customers = customers;
     this.writer = writer;
-    this.smartSheetWriter = smartSheetWriter;
-    this.smartSheetTargets = targets;
-    this.configProvider = configProvider;
-    this.mappingResolver = mappingResolver;
+    this.arrivalHandover = arrivalHandover;
   }
 
+  @Transactional
   public BookingConfirmResult confirm(String phone, BookingConfirmRequest request) {
     Customer customer = requireCustomer(phone);
     if (request == null || blank(request.appointmentDate()) || blank(request.appointmentStore())) {
       throw new IllegalArgumentException("预约日期和门店不能为空");
+    }
+    var taskDecision = arrivalHandover.createOrRefresh(
+        customer, request.appointmentDate(), request.appointmentTime(), request.appointmentStore(), request.appointmentItem());
+    if (taskDecision.completedDuplicate()) {
+      return new BookingConfirmResult("已预约", template(request));
     }
     Map<String, Object> fields = new LinkedHashMap<>();
     fields.put("appointmentDate", request.appointmentDate());
     fields.put("appointmentTime", request.appointmentTime());
     fields.put("appointmentStore", request.appointmentStore());
     fields.put("appointmentItem", request.appointmentItem());
-    fields.put("appointmentStatus", "待确认");
-    int bookedVersion = writer.write(phone, fields, customer.getVersion(), true);
-    complete(customer, request.appointmentDate(), request.appointmentStore(), request.appointmentItem(),
-        bookedVersion);
-    return new BookingConfirmResult("已预约", template(request));
+    fields.put("appointmentStatus", "待补充");
+    writer.write(phone, fields, customer.getVersion(), true);
+    return new BookingConfirmResult("待补充", template(request));
+  }
+
+  /**
+   * Persists a complete appointment found in a conversation and creates one
+   * human-completion task per project. The current customer snapshot keeps all
+   * projects so a later profile refresh does not hide part of the booking.
+   */
+  @Transactional
+  public BookingConfirmResult confirmRecognized(
+      Customer customer,
+      String customerName,
+      String appointmentDate,
+      String appointmentTime,
+      String appointmentStore,
+      List<String> appointmentItems) {
+    if (customer == null || customer.getId() == null
+        || blank(appointmentDate) || blank(appointmentStore)
+        || appointmentItems == null || appointmentItems.stream().noneMatch(item -> !blank(item))) {
+      throw new IllegalArgumentException("预约信息不完整");
+    }
+    List<String> items = appointmentItems.stream()
+        .filter(item -> !blank(item))
+        .map(String::trim)
+        .distinct()
+        .toList();
+    boolean allCompleted = true;
+    for (String item : items) {
+      var decision = arrivalHandover.createOrRefresh(
+          customer, appointmentDate, appointmentTime, appointmentStore, item);
+      allCompleted = allCompleted && decision.completedDuplicate();
+    }
+
+    String combinedItems = String.join("、", items);
+    Map<String, Object> fields = new LinkedHashMap<>();
+    if (!blank(customerName) && !same(customerName, customer.getCustomerName())) {
+      fields.put("customerName", customerName.trim());
+    }
+    if (!appointmentDate.equals(value(customer.getAppointmentDate()))) {
+      fields.put("appointmentDate", appointmentDate);
+    }
+    if (!same(appointmentTime, customer.getAppointmentTime())) {
+      fields.put("appointmentTime", appointmentTime);
+    }
+    if (!same(appointmentStore, customer.getAppointmentStore())) {
+      fields.put("appointmentStore", appointmentStore);
+    }
+    if (!same(combinedItems, customer.getAppointmentItem())) {
+      fields.put("appointmentItem", combinedItems);
+    }
+    String status = allCompleted ? "已预约" : "待补充";
+    if (!same(status, customer.getAppointmentStatus())) {
+      fields.put("appointmentStatus", status);
+    }
+    if (!fields.isEmpty()) {
+      if (blank(customer.getPhone())) {
+        writer.writeByCustomerId(
+            customer.getId(), fields, null, true,
+            CustomerFieldHistoryContext.of("会话识别", "聊天预约信息", "SYSTEM"));
+      } else {
+        writer.write(
+            customer.getPhone(), fields, null, true,
+            CustomerFieldHistoryContext.of("会话识别", "聊天预约信息", "SYSTEM"));
+      }
+    }
+    return new BookingConfirmResult(status, template(new BookingConfirmRequest(
+        appointmentDate, appointmentTime, appointmentStore, combinedItems)));
   }
 
   public void completeAfterSuggestion(String phone) {
     Customer customer = requireCustomer(phone);
-    if (!"待确认".equals(customer.getAppointmentStatus())) {
+    if (customer.getAppointmentDate() == null || blank(customer.getAppointmentStore())) {
       return;
     }
-    complete(customer, customer.getAppointmentDate(), customer.getAppointmentStore(),
-        customer.getAppointmentItem(), customer.getVersion());
-  }
-
-  private void complete(
-      Customer customer,
-      Object appointmentDate,
-      String appointmentStore,
-      String appointmentItem,
-      int expectedVersion) {
-    Map<String, Object> fields = new LinkedHashMap<>();
-    fields.put("nickname", customer.getNickname());
-    fields.put("phone", customer.getPhone());
-    fields.put("appointmentDate", appointmentDate);
-    fields.put("appointmentStore", appointmentStore);
-    fields.put("intendedProject", appointmentItem);
-    fields.put("assignedKeeper", customer.getAssignedKeeper());
-    AuxiliarySmartSheetTarget arrivalTarget = smartSheetTargets.arrival()
-        .orElseThrow(() -> new IllegalStateException("到店表尚未配置"));
-    String sourceTable = "ARRIVAL:" + arrivalTarget.sheetId();
-    String rowId = smartSheetWriter.upsert(arrivalTarget,
-        mappingResolver.toSourceFields(sourceTable, fields),
-        mappingResolver.sourceFieldFor(sourceTable, "phone"),
-        Duration.ofMillis(configProvider.get().writeTimeoutMs()));
-    writer.write(customer.getPhone(), Map.of("appointmentStatus", "已预约", "arrivalSourceRowId", rowId),
-        expectedVersion, true);
+    arrivalHandover.createOrRefresh(customer, customer.getAppointmentDate().toString(), customer.getAppointmentTime(), customer.getAppointmentStore(), customer.getAppointmentItem());
   }
 
   private Customer requireCustomer(String phone) {
@@ -98,4 +133,6 @@ public class CustomerBookingService {
 
   private boolean blank(String value) { return value == null || value.isBlank(); }
   private String safe(String value) { return value == null ? "" : value; }
+  private boolean same(String left, String right) { return safe(left).equals(safe(right)); }
+  private String value(java.time.LocalDate value) { return value == null ? "" : value.toString(); }
 }

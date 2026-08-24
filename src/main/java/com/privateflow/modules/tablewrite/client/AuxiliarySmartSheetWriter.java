@@ -58,6 +58,18 @@ public class AuxiliarySmartSheetWriter {
     return existingId;
   }
 
+  /** Adds one immutable business record. Arrival visits use this instead of phone-based upsert. */
+  public String addRecord(AuxiliarySmartSheetTarget target, Map<String, Object> values, Duration timeout) {
+    if (target == null || !target.configured()) {
+      throw new IllegalArgumentException("辅助表尚未配置");
+    }
+    Map<String, JsonNode> encoded = encode(fields(target, timeout), values == null ? Map.of() : values);
+    if (encoded.isEmpty()) {
+      throw new IllegalArgumentException("没有可写入到店表的字段");
+    }
+    return add(target, encoded, timeout);
+  }
+
   private Map<String, WecomSmartSheetField> fields(AuxiliarySmartSheetTarget target, Duration timeout) {
     JsonNode response = apiClient.postForTarget("get_fields", request(target, false), timeout, false);
     Map<String, WecomSmartSheetField> result = new LinkedHashMap<>();

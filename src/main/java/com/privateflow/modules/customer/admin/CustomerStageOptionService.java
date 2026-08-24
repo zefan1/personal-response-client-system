@@ -98,6 +98,52 @@ public class CustomerStageOptionService {
     return normalizeWithRefresh(sourceTable, value);
   }
 
+  /** Restores the last customer stage recorded before the lead became invalid. */
+  public String previousStageForCustomer(Customer customer) {
+    if (customer == null) {
+      return "未加微信";
+    }
+    String sourceTable = smartSheetConfig == null || smartSheetConfig.sourceTable().isBlank()
+        ? customer.getSourceTable() : smartSheetConfig.sourceTable();
+    if (sourceTable == null || sourceTable.isBlank()) {
+      return "未加微信";
+    }
+    String fieldName = mappedField(sourceTable);
+    if (!optionRepository.hasActive(sourceTable, fieldName)) {
+      datasourceRepository.findBySourceTable(sourceTable).ifPresent(datasource -> {
+        try {
+          refresh(datasource.id());
+        } catch (RuntimeException ignored) {
+          // The active local catalog below remains the authoritative fallback.
+        }
+      });
+    }
+    List<String> active = activeOptions(sourceTable, fieldName);
+    if (active.isEmpty()) {
+      throw new ApiException(ApiErrorCodes.CONFLICT, "没有可用的有效客户阶段，请先刷新客户阶段选项");
+    }
+    if (customer.getPhone() != null) {
+      String previous = customerRepository.findPreviousCustomerStage(customer.getPhone()).orElse(null);
+      if (previous != null && active.contains(previous)) {
+        return previous;
+      }
+    }
+    for (String preferred : List.of("未加微信", "待联系", "破冰阶段", "跟进中")) {
+      if (active.contains(preferred)) {
+        return preferred;
+      }
+    }
+    return active.stream()
+        .filter(option -> !"无效".equals(option) && !"无效线索".equals(option))
+        .findFirst()
+        .orElseThrow(() -> new ApiException(ApiErrorCodes.CONFLICT, "没有可用的有效客户阶段，请先刷新客户阶段选项"));
+  }
+
+  /** Compatibility alias for callers written before previous-stage restoration was added. */
+  public String validStageForCustomer(Customer customer) {
+    return previousStageForCustomer(customer);
+  }
+
   public String normalizeByPhone(String phone, String value) {
     if (phone == null || phone.isBlank()) {
       return value;
@@ -124,6 +170,15 @@ public class CustomerStageOptionService {
       });
     }
     return normalize(sourceTable, value);
+  }
+
+  private List<String> activeOptions(String sourceTable, String fieldName) {
+    return optionRepository.list(sourceTable, fieldName).stream()
+        .filter(item -> "ACTIVE".equals(String.valueOf(item.get("status"))))
+        .map(item -> String.valueOf(item.get("optionText")).trim())
+        .filter(option -> !option.isBlank())
+        .distinct()
+        .toList();
   }
 
   @Transactional

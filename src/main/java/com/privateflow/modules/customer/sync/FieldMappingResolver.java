@@ -98,7 +98,7 @@ public class FieldMappingResolver {
       set(customer, entry.getKey(), value);
     }
     customer.setLeadType(LeadTypes.normalize(customer.getLeadType()));
-    return new FieldMappingResult(customer, exchange);
+    return new FieldMappingResult(customer, exchange, mappedFields.keySet());
   }
 
   /**

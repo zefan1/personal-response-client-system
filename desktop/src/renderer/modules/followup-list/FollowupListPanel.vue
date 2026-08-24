@@ -119,6 +119,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { eventBus } from '../../shared/eventBus';
+import { loadDesktopConfig } from '../../shared/config';
 import {
   activeFollowupItems,
   applyLeadValidityChange,
@@ -188,9 +189,22 @@ const lastLoadedText = computed(() => {
 });
 const disposers: Array<() => void> = [];
 const collapsedLeadGroups = ref(new Set<'pending' | 'processed'>(['processed']));
+let autoRefreshTimer: number | null = null;
+
+function refreshFollowupsOnFocus(): void {
+  const intervalMs = Math.max(30, loadDesktopConfig().workbenchRefreshIntervalS) * 1000;
+  if (!state.loaded || Date.now() - state.lastLoadedAt >= intervalMs) {
+    void loadTodayFollowups();
+  }
+}
 
 onMounted(() => {
   void loadTodayFollowups();
+  const intervalMs = Math.max(30, loadDesktopConfig().workbenchRefreshIntervalS) * 1000;
+  autoRefreshTimer = window.setInterval(() => {
+    void loadTodayFollowups();
+  }, intervalMs);
+  window.addEventListener('focus', refreshFollowupsOnFocus);
   disposers.push(eventBus.on<FollowupReminderPayload>('FOLLOWUP_REMIND', handleFollowupReminder));
   disposers.push(eventBus.on<NewLeadAlertPayload>('NEW_LEAD_ALERT', handleNewLeadAlert));
   disposers.push(eventBus.on<{ tab?: FollowupTab }>('followup:switch-tab', (payload) => {
@@ -207,11 +221,16 @@ onMounted(() => {
       markNewLeadProcessed(item, payload.nickname || item.nickname || '');
     }
   }));
-  disposers.push(eventBus.on<{ phone: string; invalid: boolean; retainedUntil?: string | null; version?: number | null }>('new-lead:validity-changed', applyLeadValidityChange));
+  disposers.push(eventBus.on<{ phone: string; invalid: boolean; processedAt?: string | null; processedBy?: string | null; retainedUntil?: string | null; version?: number | null }>('new-lead:validity-changed', applyLeadValidityChange));
 });
 
 onBeforeUnmount(() => {
   disposers.splice(0).forEach((dispose) => dispose());
+  window.removeEventListener('focus', refreshFollowupsOnFocus);
+  if (autoRefreshTimer !== null) {
+    window.clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
 });
 
 function rowDescription(item: FollowupItem): string {

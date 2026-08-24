@@ -30,14 +30,23 @@ class CustomerRepositoryTest {
         "");
     jdbcTemplate = new JdbcTemplate(dataSource);
     jdbcTemplate.execute("DROP TABLE IF EXISTS customers");
+    jdbcTemplate.execute("DROP TABLE IF EXISTS customer_field_history");
     jdbcTemplate.execute("""
         CREATE TABLE customers (
           id BIGINT AUTO_INCREMENT PRIMARY KEY,
           phone VARCHAR(20),
-          nickname VARCHAR(100), wechat_id VARCHAR(100), source_channel VARCHAR(50), lead_type VARCHAR(20),
+          nickname VARCHAR(100), customer_name VARCHAR(100), wechat_id VARCHAR(100), source_channel VARCHAR(50), lead_type VARCHAR(20),
           lead_capture_type VARCHAR(100), lead_capture_method VARCHAR(100), platform_lead_at DATETIME,
-          personality_type VARCHAR(50), assigned_keeper VARCHAR(50), assigned_at DATETIME, intended_store VARCHAR(100),
+          advertising_type VARCHAR(100), global_advertisement_id VARCHAR(100), standard_advertisement_id VARCHAR(100),
+          content_id VARCHAR(100), video_id VARCHAR(100), order_number VARCHAR(100), conversion_trace VARCHAR(500),
+          personality_type VARCHAR(50), assigned_keeper VARCHAR(50), assigned_at DATETIME,
+          lead_initial_processed_at DATETIME, lead_initial_processed_by VARCHAR(50),
+          lead_retained_until DATETIME, lead_invalid BOOLEAN NOT NULL DEFAULT FALSE,
+          previous_assigned_keeper VARCHAR(100), previous_platform_lead_at DATETIME,
+          assignment_month VARCHAR(20), intended_store VARCHAR(100),
           intended_project VARCHAR(100), purchased_project VARCHAR(200), postpartum_months DECIMAL(4,1),
+          experience_card_type VARCHAR(50), pending_order_status VARCHAR(100), purchase_date DATE,
+          customer_level VARCHAR(20),
           parity VARCHAR(10), delivery_method VARCHAR(20), breastfeeding VARCHAR(20), lochia_period VARCHAR(50),
           pregnancy_weight DECIMAL(5,1), current_weight DECIMAL(5,1), body_concerns VARCHAR(500),
           diastasis_recti VARCHAR(50), urine_leakage VARCHAR(100), pubic_lumbago VARCHAR(100),
@@ -48,10 +57,26 @@ class CustomerRepositoryTest {
           last_followup_at DATETIME, followup_notes TEXT, next_followup_at DATETIME, next_followup_dir VARCHAR(200),
           appointment_date DATE, appointment_store VARCHAR(100), appointment_item VARCHAR(100), arrived VARCHAR(10),
           appointment_status VARCHAR(20), appointment_time VARCHAR(10), arrival_source_row_id VARCHAR(100),
+          arrival_handover_record TEXT, arrival_project_type VARCHAR(100), arrival_experience_project VARCHAR(500),
+          historical_experience_count VARCHAR(100), customer_report TEXT, reception_teacher VARCHAR(100),
+          reception_consultant VARCHAR(100), voucher_redeemed VARCHAR(20), transaction_amount DECIMAL(12,2),
+          transaction_at DATETIME, transaction_primary_reason VARCHAR(500),
           source_table VARCHAR(100), source_row_id VARCHAR(100), synced_at DATETIME, version INT NOT NULL DEFAULT 0,
           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           UNIQUE (phone)
+        )
+         """);
+    jdbcTemplate.execute("""
+        CREATE TABLE customer_field_history (
+          id BIGINT AUTO_INCREMENT PRIMARY KEY,
+          customer_id BIGINT NOT NULL,
+          field_name VARCHAR(100) NOT NULL,
+          field_value VARCHAR(500),
+          source VARCHAR(200) NOT NULL,
+          source_field VARCHAR(200) NOT NULL,
+          operator VARCHAR(100) NOT NULL,
+          changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """);
     synchronizer = mock(LegacyCustomerTagSynchronizer.class);
@@ -200,5 +225,43 @@ class CustomerRepositoryTest {
     assertThat(saved.getLeadCaptureMethod()).isEqualTo("落地页");
     assertThat(saved.getPlatformLeadAt()).isEqualTo(java.time.LocalDateTime.of(2026, 8, 14, 10, 30));
     assertThat(saved.getAssignedAt()).isEqualTo(java.time.LocalDateTime.of(2026, 8, 14, 11, 0));
+  }
+
+  @Test
+  void upsertAndReadKeepLeadProcessingValidityFields() {
+    Customer customer = new Customer();
+    customer.setPhone("13800000003");
+    customer.setLeadInvalid(true);
+    customer.setLeadInitialProcessedAt(java.time.LocalDateTime.of(2026, 8, 23, 18, 0));
+    customer.setLeadInitialProcessedBy("企业微信同步");
+    customer.setLeadRetainedUntil(java.time.LocalDateTime.of(2026, 8, 24, 18, 0));
+
+    assertThat(repository.upsert(customer)).isTrue();
+    assertThat(repository.updateLeadProcessingState(customer)).isEqualTo(1);
+
+    Customer saved = repository.findByPhone("13800000003").orElseThrow();
+    assertThat(saved.isLeadInvalid()).isTrue();
+    assertThat(saved.getLeadInitialProcessedAt())
+        .isEqualTo(java.time.LocalDateTime.of(2026, 8, 23, 18, 0));
+    assertThat(saved.getLeadInitialProcessedBy()).isEqualTo("企业微信同步");
+    assertThat(saved.getLeadRetainedUntil())
+        .isEqualTo(java.time.LocalDateTime.of(2026, 8, 24, 18, 0));
+  }
+
+  @Test
+  void findsLatestStageBeforeInvalidMark() {
+    jdbcTemplate.update("INSERT INTO customers (phone, customer_stage) VALUES (?, ?)",
+        "13800000004", "无效线索");
+    long customerId = jdbcTemplate.queryForObject(
+        "SELECT id FROM customers WHERE phone = ?", Long.class, "13800000004");
+    jdbcTemplate.update("""
+        INSERT INTO customer_field_history
+          (customer_id, field_name, field_value, source, source_field, operator)
+        VALUES (?, 'customerStage', '破冰阶段', 'external', '客户阶段', 'SYSTEM'),
+               (?, 'customerStage', '无效线索', 'external', '客户阶段', 'SYSTEM')
+        """, customerId, customerId);
+
+    assertThat(repository.findPreviousCustomerStage("13800000004"))
+        .contains("破冰阶段");
   }
 }

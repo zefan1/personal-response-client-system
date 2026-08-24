@@ -97,6 +97,7 @@ class FieldMappingResolverTest {
     assertThat(result.customer().getPhone()).isEqualTo("13800000000");
     assertThat(result.customer().getBodyConcerns()).isEqualTo("URINE_LEAKAGE");
     assertThat(result.tagExchange()).isEqualTo(exchange);
+    assertThat(result.mappedFields()).containsExactlyInAnyOrder("bodyConcerns", "phone");
   }
 
   @Test

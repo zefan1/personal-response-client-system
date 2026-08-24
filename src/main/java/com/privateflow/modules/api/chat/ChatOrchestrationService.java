@@ -42,7 +42,10 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Executor;
 import java.util.function.BooleanSupplier;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -73,7 +76,9 @@ public class ChatOrchestrationService {
   private final SupervisionEventService supervisionEventService;
   private final SendConfirmationRepository sendConfirmationRepository;
   private final RecognitionCommunicationArchiveService communicationArchiveService;
+  private final Executor apiOrchestrationExecutor;
 
+  @Autowired
   public ChatOrchestrationService(
       ImageRecognitionService imageRecognitionService,
       CustomerMatchService customerMatchService,
@@ -92,7 +97,8 @@ public class ChatOrchestrationService {
       FollowupConfirmationService followupConfirmationService,
       SupervisionEventService supervisionEventService,
       SendConfirmationRepository sendConfirmationRepository,
-      RecognitionCommunicationArchiveService communicationArchiveService) {
+      RecognitionCommunicationArchiveService communicationArchiveService,
+      @Qualifier("apiOrchestrationExecutor") Executor apiOrchestrationExecutor) {
     this.imageRecognitionService = imageRecognitionService;
     this.customerMatchService = customerMatchService;
     this.skillGatewayService = skillGatewayService;
@@ -111,6 +117,49 @@ public class ChatOrchestrationService {
     this.supervisionEventService = supervisionEventService;
     this.sendConfirmationRepository = sendConfirmationRepository;
     this.communicationArchiveService = communicationArchiveService;
+    this.apiOrchestrationExecutor = apiOrchestrationExecutor;
+  }
+
+  /** Compatibility constructor for focused unit tests that do not need async dispatch. */
+  ChatOrchestrationService(
+      ImageRecognitionService imageRecognitionService,
+      CustomerMatchService customerMatchService,
+      SkillGatewayService skillGatewayService,
+      CustomerQueryService customerQueryService,
+      CustomerAccessService customerAccessService,
+      ReplyTagSnapshotBuilder replyTagSnapshotBuilder,
+      RequestContextStore contextStore,
+      ApplicationEventPublisher eventPublisher,
+      AuditLogger auditLogger,
+      SkillConfigProvider skillConfigProvider,
+      LlmReplyGenerationService llmReplyGenerationService,
+      LlmFollowupAnalysisService llmFollowupAnalysisService,
+      FollowupAnalysisFieldMerger followupAnalysisFieldMerger,
+      FollowupAnalysisRetryService followupAnalysisRetryService,
+      FollowupConfirmationService followupConfirmationService,
+      SupervisionEventService supervisionEventService,
+      SendConfirmationRepository sendConfirmationRepository,
+      RecognitionCommunicationArchiveService communicationArchiveService) {
+    this(
+        imageRecognitionService,
+        customerMatchService,
+        skillGatewayService,
+        customerQueryService,
+        customerAccessService,
+        replyTagSnapshotBuilder,
+        contextStore,
+        eventPublisher,
+        auditLogger,
+        skillConfigProvider,
+        llmReplyGenerationService,
+        llmFollowupAnalysisService,
+        followupAnalysisFieldMerger,
+        followupAnalysisRetryService,
+        followupConfirmationService,
+        supervisionEventService,
+        sendConfirmationRepository,
+        communicationArchiveService,
+        Runnable::run);
   }
 
   public ChatResponse recognize(ChatRecognizeRequest request) {
@@ -448,54 +497,63 @@ public class ChatOrchestrationService {
     if (!blank(request.confirmationId())) {
       sendConfirmationRepository.claimPendingForSend(request.confirmationId(), AuthContext.username());
     }
-    communicationArchiveService.archiveConfirmedEmployeeMessage(
-        customer, request.sentText(), AuthContext.username());
-    List<CustomerMessageSentEvent.ChatMessage> rawMessages = sendConfirmMessages(request);
-    Customer analysisCustomer = customer == null ? customerFrom(request) : customer;
-    FollowupAnalysisPayload analysis = llmFollowupAnalysisService.tryAnalyze(new LlmFollowupAnalysisInput(
-        analysisCustomer,
-        rawMessages,
-        request.sentText(),
-        request.selectedDirection(),
-        AuthContext.username())).orElse(null);
-    Map<String, Object> followupFields = analysis == null
-        ? requestFollowupFields(request)
-        : followupAnalysisFieldMerger.merge(analysisCustomer, analysis);
-    if (analysis == null && llmFollowupAnalysisService.enabled() && !blank(customer.getPhone())) {
-      followupAnalysisRetryService.enqueue(
-          request.confirmationId(),
-          customer.getPhone(),
+    String operator = AuthContext.username();
+    communicationArchiveService.archiveConfirmedEmployeeMessage(customer, request.sentText(), operator);
+    if (!blank(request.confirmationId())) {
+      // The button should acknowledge immediately and remain idempotent while background work runs.
+      sendConfirmationRepository.markPendingSent(request.confirmationId(), operator, customer.getId());
+    }
+    apiOrchestrationExecutor.execute(() -> processConfirmedSend(request, customer, operator));
+    return Map.of("accepted", true, "duplicate", false);
+  }
+
+  private void processConfirmedSend(SendConfirmRequest request, Customer customer, String operator) {
+    try {
+      List<CustomerMessageSentEvent.ChatMessage> rawMessages = sendConfirmMessages(request, operator);
+      Customer analysisCustomer = customer == null ? customerFrom(request) : customer;
+      FollowupAnalysisPayload analysis = llmFollowupAnalysisService.tryAnalyze(new LlmFollowupAnalysisInput(
+          analysisCustomer,
           rawMessages,
           request.sentText(),
           request.selectedDirection(),
-          AuthContext.username());
+          operator)).orElse(null);
+      Map<String, Object> followupFields = analysis == null
+          ? requestFollowupFields(request)
+          : followupAnalysisFieldMerger.merge(analysisCustomer, analysis);
+      if (analysis == null && llmFollowupAnalysisService.enabled() && !blank(customer.getPhone())) {
+        followupAnalysisRetryService.enqueue(
+            request.confirmationId(),
+            customer.getPhone(),
+            rawMessages,
+            request.sentText(),
+            request.selectedDirection(),
+            operator);
+      }
+      String conversationSummary = analysis != null && !blank(analysis.followupRecord())
+          ? analysis.followupRecord()
+          : nvl(request.conversationSummary());
+      CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest = followupSuggest(followupFields);
+      followupConfirmationService.recordAnalysis(customer, followupFields, true);
+      eventPublisher.publishEvent(new CustomerMessageSentEvent(
+          customer.getPhone(),
+          customer.getNickname(),
+          customer.getSourceRowId() == null || customer.getSourceRowId().isBlank(),
+          customer.getSourceTable(),
+          customer.getLeadType(),
+          conversationSummary,
+          rawMessages,
+          request.sentText(),
+          request.selectedDirection(),
+          followupSuggest,
+          request.completeCurrentFollowup(),
+          followupFields,
+          operator,
+          customer.getId()));
+      auditLogger.log("SEND_CONFIRM", operator, "CUSTOMER", String.valueOf(customer.getId()), "message sent");
+    } catch (RuntimeException ex) {
+      log.error("confirmed send background processing failed, customerId={}, confirmationId={}",
+          customer == null ? null : customer.getId(), request.confirmationId(), ex);
     }
-    String conversationSummary = analysis != null && !blank(analysis.followupRecord())
-        ? analysis.followupRecord()
-        : nvl(request.conversationSummary());
-    CustomerMessageSentEvent.FollowupSuggestPayload followupSuggest = followupSuggest(followupFields);
-    followupConfirmationService.recordAnalysis(customer, followupFields, true);
-    eventPublisher.publishEvent(new CustomerMessageSentEvent(
-        customer.getPhone(),
-        customer.getNickname(),
-        customer.getSourceRowId() == null || customer.getSourceRowId().isBlank(),
-        customer.getSourceTable(),
-        customer.getLeadType(),
-        conversationSummary,
-        rawMessages,
-        request.sentText(),
-        request.selectedDirection(),
-        followupSuggest,
-        request.completeCurrentFollowup(),
-        followupFields,
-        AuthContext.username(),
-        customer.getId()));
-    auditLogger.log("SEND_CONFIRM", AuthContext.username(), "CUSTOMER", String.valueOf(customer.getId()), "message sent");
-    if (!blank(request.confirmationId())) {
-      sendConfirmationRepository.markPendingSent(
-          request.confirmationId(), AuthContext.username(), customer.getId());
-    }
-    return Map.of("accepted", true, "duplicate", false);
   }
 
   private Customer customerFrom(SendConfirmRequest request) {
@@ -773,10 +831,10 @@ public class ChatOrchestrationService {
     }
   }
 
-  private List<CustomerMessageSentEvent.ChatMessage> sendConfirmMessages(SendConfirmRequest request) {
+  private List<CustomerMessageSentEvent.ChatMessage> sendConfirmMessages(SendConfirmRequest request, String operator) {
     Optional<RequestContext> context = request.customerId() != null && request.customerId() > 0
-        ? contextStore.read(AuthContext.username(), request.customerId())
-        : contextStore.read(AuthContext.username(), request.phone());
+        ? contextStore.read(operator, request.customerId())
+        : contextStore.read(operator, request.phone());
     List<CustomerMessageSentEvent.ChatMessage> storedMessages = context
         .map(RequestContext::request)
         .map(SkillRequest::chatContext)

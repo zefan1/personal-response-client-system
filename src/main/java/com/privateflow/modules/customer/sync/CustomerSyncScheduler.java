@@ -12,9 +12,12 @@ import com.privateflow.modules.customer.history.CustomerFieldHistoryService;
 import com.privateflow.modules.customer.service.CustomerMergeEngine;
 import com.privateflow.modules.tablewrite.service.AuxiliarySmartSheetProjectionService;
 import com.privateflow.modules.tablewrite.service.CustomerMasterProjectionService;
+import java.beans.PropertyDescriptor;
+import java.lang.reflect.Method;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
@@ -224,19 +227,29 @@ public class CustomerSyncScheduler {
         incoming.setAssignedKeeper(resolveKeeperName(incoming.getAssignedKeeper()));
       }
       Customer merged = mergeEngine.merge(incoming, existing);
-      customerRepository.upsert(
-          merged,
-          mapping.tagExchange(),
-          com.privateflow.modules.tags.TagExchangeSourceType.EXTERNAL_SYNC,
-          row.rowId());
-      if (historyService != null) {
-        historyService.recordExternalSync(
-            existing,
-            merged.getPhone(),
-            sourceTable,
-            mappingResolver.sourceFieldsFor(sourceTable));
+      boolean mappedBusinessChanged = hasMappedBusinessChange(mapping, existing, merged);
+      boolean leadValidityChanged = needsLeadValiditySynchronization(mapping, existing, merged);
+      if (leadValidityChanged) {
+        synchronizeLeadValidityFromStage(mapping, merged, existing);
       }
-      customerRepository.findByPhone(merged.getPhone()).ifPresent(cacheManager::write);
+      if (mappedBusinessChanged || leadValidityChanged) {
+        customerRepository.upsert(
+            merged,
+            mapping.tagExchange(),
+            com.privateflow.modules.tags.TagExchangeSourceType.EXTERNAL_SYNC,
+            row.rowId());
+        if (leadValidityChanged) {
+          customerRepository.updateLeadProcessingState(merged);
+        }
+        if (historyService != null) {
+          historyService.recordExternalSync(
+              existing,
+              merged.getPhone(),
+              sourceTable,
+              mappingResolver.sourceFieldsFor(sourceTable));
+        }
+        customerRepository.findByPhone(merged.getPhone()).ifPresent(cacheManager::write);
+      }
       if (allowOutboundProjection && customerMasterProjectionService != null && sourceTable.startsWith("ASSIGNMENT:")) {
         customerMasterProjectionService.projectAssignment(merged);
       }
@@ -279,5 +292,90 @@ public class CustomerSyncScheduler {
     }
     String value = raw.trim();
     return accountRepository.resolveEnabledDisplayName(value).orElse(value);
+  }
+
+  /**
+   * A manual write is projected to WeCom and then appears in the next inbound sync round.
+   * Do not treat that identical read-back as a new edit: upsert increments the optimistic
+   * version, which would make an unchanged desktop card stale.
+   */
+  private boolean hasMappedBusinessChange(FieldMappingResult mapping, Customer existing, Customer merged) {
+    if (existing == null) {
+      return true;
+    }
+    for (String field : mapping.mappedFields()) {
+      try {
+        PropertyDescriptor descriptor = new PropertyDescriptor(field, Customer.class);
+        Method getter = descriptor.getReadMethod();
+        if (getter == null) {
+          log.warn("customer sync cannot compare mapped field without getter, field={}", field);
+          return true;
+        }
+        if (!Objects.equals(getter.invoke(existing), getter.invoke(merged))) {
+          return true;
+        }
+      } catch (Exception ex) {
+        // An unknown mapping can still carry a tag change. Persist it rather than discarding it.
+        log.warn("customer sync cannot compare mapped field, field={}", field);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean needsLeadValiditySynchronization(FieldMappingResult mapping,
+      Customer existing, Customer merged) {
+    if (mapping == null || merged == null || !mapping.mappedFields().contains("customerStage")) {
+      return false;
+    }
+    String stage = merged.getCustomerStage();
+    if (stage == null || stage.isBlank()) {
+      return false;
+    }
+    if (existing == null) {
+      return true;
+    }
+    if (isInvalidLeadStage(stage)) {
+      return !existing.isLeadInvalid()
+          || existing.getLeadInitialProcessedAt() == null
+          || existing.getLeadInitialProcessedBy() == null
+          || existing.getLeadRetainedUntil() == null;
+    }
+    return existing.isLeadInvalid();
+  }
+
+  /**
+   * The customer stage is the external business input. Keep the workbench's
+   * processed/invalid state aligned only when this row actually supplied that
+   * field; unrelated Smart Sheet edits must not reset a lead.
+   */
+  private void synchronizeLeadValidityFromStage(FieldMappingResult mapping,
+      Customer merged, Customer existing) {
+    if (mapping == null || merged == null || !mapping.mappedFields().contains("customerStage")) {
+      return;
+    }
+    String stage = merged.getCustomerStage();
+    if (stage == null || stage.isBlank()) {
+      return;
+    }
+    LocalDateTime now = LocalDateTime.now();
+    if (isInvalidLeadStage(stage)) {
+      merged.setLeadInvalid(true);
+      merged.setLeadInitialProcessedAt(now);
+      merged.setLeadInitialProcessedBy("企业微信同步");
+      merged.setLeadRetainedUntil(now.plusDays(1));
+      return;
+    }
+    if ((existing != null && existing.isLeadInvalid()) || merged.isLeadInvalid()) {
+      merged.setLeadInvalid(false);
+      merged.setLeadInitialProcessedAt(null);
+      merged.setLeadInitialProcessedBy(null);
+      merged.setLeadRetainedUntil(null);
+    }
+  }
+
+  private boolean isInvalidLeadStage(String stage) {
+    String value = stage.trim();
+    return "无效线索".equals(value) || "无效".equals(value);
   }
 }

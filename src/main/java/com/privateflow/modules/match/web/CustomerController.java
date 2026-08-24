@@ -219,7 +219,9 @@ public class CustomerController {
     }
     String operator = request.operator() == null || request.operator().isBlank() ? "desktop" : request.operator().trim();
     Map<String, Object> fields = new LinkedHashMap<>();
-    LocalDateTime retainedUntil = request.invalid() ? now.plusDays(1) : null;
+    // Every explicit validity action is a processing action. Keep its operator
+    // and one-day retention window even when the customer is restored to valid.
+    LocalDateTime retainedUntil = now.plusDays(1);
     fields.put("leadInvalid", request.invalid());
     // Keep the customer-stage field aligned with the explicit validity action so
     // the authoritative customer master carries the same business state as MariaDB.
@@ -227,16 +229,18 @@ public class CustomerController {
       fields.put("customerStage", stageOptionService == null
           ? "无效" : stageOptionService.normalizeForCustomer(current, "无效"));
     } else if (current != null && ("无效".equals(current.getCustomerStage()) || current.isLeadInvalid())) {
-      fields.put("customerStage", stageOptionService == null
-          ? "待联系" : stageOptionService.normalizeForCustomer(current, "待联系"));
+      if (stageOptionService == null) {
+        throw new IllegalStateException("客户阶段恢复服务不可用");
+      }
+      fields.put("customerStage", stageOptionService.previousStageForCustomer(current));
     }
-    fields.put("leadInitialProcessedAt", request.invalid() ? now : null);
-    fields.put("leadInitialProcessedBy", request.invalid() ? operator : null);
+    fields.put("leadInitialProcessedAt", now);
+    fields.put("leadInitialProcessedBy", operator);
     fields.put("leadRetainedUntil", retainedUntil);
     ManualProfileUpdateResult result = manualEditHandler.update(
         phone,
         new ManualProfileUpdateRequest(request.version(), fields, operator));
-    return ApiResponse.ok(new LeadValidityResult(result.version(), request.invalid(), retainedUntil));
+    return ApiResponse.ok(new LeadValidityResult(result.version(), request.invalid(), now, operator, retainedUntil));
   }
 
   @PostMapping("/{phone}/booking")
@@ -325,6 +329,11 @@ public class CustomerController {
   public record LeadValidityRequest(Integer version, boolean invalid, String operator) {
   }
 
-  public record LeadValidityResult(int version, boolean invalid, LocalDateTime retainedUntil) {
+  public record LeadValidityResult(
+      int version,
+      boolean invalid,
+      LocalDateTime processedAt,
+      String processedBy,
+      LocalDateTime retainedUntil) {
   }
 }

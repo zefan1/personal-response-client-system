@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
+import com.privateflow.modules.customer.admin.CustomerStageOptionService;
 import com.privateflow.modules.match.Confidence;
 import com.privateflow.modules.match.CustomerMatchErrorCodes;
 import com.privateflow.modules.match.CustomerMatchException;
@@ -163,6 +164,48 @@ class CustomerControllerTest {
             .content("{\"version\":2,\"invalid\":true,\"operator\":\"desktop\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.invalid").value(true));
+  }
+
+  @Test
+  void restoringInvalidLeadUsesAnActiveCustomerStageOption() throws Exception {
+    Customer customer = new Customer();
+    customer.setPhone("13800000000");
+    customer.setVersion(2);
+    customer.setLeadInvalid(true);
+    customer.setLeadRetainedUntil(LocalDateTime.now().plusHours(12));
+    CustomerStageOptionService stageOptions = org.mockito.Mockito.mock(CustomerStageOptionService.class);
+    when(customerQueryService.getByPhone("13800000000")).thenReturn(customer);
+    when(stageOptions.previousStageForCustomer(customer)).thenReturn("破冰阶段");
+    when(manualEditHandler.update(eq("13800000000"), argThat(request ->
+        "破冰阶段".equals(request.fields().get("customerStage"))
+            && Boolean.FALSE.equals(request.fields().get("leadInvalid"))
+            && request.fields().get("leadInitialProcessedAt") instanceof LocalDateTime
+            && "desktop".equals(request.fields().get("leadInitialProcessedBy"))
+            && request.fields().get("leadRetainedUntil") instanceof LocalDateTime)))
+        .thenReturn(new ManualProfileUpdateResult(3));
+    MockMvc controllerWithStageOptions = MockMvcBuilders
+        .standaloneSetup(new CustomerController(
+            customerSearchService,
+            customerProfileService,
+            manualEditHandler,
+            suggestionQueueManager,
+            manualSaveHandler,
+            customerTagUpdateService,
+            null,
+            customerQueryService,
+            stageOptions))
+        .build();
+
+    controllerWithStageOptions.perform(post("/api/v1/customers/13800000000/lead-validity")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"version\":2,\"invalid\":false,\"operator\":\"desktop\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.invalid").value(false))
+        .andExpect(jsonPath("$.data.processedBy").value("desktop"))
+        .andExpect(jsonPath("$.data.processedAt").isNotEmpty())
+        .andExpect(jsonPath("$.data.retainedUntil").isNotEmpty());
+
+    verify(stageOptions).previousStageForCustomer(customer);
   }
 
   @Test

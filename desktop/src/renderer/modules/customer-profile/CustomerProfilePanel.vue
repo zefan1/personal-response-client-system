@@ -518,14 +518,14 @@ onMounted(() => {
   disposers.push(eventBus.on<{ phone?: string; newStage?: string }>('stage:updated', handleStageUpdated));
   disposers.push(eventBus.on<{ phone?: string; customerId?: number | null }>('reply:send-confirmed', handleSendConfirmed));
   disposers.push(eventBus.on<CustomerTagsUpdatedPayload>('CUSTOMER_TAGS_UPDATED', handleCustomerTagsUpdated));
-  disposers.push(eventBus.on<{ phone: string; invalid: boolean; retainedUntil?: string | null; version?: number | null }>('new-lead:validity-changed', (payload) => {
+  disposers.push(eventBus.on<{ phone: string; invalid: boolean; processedAt?: string | null; processedBy?: string | null; retainedUntil?: string | null; version?: number | null }>('new-lead:validity-changed', (payload) => {
     const current = state.profile?.customer;
     if (!current || !payload.phone) return;
     const currentPhone = state.profile?.phoneFull || current.phoneFull || current.phone;
     if (normalizeFullPhone(currentPhone) !== normalizeFullPhone(payload.phone)) return;
     current.leadInvalid = payload.invalid;
-    current.leadInitialProcessedAt = payload.invalid ? new Date().toISOString() : null;
-    current.leadInitialProcessedBy = payload.invalid ? 'desktop' : null;
+    current.leadInitialProcessedAt = payload.processedAt ?? new Date().toISOString();
+    current.leadInitialProcessedBy = payload.processedBy ?? 'desktop';
     current.leadRetainedUntil = payload.retainedUntil ?? null;
     if (typeof payload.version === 'number') current.version = payload.version;
   }));

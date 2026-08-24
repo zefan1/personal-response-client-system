@@ -508,7 +508,13 @@ export async function toggleProfileLeadInvalid(): Promise<void> {
   const invalid = !Boolean(customer.leadInvalid);
   customerProfileState.leadValiditySaving = true;
   try {
-    const response = await postJson<{ version: number; invalid: boolean; retainedUntil?: string | null }>(
+    const response = await postJson<{
+      version: number;
+      invalid: boolean;
+      processedAt?: string | null;
+      processedBy?: string | null;
+      retainedUntil?: string | null;
+    }>(
       `/api/v1/customers/${encodeURIComponent(phone)}/lead-validity`,
       { version, invalid, operator: 'desktop' },
       SAVE_TIMEOUT_MS
@@ -518,19 +524,21 @@ export async function toggleProfileLeadInvalid(): Promise<void> {
       return;
     }
     customer.leadInvalid = response.data.invalid;
-    customer.leadInitialProcessedAt = response.data.invalid ? new Date().toISOString() : null;
-    customer.leadInitialProcessedBy = response.data.invalid ? 'desktop' : null;
+    customer.leadInitialProcessedAt = response.data.processedAt ?? new Date().toISOString();
+    customer.leadInitialProcessedBy = response.data.processedBy ?? 'desktop';
     customer.leadRetainedUntil = response.data.retainedUntil ?? null;
     customer.version = response.data.version;
     eventBus.emit('new-lead:validity-changed', {
       phone,
       invalid: response.data.invalid,
+      processedAt: customer.leadInitialProcessedAt,
+      processedBy: customer.leadInitialProcessedBy,
       retainedUntil: response.data.retainedUntil ?? null,
       version: response.data.version
     });
     customerProfileState.toast = response.data.invalid
       ? '已标记为无效，1天内可点击“有效”撤回'
-      : '已恢复为有效，重新回到未处理';
+      : '已恢复为有效，保留在已处理列表1天';
   } catch {
     customerProfileState.toast = invalid ? '标记无效失败，请检查网络后重试' : '撤回无效失败，请检查网络后重试';
   } finally {

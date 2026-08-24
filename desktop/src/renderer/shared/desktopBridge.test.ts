@@ -6,7 +6,8 @@ import {
   notifyReplyTask,
   onReplyTaskOpen,
   openAdminConsole,
-  toggleAlwaysOnTop
+  toggleAlwaysOnTop,
+  writeClipboardText
 } from './desktopBridge';
 
 describe('desktopBridge admin console launcher', () => {
@@ -40,6 +41,26 @@ describe('desktopBridge admin console launcher', () => {
       error: 'DESKTOP_BRIDGE_STALE'
     });
     expect(windowOpenSpy).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the browser clipboard when the preload bridge is stale', async () => {
+    const writeText = vi.fn(async () => undefined);
+    (window as unknown as { desktopBridge: Record<string, unknown> }).desktopBridge = {};
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    await expect(writeClipboardText('reply text')).resolves.toMatchObject({ success: true });
+    expect(writeText).toHaveBeenCalledWith('reply text');
+  });
+
+  it('falls back when the Electron clipboard method rejects', async () => {
+    const writeClipboardTextMock = vi.fn(async () => { throw new Error('bridge unavailable'); });
+    const writeText = vi.fn(async () => undefined);
+    (window as unknown as { desktopBridge: Record<string, unknown> }).desktopBridge = { writeClipboardText: writeClipboardTextMock };
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    await expect(writeClipboardText('reply text')).resolves.toMatchObject({ success: true });
+    expect(writeClipboardTextMock).toHaveBeenCalledWith('reply text');
+    expect(writeText).toHaveBeenCalledWith('reply text');
   });
 
   it('does not open an Electron child window when preload injection is missing', async () => {

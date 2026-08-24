@@ -14,6 +14,7 @@ import type {
 } from './types';
 
 const FOLLOWUP_TIMEOUT_MS = 5000;
+const AUTOMATIC_RETRY_DELAYS_MS = [2000, 5000, 10000, 30000];
 const EMPTY_METRICS: WorkbenchMetrics = {
   pendingFollowup: { total: 0, tuanGou: 0, xianSuo: 0 },
   appointment: { total: 0, tuanGou: 0, xianSuo: 0 },
@@ -33,6 +34,8 @@ export const workbenchState = reactive({
   retryOnly: false,
   toast: ''
 });
+
+let automaticRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const workbenchMetrics = computed<WorkbenchMetrics>(() => {
   const next = cloneMetrics();
@@ -98,6 +101,9 @@ export async function loadWorkbenchFollowups(manual = false): Promise<void> {
   if (workbenchState.loading) {
     return;
   }
+  if (manual) {
+    clearAutomaticRetryTimer();
+  }
   workbenchState.loading = true;
   workbenchState.toast = '';
   try {
@@ -112,13 +118,19 @@ export async function loadWorkbenchFollowups(manual = false): Promise<void> {
     workbenchState.retryOnly = false;
     workbenchState.stale = false;
     workbenchState.loaded = true;
+    clearAutomaticRetryTimer();
   } catch {
     workbenchState.fetchFailedCount += 1;
     workbenchState.stale = workbenchState.loaded;
     workbenchState.retryOnly = workbenchState.fetchFailedCount >= 3;
     workbenchState.toast = manual || !workbenchState.loaded
       ? '数据加载失败，请检查网络后重试'
-      : '当前数据可能不是最新，可手动重试';
+      : '当前数据可能不是最新，正在自动刷新';
+    // A loaded dashboard has usable cached data, so silently recover it in the
+    // background. Initial loading still keeps the explicit retry fallback.
+    if (workbenchState.stale) {
+      scheduleAutomaticRetry();
+    }
   } finally {
     workbenchState.loading = false;
   }
@@ -140,11 +152,28 @@ export async function loadWorkbenchNotices(): Promise<void> {
 
 export function refreshWorkbenchIfNeeded(): void {
   const intervalMs = loadDesktopConfig().workbenchRefreshIntervalS * 1000;
-  if (workbenchState.retryOnly) {
-    return;
-  }
   if (!workbenchState.loaded || workbenchState.followupDataDirty || Date.now() - workbenchState.lastFetchAt >= intervalMs) {
     void loadWorkbenchFollowups();
+  }
+}
+
+function scheduleAutomaticRetry(): void {
+  if (automaticRetryTimer !== null) {
+    return;
+  }
+  const delayIndex = Math.min(Math.max(workbenchState.fetchFailedCount - 1, 0), AUTOMATIC_RETRY_DELAYS_MS.length - 1);
+  automaticRetryTimer = setTimeout(() => {
+    automaticRetryTimer = null;
+    if (!workbenchState.loading) {
+      void loadWorkbenchFollowups();
+    }
+  }, AUTOMATIC_RETRY_DELAYS_MS[delayIndex]);
+}
+
+function clearAutomaticRetryTimer(): void {
+  if (automaticRetryTimer !== null) {
+    clearTimeout(automaticRetryTimer);
+    automaticRetryTimer = null;
   }
 }
 
@@ -192,6 +221,9 @@ export function handleWorkbenchNewLead(payload: NewLeadAlertPayload): void {
     assignedKeeper: payload.assignedKeeper,
     priority: payload.priority,
     arrivedAt: payload.arrivedAt,
+    contactValue: payload.contactValue,
+    contactType: payload.contactType,
+    customerVersion: payload.customerVersion,
     leadProcessed: payload.leadProcessed,
     leadInvalid: payload.leadInvalid,
     leadRetainedUntil: payload.leadRetainedUntil

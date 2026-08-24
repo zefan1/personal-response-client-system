@@ -34,8 +34,13 @@ export type ReplyTaskOpenPayload = {
 };
 
 export async function writeClipboardText(text: string): Promise<BridgeResult> {
-  if (window.desktopBridge) {
-    return window.desktopBridge.writeClipboardText(text);
+  const bridge = window.desktopBridge as Partial<NonNullable<Window['desktopBridge']>> | undefined;
+  if (typeof bridge?.writeClipboardText === 'function') {
+    try {
+      return await bridge.writeClipboardText(text);
+    } catch {
+      // A stale or unavailable preload must not make the click appear inert.
+    }
   }
   if (navigator.clipboard?.writeText) {
     try {
@@ -45,7 +50,7 @@ export async function writeClipboardText(text: string): Promise<BridgeResult> {
       return { success: fallbackCopyText(text) };
     }
   }
-  return { success: fallbackCopyText(text) };
+  return { success: fallbackCopyText(text), error: 'CLIPBOARD_FALLBACK' };
 }
 
 export async function writeClipboardImage(imageUrl: string): Promise<BridgeResult> {

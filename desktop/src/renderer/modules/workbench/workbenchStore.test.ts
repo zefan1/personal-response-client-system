@@ -164,6 +164,23 @@ describe('workbenchStore', () => {
     expect(workbench.workbenchState.loading).toBe(false);
   });
 
+  it('automatically retries a stale loaded workbench and clears the warning after recovery', async () => {
+    const { workbench } = await freshStore();
+    getJsonMock.mockResolvedValueOnce({ success: true, data: { items: [followup({ phone: 'cache' })] } });
+    await workbench.loadWorkbenchFollowups();
+    getJsonMock.mockRejectedValueOnce(new Error('temporary network down'));
+    getJsonMock.mockResolvedValueOnce({ success: true, data: { items: [followup({ phone: 'fresh' })] } });
+
+    await workbench.loadWorkbenchFollowups();
+    expect(workbench.workbenchState.stale).toBe(true);
+    expect(workbench.workbenchState.followups.map((item) => item.phone)).toEqual(['cache']);
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(workbench.workbenchState.stale).toBe(false);
+    expect(workbench.workbenchState.followups.map((item) => item.phone)).toEqual(['fresh']);
+    expect(workbench.workbenchState.toast).toBe('');
+  });
+
   it('refreshes only when stale, dirty, expired, or not yet loaded', async () => {
     const { workbench } = await freshStore();
     getJsonMock.mockResolvedValue({ success: true, data: { items: [] } });

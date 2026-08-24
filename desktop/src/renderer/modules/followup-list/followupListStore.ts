@@ -36,6 +36,7 @@ export const selectedFollowupItems = computed(() =>
 );
 
 export async function loadTodayFollowups(): Promise<void> {
+  if (followupListState.loading) return;
   followupListState.loading = true;
   followupListState.error = '';
   try {
@@ -123,6 +124,9 @@ export function handleNewLeadAlert(payload: NewLeadAlertPayload): void {
     sourceTable: payload.sourceTable,
     assignedKeeper: payload.assignedKeeper,
     arrivedAt: payload.arrivedAt,
+    contactValue: payload.contactValue,
+    contactType: payload.contactType,
+    customerVersion: payload.customerVersion,
     leadProcessed: payload.leadProcessed,
     leadInvalid: payload.leadInvalid,
     leadRetainedUntil: payload.leadRetainedUntil,
@@ -213,6 +217,7 @@ export function isLeadValidityUpdating(target: LeadValidityTarget): boolean {
 export async function toggleLeadInvalid(target: LeadValidityTarget): Promise<void> {
   const phone = target.phoneFull ?? target.phone;
   const invalid = !Boolean(target.leadInvalid);
+  const previousInvalid = Boolean(target.leadInvalid);
   if (!phone || leadValidityUpdatingPhones.has(phone)) return;
   if (typeof target.customerVersion !== 'number') {
     followupListState.error = '客户档案版本缺失，请刷新后重试';
@@ -220,11 +225,22 @@ export async function toggleLeadInvalid(target: LeadValidityTarget): Promise<voi
   }
   leadValidityUpdatingPhones.add(phone);
   try {
-    const response = await postJson<{ version: number; invalid: boolean; retainedUntil?: string | null }>(
-      `/api/v1/customers/${encodeURIComponent(phone)}/lead-validity`,
-      { version: target.customerVersion, invalid, operator: 'desktop' },
-      FOLLOWUP_TIMEOUT_MS
-    );
+    let response = await submitLeadValidity(phone, invalid, target.customerVersion);
+    if (!response.success && response.errorCode === '50-10002') {
+      await loadTodayFollowups();
+      const refreshed = followupListState.groups.NEW_LEAD
+        .find((item) => (item.phoneFull ?? item.phone) === phone);
+      if (refreshed?.leadInvalid === invalid) {
+        return;
+      }
+      if (refreshed && refreshed.leadInvalid === previousInvalid
+          && typeof refreshed.customerVersion === 'number') {
+        response = await submitLeadValidity(phone, invalid, refreshed.customerVersion);
+      } else {
+        followupListState.error = '客户档案已被其他操作更新，请确认当前状态后再处理';
+        return;
+      }
+    }
     if (!response.success || !response.data) {
       followupListState.error = response.message || (invalid ? '标记无效失败，请刷新后重试' : '撤回无效失败，请刷新后重试');
       return;
@@ -232,12 +248,16 @@ export async function toggleLeadInvalid(target: LeadValidityTarget): Promise<voi
     applyLeadValidityChange({
       phone,
       invalid: response.data.invalid,
+      processedAt: response.data.processedAt ?? null,
+      processedBy: response.data.processedBy ?? null,
       retainedUntil: response.data.retainedUntil ?? null,
       version: response.data.version
     });
     eventBus.emit('new-lead:validity-changed', {
       phone,
       invalid: response.data.invalid,
+      processedAt: response.data.processedAt ?? null,
+      processedBy: response.data.processedBy ?? null,
       retainedUntil: response.data.retainedUntil ?? null,
       version: response.data.version
     });
@@ -248,9 +268,27 @@ export async function toggleLeadInvalid(target: LeadValidityTarget): Promise<voi
   }
 }
 
+type LeadValidityResponse = {
+  version: number;
+  invalid: boolean;
+  processedAt?: string | null;
+  processedBy?: string | null;
+  retainedUntil?: string | null;
+};
+
+function submitLeadValidity(phone: string, invalid: boolean, version: number) {
+  return postJson<LeadValidityResponse>(
+    `/api/v1/customers/${encodeURIComponent(phone)}/lead-validity`,
+    { version, invalid, operator: 'desktop' },
+    FOLLOWUP_TIMEOUT_MS
+  );
+}
+
 export function applyLeadValidityChange(payload: {
   phone: string;
   invalid: boolean;
+  processedAt?: string | null;
+  processedBy?: string | null;
   retainedUntil?: string | null;
   version?: number | null;
 }): void {
@@ -260,7 +298,7 @@ export function applyLeadValidityChange(payload: {
   if (!item) return;
   const wasProcessed = Boolean(item.leadProcessed);
   item.leadInvalid = payload.invalid;
-  item.leadProcessed = payload.invalid;
+  item.leadProcessed = true;
   item.leadRetainedUntil = payload.retainedUntil ?? null;
   if (typeof payload.version === 'number') item.customerVersion = payload.version;
   if (wasProcessed !== item.leadProcessed) {

@@ -9,6 +9,11 @@ type ProfileResponse = {
   phoneFull?: string | null;
 };
 
+type CustomerProfileSnapshot = {
+  version: number;
+  nickname: string;
+};
+
 export const newLeadFlowState = reactive({
   open: false,
   item: null as LeadContactItem | null,
@@ -79,16 +84,31 @@ export async function confirmLeadContact(): Promise<void> {
   newLeadFlowState.saving = true;
   newLeadFlowState.error = '';
   try {
-    const version = await resolveCustomerVersion(item);
-    if (version === null) {
+    const profile = await resolveCustomerProfile(item);
+    if (!profile) {
       throw new Error('客户档案版本缺失，请刷新新客资列表后重试');
     }
     const contact = contactValue(item);
-    const response = await postJson<{ version: number }>(
-      `/api/v1/customers/${encodeURIComponent(contact)}/lead-processing`,
-      { version, nickname, operator: 'desktop' },
-      10000
+    let response = await submitLeadProcessing(
+      contact,
+      profile.version,
+      nickname
     );
+    if (!response.success && response.errorCode === '50-10002') {
+      const refreshed = await resolveCustomerProfile(item, true);
+      if (!refreshed) {
+        throw new Error('客户档案已被更新，暂时无法读取最新版本，请稍后重试');
+      }
+      item.customerVersion = refreshed.version;
+      if (refreshed.nickname && refreshed.nickname !== nickname) {
+        throw new Error('该客户的微信昵称已被其他人填写，请确认后再提交');
+      }
+      response = await submitLeadProcessing(
+        contact,
+        refreshed.version,
+        nickname
+      );
+    }
     if (!response.success || !response.data) {
       throw new Error(response.message || '保存失败，请刷新后重试');
     }
@@ -113,6 +133,14 @@ export async function confirmLeadContact(): Promise<void> {
   }
 }
 
+async function submitLeadProcessing(contact: string, version: number, nickname: string) {
+  return postJson<{ version: number }>(
+      `/api/v1/customers/${encodeURIComponent(contact)}/lead-processing`,
+      { version, nickname, operator: 'desktop' },
+      10000
+    );
+}
+
 export async function copySelectedFriendRequestTemplate(): Promise<void> {
   const template = newLeadFlowState.templates.find((candidate) => candidate.id === newLeadFlowState.selectedTemplateId)
     ?? newLeadFlowState.templates[0];
@@ -128,11 +156,18 @@ function contactValue(item: LeadContactItem): string {
   return String(item.contactValue || item.phoneFull || item.phone || '').trim();
 }
 
-async function resolveCustomerVersion(item: LeadContactItem): Promise<number | null> {
-  if (typeof item.customerVersion === 'number') return item.customerVersion;
+async function resolveCustomerProfile(item: LeadContactItem, forceRefresh = false): Promise<CustomerProfileSnapshot | null> {
+  if (!forceRefresh && typeof item.customerVersion === 'number') {
+    return { version: item.customerVersion, nickname: item.nickname?.trim() ?? '' };
+  }
   const contact = contactValue(item);
   if (!contact) return null;
   const response = await getJson<ProfileResponse>(`/api/v1/customers/${encodeURIComponent(contact)}`, 8000);
   if (!response.success || !response.data?.customer) return null;
-  return typeof response.data.customer.version === 'number' ? response.data.customer.version : null;
+  const version = response.data.customer.version;
+  if (typeof version !== 'number') return null;
+  return {
+    version,
+    nickname: response.data.customer.nickname?.trim() ?? ''
+  };
 }

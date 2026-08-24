@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FollowupItem, FollowupReminderPayload, NewLeadAlertPayload } from './types';
 
 const getJsonMock = vi.fn();
+const postJsonMock = vi.fn();
 
 vi.mock('../../shared/apiClient', () => ({
-  getJson: getJsonMock
+  getJson: getJsonMock,
+  postJson: postJsonMock
 }));
 
 type FollowupModule = typeof import('./followupListStore');
@@ -37,6 +39,7 @@ async function freshStore(): Promise<{ followups: FollowupModule; eventBus: Even
     newReminderFlashMs: 200
   }));
   getJsonMock.mockReset();
+  postJsonMock.mockReset();
   const followups = await import('./followupListStore');
   const { eventBus } = await import('../../shared/eventBus');
   return { followups, eventBus };
@@ -53,6 +56,7 @@ describe('followupListStore', () => {
     vi.useRealTimers();
     localStorage.clear();
     getJsonMock.mockReset();
+    postJsonMock.mockReset();
   });
 
   it('starts on today followups so keepers handle todays work first', async () => {
@@ -105,6 +109,22 @@ describe('followupListStore', () => {
     expect(followups.followupListState.groups.DUE_TODAY.map((entry) => entry.phone)).toEqual(['cache']);
   });
 
+  it('does not start a second refresh while the first refresh is in flight', async () => {
+    const { followups } = await freshStore();
+    let resolveRequest: ((value: unknown) => void) | undefined;
+    getJsonMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveRequest = resolve;
+    }));
+
+    const first = followups.loadTodayFollowups();
+    const second = followups.loadTodayFollowups();
+
+    expect(getJsonMock).toHaveBeenCalledTimes(1);
+    resolveRequest?.({ success: true, data: { keeperId: 'keeper-a', totalCount: 0, items: [] } });
+    await Promise.all([first, second]);
+    expect(followups.followupListState.loaded).toBe(true);
+  });
+
   it('chooses the primary reminder, moves existing rows across tabs, and clears flash after timeout', async () => {
     const { followups } = await freshStore();
     followups.followupListState.groups.APPOINTMENT = [
@@ -148,7 +168,8 @@ describe('followupListStore', () => {
       priority: 'HIGH',
       sourceTable: 'sheet-a',
       assignedKeeper: 'keeper-a',
-      arrivedAt: '2026-07-03T12:00:00Z'
+      arrivedAt: '2026-07-03T12:00:00Z',
+      customerVersion: 42
     };
 
     followups.handleNewLeadAlert(payload);
@@ -158,7 +179,8 @@ describe('followupListStore', () => {
     expect(followups.followupListState.groups.NEW_LEAD[0]).toMatchObject({
       phone: '18800001111',
       nickname: 'Lead A Updated',
-      alertLevel: 'NORMAL'
+      alertLevel: 'NORMAL',
+      customerVersion: 42
     });
     expect(followups.followupListState.newReminderCount).toBe(2);
     expect(followups.followupListState.newReminderTab).toBe('NEW_LEAD');
@@ -266,6 +288,95 @@ describe('followupListStore', () => {
     expect(followups.followupListState.activeTab).toBe('APPOINTMENT');
     expect(followups.followupListState.selectedPhones.size).toBe(0);
     expect(followups.followupListState.newReminderCount).toBe(0);
+  });
+
+  it('refreshes and retries a validity change once with the latest version after an echo-sync conflict', async () => {
+    const { followups } = await freshStore();
+    followups.followupListState.groups.NEW_LEAD = [item({
+      phone: '18800001111',
+      reminderType: 'NEW_LEAD',
+      customerVersion: 37,
+      leadInvalid: true,
+      leadProcessed: true
+    })];
+    postJsonMock
+      .mockResolvedValueOnce({ success: false, data: null, errorCode: '50-10002', message: '档案已被更新，请刷新后重试' })
+      .mockResolvedValueOnce({
+        success: true,
+        errorCode: null,
+        message: null,
+        data: { version: 39, invalid: false, processedAt: '2026-08-24T10:00:00', processedBy: 'desktop', retainedUntil: '2026-08-25T10:00:00' }
+      });
+    getJsonMock.mockResolvedValue({
+      success: true,
+      errorCode: null,
+      message: null,
+      data: {
+        keeperId: 'keeper-a',
+        totalCount: 1,
+        items: [item({
+          phone: '18800001111',
+          reminderType: 'NEW_LEAD',
+          customerVersion: 38,
+          leadInvalid: true,
+          leadProcessed: true
+        })]
+      }
+    });
+
+    await followups.toggleLeadInvalid(followups.followupListState.groups.NEW_LEAD[0]);
+
+    expect(postJsonMock).toHaveBeenNthCalledWith(1,
+      '/api/v1/customers/18800001111/lead-validity',
+      { version: 37, invalid: false, operator: 'desktop' }, 10000);
+    expect(postJsonMock).toHaveBeenNthCalledWith(2,
+      '/api/v1/customers/18800001111/lead-validity',
+      { version: 38, invalid: false, operator: 'desktop' }, 10000);
+    expect(followups.followupListState.groups.NEW_LEAD[0]).toMatchObject({
+      leadInvalid: false,
+      customerVersion: 39
+    });
+  });
+
+  it('does not retry when refresh shows the requested validity is already applied', async () => {
+    const { followups } = await freshStore();
+    followups.followupListState.groups.NEW_LEAD = [item({
+      phone: '18800001111',
+      reminderType: 'NEW_LEAD',
+      customerVersion: 37,
+      leadInvalid: true,
+      leadProcessed: true
+    })];
+    postJsonMock.mockResolvedValue({
+      success: false,
+      data: null,
+      errorCode: '50-10002',
+      message: '档案已被更新，请刷新后重试'
+    });
+    getJsonMock.mockResolvedValue({
+      success: true,
+      errorCode: null,
+      message: null,
+      data: {
+        keeperId: 'keeper-a',
+        totalCount: 1,
+        items: [item({
+          phone: '18800001111',
+          reminderType: 'NEW_LEAD',
+          customerVersion: 38,
+          leadInvalid: false,
+          leadProcessed: true
+        })]
+      }
+    });
+
+    await followups.toggleLeadInvalid(followups.followupListState.groups.NEW_LEAD[0]);
+
+    expect(postJsonMock).toHaveBeenCalledTimes(1);
+    expect(followups.followupListState.groups.NEW_LEAD[0]).toMatchObject({
+      leadInvalid: false,
+      customerVersion: 38
+    });
   });
 });
 

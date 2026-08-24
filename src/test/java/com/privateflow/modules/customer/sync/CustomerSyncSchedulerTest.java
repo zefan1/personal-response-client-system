@@ -232,6 +232,145 @@ class CustomerSyncSchedulerTest {
   }
 
   @Test
+  void externalInvalidStageMarksLeadProcessedAndInvalid() {
+    SheetSource source = new SheetSource(7L, "sheet-only", "table_only");
+    Customer incoming = new Customer();
+    incoming.setPhone("13800000000");
+    incoming.setCustomerStage("无效线索");
+    Customer existing = new Customer();
+    existing.setPhone(incoming.getPhone());
+    FieldMappingResolver resolver = mock(FieldMappingResolver.class);
+    CustomerRepository repository = mock(CustomerRepository.class);
+    CustomerMergeEngine merge = mock(CustomerMergeEngine.class);
+    scheduler = scheduler(resolver, repository, mock(CustomerCacheManager.class), merge);
+    when(resolver.mapRowResult(eq("table_only"), any(SheetRow.class)))
+        .thenReturn(new FieldMappingResult(incoming,
+            new TagExchangeResult(Map.of(), List.of(), List.of()),
+            java.util.Set.of("customerStage")));
+    when(sheetClient.fetchIncrementalRows(any(), any(LocalDateTime.class), eq(100)))
+        .thenReturn(List.of(new SheetRow("row-1", Map.of("phone", "13800000000"))));
+    when(repository.findByPhone("13800000000"))
+        .thenReturn(Optional.of(existing), Optional.of(incoming));
+    when(merge.merge(incoming, existing)).thenReturn(incoming);
+
+    scheduler.runOne(source);
+
+    assertThat(incoming.isLeadInvalid()).isTrue();
+    assertThat(incoming.getLeadInitialProcessedBy()).isEqualTo("企业微信同步");
+    assertThat(incoming.getLeadInitialProcessedAt()).isNotNull();
+    assertThat(incoming.getLeadRetainedUntil()).isAfter(incoming.getLeadInitialProcessedAt());
+    verify(repository).upsert(incoming, new TagExchangeResult(Map.of(), List.of(), List.of()),
+        TagExchangeSourceType.EXTERNAL_SYNC, "row-1");
+    verify(repository).updateLeadProcessingState(incoming);
+  }
+
+  @Test
+  void identicalWecomStageReadbackDoesNotIncrementCustomerVersionOrOverwriteOperator() {
+    SheetSource source = new SheetSource(7L, "sheet-only", "table_only");
+    LocalDateTime processedAt = LocalDateTime.of(2026, 8, 24, 9, 41, 37);
+    Customer existing = new Customer();
+    existing.setPhone("13800000000");
+    existing.setCustomerStage("无效线索");
+    existing.setLeadInvalid(true);
+    existing.setLeadInitialProcessedAt(processedAt);
+    existing.setLeadInitialProcessedBy("desktop");
+    existing.setLeadRetainedUntil(processedAt.plusDays(1));
+    Customer incoming = new Customer();
+    incoming.setPhone(existing.getPhone());
+    incoming.setCustomerStage(existing.getCustomerStage());
+    Customer merged = new Customer();
+    merged.setPhone(existing.getPhone());
+    merged.setCustomerStage(existing.getCustomerStage());
+    merged.setLeadInvalid(existing.isLeadInvalid());
+    merged.setLeadInitialProcessedAt(existing.getLeadInitialProcessedAt());
+    merged.setLeadInitialProcessedBy(existing.getLeadInitialProcessedBy());
+    merged.setLeadRetainedUntil(existing.getLeadRetainedUntil());
+    FieldMappingResolver resolver = mock(FieldMappingResolver.class);
+    CustomerRepository repository = mock(CustomerRepository.class);
+    CustomerCacheManager cache = mock(CustomerCacheManager.class);
+    CustomerMergeEngine merge = mock(CustomerMergeEngine.class);
+    scheduler = scheduler(resolver, repository, cache, merge);
+    when(resolver.mapRowResult(eq("table_only"), any(SheetRow.class)))
+        .thenReturn(new FieldMappingResult(incoming,
+            new TagExchangeResult(Map.of(), List.of(), List.of()),
+            java.util.Set.of("customerStage")));
+    when(sheetClient.fetchIncrementalRows(any(), any(LocalDateTime.class), eq(100)))
+        .thenReturn(List.of(new SheetRow("row-1", Map.of("phone", "13800000000"))));
+    when(repository.findByPhone(existing.getPhone())).thenReturn(Optional.of(existing));
+    when(merge.merge(incoming, existing)).thenReturn(merged);
+
+    scheduler.runOne(source);
+
+    verify(repository, never()).upsert(any(), any(), any(), any());
+    verify(repository, never()).updateLeadProcessingState(any());
+    verifyNoInteractions(cache);
+    assertThat(merged.getLeadInitialProcessedBy()).isEqualTo("desktop");
+    assertThat(merged.getLeadInitialProcessedAt()).isEqualTo(processedAt);
+  }
+
+  @Test
+  void changingExternalInvalidStageBackToValidRestoresLead() {
+    SheetSource source = new SheetSource(7L, "sheet-only", "table_only");
+    Customer incoming = new Customer();
+    incoming.setPhone("13800000000");
+    incoming.setCustomerStage("已到店体验");
+    Customer existing = new Customer();
+    existing.setPhone(incoming.getPhone());
+    existing.setLeadInvalid(true);
+    existing.setLeadInitialProcessedAt(LocalDateTime.now().minusHours(2));
+    existing.setLeadInitialProcessedBy("企业微信同步");
+    existing.setLeadRetainedUntil(LocalDateTime.now().plusHours(22));
+    FieldMappingResolver resolver = mock(FieldMappingResolver.class);
+    CustomerRepository repository = mock(CustomerRepository.class);
+    CustomerMergeEngine merge = mock(CustomerMergeEngine.class);
+    scheduler = scheduler(resolver, repository, mock(CustomerCacheManager.class), merge);
+    when(resolver.mapRowResult(eq("table_only"), any(SheetRow.class)))
+        .thenReturn(new FieldMappingResult(incoming,
+            new TagExchangeResult(Map.of(), List.of(), List.of()),
+            java.util.Set.of("customerStage")));
+    when(sheetClient.fetchIncrementalRows(any(), any(LocalDateTime.class), eq(100)))
+        .thenReturn(List.of(new SheetRow("row-1", Map.of("phone", "13800000000"))));
+    when(repository.findByPhone("13800000000"))
+        .thenReturn(Optional.of(existing), Optional.of(incoming));
+    when(merge.merge(incoming, existing)).thenReturn(incoming);
+
+    scheduler.runOne(source);
+
+    assertThat(incoming.isLeadInvalid()).isFalse();
+    assertThat(incoming.getLeadInitialProcessedAt()).isNull();
+    assertThat(incoming.getLeadInitialProcessedBy()).isNull();
+    assertThat(incoming.getLeadRetainedUntil()).isNull();
+  }
+
+  @Test
+  void unrelatedExternalFieldDoesNotChangeLeadValidity() {
+    SheetSource source = new SheetSource(7L, "sheet-only", "table_only");
+    Customer incoming = new Customer();
+    incoming.setPhone("13800000000");
+    incoming.setLeadInvalid(true);
+    Customer existing = new Customer();
+    existing.setPhone(incoming.getPhone());
+    existing.setLeadInvalid(true);
+    FieldMappingResolver resolver = mock(FieldMappingResolver.class);
+    CustomerRepository repository = mock(CustomerRepository.class);
+    CustomerMergeEngine merge = mock(CustomerMergeEngine.class);
+    scheduler = scheduler(resolver, repository, mock(CustomerCacheManager.class), merge);
+    when(resolver.mapRowResult(eq("table_only"), any(SheetRow.class)))
+        .thenReturn(new FieldMappingResult(incoming,
+            new TagExchangeResult(Map.of(), List.of(), List.of()),
+            java.util.Set.of("nickname")));
+    when(sheetClient.fetchIncrementalRows(any(), any(LocalDateTime.class), eq(100)))
+        .thenReturn(List.of(new SheetRow("row-1", Map.of("phone", "13800000000"))));
+    when(repository.findByPhone("13800000000"))
+        .thenReturn(Optional.of(existing), Optional.of(incoming));
+    when(merge.merge(incoming, existing)).thenReturn(incoming);
+
+    scheduler.runOne(source);
+
+    assertThat(incoming.isLeadInvalid()).isTrue();
+  }
+
+  @Test
   void databaseFailureRecordsSyncFailureAndDoesNotWriteCache() {
     SheetSource source = new SheetSource(7L, "sheet-only", "table_only");
     Customer incoming = new Customer();

@@ -46,6 +46,28 @@ public class CustomerRepository {
     return customers.stream().findFirst();
   }
 
+  /** Returns the latest non-invalid customer stage recorded before an invalid mark. */
+  public Optional<String> findPreviousCustomerStage(String phone) {
+    if (phone == null || phone.isBlank()) {
+      return Optional.empty();
+    }
+    return jdbcTemplate.query("""
+        SELECT h.field_value
+        FROM customer_field_history h
+        JOIN customers c ON c.id = h.customer_id
+        WHERE c.phone = ?
+          AND h.field_name = 'customerStage'
+          AND h.field_value IS NOT NULL
+          AND TRIM(h.field_value) NOT IN ('无效', '无效线索')
+        ORDER BY h.changed_at DESC, h.id DESC
+        LIMIT 1
+        """, (rs, rowNum) -> rs.getString("field_value"), phone)
+        .stream()
+        .filter(value -> value != null && !value.isBlank())
+        .map(String::trim)
+        .findFirst();
+  }
+
   public int replaceCustomerStage(String oldStage, String newStage) {
     if (oldStage == null || oldStage.isBlank() || newStage == null || newStage.isBlank()
         || oldStage.equals(newStage)) {
@@ -271,6 +293,23 @@ public class CustomerRepository {
       }
     }
     return updated > 0;
+  }
+
+  /** Persists the workbench validity state after an explicit state transition. */
+  public int updateLeadProcessingState(Customer customer) {
+    return jdbcTemplate.update("""
+        UPDATE customers
+        SET lead_initial_processed_at = ?,
+            lead_initial_processed_by = ?,
+            lead_retained_until = ?,
+            lead_invalid = ?
+        WHERE phone = ?
+        """,
+        timestamp(customer.getLeadInitialProcessedAt()),
+        customer.getLeadInitialProcessedBy(),
+        timestamp(customer.getLeadRetainedUntil()),
+        customer.isLeadInvalid(),
+        customer.getPhone());
   }
 
   private void updateExtendedBusinessFields(Customer customer) {

@@ -41,7 +41,7 @@ export async function handleReplySelected(payload: ReplySelectedPayload): Promis
   copyBackfillState.toast = '已复制到剪贴板，请粘贴到微信发送';
   copyBackfillState.pendingSendDecision = {
     ...payload,
-    confirmationId: crypto.randomUUID(),
+    confirmationId: createConfirmationId(),
     status: 'AWAITING_DECISION',
     createdAt: new Date().toISOString(),
     errorMessage: '',
@@ -51,6 +51,13 @@ export async function handleReplySelected(payload: ReplySelectedPayload): Promis
   persistPendingSendDecision();
   void registerPendingSendDecision(copyBackfillState.pendingSendDecision);
   startReminderTimer();
+}
+
+function createConfirmationId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return `copy-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function discardPendingSendDecision(): void {

@@ -81,7 +81,9 @@ const confirmButtonLabel = computed(() => {
 onMounted(() => {
   resumePendingSendReminder();
   disposers.push(eventBus.on<ReplySelectedPayload>('reply:selected', (payload) => {
-    void handleReplySelected(payload);
+    void handleReplySelected(payload).catch(() => {
+      state.toast = '复制失败，请重启桌面端后重试';
+    });
   }));
   disposers.push(eventBus.on('recognize:start', closeSuggestionToast));
 });

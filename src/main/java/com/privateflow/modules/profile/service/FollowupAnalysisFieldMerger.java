@@ -29,10 +29,7 @@ public class FollowupAnalysisFieldMerger {
     putIfPresent(fields, "internalNote", payload.internalNote());
     putIfPresent(fields, "bodyConcerns", payload.bodyConcerns());
     putIfPresent(fields, "customerProfileSummary", payload.customerProfileSummary());
-    String customerStage = payload.customerStage();
-    if (stageOptionService != null) {
-      customerStage = stageOptionService.normalizeForCustomer(customer, customerStage);
-    }
+    String customerStage = normalizeCustomerStage(customer, payload.customerStage());
     putIfPresent(fields, "customerStage", customerStage);
     putIfPresent(fields, "nextFollowupDir", payload.nextFollowupDirection());
     putIfPresent(fields, "nextFollowupAt", payload.nextFollowupAt());
@@ -41,6 +38,19 @@ public class FollowupAnalysisFieldMerger {
     }
     addTrackingCapture(fields, customer, payload.trackingCapture());
     return fields;
+  }
+
+  private String normalizeCustomerStage(Customer customer, String value) {
+    if (blank(value) || stageOptionService == null) {
+      return value;
+    }
+    try {
+      return stageOptionService.normalizeForCustomer(customer, value);
+    } catch (IllegalArgumentException ex) {
+      // An AI label that is not in the current WeCom option catalog must not
+      // roll back the employee's already-sent message or other follow-up data.
+      return null;
+    }
   }
 
   private void addTrackingCapture(Map<String, Object> fields, Customer customer, String capture) {

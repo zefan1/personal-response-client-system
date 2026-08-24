@@ -35,6 +35,9 @@ export const recognitionState = reactive({
 let requestSequence = 0;
 const RECOGNITION_JOB_POLL_INTERVAL_MS = 1000;
 const recognitionJobPollTimers = new Map<string, number>();
+// A job remains active until its backend task reaches a terminal state. This
+// closes the gap between screenshot capture and the queued recognition job.
+const activeRecognitionSessions = new Set<string>();
 
 export function beginScreenshotRecognition(source: RecognizeSource): string | null {
   if (recognitionState.imageServiceStatus === 'DOWN') {
@@ -42,7 +45,12 @@ export function beginScreenshotRecognition(source: RecognizeSource): string | nu
     recognitionState.isTwoBoxMode = true;
     return null;
   }
+  if (activeRecognitionSessions.size > 0) {
+    recognitionState.toast = '已有识别任务进行中，请等待当前任务完成';
+    return null;
+  }
   const sessionId = nextReplySessionId();
+  activeRecognitionSessions.add(sessionId);
   recognitionState.toast = '';
   eventBus.emit('recognize:start', {
     sessionId,
@@ -54,6 +62,7 @@ export function beginScreenshotRecognition(source: RecognizeSource): string | nu
 }
 
 export function failScreenshotRecognition(sessionId: string, message: string): void {
+  releaseRecognitionSession(sessionId);
   recognitionState.toast = message;
   eventBus.emit('recognize:image-failed', {
     sessionId,
@@ -67,23 +76,34 @@ export async function triggerRecognize(
   content: RecognizeContent,
   existingSessionId?: string
 ): Promise<void> {
+  const sessionId = existingSessionId ?? nextReplySessionId();
+  if (!existingSessionId) {
+    if (activeRecognitionSessions.size > 0) {
+      recognitionState.toast = '已有识别任务进行中，请等待当前任务完成';
+      return;
+    }
+    activeRecognitionSessions.add(sessionId);
+  } else if (!activeRecognitionSessions.has(sessionId)) {
+    activeRecognitionSessions.add(sessionId);
+  }
   if (recognitionState.imageServiceStatus === 'DOWN' && source !== 'CLIPBOARD_TEXT') {
     recognitionState.toast = '图片识别暂不可用，请使用文字通道';
     recognitionState.isTwoBoxMode = true;
     if (existingSessionId) {
       eventBus.emit('recognize:failed', { sessionId: existingSessionId, message: recognitionState.toast });
     }
+    releaseRecognitionSession(sessionId);
     return;
   }
   recognitionState.pendingCount += 1;
   recognitionState.isRecognizePending = recognitionState.pendingCount > 0;
   recognitionState.lastRequestSource = source;
-  const sessionId = existingSessionId ?? nextReplySessionId();
   const contentMd5 = await digest(JSON.stringify(content));
   if (contentMd5 === recognitionState.lastRequestContentMd5 && Date.now() - recognitionState.lastRequestTime < 1000) {
     recognitionState.pendingCount = Math.max(0, recognitionState.pendingCount - 1);
     recognitionState.isRecognizePending = recognitionState.pendingCount > 0;
     recognitionState.lastRequestSource = null;
+    releaseRecognitionSession(sessionId);
     if (existingSessionId) {
       eventBus.emit('recognize:failed', { sessionId, message: '该聊天刚刚已提交识别，无需重复操作' });
     }
@@ -133,14 +153,18 @@ export async function triggerRecognize(
     }
     eventBus.emit('recognize:progress', { sessionId, source, stage: 'GENERATING', message: '正在生成回复' });
     eventBus.emit('recognize:result', { sessionId, source, response: data });
+    releaseRecognitionSession(sessionId);
     recognitionState.isTwoBoxMode = false;
   } catch {
     recognitionState.toast = '请求超时，请检查网络后重试';
     eventBus.emit('recognize:timeout', { sessionId, message: recognitionState.toast });
+    releaseRecognitionSession(sessionId);
   } finally {
     recognitionState.pendingCount = Math.max(0, recognitionState.pendingCount - 1);
     recognitionState.isRecognizePending = recognitionState.pendingCount > 0;
     recognitionState.lastRequestSource = null;
+    // A queued/running backend job releases the session from handleRecognitionJob
+    // only when it reaches READY, CANCELLED, or FAILED.
   }
 }
 
@@ -237,6 +261,7 @@ export function handleImageServiceStatus(payload: { status?: string; message?: s
 }
 
 function handleError(errorCode: string | null, sessionId: string, message?: string | null): void {
+  releaseRecognitionSession(sessionId);
   if (errorCode === 'RECOGNITION_BACKEND_RESTARTED') {
     const detail = '后端重启导致识图任务失败，请重新识别聊天后重试';
     recognitionState.toast = detail;
@@ -289,12 +314,18 @@ function handleRecognitionJob(
       return;
     }
     eventBus.emit('recognize:result', { sessionId, source, response: job.response });
+    releaseRecognitionSession(sessionId);
     return;
   }
   if (job.status === 'CANCELLED') {
+    releaseRecognitionSession(sessionId);
     return;
   }
   handleError(job.errorCode ?? errorCodeForJobStatus(job.status), sessionId, errorMessageForJobStatus(job.status));
+}
+
+function releaseRecognitionSession(sessionId: string): void {
+  activeRecognitionSessions.delete(sessionId);
 }
 
 function scheduleRecognitionJobPoll(jobId: string, sessionId: string, source: RecognizeSource): void {

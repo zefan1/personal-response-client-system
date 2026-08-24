@@ -9,6 +9,8 @@ body {
   background: #f6f7f9;
   overflow-x: hidden;
   --desktop-sidebar-width: 104px;
+  --admin-primary: #c96f30;
+  --admin-primary-hover: #ad5921;
 }
 
 button,
@@ -445,6 +447,36 @@ textarea {
 .workbench-panel {
   gap: 9px;
 }
+
+.arrival-handover-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e7d7c3;
+  border-radius: 8px;
+  background: #fffaf4;
+}
+.arrival-handover-notice { margin: 0; padding: 9px 10px; border: 1px solid #b7dec5; border-radius: 6px; background: #f0faf3; color: #176b3a; font-size: 13px; }
+
+.arrival-handover-panel .section-inline-head { align-items: center; }
+.arrival-handover-panel h3 { margin: 0; font-size: 14px; }
+.arrival-handover-panel small { color: #7a6250; }
+.arrival-task-group { display: flex; flex-direction: column; gap: 5px; }
+.arrival-task-group-name { margin: 2px 0 0; color: #7a6250; font-size: 12px; font-weight: 600; }
+.arrival-task-row { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid #eadfce; border-radius: 6px; background: #fff; }
+.arrival-task-summary { min-width: 0; flex: 1; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.arrival-task-summary strong, .arrival-task-summary span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arrival-task-summary span { margin-top: 3px; color: #725f50; font-size: 12px; }
+.arrival-dialog { width: min(680px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 32px)); padding: 0; border: 0; border-radius: 8px; color: #2e2924; box-shadow: 0 18px 48px rgba(68, 45, 24, .24); }
+.arrival-dialog::backdrop { background: rgba(40, 31, 23, .38); }
+.arrival-form { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+.arrival-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.arrival-dialog-head h2 { margin: 0; font-size: 18px; }.arrival-dialog-head p { margin: 5px 0 0; color: #715f50; font-size: 13px; }
+.arrival-readonly { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border-radius: 6px; background: #f7f1ea; color: #685748; }
+.arrival-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.arrival-field-grid label, .arrival-report-field { display: flex; flex-direction: column; gap: 6px; color: #4e4036; font-size: 13px; font-weight: 600; }.arrival-field-grid select { width: 100%; min-height: 36px; border: 1px solid #cfc1b1; border-radius: 5px; background: #fff; color: #2e2924; padding: 0 9px; }.arrival-report-field small { color: #8d7662; font-weight: 400; }
+.arrival-dropzone { display: flex; min-height: 92px; align-items: center; justify-content: center; gap: 10px; border: 1px dashed #b8a18a; border-radius: 6px; background: #fffdfb; color: #735f50; }.arrival-dropzone.dragging { border-color: #a55b2a; background: #fff4ea; }.arrival-dropzone input { display: none; }.arrival-dropzone p { margin: 0; font-size: 12px; }
+.arrival-report-list { display: flex; flex-direction: column; gap: 4px; margin: -7px 0 0; padding: 0; list-style: none; }.arrival-report-list li { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: #5e4f44; }.arrival-report-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.arrival-form-error { margin: 0; color: #a43d2b; font-size: 13px; }.arrival-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
 
 .workbench-notices {
   display: flex;

@@ -127,6 +127,44 @@ describe('ChatRecognitionPanel', () => {
     app.unmount();
   });
 
+  it('does not start a second recognition session while the first screenshot is pending', async () => {
+    let finishCapture: ((result: { success: true; imageBase64: string }) => void) | undefined;
+    mocks.captureScreenshot.mockImplementationOnce(() => new Promise((resolve) => {
+      finishCapture = resolve;
+    }));
+    const { app, host } = await mountPanel();
+    const capture = host.querySelector('.toolbar .primary') as HTMLButtonElement;
+
+    capture.click();
+    await flushUi();
+    capture.click();
+    await flushUi();
+
+    expect(mocks.captureScreenshot).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain('已有识别任务进行中');
+    finishCapture?.({ success: true, imageBase64: 'button-image' });
+    await waitForPostJson();
+    app.unmount();
+  });
+
+  it('keeps the recognition gate occupied while the backend job is queued', async () => {
+    mocks.postJson.mockResolvedValueOnce({
+      success: true,
+      data: { jobId: 'job-queued', status: 'QUEUED', errorCode: null, response: null }
+    });
+    const { app, host } = await mountPanel();
+    const capture = host.querySelector('.toolbar .primary') as HTMLButtonElement;
+
+    capture.click();
+    await waitForPostJson();
+    capture.click();
+    await flushUi();
+
+    expect(mocks.captureScreenshot).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain('已有识别任务进行中');
+    app.unmount();
+  });
+
   it('shows the capture coordinator failure reason instead of replacing it with a generic error', async () => {
     mocks.captureScreenshot.mockResolvedValueOnce({
       success: false,
