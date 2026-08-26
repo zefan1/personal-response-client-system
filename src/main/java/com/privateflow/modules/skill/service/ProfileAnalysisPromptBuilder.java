@@ -12,7 +12,10 @@ public class ProfileAnalysisPromptBuilder {
 
   private static final String PROFILE_ANALYSIS_TASK = """
       你是客户档案分析助手。请分析 profile_analysis_context 中的客户档案、当前标签、锁定分类和动态候选标签。
-      只能把 recentMessages 中 role=client 的客户原话或明确业务数据作为判断依据，不能把员工回复当作客户证据。
+      普通档案字段只能把 recentMessages 中 role=client 的客户原话或明确业务数据作为判断依据，不能把员工回复当作客户事实。
+      但当 target_fields 包含 intendedProject（意向项目）时，可以结合客户原话和员工明确确认、推荐、解释的项目语境判断客户当前意向；必须能说明双方语境确实对应同一客户需求，不能只因员工随口提及就判定。
+      intendedProject 只能从 customer.intendedProjectOptions 中当前有效的 optionText 选择；如果列表为空或证据不足，省略该字段。
+      intendedProject 的判断优先使用明确的当前聊天意向，允许替换已有意向；不得把 lochiaPeriod（恶露状态）当成否定产康意向的理由，恶露状态只用于后续服务安排。
       只能返回 target_fields 中的非标签档案字段；标签判断必须使用 candidateCategories 中当前提供的分类和标签编码。
       UPDATE 表示证据充分且满足分类策略；信息不足返回 UNABLE_TO_DETERMINE；当前值仍正确返回 KEEP_CURRENT。
       多选 ADD_ONLY 只能返回尚未存在的新增标签并使用 ADD；单选 REPLACE 使用 REPLACE；不修改时使用 NONE。

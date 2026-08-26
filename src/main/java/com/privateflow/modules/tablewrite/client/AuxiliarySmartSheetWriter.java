@@ -70,6 +70,43 @@ public class AuxiliarySmartSheetWriter {
     return add(target, encoded, timeout);
   }
 
+  /** Updates one already-materialized immutable business record. */
+  public void updateRecord(
+      AuxiliarySmartSheetTarget target, String recordId, Map<String, Object> values, Duration timeout) {
+    if (target == null || !target.configured() || recordId == null || recordId.isBlank()) {
+      throw new IllegalArgumentException("到店表记录不存在");
+    }
+    Map<String, JsonNode> encoded = encode(fields(target, timeout), values == null ? Map.of() : values);
+    if (encoded.isEmpty()) {
+      throw new IllegalArgumentException("没有可更新的到店表字段");
+    }
+    update(target, recordId.trim(), encoded, timeout);
+  }
+
+  /** Returns false only when WeCom confirms that the named record is no longer present. */
+  public boolean recordExists(
+      AuxiliarySmartSheetTarget target, String recordId, Duration timeout) {
+    if (target == null || !target.configured() || recordId == null || recordId.isBlank()) {
+      throw new IllegalArgumentException("到店表记录不存在");
+    }
+    Map<String, Object> body = request(target, false);
+    body.put("record_ids", List.of(recordId.trim()));
+    JsonNode response = apiClient.postForTarget("get_records", body, timeout, false);
+    JsonNode records = response == null ? null : response.get("records");
+    if (records == null || !records.isArray()) {
+      throw new IllegalStateException("到店表记录读取失败");
+    }
+    if (records.isEmpty()) {
+      return false;
+    }
+    for (JsonNode record : records) {
+      if (recordId.trim().equals(text(record.get("record_id")))) {
+        return true;
+      }
+    }
+    throw new IllegalStateException("到店表记录读取结果不匹配");
+  }
+
   private Map<String, WecomSmartSheetField> fields(AuxiliarySmartSheetTarget target, Duration timeout) {
     JsonNode response = apiClient.postForTarget("get_fields", request(target, false), timeout, false);
     Map<String, WecomSmartSheetField> result = new LinkedHashMap<>();

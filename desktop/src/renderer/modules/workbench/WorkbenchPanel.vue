@@ -52,8 +52,6 @@
       </button>
     </div>
 
-    <ArrivalHandoverTasks />
-
     <div class="workbench-columns">
       <section class="workbench-section">
         <header class="section-inline-head">
@@ -135,7 +133,6 @@ import type { FollowupReminderPayload, NewLeadAlertPayload, WorkbenchNoticePaylo
 import type { WorkbenchMetricKey } from './types';
 import { requestLeadContact } from '../new-lead-flow/newLeadFlowStore';
 import { isLeadValidityUpdating, toggleLeadInvalid } from '../followup-list/followupListStore';
-import ArrivalHandoverTasks from './ArrivalHandoverTasks.vue';
 
 const metricCards = computed<Array<{ key: WorkbenchMetricKey; label: string; icon: string; metric: { total: number; tuanGou: number; xianSuo: number } }>>(() => [
   { key: 'pendingFollowup', label: '待跟进', icon: '跟', metric: workbenchMetrics.value.pendingFollowup },

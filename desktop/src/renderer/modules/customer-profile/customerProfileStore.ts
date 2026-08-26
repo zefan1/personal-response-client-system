@@ -82,9 +82,6 @@ export const customerProfileState = reactive({
     appointment: false
   } as Record<SectionKey, boolean>,
   toast: '',
-  bookingOpen: false,
-  bookingTemplate: '',
-  bookingDraft: { appointmentDate: '', appointmentTime: '', appointmentStore: '', appointmentItem: '' },
   leadValiditySaving: false
 });
 
@@ -339,33 +336,6 @@ export async function saveProfileEdits(): Promise<void> {
     customerProfileState.toast = '保存超时，请重试';
   } finally {
     customerProfileState.saving = false;
-  }
-}
-
-export function beginBooking(): void {
-  const customer = customerProfileState.profile?.customer;
-  customerProfileState.bookingDraft = {
-    appointmentDate: customer?.appointmentDate ?? '',
-    appointmentTime: customer?.appointmentTime ?? '',
-    appointmentStore: customer?.appointmentStore ?? '',
-    appointmentItem: customer?.appointmentItem ?? ''
-  };
-  customerProfileState.bookingTemplate = '';
-  customerProfileState.bookingOpen = true;
-}
-
-export async function confirmBooking(): Promise<void> {
-  const phone = currentProfilePhone();
-  if (!phone) return;
-  try {
-    const response = await postJson<{ appointmentStatus: string; template: string }>(
-      `/api/v1/customers/${encodeURIComponent(phone)}/booking`, customerProfileState.bookingDraft, SAVE_TIMEOUT_MS);
-    if (!response.success || !response.data) throw new Error('booking failed');
-    customerProfileState.bookingTemplate = response.data.template;
-    await openProfile(phone, 'PROFILE_CARD');
-    customerProfileState.toast = '预约信息已保存，等待客户填写';
-  } catch {
-    customerProfileState.toast = '预约保存失败，请检查日期和门店';
   }
 }
 

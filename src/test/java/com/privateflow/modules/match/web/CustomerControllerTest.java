@@ -74,7 +74,6 @@ class CustomerControllerTest {
             suggestionQueueManager,
             manualSaveHandler,
             customerTagUpdateService,
-            null,
             customerQueryService))
         .build();
     objectMapper = new ObjectMapper();
@@ -191,7 +190,6 @@ class CustomerControllerTest {
             suggestionQueueManager,
             manualSaveHandler,
             customerTagUpdateService,
-            null,
             customerQueryService,
             stageOptions))
         .build();

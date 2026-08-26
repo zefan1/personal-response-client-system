@@ -52,6 +52,7 @@ public class CustomerStageOptionService {
 
   public Map<String, Object> current(long datasourceId) {
     Datasource datasource = datasource(datasourceId);
+    requireCustomerMaster(datasource);
     String fieldName = stageField(datasource);
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("datasourceId", datasourceId);
@@ -184,6 +185,7 @@ public class CustomerStageOptionService {
   @Transactional
   public Map<String, Object> refresh(long datasourceId) {
     Datasource datasource = datasource(datasourceId);
+    requireCustomerMaster(datasource);
     String fieldName = stageField(datasource);
     AuxiliarySmartSheetTarget target = target(datasource);
     if (target == null || !target.configured()) {
@@ -217,6 +219,7 @@ public class CustomerStageOptionService {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "阶段选项确认信息不完整");
     }
     Datasource datasource = datasource(datasourceId);
+    requireCustomerMaster(datasource);
     String fieldName = stageField(datasource);
     Map<String, Object> oldOption = optionRepository.find(datasource.sourceTable(), fieldName, request.oldOptionId().trim())
         .orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "旧阶段选项不存在"));
@@ -254,6 +257,22 @@ public class CustomerStageOptionService {
         .map(FieldMappingDto::sourceField)
         .findFirst()
         .orElseThrow(() -> new ApiException(ApiErrorCodes.CONFLICT, "请先将企业微信客户阶段列映射为系统内容“客户阶段”"));
+  }
+
+  private void requireCustomerMaster(Datasource datasource) {
+    if (datasource == null || !isCustomerMaster(datasource)) {
+      throw new ApiException(ApiErrorCodes.CONFLICT, "客户阶段选项只适用于客户主表，请先选择客户主表");
+    }
+  }
+
+  private boolean isCustomerMaster(Datasource datasource) {
+    if (datasource.description() != null
+        && "SYSTEM_MANAGED_SMART_SHEET:PRIMARY".equalsIgnoreCase(datasource.description().trim())) {
+      return true;
+    }
+    return smartSheetConfig != null
+        && datasource.sheetId().equals(smartSheetConfig.documentId())
+        && datasource.sourceTable().equals(smartSheetConfig.sourceTable());
   }
 
   private String mappedField(String sourceTable) {

@@ -9,7 +9,7 @@
     "build": "vite build && tsc -p tsconfig.main.json",
     "dev": "vite --host 127.0.0.1",
     "electron:dev": "npm run build && set VITE_DEV_SERVER_URL=http://127.0.0.1:5173&& electron .",
-    "electron:preview": "npm run build && electron .",
+    "electron:preview": "npm run build && node scripts/electron-preview.mjs",
     "electron:smoke": "npm run build && node scripts/electron-smoke.mjs",
     "renderer:smoke": "npm run build && node scripts/renderer-smoke.mjs",
     "test": "vitest run",

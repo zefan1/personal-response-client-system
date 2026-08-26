@@ -10,6 +10,7 @@ import com.privateflow.modules.customer.infra.CustomerCacheManager;
 import com.privateflow.modules.customer.infra.CustomerRepository;
 import com.privateflow.modules.customer.history.CustomerFieldHistoryService;
 import com.privateflow.modules.customer.service.CustomerMergeEngine;
+import com.privateflow.modules.customer.admin.IntentProjectMappingService;
 import com.privateflow.modules.tablewrite.service.AuxiliarySmartSheetProjectionService;
 import com.privateflow.modules.tablewrite.service.CustomerMasterProjectionService;
 import java.beans.PropertyDescriptor;
@@ -47,6 +48,7 @@ public class CustomerSyncScheduler {
   private final CustomerMasterProjectionService customerMasterProjectionService;
   private final CustomerFieldHistoryService historyService;
   private final AccountRepository accountRepository;
+  private IntentProjectMappingService intentProjectMappingService;
 
   @Autowired
   public CustomerSyncScheduler(
@@ -76,6 +78,11 @@ public class CustomerSyncScheduler {
     this.customerMasterProjectionService = customerMasterProjectionService;
     this.historyService = historyService;
     this.accountRepository = accountRepository;
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  public void setIntentProjectMappingService(IntentProjectMappingService service) {
+    this.intentProjectMappingService = service;
   }
 
   public CustomerSyncScheduler(
@@ -250,12 +257,21 @@ public class CustomerSyncScheduler {
         }
         customerRepository.findByPhone(merged.getPhone()).ifPresent(cacheManager::write);
       }
+      Customer outboundCustomer = merged;
+      if (intentProjectMappingService != null && incoming.getPurchasedProject() != null
+          && !incoming.getPurchasedProject().isBlank()) {
+        customerRepository.findByPhone(merged.getPhone()).ifPresent(intentProjectMappingService::applyPurchaseMapping);
+        // The mapping writes the authoritative fact and increments the customer
+        // version. Refresh the projection object so an older merged snapshot
+        // cannot write the previous intent back to WeCom afterward.
+        outboundCustomer = customerRepository.findByPhone(merged.getPhone()).orElse(merged);
+      }
       if (allowOutboundProjection && customerMasterProjectionService != null && sourceTable.startsWith("ASSIGNMENT:")) {
-        customerMasterProjectionService.projectAssignment(merged);
+        customerMasterProjectionService.projectAssignment(outboundCustomer);
       }
       if (allowOutboundProjection && projectionService != null) {
         try {
-          projectionService.project(merged);
+          projectionService.project(outboundCustomer);
         } catch (RuntimeException projectionFailure) {
           log.warn("客户辅助表投影失败, phone={}, reason={}",
               merged.getPhone(), projectionFailure.getMessage());

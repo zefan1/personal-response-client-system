@@ -63,6 +63,8 @@ public class CustomerMasterProjectionService {
     }
     String sourceTable = smartSheetConfig.sourceTable();
     Map<String, Object> normalizedFields = new LinkedHashMap<>(fields);
+    // A partial projection still needs the primary table's unique identifier to upsert safely.
+    normalizedFields.putIfAbsent("phone", customer.getPhone());
     if (normalizedFields.get("customerStage") != null && stageOptionService != null) {
       normalizedFields.put("customerStage", stageOptionService.normalizeForCustomer(
           customer, String.valueOf(normalizedFields.get("customerStage"))));

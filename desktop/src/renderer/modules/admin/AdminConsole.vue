@@ -1072,7 +1072,7 @@
           <p v-if="!selectedDatasource" class="ops-empty">从上方数据源列表选择一项。</p>
         </article>
 
-        <article v-if="activeSection.key === 'data-integration' && selectedDatasource" class="ops-panel wide">
+        <article v-if="activeSection.key === 'data-integration' && supportsCustomerStageOptions(selectedDatasource)" class="ops-panel wide">
           <div class="ops-panel-head">
             <div>
               <h2>客户阶段选项</h2>
@@ -1105,6 +1105,57 @@
               <button class="secondary small" type="button" @click="decideCustomerStageOption(stageOptionPartner(option), option, 'NEW')">确认为新阶段</button>
             </div>
           </div>
+        </article>
+
+        <article v-if="activeSection.key === 'data-integration'" class="ops-panel wide">
+          <div class="ops-panel-head">
+            <div>
+              <h2>意向项目关键词补全</h2>
+              <p>企业微信客户主表的“意向项目”选项按分组维护关键词；购买项目匹配后先更新唯一事实数据库，再同步客户主表。</p>
+            </div>
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="intentProjectRefreshing || intentProjectRecomputing" @click="refreshIntentProjectMappings">
+                {{ intentProjectRefreshing ? '读取中...' : '读取最新项目选项' }}
+              </button>
+              <button class="primary small" type="button" :disabled="intentProjectRefreshing || intentProjectRecomputing || !intentProjectRules.length" @click="recomputeIntentProjects">
+                {{ intentProjectRecomputing ? '补算中...' : '开始补算空缺客户' }}
+              </button>
+            </div>
+          </div>
+          <p v-if="intentProjectMappingMessage" class="ops-intent-project-feedback" :class="{ error: intentProjectMappingError }" role="status">{{ intentProjectMappingMessage }}</p>
+          <p class="ops-helper-callout">输入关键词后离开输入框会自动保存。历史补算只处理“意向项目”为空的客户，不覆盖已有值。</p>
+          <div v-if="intentProjectRules.length" class="ops-intent-project-rules">
+            <div v-for="rule in intentProjectRules" :key="rule.optionId" class="ops-intent-project-rule">
+              <div class="ops-intent-project-rule-head">
+                <strong>{{ rule.optionText }}</strong>
+                <span>{{ rule.status === 'ORPHANED' ? '企业微信已删除' : rule.status === 'PENDING' ? '新选项，待配置' : rule.status === 'DISABLED' ? '已停用' : '启用中' }}</span>
+              </div>
+              <div class="ops-intent-project-keywords" :aria-label="`${rule.optionText}关键词`">
+                <div v-for="(keyword, index) in intentProjectKeywordInputs(rule)" :key="`${rule.optionId}-${index}`" class="ops-intent-project-keyword-row">
+                  <input
+                    :value="keyword"
+                    type="text"
+                    maxlength="100"
+                    placeholder="输入购买项目关键词"
+                    :aria-label="`${rule.optionText}关键词 ${index + 1}`"
+                    :disabled="intentProjectRuleReadOnly(rule) || isIntentProjectRuleSaving(rule)"
+                    @input="updateIntentProjectKeyword(rule, index, $event)"
+                    @change="saveIntentProjectKeywords(rule)"
+                  />
+                  <div v-if="index === intentProjectKeywordInputs(rule).length - 1" class="ops-intent-project-keyword-actions">
+                    <button class="ops-icon-button" type="button" title="新增关键词" aria-label="新增关键词" :disabled="intentProjectRuleReadOnly(rule) || isIntentProjectRuleSaving(rule)" @click="addIntentProjectKeyword(rule)">+</button>
+                    <button class="ops-icon-button" type="button" title="删除最后一个关键词" aria-label="删除最后一个关键词" :disabled="intentProjectRuleReadOnly(rule) || isIntentProjectRuleSaving(rule) || intentProjectKeywordInputs(rule).length <= 1" @click="removeIntentProjectKeyword(rule)">−</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ops-intent-project-settings">
+                <label class="ops-inline-toggle"><input type="checkbox" :checked="rule.status === 'ACTIVE'" :disabled="intentProjectRuleReadOnly(rule) || isIntentProjectRuleSaving(rule)" @change="saveIntentProjectRuleToggle(rule, $event)">启用</label>
+                <label class="ops-inline-toggle">优先级 <input class="ops-number-input" type="number" :value="rule.priority || 0" :disabled="intentProjectRuleReadOnly(rule) || isIntentProjectRuleSaving(rule)" @change="saveIntentProjectRulePriority(rule, $event)"></label>
+                <span v-if="isIntentProjectRuleSaving(rule)" class="ops-intent-project-saving">保存中...</span>
+              </div>
+            </div>
+          </div>
+          <p v-else class="ops-empty">还没有读取到企业微信“意向项目”选项，请先点击“读取最新项目选项”。</p>
         </article>
 
         <article v-if="activeSection.key === 'data-integration'" class="ops-panel">
@@ -1156,6 +1207,95 @@
             </div>
             <button class="primary small" type="button" @click="openForm('quickSearch')">新增内容</button>
           </div>
+          <section class="workbench-template-config" aria-label="工作台自动复制话术设置">
+            <button
+              class="workbench-template-config-toggle"
+              type="button"
+              :aria-expanded="workbenchTemplateConfigExpanded"
+              aria-controls="workbench-template-config-content"
+              @click="workbenchTemplateConfigExpanded = !workbenchTemplateConfigExpanded"
+            >
+              <div>
+                <h3>工作台自动复制话术</h3>
+                <p>先在下方维护并启用速搜话术模板，再在这里指定工作台使用场景。</p>
+              </div>
+              <span class="workbench-template-config-chevron" aria-hidden="true"></span>
+            </button>
+            <div v-show="workbenchTemplateConfigExpanded" id="workbench-template-config-content" class="workbench-template-config-content">
+              <section class="workbench-template-config-block" aria-label="预约成功话术配置">
+              <div>
+                <h4>预约成功</h4>
+                <p>提交预约后会填入当前客户的唯一事实数据库字段并复制。</p>
+              </div>
+              <div class="workbench-template-config-picker">
+                <label class="workbench-template-config-select">
+                  <span>指定预约话术</span>
+                  <select v-model="appointmentTemplateSelection" aria-label="选择预约成功话术模板">
+                    <option value="">不复制话术</option>
+                    <option v-for="item in friendRequestSourceTemplates" :key="item.id" :value="String(item.id)">
+                      {{ item.title || `模板 #${item.id}` }} · {{ item.shortcutCode || '无快捷码' }}
+                    </option>
+                  </select>
+                  <small v-if="!friendRequestSourceTemplates.length">暂无已启用的话术模板，请先新增并启用一条速搜内容。</small>
+                </label>
+                <button class="primary small" type="button" :disabled="loading || appointmentTemplateSaving || !appointmentTemplateDirty" @click="saveAppointmentSuccessTemplate">
+                  {{ appointmentTemplateSaving ? '保存中…' : appointmentTemplateDirty ? '保存并生效' : '已保存' }}
+                </button>
+              </div>
+              </section>
+              <article class="workbench-template-display" :aria-label="appointmentTemplateDirty ? '待保存的预约成功话术' : '已生效的预约成功话术'">
+                <header>
+                  <div class="friend-request-template-row-head">
+                    <div>
+                      <h4>{{ appointmentTemplateDirty ? '待保存的预约成功话术' : '当前预约成功话术' }}</h4>
+                      <small v-if="appointmentTemplateDirty">已选择模板，但尚未保存；工作台仍使用原配置。</small>
+                      <small v-else>{{ appointmentSuccessTemplate ? `来源：速搜内容管理 · ${appointmentSuccessTemplate.shortcutCode || '无快捷码'}` : '尚未指定预约成功话术' }}</small>
+                    </div>
+                  </div>
+                </header>
+                <p class="friend-request-template-preview">{{ (appointmentTemplateDirty ? appointmentTemplateDraft : appointmentSuccessTemplate)?.content || '选择并启用速搜话术后，会在这里展示原文。' }}</p>
+              </article>
+              <section class="workbench-template-config-block" aria-label="添加好友申请话术配置">
+              <div>
+                <h4>添加好友申请</h4>
+                <p>从已启用的速搜话术模板中选择，启用后会在桌面工作台复制收集号时显示。</p>
+              </div>
+              <div class="friend-request-template-picker">
+                <label>
+                  选择速搜内容管理里的模板
+                  <select v-model="friendRequestTemplateSelection" aria-label="选择添加好友申请话术模板">
+                    <option value="" disabled>请选择一个模板</option>
+                    <option v-for="item in friendRequestSourceTemplates" :key="item.id" :value="String(item.id)">
+                      {{ item.title || `模板 #${item.id}` }} · {{ item.shortcutCode || '无快捷码' }}
+                    </option>
+                  </select>
+                  <small v-if="!friendRequestSourceTemplates.length">暂无启用的速搜话术模板，请先新增并启用。</small>
+                </label>
+                <button class="secondary small" type="button" :disabled="!friendRequestTemplateSelection" @click="void addSelectedFriendRequestTemplates()">添加话术</button>
+              </div>
+              </section>
+              <article class="workbench-template-display" aria-label="已生效的添加好友申请话术">
+                <header>
+                  <h4>当前添加好友申请话术</h4>
+                  <small>已添加的话术会在工作台复制收集号时展示。</small>
+                </header>
+                <div v-if="friendRequestTemplates.length" class="friend-request-template-list">
+                  <article v-for="(template, index) in friendRequestTemplates" :key="template.id" class="friend-request-template-row">
+                    <div class="friend-request-template-row-head">
+                      <div>
+                        <strong>{{ template.name }}</strong>
+                        <small>{{ template.quickSearchItemId ? '来源：速搜内容管理' : '旧版手动话术，请重新选择速搜模板' }}</small>
+                      </div>
+                      <label class="ops-checkline"><input v-model="template.enabled" class="ops-switch" type="checkbox" @change="void saveFriendRequestTemplates()" /> 工作台显示话术</label>
+                      <button class="secondary small danger" type="button" @click="void removeFriendRequestTemplate(index)">移除</button>
+                    </div>
+                    <p class="friend-request-template-preview">{{ template.text || '该速搜模板暂无正文' }}</p>
+                  </article>
+                </div>
+                <p v-else class="ops-empty">还没有选择添加好友话术。</p>
+              </article>
+            </div>
+          </section>
           <div class="ops-filter-bar three">
             <input v-model="quickSearchKeyword" placeholder="搜索标题、快线码或正文" @change="resetQuickSearchPageAndLoad" />
             <select v-model="quickSearchType" @change="resetQuickSearchPageAndLoad">
@@ -1222,41 +1362,6 @@
             </div>
             <button class="secondary small" type="button" :disabled="loading" @click="refreshTemplatePromotionCandidates">刷新候选</button>
           </div>
-          <section class="friend-request-template-panel">
-            <div class="ops-panel-head">
-              <div>
-                <h3>添加好友申请话术</h3>
-                <p>从“速搜内容管理”的话术模板中选择，启用后才会在桌面工作台复制收集号时显示。</p>
-              </div>
-            </div>
-            <div class="friend-request-template-picker">
-              <label>
-                选择速搜内容管理里的模板
-                <select v-model="friendRequestTemplateSelection" aria-label="选择添加好友申请话术模板">
-                  <option value="" disabled>请选择一个模板</option>
-                  <option v-for="item in friendRequestSourceTemplates" :key="item.id" :value="String(item.id)">
-                    {{ item.title || `模板 #${item.id}` }} · {{ item.shortcutCode || '无快捷码' }}
-                  </option>
-                </select>
-                <small v-if="!friendRequestSourceTemplates.length">暂无启用的速搜话术模板，请先到“速搜内容管理”新增并启用。</small>
-              </label>
-              <button class="secondary small" type="button" :disabled="!friendRequestTemplateSelection" @click="void addSelectedFriendRequestTemplates()">添加话术</button>
-            </div>
-            <div class="friend-request-template-list">
-              <article v-for="(template, index) in friendRequestTemplates" :key="template.id" class="friend-request-template-row">
-                <div class="friend-request-template-row-head">
-                  <div>
-                    <strong>{{ template.name }}</strong>
-                    <small>{{ template.quickSearchItemId ? '来源：速搜内容管理' : '旧版手动话术，请重新选择速搜模板' }}</small>
-                  </div>
-                  <label class="ops-checkline"><input v-model="template.enabled" class="ops-switch" type="checkbox" @change="void saveFriendRequestTemplates()" /> 工作台显示话术</label>
-                  <button class="secondary small danger" type="button" @click="void removeFriendRequestTemplate(index)">移除</button>
-                </div>
-                <p class="friend-request-template-preview">{{ template.text || '该速搜模板暂无正文' }}</p>
-              </article>
-            </div>
-            <p v-if="!friendRequestTemplates.length" class="ops-empty">还没有选择添加好友话术。</p>
-          </section>
           <div class="ops-filter-bar three template-candidate-filters">
             <input v-model="templatePromotionKeyword" placeholder="搜索标题、员工或正文" />
             <select v-model="templatePromotionLeadTypeFilter" aria-label="筛选线索类型">
@@ -2764,16 +2869,24 @@
             :class="{ 'ops-form-span-2': field.type === 'textarea', 'ops-boolean-field': field.type === 'checkbox', 'ops-quick-search-image-field': activeForm === 'quickSearch' && field.key === 'imageUrl' }"
           >
             <span class="ops-label-title">{{ field.label }}</span>
-            <div v-if="activeForm === 'quickSearch' && field.key === 'content'" class="ops-variable-bar">
-              <button
-                v-for="variable in quickSearchVariables"
-                :key="variable.value"
-                class="secondary tiny"
-                type="button"
-                @click="insertQuickSearchVariable(variable.value)"
-              >
-                {{ variable.label }}
-              </button>
+            <div v-if="activeForm === 'quickSearch' && field.key === 'content'" class="ops-variable-bar ops-template-variable-picker">
+              <div class="ops-template-variable-picker-head">
+                <span>插入唯一事实数据库字段</span>
+                <input v-model="quickSearchVariableQuery" type="search" placeholder="搜索字段名称或标识" aria-label="搜索唯一事实数据库字段" />
+              </div>
+              <div class="ops-template-variable-results" aria-label="唯一事实数据库字段列表">
+                <button
+                  v-for="variable in filteredQuickSearchVariables"
+                  :key="variable.key"
+                  class="secondary tiny"
+                  type="button"
+                  :title="`插入 {{${variable.key}}}`"
+                  @click="insertQuickSearchVariable(variable.value)"
+                >
+                  {{ variable.label }}
+                </button>
+                <span v-if="!filteredQuickSearchVariables.length" class="ops-template-variable-empty">没有匹配的唯一事实数据库字段</span>
+              </div>
             </div>
             <div v-if="activeForm === 'quickSearch' && field.key === 'imageUrl'" class="ops-quick-search-image-control">
               <div v-if="formDraft.imageUrl" class="ops-image-preview">
@@ -3320,6 +3433,7 @@ const formDraft = reactive<AnyRecord>({});
 const formError = ref('');
 const versionUploadState = reactive<{ kind: 'idle' | 'loading' | 'success' | 'error'; message: string }>({ kind: 'idle', message: '' });
 const selectedDatasource = ref<AnyRecord | null>(null);
+let datasourceSelectionRequest = 0;
 const mappingDraft = reactive<Record<string, string>>({});
 const mappingEnabledDraft = reactive<Record<string, boolean>>({});
 const skillSceneFilter = ref('');
@@ -3448,6 +3562,11 @@ type FriendRequestTemplateDraft = { id: string; name: string; text: string; enab
 const friendRequestTemplates = ref<FriendRequestTemplateDraft[]>([]);
 const friendRequestSourceTemplates = ref<AnyRecord[]>([]);
 const friendRequestTemplateSelection = ref('');
+const appointmentTemplateSelection = ref('');
+const appointmentTemplateSavedSelection = ref('');
+const appointmentTemplateSaving = ref(false);
+const quickSearchVariableQuery = ref('');
+const workbenchTemplateConfigExpanded = ref(true);
 const datasources = ref<AnyRecord[]>([]);
 const syncStatuses = ref<AnyRecord[]>([]);
 const customerFields = ref<AnyRecord[]>([]);
@@ -3458,6 +3577,12 @@ const stageOptionCatalogMessage = ref('');
 const stageOptionCatalogError = ref(false);
 const stageOptionPending = computed(() => listFrom(stageOptionCatalog.value, 'options').filter((item) => String(item.status || '').toUpperCase() === 'PENDING'));
 const stageOptionOrphaned = computed(() => listFrom(stageOptionCatalog.value, 'options').filter((item) => String(item.status || '').toUpperCase() === 'ORPHANED'));
+const intentProjectRules = ref<AnyRecord[]>([]);
+const intentProjectMappingMessage = ref('');
+const intentProjectMappingError = ref(false);
+const intentProjectRefreshing = ref(false);
+const intentProjectRecomputing = ref(false);
+const intentProjectSavingOptionIds = ref<string[]>([]);
 const importLogs = ref<AnyRecord[]>([]);
 const customerSearchItems = ref<AnyRecord[]>([]);
 const selectedAdminCustomer = ref<AnyRecord | null>(null);
@@ -4271,10 +4396,26 @@ const activeFormFields = computed(() => formMeta(activeForm.value).fields);
 const ruleConditionFields = computed(() => activeFormFields.value.filter((field) => ['leadType', 'thresholdHours'].includes(field.key)));
 const ruleMetaFields = computed(() => activeFormFields.value.filter((field) => ['name', 'priority', 'enabled'].includes(field.key)));
 const ruleActionFields = computed(() => activeFormFields.value.filter((field) => ['actionType', 'alertLevel', 'reminderType', 'tagName'].includes(field.key)));
-const quickSearchVariables = QUICK_SEARCH_TEMPLATE_VARIABLES.map((variable) => ({
+const quickSearchVariables = computed(() => QUICK_SEARCH_TEMPLATE_VARIABLES.filter((variable) => [
+  'nickname', 'phone', 'intendedStore', 'intendedProject', 'customerStage', 'intentLevel',
+  'nextFollowupAt', 'appointmentDate', 'appointmentItem', 'appointmentStore', 'arrived', 'assignedKeeper'
+].includes(variable.key)).map((variable) => ({
+  key: variable.key,
   label: variable.label,
   value: variable.placeholder
-}));
+})));
+const filteredQuickSearchVariables = computed(() => {
+  const keyword = quickSearchVariableQuery.value.trim().toLowerCase();
+  if (!keyword) return quickSearchVariables.value;
+  return quickSearchVariables.value.filter((field) => `${field.label} ${field.key}`.toLowerCase().includes(keyword));
+});
+const appointmentTemplateDirty = computed(() => appointmentTemplateSelection.value !== appointmentTemplateSavedSelection.value);
+const appointmentTemplateDraft = computed(() => friendRequestSourceTemplates.value.find(
+  (item) => String(item.id) === appointmentTemplateSelection.value
+) ?? null);
+const appointmentSuccessTemplate = computed(() => friendRequestSourceTemplates.value.find(
+  (item) => String(item.id) === appointmentTemplateSavedSelection.value
+) ?? null);
 const selectedSkillTestBinding = computed(() => skillBindings.value.find((item) => String(item.id) === selectedSkillTestBindingId.value) || null);
 const smartSheetCards = computed(() => SMART_SHEET_ROLES.map((role) => {
   const configuredUrl = configValue(role.configKey);
@@ -4510,6 +4651,7 @@ async function loadSkillAi() {
     llmAnalytics.value = recordFromResponse(llmCallAnalytics);
     configs.value = configEntries(configList);
     hydrateFriendRequestTemplates();
+    hydrateAppointmentTemplateSelection();
     datasources.value = listFromResponse(dsList);
     syncStatuses.value = listFromResponse(syncList);
     hydratePromptDraft();
@@ -4559,11 +4701,13 @@ async function loadDataContent() {
     applyTemplatePromotionCandidates(candidateList);
     friendRequestSourceTemplates.value = listFromResponse(friendRequestList);
     configs.value = configEntries(configList);
+    hydrateAppointmentTemplateSelection();
     hydrateFriendRequestTemplates();
     reconcileFriendRequestTemplates();
     if (!selectedDatasource.value && datasources.value.length) {
       selectDatasource(datasources.value[0]);
     }
+    void loadIntentProjectMappings(false);
   }, '数据与内容已刷新');
 }
 
@@ -5015,6 +5159,12 @@ function hydrateFriendRequestTemplates(): void {
   }
 }
 
+function hydrateAppointmentTemplateSelection(): void {
+  const saved = configValue('arrival.appointment_success_template_id');
+  appointmentTemplateSavedSelection.value = saved;
+  appointmentTemplateSelection.value = saved;
+}
+
 function reconcileFriendRequestTemplates(): void {
   for (const template of friendRequestTemplates.value) {
     if (!template.quickSearchItemId) continue;
@@ -5069,6 +5219,26 @@ async function saveFriendRequestTemplates(): Promise<void> {
     });
     configs.value = configEntries(await getJson<unknown>('/admin/api/v1/configs'));
   }, '添加好友申请话术已保存');
+}
+
+async function saveAppointmentSuccessTemplate(): Promise<void> {
+  if (!appointmentTemplateDirty.value || appointmentTemplateSaving.value) return;
+  appointmentTemplateSaving.value = true;
+  try {
+    await runWithNotice(async () => {
+      const requestedSelection = appointmentTemplateSelection.value;
+      await putJson('/admin/api/v1/configs/arrival.appointment_success_template_id', { value: requestedSelection });
+      configs.value = configEntries(await getJson<unknown>('/admin/api/v1/configs'));
+      const persistedSelection = configValue('arrival.appointment_success_template_id');
+      if (persistedSelection !== requestedSelection) {
+        throw new Error('预约话术保存未生效，请刷新管理后台后重试');
+      }
+      appointmentTemplateSavedSelection.value = persistedSelection;
+      appointmentTemplateSelection.value = persistedSelection;
+    }, appointmentTemplateSelection.value ? '预约成功话术已保存并生效' : '预约成功话术已取消并生效');
+  } finally {
+    appointmentTemplateSaving.value = false;
+  }
 }
 
 async function loadCustomerMasterDefault() {
@@ -6695,6 +6865,7 @@ async function testLlmEnvironment(env: AnyRecord) {
 }
 
 async function selectDatasource(item: AnyRecord) {
+  const requestId = ++datasourceSelectionRequest;
   selectedDatasource.value = item;
   stageOptionCatalog.value = null;
   stageOptionCatalogMessage.value = '';
@@ -6705,8 +6876,10 @@ async function selectDatasource(item: AnyRecord) {
   mappingCompare.value = null;
   Object.keys(mappingDraft).forEach((key) => delete mappingDraft[key]);
   Object.keys(mappingEnabledDraft).forEach((key) => delete mappingEnabledDraft[key]);
+  const isCurrentSelection = () => requestId === datasourceSelectionRequest && selectedDatasource.value?.id === item.id;
   await runWithNotice(async () => {
     const payload = await getJson<unknown>(`/admin/api/v1/datasources/${item.id}/mappings`);
+    if (!isCurrentSelection()) return;
     mappings.value = listFromResponse(payload);
     for (const mapping of mappings.value) {
       const target = mapping.targetField ?? mapping.fieldName;
@@ -6721,14 +6894,29 @@ async function selectDatasource(item: AnyRecord) {
     }
     // Opening a mapping always re-reads the live Smart Sheet schema. Do not
     // let a browser/proxy cache make the operator work from an old column list.
-    await loadDatasourceColumns(false, true);
-    await loadCustomerStageOptions(false);
+    await loadDatasourceColumns(false, true, item.id);
+    if (!isCurrentSelection()) return;
+    if (supportsCustomerStageOptions(item)) {
+      await loadCustomerStageOptions(false, item.id);
+    }
   }, '字段映射已加载');
 }
 
-async function loadCustomerStageOptions(showNotice = true) {
+function supportsCustomerStageOptions(datasource: AnyRecord | null | undefined): boolean {
+  if (!datasource) return false;
+  const description = String(datasource.description ?? '').trim().toUpperCase();
+  if (description === 'SYSTEM_MANAGED_SMART_SHEET:PRIMARY') return true;
+  const primaryDocumentId = configValue('table.primary.document_id').trim();
+  const primarySourceTable = configValue('table.primary.source_table').trim();
+  return Boolean(
+    (primaryDocumentId && String(datasource.sheetId ?? '').trim() === primaryDocumentId)
+      || (primarySourceTable && String(datasource.sourceTable ?? '').trim() === primarySourceTable)
+  );
+}
+
+async function loadCustomerStageOptions(showNotice = true, expectedDatasourceId?: number) {
   const datasource = selectedDatasource.value;
-  if (!datasource) return;
+  if (!datasource || (expectedDatasourceId !== undefined && datasource.id !== expectedDatasourceId)) return;
   const load = async () => {
     stageOptionCatalog.value = recordFromResponse(await getJson<unknown>(`/admin/api/v1/datasources/${datasource.id}/customer-stage-options`));
     stageOptionCatalogMessage.value = '';
@@ -6745,6 +6933,138 @@ async function loadCustomerStageOptions(showNotice = true) {
     stageOptionCatalogMessage.value = error instanceof Error ? error.message : '客户阶段选项暂时无法读取';
     if (!showNotice) return;
     throw error;
+  }
+}
+
+async function loadIntentProjectMappings(showNotice = true) {
+  const load = async () => {
+    const payload = recordFromResponse(await getJson<unknown>('/admin/api/v1/intent-project-mappings?refresh=false'));
+    intentProjectRules.value = listFrom(payload, 'rules');
+  };
+  try {
+    if (showNotice) {
+      await runWithNotice(load, '意向项目选项已刷新');
+    } else {
+      await load();
+    }
+  } catch (error) {
+    intentProjectMappingError.value = true;
+    intentProjectMappingMessage.value = error instanceof Error ? error.message : '意向项目规则暂时无法读取';
+  }
+}
+
+async function refreshIntentProjectMappings() {
+  if (intentProjectRefreshing.value) return;
+  intentProjectRefreshing.value = true;
+  intentProjectMappingMessage.value = '正在从企业微信读取“意向项目”选项...';
+  intentProjectMappingError.value = false;
+  try {
+    const payload = recordFromResponse(await postJson<unknown>('/admin/api/v1/intent-project-mappings/refresh', {}));
+    intentProjectRules.value = listFrom(payload, 'rules');
+    const total = Number(payload.total ?? intentProjectRules.value.length);
+    intentProjectMappingMessage.value = `已读取企业微信最新选项，共 ${total} 项。`;
+  } catch (error) {
+    intentProjectMappingError.value = true;
+    intentProjectMappingMessage.value = `读取失败：${humanizeError(error)}。请确认企业微信表格连接后重试。`;
+  } finally {
+    intentProjectRefreshing.value = false;
+  }
+}
+
+function intentProjectKeywordInputs(rule: AnyRecord): string[] {
+  const keywords = Array.isArray(rule.keywords) ? rule.keywords.map(value => String(value ?? '')) : [];
+  return keywords.length ? keywords : [''];
+}
+
+function intentProjectRuleReadOnly(rule: AnyRecord): boolean {
+  return String(rule.status || '').toUpperCase() === 'ORPHANED';
+}
+
+function isIntentProjectRuleSaving(rule: AnyRecord): boolean {
+  return intentProjectSavingOptionIds.value.includes(String(rule.optionId));
+}
+
+function updateIntentProjectKeyword(rule: AnyRecord, index: number, event: Event) {
+  const keywords = intentProjectKeywordInputs(rule);
+  keywords[index] = (event.target as HTMLInputElement).value;
+  rule.keywords = keywords;
+}
+
+function addIntentProjectKeyword(rule: AnyRecord) {
+  const keywords = intentProjectKeywordInputs(rule);
+  keywords.push('');
+  rule.keywords = keywords;
+}
+
+async function removeIntentProjectKeyword(rule: AnyRecord) {
+  const keywords = intentProjectKeywordInputs(rule);
+  if (keywords.length <= 1) return;
+  keywords.pop();
+  rule.keywords = keywords;
+  await saveIntentProjectRule(rule);
+}
+
+async function saveIntentProjectKeywords(rule: AnyRecord) {
+  await saveIntentProjectRule(rule);
+}
+
+async function saveIntentProjectRuleToggle(rule: AnyRecord, event: Event) {
+  await saveIntentProjectRule(rule, { enabled: (event.target as HTMLInputElement).checked });
+}
+
+async function saveIntentProjectRulePriority(rule: AnyRecord, event: Event) {
+  await saveIntentProjectRule(rule, { priority: Number((event.target as HTMLInputElement).value || 0) });
+}
+
+async function saveIntentProjectRule(rule: AnyRecord, patch: { enabled?: boolean; priority?: number } = {}) {
+  const optionId = String(rule.optionId || '');
+  if (!optionId || intentProjectRuleReadOnly(rule) || isIntentProjectRuleSaving(rule)) return;
+  const keywords = intentProjectKeywordInputs(rule).map(value => value.trim()).filter(Boolean);
+  intentProjectSavingOptionIds.value = [...intentProjectSavingOptionIds.value, optionId];
+  intentProjectMappingMessage.value = '';
+  intentProjectMappingError.value = false;
+  try {
+    const response = recordFromResponse(await putJson<unknown>(`/admin/api/v1/intent-project-mappings/${encodeURIComponent(optionId)}`, {
+      keywords,
+      priority: patch.priority ?? Number(rule.priority || 0),
+      enabled: patch.enabled ?? String(rule.status || '').toUpperCase() === 'ACTIVE'
+    }));
+    Object.assign(rule, response, { keywords: keywords.length ? keywords : [''] });
+    intentProjectMappingMessage.value = `“${rule.optionText}”关键词已保存。`;
+  } catch (error) {
+    intentProjectMappingError.value = true;
+    intentProjectMappingMessage.value = `“${rule.optionText}”保存失败：${humanizeError(error)}。输入内容未丢失，可修改后重试。`;
+  } finally {
+    intentProjectSavingOptionIds.value = intentProjectSavingOptionIds.value.filter(value => value !== optionId);
+  }
+}
+
+async function recomputeIntentProjects() {
+  if (!window.confirm('确认根据当前关键词规则补算“意向项目”为空的客户吗？已有意向项目不会被覆盖。')) return;
+  if (intentProjectRecomputing.value) return;
+  intentProjectRecomputing.value = true;
+  try {
+    const result = recordFromResponse(await postJson<unknown>(
+      '/admin/api/v1/intent-project-mappings/recompute?onlyEmpty=true',
+      {},
+      Math.max(loadDesktopConfig().requestTotalTimeoutMs, 120000)
+    ));
+    const databaseUpdated = Number(result.databaseUpdated ?? result.updated ?? 0);
+    const projectionQueued = Number(result.projectionQueued ?? databaseUpdated);
+    const errors = listFrom(result, 'errors');
+    const errorSummary = [...new Set(errors
+      .map(error => String(error.stage || error.message || '').trim())
+      .filter(Boolean))]
+      .slice(0, 2)
+      .join('、');
+    intentProjectMappingMessage.value = `补算完成：符合条件 ${result.scanned ?? 0} 位（已购项目有值且意向项目为空），关键词命中 ${result.matched ?? 0} 位，唯一事实数据库已更新 ${databaseUpdated} 位，${projectionQueued} 位已加入企业微信同步队列。`
+      + (errors.length > 0 ? `另有 ${errors.length} 位未完成${errorSummary ? `：${errorSummary}` : ''}。` : '');
+    intentProjectMappingError.value = errors.some(error => error.stage === '唯一事实数据库更新');
+  } catch (error) {
+    intentProjectMappingError.value = true;
+    intentProjectMappingMessage.value = `补算失败：${humanizeError(error)}。请稍后重试。`;
+  } finally {
+    intentProjectRecomputing.value = false;
   }
 }
 
@@ -6794,12 +7114,13 @@ async function decideCustomerStageOption(oldOption: AnyRecord | null, newOption:
   }, decision === 'SAME' ? '阶段选项已确认并完成迁移' : '新阶段选项已确认');
 }
 
-async function loadDatasourceColumns(showNotice = true, forceRefresh = false) {
+async function loadDatasourceColumns(showNotice = true, forceRefresh = false, expectedDatasourceId?: number) {
   const datasource = selectedDatasource.value;
-  if (!datasource) return;
+  if (!datasource || (expectedDatasourceId !== undefined && datasource.id !== expectedDatasourceId)) return;
   const load = async () => {
     const refreshQuery = forceRefresh ? `?refresh=${Date.now()}` : '';
     const payload = recordFromResponse(await getJson<unknown>(`/admin/api/v1/datasources/${datasource.id}/columns${refreshQuery}`));
+    if (expectedDatasourceId !== undefined && selectedDatasource.value?.id !== expectedDatasourceId) return;
     datasourceColumnStatus.value = payload;
     datasourceColumns.value = listFrom(payload, 'columns');
     applyAutomaticMappings();

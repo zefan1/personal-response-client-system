@@ -100,7 +100,7 @@ public class ConfigAdminService {
   private void validate(String key, String value) {
     if (key.startsWith("system.") || key.startsWith("cache.") || key.startsWith("skill.") || key.startsWith("llm.")
         || key.startsWith("image.") || key.startsWith("match.") || key.startsWith("profile.")
-        || key.startsWith("followup.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.") || key.startsWith("health.")
+        || key.startsWith("followup.") || key.startsWith("arrival.") || key.startsWith("table.") || key.startsWith("datasource.") || key.startsWith("quicksearch.") || key.startsWith("health.")
         || key.startsWith("desktop.")
         || key.startsWith("tag.") || key.startsWith("version.") || key.startsWith("notice.") || key.startsWith("audit.")
         || key.startsWith("chat.") || key.startsWith("supervision.") || key.startsWith("wecom.")) {

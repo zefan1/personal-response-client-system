@@ -101,6 +101,10 @@
           <span class="action-icon" aria-hidden="true">批</span>
           <strong class="action-label">批量</strong>
         </button>
+        <button class="secondary sidebar-quick-button" type="button" title="预约当前微信客户" @click="openManualAppointment()">
+          <span class="action-icon" aria-hidden="true">约</span>
+          <strong class="action-label">预约</strong>
+        </button>
       </nav>
       <ReplyTaskSidebar
         :tasks="compactReplyTasks"
@@ -163,6 +167,8 @@
       <TemplateLibraryOverlay />
       <PersonalTemplateEditor />
       <BatchTemplateOverlay />
+      <ManualAppointmentOverlay />
+      <WorkbenchSuccessToastAgent />
       <HelpModeAgent />
       <ClipboardCaptureConfirmAgent />
       <WorkbenchPanel v-show="activeDesktopPanel === 'workbench'" />
@@ -206,6 +212,8 @@ import AdminConsole from './modules/admin/AdminConsole.vue';
 import ChatRecognitionPanel from './modules/chat-recognition/ChatRecognitionPanel.vue';
 import ClipboardCaptureConfirmAgent from './modules/chat-recognition/ClipboardCaptureConfirmAgent.vue';
 import BatchTemplateOverlay from './modules/batch-template/BatchTemplateOverlay.vue';
+import ManualAppointmentOverlay from './modules/workbench/ManualAppointmentOverlay.vue';
+import { openManualAppointment } from './modules/workbench/manualAppointmentStore';
 import CopyBackfillAgent from './modules/copy-backfill/CopyBackfillAgent.vue';
 import CustomerProfilePanel from './modules/customer-profile/CustomerProfilePanel.vue';
 import CommunicationHistoryPanel from './modules/communication-history/CommunicationHistoryPanel.vue';
@@ -237,6 +245,7 @@ import { eventBus } from './shared/eventBus';
 import { connectWsMessageBus, disconnectWsMessageBus } from './shared/wsMessageBus';
 import { cleanupStageSuggestionHandler, initializeStageSuggestionHandler } from './modules/stage-suggestion/stageSuggestionHandler';
 import WorkbenchPanel from './modules/workbench/WorkbenchPanel.vue';
+import WorkbenchSuccessToastAgent from './modules/workbench/WorkbenchSuccessToastAgent.vue';
 import {
   beginScreenshotRecognition,
   cancelRecognitionJob,

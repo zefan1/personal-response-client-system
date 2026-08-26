@@ -6,9 +6,8 @@ cd "$(dirname "$0")/.."
 export SPRING_DATASOURCE_URL='jdbc:mysql://localhost:3306/private_domain_assistant_smoke?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false'
 export SPRING_DATASOURCE_USERNAME='pda_smoke'
 export SPRING_DATASOURCE_PASSWORD='pda_smoke_pwd'
-# Local development stays mock by default, but a controlled acceptance run may
-# pass MOCK_EXTERNALS=false from the PowerShell launcher to use the real relay.
-export MOCK_EXTERNALS="${MOCK_EXTERNALS:-true}"
+# Runtime defaults to the configured real relay. Mocking must be explicitly requested.
+export MOCK_EXTERNALS="${MOCK_EXTERNALS:-false}"
 export SERVER_PORT='8080'
 export WECOM_TRANSPORT_MODE="${WECOM_TRANSPORT_MODE:-RELAY}"
 export SPRING_FLYWAY_VALIDATE_ON_MIGRATE='false'

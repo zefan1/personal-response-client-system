@@ -5,6 +5,8 @@ import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.llm.LlmProfileExtractionService;
 import com.privateflow.modules.profile.config.ProfileConfigProvider;
 import com.privateflow.modules.profile.infra.ProfileFieldRegistry;
+import com.privateflow.modules.customer.admin.IntentProjectMappingService;
+import java.util.LinkedHashMap;
 import com.privateflow.modules.skill.ProfileExtractRequest;
 import com.privateflow.modules.skill.ProfileAnalysisResult;
 import com.privateflow.modules.skill.SkillGatewayService;
@@ -22,6 +24,7 @@ public class ProfileExtractionClient {
   private final ProfileConfigProvider configProvider;
   private final LlmProfileExtractionService llmProfileExtractionService;
   private final ProfileAnalysisContextBuilder contextBuilder;
+  private IntentProjectMappingService intentProjectMappingService;
 
   public ProfileExtractionClient(
       SkillGatewayService skillGatewayService,
@@ -36,6 +39,11 @@ public class ProfileExtractionClient {
     this.contextBuilder = contextBuilder;
   }
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  public void setIntentProjectMappingService(IntentProjectMappingService service) {
+    this.intentProjectMappingService = service;
+  }
+
   public ProfileAnalysisResult extract(String conversationText, Customer customer, String caller) {
     return extract(conversationText, List.of(), customer, caller);
   }
@@ -47,7 +55,10 @@ public class ProfileExtractionClient {
       String caller) {
     try {
       List<String> targetFields = configProvider.get().extractFields();
-      var existingProfile = fieldRegistry.toProfileMap(customer);
+      var existingProfile = new LinkedHashMap<>(fieldRegistry.toProfileMap(customer));
+      if (intentProjectMappingService != null) {
+        existingProfile.put("intendedProjectOptions", intentProjectMappingService.current(true).get("rules"));
+      }
       var analysisContext = contextBuilder.build(customer, existingProfile, rawMessages);
       if (analysisContext.effectiveMessageCount() <= 0) {
         return ProfileAnalysisResult.empty();

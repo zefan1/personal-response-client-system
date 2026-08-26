@@ -19,6 +19,6 @@ public record ProfileConfig(
         "lochiaPeriod", "bodyConcerns", "diastasisRecti", "urineLeakage",
         "pubicLumbago", "prevRepairExp", "postpartumCheck", "exerciseHabits",
         "worries", "intentLevel", "personalityType", "nextFollowupAt",
-        "nextFollowupDir", "followupNotes");
+        "nextFollowupDir", "followupNotes", "intendedProject");
   }
 }

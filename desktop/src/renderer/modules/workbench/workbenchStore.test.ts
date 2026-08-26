@@ -285,6 +285,19 @@ describe('workbenchStore', () => {
     ]);
     expect(workbench.workbenchState.toast).toContain('待办队列');
   });
+
+  it('shows a success toast for five seconds and then clears it', async () => {
+    const { workbench } = await freshStore();
+
+    workbench.showWorkbenchSuccessToast('保存成功，已复制预约话术');
+    expect(workbench.workbenchState.successToast).toBe('保存成功，已复制预约话术');
+
+    vi.advanceTimersByTime(4999);
+    expect(workbench.workbenchState.successToast).toBe('保存成功，已复制预约话术');
+
+    vi.advanceTimersByTime(1);
+    expect(workbench.workbenchState.successToast).toBe('');
+  });
 });
 
 function followup(patch: Partial<FollowupItem>): FollowupItem {

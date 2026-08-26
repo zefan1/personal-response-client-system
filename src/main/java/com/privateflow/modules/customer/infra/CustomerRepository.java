@@ -46,6 +46,14 @@ public class CustomerRepository {
     return customers.stream().findFirst();
   }
 
+  public List<Customer> findCustomersForIntentProject(boolean onlyEmptyIntent) {
+    String sql = "SELECT * FROM customers WHERE purchased_project IS NOT NULL "
+        + "AND TRIM(purchased_project) <> ''"
+        + (onlyEmptyIntent ? " AND (intended_project IS NULL OR TRIM(intended_project) = '')" : "")
+        + " ORDER BY id";
+    return jdbcTemplate.query(sql, ROW_MAPPER);
+  }
+
   /** Returns the latest non-invalid customer stage recorded before an invalid mark. */
   public Optional<String> findPreviousCustomerStage(String phone) {
     if (phone == null || phone.isBlank()) {

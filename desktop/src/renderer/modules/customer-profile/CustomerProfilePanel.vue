@@ -289,15 +289,6 @@
           <summary><span>最近一次预约</span><small>{{ appointmentOverview }} · {{ customer.appointmentStore || '门店待确认' }}</small></summary>
           <FieldGrid v-if="state.editMode" :items="appointmentItems" />
           <ProfileFieldRows v-else :items="appointmentSummaryItems" />
-        <button v-if="!readOnly" class="primary small" type="button" :disabled="state.editMode" @click="beginBooking">确认预约并生成填写信息</button>
-        <form v-if="!readOnly && state.bookingOpen" class="booking-form" @submit.prevent="confirmBooking">
-          <label>预约日期<input v-model="state.bookingDraft.appointmentDate" type="date" required /></label>
-          <label>预约时间<input v-model="state.bookingDraft.appointmentTime" type="time" /></label>
-          <label>预约门店<input v-model="state.bookingDraft.appointmentStore" required /></label>
-          <label>预约项目<input v-model="state.bookingDraft.appointmentItem" /></label>
-          <button class="primary small" type="submit">生成预约信息</button>
-          <textarea v-if="state.bookingTemplate" :value="state.bookingTemplate" readonly rows="6" aria-label="预约信息模板" />
-        </form>
         </details>
         <details class="profile-detail-disclosure profile-appointment-history">
           <summary><span>后续到店记录</span><small>每次预约、到店与服务资料会继续追加</small></summary>
@@ -321,12 +312,10 @@ import { eventBus } from '../../shared/eventBus';
 import {
   appendProfileSuggestions,
   appendStageSuggestion,
-  beginBooking,
   beginTagEdit,
   cancelTagEdit,
   cancelEditMode,
   cleanupCustomerProfileStore,
-  confirmBooking,
   confirmTableSync,
   copyCustomerNickname,
   copyCustomerPhone,

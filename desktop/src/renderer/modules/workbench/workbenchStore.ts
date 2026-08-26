@@ -32,10 +32,23 @@ export const workbenchState = reactive({
   fetchFailedCount: 0,
   stale: false,
   retryOnly: false,
-  toast: ''
+  toast: '',
+  successToast: ''
 });
 
 let automaticRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let successToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function showWorkbenchSuccessToast(message: string): void {
+  workbenchState.successToast = message;
+  if (successToastTimer !== null) {
+    clearTimeout(successToastTimer);
+  }
+  successToastTimer = setTimeout(() => {
+    workbenchState.successToast = '';
+    successToastTimer = null;
+  }, 5000);
+}
 
 export const workbenchMetrics = computed<WorkbenchMetrics>(() => {
   const next = cloneMetrics();

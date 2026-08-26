@@ -2,7 +2,8 @@ param(
   [string]$RelayPath = (Join-Path $env:LOCALAPPDATA 'PrivateDomainAssistant\wecom-relay.clixml'),
   [string]$SmartSheetPath = (Join-Path $env:LOCALAPPDATA 'PrivateDomainAssistant\wecom-smartsheet.clixml'),
   [string]$InboundCallbackRelayPath = (Join-Path $env:LOCALAPPDATA 'PrivateDomainAssistant\wecom-inbound-callback-relay.clixml'),
-  [switch]$RealExternal
+  [switch]$RealExternal,
+  [switch]$MockExternal
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,11 +30,13 @@ $previous = @{}
 $previousWslEnv = $env:WSLENV
 
 try {
-  if ($RealExternal) {
-    $previous['MOCK_EXTERNALS'] = [Environment]::GetEnvironmentVariable('MOCK_EXTERNALS', 'Process')
-    $env:MOCK_EXTERNALS = 'false'
-    $allNames += 'MOCK_EXTERNALS'
+  if ($RealExternal -and $MockExternal) {
+    throw 'RealExternal and MockExternal cannot be used together.'
   }
+  # Runtime defaults to the configured real relay. Mocking is opt-in only.
+  $previous['MOCK_EXTERNALS'] = [Environment]::GetEnvironmentVariable('MOCK_EXTERNALS', 'Process')
+  $env:MOCK_EXTERNALS = if ($MockExternal) { 'true' } else { 'false' }
+  $allNames += 'MOCK_EXTERNALS'
   foreach ($name in $names) {
     $secureValue = if ($relay.PSObject.Properties[$name]) { $relay.$name } else { $smartSheet.$name }
     if ($secureValue -isnot [System.Security.SecureString]) {

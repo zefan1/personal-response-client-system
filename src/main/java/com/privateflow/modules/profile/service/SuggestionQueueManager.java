@@ -3,7 +3,6 @@ package com.privateflow.modules.profile.service;
 import com.privateflow.common.events.ProfileSuggestionsReadyEvent;
 import com.privateflow.common.events.ProfileUpdatedEvent;
 import com.privateflow.modules.customer.Customer;
-import com.privateflow.modules.customer.booking.CustomerBookingService;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.service.CustomerAccessService;
 import com.privateflow.modules.profile.BatchResolveRequest;
@@ -39,7 +38,6 @@ public class SuggestionQueueManager {
   private final ApplicationEventPublisher eventPublisher;
   private final AuditLogRepository auditLogRepository;
   private final CustomerAccessService customerAccessService;
-  private final CustomerBookingService customerBookingService;
 
   @Autowired
   public SuggestionQueueManager(
@@ -50,8 +48,7 @@ public class SuggestionQueueManager {
       ProfileConfigProvider configProvider,
       ApplicationEventPublisher eventPublisher,
       AuditLogRepository auditLogRepository,
-      CustomerAccessService customerAccessService,
-      CustomerBookingService customerBookingService) {
+      CustomerAccessService customerAccessService) {
     this.suggestionRepository = suggestionRepository;
     this.customerQueryService = customerQueryService;
     this.fieldRegistry = fieldRegistry;
@@ -60,20 +57,6 @@ public class SuggestionQueueManager {
     this.eventPublisher = eventPublisher;
     this.auditLogRepository = auditLogRepository;
     this.customerAccessService = customerAccessService;
-    this.customerBookingService = customerBookingService;
-  }
-
-  public SuggestionQueueManager(
-      SuggestionRepository suggestionRepository,
-      CustomerQueryService customerQueryService,
-      ProfileFieldRegistry fieldRegistry,
-      ProfileWriter profileWriter,
-      ProfileConfigProvider configProvider,
-      ApplicationEventPublisher eventPublisher,
-      AuditLogRepository auditLogRepository,
-      CustomerAccessService customerAccessService) {
-    this(suggestionRepository, customerQueryService, fieldRegistry, profileWriter, configProvider,
-        eventPublisher, auditLogRepository, customerAccessService, null);
   }
 
   public List<ProfileSuggestion> listPending(String phone) {
@@ -156,9 +139,6 @@ public class SuggestionQueueManager {
       profileWriter.write(phone, updates, customer.getVersion(), false);
       eventPublisher.publishEvent(new ProfileUpdatedEvent(phone, List.copyOf(updates.keySet())));
       confirmed = suggestionRepository.markStatus(confirmedIds, SuggestionStatus.CONFIRMED);
-      if (customerBookingService != null) {
-        customerBookingService.completeAfterSuggestion(phone);
-      }
     }
     int skipped = suggestionRepository.markStatus(skippedIds, SuggestionStatus.CONFLICT_SKIPPED);
     auditLogRepository.log("UPDATE_PROFILE", operator, "customer", phone, "confirm profile suggestions");

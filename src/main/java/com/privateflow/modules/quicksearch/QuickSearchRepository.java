@@ -26,6 +26,16 @@ public class QuickSearchRepository {
         """, new QuickSearchItemMapper());
   }
 
+  public java.util.Optional<QuickSearchItem> findEnabledTemplate(long id) {
+    return jdbcTemplate.query("""
+        SELECT id, content_type, scene, lead_type, title, shortcut_code, content, image_url,
+               sort_order, is_enabled, updated_at
+        FROM quick_search_items
+        WHERE id = ? AND is_enabled = 1 AND content_type = 'TEMPLATE'
+        LIMIT 1
+        """, new QuickSearchItemMapper(), id).stream().findFirst();
+  }
+
   private static final class QuickSearchItemMapper implements RowMapper<QuickSearchItem> {
     @Override
     public QuickSearchItem mapRow(ResultSet rs, int rowNum) throws SQLException {

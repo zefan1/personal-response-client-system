@@ -7,6 +7,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.tablewrite.client.WecomTableClient;
 import com.privateflow.modules.tablewrite.config.TableConfig;
@@ -19,6 +21,34 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class CustomerMasterProjectionServiceTest {
+
+  @Test
+  void includesPhoneWhenProjectingOnlyAnIntendedProjectField() {
+    WecomTableClient tableClient = mock(WecomTableClient.class);
+    TableConfigProvider configProvider = mock(TableConfigProvider.class);
+    TableFieldMappingResolver mappings = mock(TableFieldMappingResolver.class);
+    WecomSmartSheetConfig smartSheet = new WecomSmartSheetConfig(
+        "https://qyapi.weixin.qq.com", "corp", "secret", "document", "primary", "view",
+        "PRIMARY", "联系方式");
+    CustomerMasterProjectionService service = new CustomerMasterProjectionService(
+        tableClient, smartSheet, configProvider, mappings);
+    Customer customer = new Customer();
+    customer.setPhone("13800000000");
+
+    when(configProvider.get()).thenReturn(new TableConfig("", "", 10_000, 5, 60, 1, "ADMIN", 100, 1_000));
+    when(mappings.sourceFieldFor("PRIMARY", "phone")).thenReturn("联系方式");
+    when(mappings.toSourceFields(eq("PRIMARY"), any())).thenAnswer(invocation -> {
+      @SuppressWarnings("unchecked")
+      Map<String, Object> canonicalFields = invocation.getArgument(1, Map.class);
+      assertThat(canonicalFields).containsEntry("phone", "13800000000").containsEntry("intendedProject", "产康");
+      return new LinkedHashMap<>(Map.of("联系方式", "13800000000", "意向项目", "产康"));
+    });
+    when(tableClient.createRow(eq("PRIMARY"), any(), any())).thenReturn("primary-row");
+
+    service.projectFields(customer, Map.of("intendedProject", "产康"));
+
+    verify(tableClient).updateRow(eq("PRIMARY"), eq("primary-row"), any(), any());
+  }
 
   @Test
   void keepsProjectingWhenPrimarySheetRejectsOptionalFields() {

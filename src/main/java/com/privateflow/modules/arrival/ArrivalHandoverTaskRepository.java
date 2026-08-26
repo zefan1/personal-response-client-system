@@ -21,6 +21,15 @@ public class ArrivalHandoverTaskRepository {
         ORDER BY id DESC LIMIT 1
         """, (rs, row) -> map(rs), phone, Date.valueOf(date), value(time), value(store), value(item)).stream().findFirst();
   }
+
+  public Optional<ArrivalHandoverTask> findManualMatching(String phone, LocalDate date, String time, String store, String item) {
+    return jdbc.query("""
+        SELECT * FROM arrival_handover_tasks WHERE phone=?
+        AND COALESCE(appointment_date, '1000-01-01') = COALESCE(?, '1000-01-01')
+        AND COALESCE(appointment_time,'')=? AND COALESCE(appointment_store,'')=? AND COALESCE(appointment_item,'')=?
+        ORDER BY id DESC LIMIT 1
+        """, (rs, row) -> map(rs), phone, date == null ? null : Date.valueOf(date), value(time), value(store), value(item)).stream().findFirst();
+  }
   public long create(ArrivalHandoverTask task) {
     jdbc.update("""
         INSERT INTO arrival_handover_tasks (customer_id,phone,assigned_keeper,appointment_date,appointment_time,appointment_store,appointment_item,next_sync_at)
@@ -46,6 +55,36 @@ public class ArrivalHandoverTaskRepository {
       WHERE id=? AND task_status='PENDING'
       """, request.visitType(), request.voucherRedeemed(), request.experienceProject(), request.projectType(),
         request.historicalExperienceCount(), reports, operator, id);
+  }
+  public long createManual(ArrivalHandoverTask task, String operator) {
+    jdbc.update("""
+        INSERT INTO arrival_handover_tasks
+        (customer_id,phone,assigned_keeper,appointment_date,appointment_time,appointment_store,appointment_item,
+         visit_type,voucher_redeemed,experience_project,project_type,historical_experience_count,customer_report,
+         task_status,sync_status,completed_by,completed_at,next_sync_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'COMPLETED','PENDING',?,NOW(),NOW())
+        """, task.getCustomerId(), task.getPhone(), task.getAssignedKeeper(),
+        task.getAppointmentDate() == null ? null : Date.valueOf(task.getAppointmentDate()), task.getAppointmentTime(),
+        task.getAppointmentStore(), task.getAppointmentItem(), task.getVisitType(), task.getVoucherRedeemed(),
+        task.getExperienceProject(), task.getProjectType(), task.getHistoricalExperienceCount(), task.getCustomerReport(), operator);
+    Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    return id == null ? 0L : id;
+  }
+  public void updateManual(long id, ArrivalHandoverTask task, String operator) {
+    jdbc.update("""
+        UPDATE arrival_handover_tasks SET assigned_keeper=?, appointment_date=?, appointment_time=?, appointment_store=?, appointment_item=?,
+        visit_type=?, voucher_redeemed=?, experience_project=?, project_type=?, historical_experience_count=?, customer_report=?,
+        task_status='COMPLETED', sync_status='PENDING', completed_by=?, completed_at=NOW(), next_sync_at=NOW(), sync_error=NULL, updated_at=NOW()
+        WHERE id=?
+        """, task.getAssignedKeeper(), task.getAppointmentDate() == null ? null : Date.valueOf(task.getAppointmentDate()),
+        task.getAppointmentTime(), task.getAppointmentStore(), task.getAppointmentItem(), task.getVisitType(), task.getVoucherRedeemed(),
+        task.getExperienceProject(), task.getProjectType(), task.getHistoricalExperienceCount(), task.getCustomerReport(), operator, id);
+  }
+  public void updateManualReports(long id, String reports) {
+    jdbc.update("""
+        UPDATE arrival_handover_tasks SET customer_report=?, sync_status='PENDING', next_sync_at=NOW(),
+        sync_error=NULL, updated_at=NOW() WHERE id=? AND task_status='COMPLETED'
+        """, reports, id);
   }
   public void markReminded(long id) { jdbc.update("UPDATE arrival_handover_tasks SET reminded_at=NOW(), updated_at=NOW() WHERE id=? AND task_status='PENDING'", id); }
   public void markSynced(long id, String rowId) { jdbc.update("UPDATE arrival_handover_tasks SET sync_status='SYNCED',wecom_row_id=?,sync_error=NULL,next_sync_at=NULL,updated_at=NOW() WHERE id=?", rowId,id); }

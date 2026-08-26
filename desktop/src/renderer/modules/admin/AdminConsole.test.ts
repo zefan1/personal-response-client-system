@@ -485,6 +485,15 @@ const apiData: Record<string, unknown> = {
       { id: 1002, nickname: '李女士', phone: '13800001002', wechatId: 'wx-li-2' }
     ]
   },
+  '/admin/api/v1/intent-project-mappings': {
+    fieldName: '意向项目',
+    total: 3,
+    rules: [
+      { optionId: 'option-postpartum', optionText: '产康', keywords: [], priority: 0, status: 'ACTIVE' },
+      { optionId: 'option-pregnancy', optionText: '孕按', keywords: ['孕期舒缓'], priority: 0, status: 'ACTIVE' },
+      { optionId: 'option-breastfeeding', optionText: '母乳', keywords: [], priority: 0, status: 'ACTIVE' }
+    ]
+  },
   '/admin/api/v1/customer-master/1001': {
     customer: { id: 1001, nickname: '李女士', phone: '13800001001', wechatId: 'wx-li' },
     fields: [
@@ -2038,6 +2047,102 @@ describe('AdminConsole product surface', () => {
     expect(auditFilters.open).toBe(false);
     expect(host.querySelector('.ops-audit-action-grid')).toBeTruthy();
 
+    app.unmount();
+  });
+
+  it('lets administrators add, remove, save, and force-refresh intent project keywords', async () => {
+    apiMocks.postJson.mockImplementation(async (path: string) => {
+      if (path === '/admin/api/v1/intent-project-mappings/refresh') {
+        return {
+          success: true,
+          data: {
+            fieldName: '意向项目',
+            total: 4,
+            rules: [...(apiData['/admin/api/v1/intent-project-mappings'] as { rules: unknown[] }).rules,
+              { optionId: 'option-new', optionText: '新增项目', keywords: [], priority: 0, status: 'PENDING' }]
+          },
+          errorCode: null,
+          message: null
+        };
+      }
+      return { success: true, data: {}, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户数据对接').click();
+    await flushSave();
+
+    const postpartumRule = [...host.querySelectorAll('.ops-intent-project-rule')]
+      .find((rule) => rule.textContent?.includes('产康')) as HTMLElement;
+    expect(postpartumRule).toBeTruthy();
+    expect(postpartumRule.querySelectorAll('.ops-intent-project-keyword-row input')).toHaveLength(1);
+
+    (postpartumRule.querySelector('[aria-label="新增关键词"]') as HTMLButtonElement).click();
+    await flushUi();
+    const inputs = [...postpartumRule.querySelectorAll('.ops-intent-project-keyword-row input')] as HTMLInputElement[];
+    expect(inputs).toHaveLength(2);
+    setInputValue(inputs[0], '腹直肌');
+    await flushSave();
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/intent-project-mappings/option-postpartum', {
+      keywords: ['腹直肌'], priority: 0, enabled: true
+    });
+
+    (postpartumRule.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
+    await flushSave();
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/intent-project-mappings/option-postpartum', {
+      keywords: ['腹直肌'], priority: 0, enabled: false
+    });
+    setInputValue(postpartumRule.querySelector('.ops-number-input') as HTMLInputElement, '8');
+    await flushSave();
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/intent-project-mappings/option-postpartum', {
+      keywords: ['腹直肌'], priority: 8, enabled: true
+    });
+
+    (postpartumRule.querySelector('[aria-label="删除最后一个关键词"]') as HTMLButtonElement).click();
+    await flushSave();
+    expect(postpartumRule.querySelectorAll('.ops-intent-project-keyword-row input')).toHaveLength(1);
+
+    findButton(host, '读取最新项目选项').click();
+    await flushSave();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/intent-project-mappings/refresh', {});
+    expect(mainText(host)).toContain('已读取企业微信最新选项，共 4 项。');
+    expect(mainText(host)).toContain('新增项目');
+    expect(mainText(host)).toContain('新选项，待配置');
+
+    app.unmount();
+  });
+
+  it('uses a longer timeout and reports the asynchronous WeCom queue after an intent-project backfill', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    apiMocks.postJson.mockImplementation(async (path: string) => {
+      if (path === '/admin/api/v1/intent-project-mappings/recompute?onlyEmpty=true') {
+        return {
+          success: true,
+          data: {
+            scanned: 14,
+            matched: 11,
+            databaseUpdated: 11,
+            projectionQueued: 11,
+            errors: []
+          },
+          errorCode: null,
+          message: null
+        };
+      }
+      return { success: true, data: {}, errorCode: null, message: null };
+    });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '客户数据对接').click();
+    await flushSave();
+    findButton(host, '开始补算空缺客户').click();
+    await flushSave();
+
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/intent-project-mappings/recompute?onlyEmpty=true', {}, 120000);
+    expect(mainText(host)).toContain('符合条件 14 位（已购项目有值且意向项目为空）');
+    expect(mainText(host)).toContain('唯一事实数据库已更新 11 位，11 位已加入企业微信同步队列');
+
+    confirm.mockRestore();
     app.unmount();
   });
 

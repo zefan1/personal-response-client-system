@@ -4,6 +4,7 @@ import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.common.events.CustomerFollowupAnalysisCompletedEvent;
 import com.privateflow.common.events.ManualProfileUpdatedEvent;
 import com.privateflow.common.events.RecognizedProfileFactsUpdatedEvent;
+import com.privateflow.common.events.ProfileUpdatedEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.customer.Customer;
@@ -156,6 +157,29 @@ public class TableWriteOrchestrator {
           TableWriteActionType.UPDATE,
           new PendingWritePayload(retrySourceTable(customer), retrySourceRowId(customer), fields),
           ex.getMessage());
+    }
+  }
+
+  /** Projects automatic chat/profile intent changes into the customer-master Smart Sheet. */
+  @Async("tableWriteExecutor")
+  @EventListener
+  public void onProfileUpdated(ProfileUpdatedEvent event) {
+    if (event == null || event.phone() == null || event.phone().isBlank()
+        || event.updatedFields() == null || !event.updatedFields().contains("intendedProject")) {
+      return;
+    }
+    Customer customer = customerQueryService.getByPhone(event.phone());
+    if (customer == null || customer.getIntendedProject() == null || customer.getIntendedProject().isBlank()) {
+      return;
+    }
+    try {
+      customerMasterProjectionService.projectFields(customer,
+          Map.of("intendedProject", customer.getIntendedProject()));
+    } catch (RuntimeException ex) {
+      queueManager.enqueue(customer.getId(), customer.getPhone(), TableWriteActionType.UPDATE,
+          new PendingWritePayload("PRIMARY", null, Map.of("intendedProject", customer.getIntendedProject())),
+          ex.getMessage());
+      log.warn("automatic intent project projection queued, phone={}", customer.getPhone(), ex);
     }
   }
 

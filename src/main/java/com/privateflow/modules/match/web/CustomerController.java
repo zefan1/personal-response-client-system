@@ -3,9 +3,6 @@ package com.privateflow.modules.match.web;
 import com.privateflow.modules.customer.Customer;
 import com.privateflow.modules.customer.CustomerQueryService;
 import com.privateflow.modules.customer.admin.CustomerStageOptionService;
-import com.privateflow.modules.customer.booking.BookingConfirmRequest;
-import com.privateflow.modules.customer.booking.BookingConfirmResult;
-import com.privateflow.modules.customer.booking.CustomerBookingService;
 import com.privateflow.modules.match.ApiResponse;
 import com.privateflow.modules.match.CustomerBatchRequest;
 import com.privateflow.modules.match.CustomerBatchResponse;
@@ -61,7 +58,6 @@ public class CustomerController {
   private final SuggestionQueueManager suggestionQueueManager;
   private final ManualSaveHandler manualSaveHandler;
   private final CustomerTagUpdateService customerTagUpdateService;
-  private final CustomerBookingService customerBookingService;
   private final CustomerQueryService customerQueryService;
   private final CustomerStageOptionService stageOptionService;
 
@@ -73,7 +69,6 @@ public class CustomerController {
       SuggestionQueueManager suggestionQueueManager,
       ManualSaveHandler manualSaveHandler,
       CustomerTagUpdateService customerTagUpdateService,
-      CustomerBookingService customerBookingService,
       CustomerQueryService customerQueryService,
       CustomerStageOptionService stageOptionService) {
     this.customerSearchService = customerSearchService;
@@ -82,7 +77,6 @@ public class CustomerController {
     this.suggestionQueueManager = suggestionQueueManager;
     this.manualSaveHandler = manualSaveHandler;
     this.customerTagUpdateService = customerTagUpdateService;
-    this.customerBookingService = customerBookingService;
     this.customerQueryService = customerQueryService;
     this.stageOptionService = stageOptionService;
   }
@@ -94,22 +88,9 @@ public class CustomerController {
       SuggestionQueueManager suggestionQueueManager,
       ManualSaveHandler manualSaveHandler,
       CustomerTagUpdateService customerTagUpdateService,
-      CustomerBookingService customerBookingService,
       CustomerQueryService customerQueryService) {
     this(customerSearchService, customerProfileService, manualEditHandler, suggestionQueueManager,
-        manualSaveHandler, customerTagUpdateService, customerBookingService, customerQueryService, null);
-  }
-
-  public CustomerController(
-      CustomerSearchService customerSearchService,
-      CustomerProfileService customerProfileService,
-      ManualEditHandler manualEditHandler,
-      SuggestionQueueManager suggestionQueueManager,
-      ManualSaveHandler manualSaveHandler,
-      CustomerTagUpdateService customerTagUpdateService,
-      CustomerBookingService customerBookingService) {
-    this(customerSearchService, customerProfileService, manualEditHandler, suggestionQueueManager,
-        manualSaveHandler, customerTagUpdateService, customerBookingService, null, null);
+        manualSaveHandler, customerTagUpdateService, customerQueryService, null);
   }
 
   public CustomerController(
@@ -120,7 +101,7 @@ public class CustomerController {
       ManualSaveHandler manualSaveHandler,
       CustomerTagUpdateService customerTagUpdateService) {
     this(customerSearchService, customerProfileService, manualEditHandler, suggestionQueueManager,
-        manualSaveHandler, customerTagUpdateService, null, null, null);
+        manualSaveHandler, customerTagUpdateService, null, null);
   }
 
   @GetMapping("/search")
@@ -241,16 +222,6 @@ public class CustomerController {
         phone,
         new ManualProfileUpdateRequest(request.version(), fields, operator));
     return ApiResponse.ok(new LeadValidityResult(result.version(), request.invalid(), now, operator, retainedUntil));
-  }
-
-  @PostMapping("/{phone}/booking")
-  public ApiResponse<BookingConfirmResult> confirmBooking(
-      @PathVariable("phone") String phone,
-      @RequestBody BookingConfirmRequest request) {
-    if (customerBookingService == null) {
-      throw new IllegalStateException("预约服务不可用");
-    }
-    return ApiResponse.ok(customerBookingService.confirm(phone, request));
   }
 
   @PutMapping("/{phone}/tags/{categoryId}")
