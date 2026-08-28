@@ -43,6 +43,7 @@ const api = {
   writeClipboardText: (text: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('clipboard:write-text', { text }),
   writeClipboardImage: (imageUrl: string): Promise<{ success: boolean; error?: string; message?: string }> => ipcRenderer.invoke('clipboard:write-image', { imageUrl }),
   openAdminConsole: (url?: string): Promise<{ success: boolean; error?: string; message?: string; url?: string }> => ipcRenderer.invoke('admin:open-external', { url }),
+  openAssignmentTable: (url: string): Promise<{ success: boolean; error?: string; message?: string; url?: string }> => ipcRenderer.invoke('assignment-table:open-external', { url }),
   toggleAlwaysOnTop: (): Promise<AlwaysOnTopResult> => ipcRenderer.invoke('window:toggle-always-on-top'),
   getAlwaysOnTop: (): Promise<AlwaysOnTopResult> => ipcRenderer.invoke('window:get-always-on-top'),
   getOnlineStatus: (): Promise<OnlineStatusPayload> => ipcRenderer.invoke('app:get-online-status'),

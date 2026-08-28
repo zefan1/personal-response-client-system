@@ -14,6 +14,9 @@ type CustomerProfileSnapshot = {
   nickname: string;
 };
 
+const TOAST_DISMISS_MS = 4000;
+let toastTimer: number | null = null;
+
 export const newLeadFlowState = reactive({
   open: false,
   item: null as LeadContactItem | null,
@@ -34,12 +37,12 @@ export function requestLeadContact(item: LeadContactItem): void {
 export async function openLeadContact(item: LeadContactItem): Promise<void> {
   const value = contactValue(item);
   if (!value) {
-    newLeadFlowState.toast = '没有可复制的手机号或微信号';
+    setToast('没有可复制的手机号或微信号');
     return;
   }
   const copied = await writeClipboardText(value);
   if (!copied.success) {
-    newLeadFlowState.toast = '复制失败，请重试';
+    setToast('复制失败，请重试');
     return;
   }
   newLeadFlowState.item = item;
@@ -47,7 +50,7 @@ export async function openLeadContact(item: LeadContactItem): Promise<void> {
   newLeadFlowState.copiedContact = true;
   newLeadFlowState.open = true;
   newLeadFlowState.error = '';
-  newLeadFlowState.toast = `${item.contactType === 'WECHAT' ? '微信号' : '手机号'}已复制`;
+  setToast(`${item.contactType === 'WECHAT' ? '微信号' : '手机号'}已复制`);
   await loadFriendRequestTemplates();
 }
 
@@ -117,12 +120,12 @@ export async function confirmLeadContact(): Promise<void> {
     if (template) {
       const copied = await writeClipboardText(template.text);
       if (!copied.success) {
-        newLeadFlowState.toast = '昵称已保存，但话术复制失败，请重新点击复制话术';
+        setToast('昵称已保存，但话术复制失败，请重新点击复制话术');
       } else {
-        newLeadFlowState.toast = '昵称已保存，添加好友话术已复制';
+        setToast('昵称已保存，添加好友话术已复制');
       }
     } else {
-      newLeadFlowState.toast = '昵称已保存';
+      setToast('昵称已保存');
     }
     eventBus.emit('new-lead:processed', { phone: item.phoneFull ?? item.phone, nickname });
     newLeadFlowState.open = false;
@@ -149,7 +152,16 @@ export async function copySelectedFriendRequestTemplate(): Promise<void> {
     return;
   }
   const result = await writeClipboardText(template.text);
-  newLeadFlowState.toast = result.success ? '添加好友话术已复制' : '话术复制失败，请重试';
+  setToast(result.success ? '添加好友话术已复制' : '话术复制失败，请重试');
+}
+
+function setToast(message: string): void {
+  if (toastTimer !== null) window.clearTimeout(toastTimer);
+  newLeadFlowState.toast = message;
+  toastTimer = window.setTimeout(() => {
+    newLeadFlowState.toast = '';
+    toastTimer = null;
+  }, TOAST_DISMISS_MS);
 }
 
 function contactValue(item: LeadContactItem): string {

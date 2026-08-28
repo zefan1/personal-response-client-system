@@ -2,29 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { QUICK_SEARCH_TEMPLATE_VARIABLES, resolveQuickSearchTemplate } from './templateVariables';
 
 describe('quick-search template variables', () => {
-  it('uses Chinese placeholders for every variable shown to administrators', () => {
-    expect(QUICK_SEARCH_TEMPLATE_VARIABLES.map((item) => item.placeholder)).toEqual([
-      '{{客户昵称}}',
-      '{{客户名称}}',
-      '{{手机号}}',
-      '{{意向门店}}',
-      '{{意向项目}}',
-      '{{客户阶段}}',
-      '{{意向等级}}',
-      '{{下次跟进时间}}',
-      '{{预约日期}}',
-      '{{预约时间}}',
-      '{{预约项目}}',
-      '{{预约门店}}',
-      '{{类型}}',
-      '{{是否核券}}',
-      '{{体验项目}}',
-      '{{项目类型}}',
-      '{{历史体验次数}}',
-      '{{客户报告}}',
-      '{{是否到店}}',
-      '{{分配管家}}'
-    ]);
+  it('includes every unique-fact field that an administrator can insert', () => {
+    expect(QUICK_SEARCH_TEMPLATE_VARIABLES.map((item) => item.key)).toEqual(expect.arrayContaining([
+      'customerName', 'bodyConcerns', 'followupNotes', 'appointmentStatus',
+      'arrivalExperienceProject', 'customerStage', 'transactionPrimaryReason'
+    ]));
   });
 
   it('resolves Chinese, legacy English, and unique-fact field-key placeholders', () => {
@@ -57,6 +39,20 @@ describe('quick-search template variables', () => {
     expect(resolveQuickSearchTemplate('客户名称：{{客户名称}}\n预约时间：{{预约时间}}', customer)).toBe(
       '客户名称：王小雨\n预约时间：14:00'
     );
+  });
+
+  it('resolves Chinese labels for unique-fact fields outside the original shortcut list', () => {
+    expect(resolveQuickSearchTemplate('{{客户关注点}} / {{身体关注}} / {{跟进记录}}', {
+      bodyConcerns: '腹直肌分离',
+      followupNotes: '已约到店评估'
+    })).toBe('腹直肌分离 / 腹直肌分离 / 已约到店评估');
+  });
+
+  it('keeps legacy project placeholders compatible with their current field names', () => {
+    expect(resolveQuickSearchTemplate('{{项目类型}} {{体验项目}}', {
+      projectType: '体验卡',
+      experienceProject: '盆底肌评估'
+    })).toBe('体验卡 盆底肌评估');
   });
 
   it('prefers an edited appointmentDateTime over a stale separate time value', () => {

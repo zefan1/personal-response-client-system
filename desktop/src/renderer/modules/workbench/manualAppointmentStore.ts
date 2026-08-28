@@ -7,7 +7,13 @@ import { showWorkbenchSuccessToast } from './workbenchStore';
 export type ManualAppointmentCandidate = { customerId: number; nickname?: string | null; phone?: string | null; intendedStore?: string | null };
 export type ManualAppointmentField = { key: string; label: string; type: string; editable: boolean; options: string[] };
 type ManualAppointmentForm = { customerId: number; customerVersion: number; nickname: string; phone: string; values: Record<string, string>; fields: ManualAppointmentField[] };
-type ManualAppointmentSaveResult = { synced: boolean; taskId: number; syncError?: string | null; templateContent?: string | null };
+type ManualAppointmentSaveResult = {
+  synced: boolean;
+  taskId: number;
+  syncError?: string | null;
+  templateContent?: string | null;
+  templateValues?: Record<string, string> | null;
+};
 type Report = { id: string; fileName: string };
 type PendingReport = { id: string; file: File };
 
@@ -119,7 +125,15 @@ export async function submitManualAppointment(): Promise<void> {
   manualAppointmentState.notice = '';
   try {
     const form = manualAppointmentState.form;
-    const response = await postJson<ManualAppointmentSaveResult>(`/api/v1/arrival-handover/customers/${form.customerId}/appointment`, { customerVersion: form.customerVersion, values: form.values });
+    let response = await saveManualAppointment(form);
+    if (!response.success && response.errorCode === '50-10002') {
+      const latest = await getJson<ManualAppointmentForm>(`/api/v1/arrival-handover/customers/${form.customerId}/appointment`);
+      if (!latest.success || !latest.data) {
+        throw new Error('客户资料刚有更新，无法读取最新版本，请直接再次提交');
+      }
+      form.customerVersion = latest.data.customerVersion;
+      response = await saveManualAppointment(form);
+    }
     if (!response.success || !response.data) throw new Error(response.message || '预约保存失败');
     let result = response.data;
     if (manualAppointmentState.reportFiles.length) {
@@ -136,7 +150,8 @@ export async function submitManualAppointment(): Promise<void> {
       result = { ...result, synced: committed.data.synced, syncError: committed.data.syncError };
     }
     if (result.templateContent) {
-      const text = resolveQuickSearchTemplate(result.templateContent, { ...form.values, nickname: form.nickname, phone: form.phone }, form.phone);
+      const templateValues = { ...form.values, ...(result.templateValues ?? {}), nickname: form.nickname, phone: form.phone };
+      const text = removeUnresolvedTemplateLines(resolveQuickSearchTemplate(result.templateContent, templateValues, form.phone));
       const copied = await writeClipboardText(text);
       if (!copied.success) throw new Error('预约已保存，但预约成功话术复制失败');
     }
@@ -154,4 +169,15 @@ export async function submitManualAppointment(): Promise<void> {
   } finally {
     manualAppointmentState.saving = false;
   }
+}
+
+function saveManualAppointment(form: ManualAppointmentForm) {
+  return postJson<ManualAppointmentSaveResult>(
+    `/api/v1/arrival-handover/customers/${form.customerId}/appointment`,
+    { customerVersion: form.customerVersion, values: form.values }
+  );
+}
+
+function removeUnresolvedTemplateLines(text: string): string {
+  return text.split(/\r?\n/).filter((line) => !/\{\{[^{}]+\}\}|\{[^{}]+\}/.test(line)).join('\n');
 }

@@ -6,26 +6,76 @@ export type QuickSearchTemplateVariable = {
 };
 
 export const QUICK_SEARCH_TEMPLATE_VARIABLES: QuickSearchTemplateVariable[] = [
+  variable('customerName', '客户姓名', ['客户名称', '真实姓名']),
   variable('nickname', '客户昵称'),
-  variable('customerName', '客户名称', ['客户姓名', '真实姓名']),
   variable('phone', '手机号'),
+  variable('wechatId', '微信号'),
+  variable('sourceChannel', '来源渠道'),
+  variable('leadType', '客资类型'),
+  variable('leadCaptureMethod', '留资方式'),
+  variable('platformLeadAt', '平台留资时间'),
+  variable('advertisingType', '广告类型'),
+  variable('globalAdvertisementId', '全域广告ID'),
+  variable('standardAdvertisementId', '标准广告ID'),
+  variable('contentId', '内容ID'),
+  variable('videoId', '视频ID'),
+  variable('orderNumber', '订单号'),
+  variable('conversionTrace', '转化追溯'),
+  variable('previousAssignedKeeper', '上次分配人'),
+  variable('previousPlatformLeadAt', '上次留资时间'),
+  variable('assignedKeeper', '分配管家', ['管家名']),
+  variable('assignedAt', '分配日期'),
+  variable('assignmentMonth', '分配月份'),
   variable('intendedStore', '意向门店'),
   variable('intendedProject', '意向项目'),
-  variable('customerStage', '客户阶段'),
+  variable('purchasedProject', '已购项目'),
+  variable('experienceCardType', '体验卡类型'),
+  variable('pendingOrderStatus', '挂单情况'),
+  variable('purchaseDate', '购卡时间'),
+  variable('customerLevel', '客户等级'),
   variable('intentLevel', '意向等级'),
+  variable('personalityType', '性格类型'),
+  variable('postpartumMonths', '产后月份'),
+  variable('parity', '胎次'),
+  variable('deliveryMethod', '分娩方式'),
+  variable('breastfeeding', '哺乳情况'),
+  variable('lochiaPeriod', '恶露/月经情况'),
+  variable('pregnancyWeight', '孕期增重'),
+  variable('currentWeight', '当前体重'),
+  variable('bodyConcerns', '客户关注点', ['身体关注']),
+  variable('diastasisRecti', '腹直肌分离'),
+  variable('urineLeakage', '漏尿情况'),
+  variable('pubicLumbago', '耻骨/腰痛'),
+  variable('prevRepairExp', '既往修复经历'),
+  variable('postpartumCheck', '产后检查'),
+  variable('exerciseHabits', '运动习惯'),
+  variable('customerProfileSummary', '客户档案摘要'),
+  variable('internalNote', '备注'),
+  variable('firstTrackingCapture', '第一次追踪捕捉'),
+  variable('secondTrackingCapture', '第二次追踪捕捉'),
+  variable('thirdTrackingCapture', '第三次追踪捕捉'),
+  variable('lastFollowupAt', '最近跟进时间'),
+  variable('followupNotes', '跟进记录'),
   variable('nextFollowupAt', '下次跟进时间'),
+  variable('nextFollowupDir', '下次跟进方向'),
   variable('appointmentDate', '预约日期'),
   variable('appointmentTime', '预约时间'),
   variable('appointmentItem', '预约项目'),
   variable('appointmentStore', '预约门店'),
-  variable('visitType', '类型'),
-  variable('voucherRedeemed', '是否核券'),
-  variable('experienceProject', '体验项目'),
-  variable('projectType', '项目类型'),
+  variable('appointmentStatus', '预约状态'),
+  variable('arrived', '是否到店'),
+  variable('arrivalHandoverRecord', '到店衔接记录'),
+  variable('arrivalProjectType', '项目类型'),
+  variable('arrivalExperienceProject', '到店体验项目', ['体验项目']),
   variable('historicalExperienceCount', '历史体验次数'),
   variable('customerReport', '客户报告'),
-  variable('arrived', '是否到店'),
-  variable('assignedKeeper', '分配管家', ['管家名'])
+  variable('receptionTeacher', '接待老师'),
+  variable('receptionConsultant', '接待顾问'),
+  variable('voucherRedeemed', '是否核券'),
+  variable('customerStage', '客户阶段'),
+  variable('transactionAmount', '成交金额'),
+  variable('transactionAt', '成交时间'),
+  variable('transactionPrimaryReason', '成交主因')
 ];
 
 const VARIABLE_KEY_BY_ALIAS = new Map<string, string>();
@@ -80,11 +130,20 @@ function templateValue(customer: Record<string, unknown>, key: string, phoneFull
       return time.slice(0, 5);
     }
   }
-  const value = customer[key];
+  const value = customer[key] ?? legacyTemplateValue(customer, key);
   if (value === undefined || value === null || value === '') {
     return '';
   }
   return String(value);
+}
+
+function legacyTemplateValue(customer: Record<string, unknown>, key: string): unknown {
+  const legacyKey = ({
+    arrivalProjectType: 'projectType',
+    arrivalExperienceProject: 'experienceProject',
+    leadType: 'visitType'
+  } as Record<string, string>)[key];
+  return legacyKey ? customer[legacyKey] : undefined;
 }
 
 function phoneLast4(customer: Record<string, unknown>, phoneFull: string): string {

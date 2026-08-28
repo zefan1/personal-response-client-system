@@ -1,3 +1,5 @@
+import { resolveAssignmentTableUrl } from '../../shared/assignmentTableUrl';
+
 export type BridgeResult = {
   success: boolean;
   error?: string;
@@ -86,6 +88,24 @@ export async function openAdminConsole(url: string): Promise<BridgeResult> {
     };
   }
   const opened = window.open(url, '_blank', 'noopener,noreferrer');
+  return { success: Boolean(opened) };
+}
+
+export async function openAssignmentTable(url: string): Promise<BridgeResult> {
+  let resolvedUrl: string;
+  try {
+    resolvedUrl = resolveAssignmentTableUrl(url);
+  } catch (error) {
+    return {
+      success: false,
+      error: 'ASSIGNMENT_TABLE_OPEN_FAILED',
+      message: error instanceof Error ? error.message : '企业微信表格链接无效'
+    };
+  }
+  if (window.desktopBridge?.openAssignmentTable) {
+    return window.desktopBridge.openAssignmentTable(resolvedUrl);
+  }
+  const opened = window.open(resolvedUrl, '_blank', 'noopener,noreferrer');
   return { success: Boolean(opened) };
 }
 

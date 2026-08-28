@@ -642,6 +642,7 @@
               <small class="ops-smart-sheet-card-url" :class="{ missing: !card.configuredUrl }">{{ card.configuredUrl || '未保存网址' }}</small>
               <small v-if="card.ready" class="ops-smart-sheet-target-summary">运行目标：{{ card.sheetId }} / {{ card.viewId }}</small>
               <button class="secondary small" type="button" @click="selectSmartSheetRole(card.value)">配置这张表</button>
+              <button v-if="card.value === 'ASSIGNMENT'" class="secondary small" type="button" aria-haspopup="dialog" @click="assignmentTableManagerOpen = true">表格管理</button>
             </article>
           </div>
           <div class="ops-smart-sheet-connect-row">
@@ -2279,7 +2280,7 @@
           </div>
           <div class="ops-detail-box">
             <strong>安装包上传</strong>
-            <p>新增版本时可先上传安装包，系统会自动回填下载地址和文件大小；也可以继续使用已有下载地址。</p>
+            <p>新增版本时可先上传安装包，系统会自动回填下载地址和文件大小；发布后的 Windows 版本会自动出现在登录页下载入口。</p>
             <button class="secondary small" type="button" @click="openForm('version')">上传或新增版本</button>
           </div>
           <div class="ops-table">
@@ -2537,6 +2538,12 @@
         </article>
       </section>
     </main>
+
+    <AssignmentTableManagerDialog
+      v-if="assignmentTableManagerOpen"
+      @close="assignmentTableManagerOpen = false"
+      @changed="refreshAssignmentTableConfiguration"
+    />
 
     <div v-if="customerMasterSearchOpen" class="ops-drawer-backdrop ops-modal-backdrop" @click.self="closeCustomerMasterSearch">
       <section class="ops-drawer ops-modal-form customer-master-search-modal" role="dialog" aria-modal="true" aria-labelledby="customer-master-search-title">
@@ -3013,6 +3020,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import AdminNavigation from './AdminNavigation.vue';
+import AssignmentTableManagerDialog from './AssignmentTableManagerDialog.vue';
 import CustomerProfilePanel from '../customer-profile/CustomerProfilePanel.vue';
 import {
   deleteJson as requestDeleteJson,
@@ -3427,6 +3435,7 @@ const activeSectionKey = ref<SectionKey>(props.tagManagementOnly ? 'customer-tag
 const loading = ref(false);
 const notice = ref('');
 const noticeKind = ref<NoticeKind>('info');
+const assignmentTableManagerOpen = ref(false);
 const activeForm = ref<FormKind | null>(null);
 const editingItem = ref<AnyRecord | null>(null);
 const formDraft = reactive<AnyRecord>({});
@@ -4396,18 +4405,26 @@ const activeFormFields = computed(() => formMeta(activeForm.value).fields);
 const ruleConditionFields = computed(() => activeFormFields.value.filter((field) => ['leadType', 'thresholdHours'].includes(field.key)));
 const ruleMetaFields = computed(() => activeFormFields.value.filter((field) => ['name', 'priority', 'enabled'].includes(field.key)));
 const ruleActionFields = computed(() => activeFormFields.value.filter((field) => ['actionType', 'alertLevel', 'reminderType', 'tagName'].includes(field.key)));
-const quickSearchVariables = computed(() => QUICK_SEARCH_TEMPLATE_VARIABLES.filter((variable) => [
-  'nickname', 'phone', 'intendedStore', 'intendedProject', 'customerStage', 'intentLevel',
-  'nextFollowupAt', 'appointmentDate', 'appointmentItem', 'appointmentStore', 'arrived', 'assignedKeeper'
-].includes(variable.key)).map((variable) => ({
-  key: variable.key,
-  label: variable.label,
-  value: variable.placeholder
-})));
+const quickSearchVariables = computed(() => {
+  const knownVariables = new Map(QUICK_SEARCH_TEMPLATE_VARIABLES.map((variable) => [variable.key, variable]));
+  const fields: AnyRecord[] = customerFields.value.length
+    ? customerFields.value
+    : QUICK_SEARCH_TEMPLATE_VARIABLES.map((variable) => ({ key: variable.key, label: variable.label }));
+  return fields.map((field) => {
+    const key = String(field.key ?? field.fieldName ?? field.name ?? '').trim();
+    const known = knownVariables.get(key);
+    return {
+      key,
+      label: String(field.label ?? field.displayName ?? known?.label ?? key),
+      category: String(field.category ?? ''),
+      value: known?.placeholder ?? `{{${key}}}`
+    };
+  }).filter((field) => field.key);
+});
 const filteredQuickSearchVariables = computed(() => {
   const keyword = quickSearchVariableQuery.value.trim().toLowerCase();
   if (!keyword) return quickSearchVariables.value;
-  return quickSearchVariables.value.filter((field) => `${field.label} ${field.key}`.toLowerCase().includes(keyword));
+  return quickSearchVariables.value.filter((field) => `${field.label} ${field.key} ${field.category}`.toLowerCase().includes(keyword));
 });
 const appointmentTemplateDirty = computed(() => appointmentTemplateSelection.value !== appointmentTemplateSavedSelection.value);
 const appointmentTemplateDraft = computed(() => friendRequestSourceTemplates.value.find(
@@ -4656,6 +4673,22 @@ async function loadSkillAi() {
     syncStatuses.value = listFromResponse(syncList);
     hydratePromptDraft();
   }, '配置中心已刷新');
+}
+
+async function refreshAssignmentTableConfiguration() {
+  await runWithNotice(async () => {
+    const [configList, datasourceList, syncList] = await Promise.all([
+      getJson<unknown>('/admin/api/v1/configs'),
+      getJson<unknown>('/admin/api/v1/datasources'),
+      getJson<unknown>('/admin/api/v1/datasources/sync-status')
+    ]);
+    configs.value = configEntries(configList);
+    datasources.value = listFromResponse(datasourceList);
+    syncStatuses.value = listFromResponse(syncList);
+    if (smartSheetConnectionDraft.role === 'ASSIGNMENT') {
+      hydrateSmartSheetTarget('ASSIGNMENT');
+    }
+  }, '分配表配置已自动更新');
 }
 
 async function loadSkillAnalytics() {
@@ -8588,7 +8621,11 @@ function parseRuleAction(value: unknown) {
 
 function normalizeCustomerFields(response: ApiResponse<unknown>) {
   const fields = listFromResponse(response);
-  return fields.length ? fields.map((field) => ({ key: field.key ?? field.fieldName ?? field.name, label: field.label ?? field.displayName ?? field.name ?? field.key })) : [
+  return fields.length ? fields.map((field) => ({
+    key: field.key ?? field.fieldName ?? field.name,
+    label: field.label ?? field.displayName ?? field.name ?? field.key,
+    category: field.category ?? ''
+  })) : [
     { key: 'phone', label: '手机号' },
     { key: 'nickname', label: '客户昵称' },
     { key: 'leadType', label: '线索类型' },

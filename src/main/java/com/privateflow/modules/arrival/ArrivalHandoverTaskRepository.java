@@ -64,8 +64,8 @@ public class ArrivalHandoverTaskRepository {
          task_status,sync_status,completed_by,completed_at,next_sync_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'COMPLETED','PENDING',?,NOW(),NOW())
         """, task.getCustomerId(), task.getPhone(), task.getAssignedKeeper(),
-        task.getAppointmentDate() == null ? null : Date.valueOf(task.getAppointmentDate()), task.getAppointmentTime(),
-        task.getAppointmentStore(), task.getAppointmentItem(), task.getVisitType(), task.getVoucherRedeemed(),
+        task.getAppointmentDate() == null ? null : Date.valueOf(task.getAppointmentDate()), value(task.getAppointmentTime()),
+        task.getAppointmentStore(), value(task.getAppointmentItem()), task.getVisitType(), task.getVoucherRedeemed(),
         task.getExperienceProject(), task.getProjectType(), task.getHistoricalExperienceCount(), task.getCustomerReport(), operator);
     Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     return id == null ? 0L : id;
@@ -77,7 +77,7 @@ public class ArrivalHandoverTaskRepository {
         task_status='COMPLETED', sync_status='PENDING', completed_by=?, completed_at=NOW(), next_sync_at=NOW(), sync_error=NULL, updated_at=NOW()
         WHERE id=?
         """, task.getAssignedKeeper(), task.getAppointmentDate() == null ? null : Date.valueOf(task.getAppointmentDate()),
-        task.getAppointmentTime(), task.getAppointmentStore(), task.getAppointmentItem(), task.getVisitType(), task.getVoucherRedeemed(),
+        value(task.getAppointmentTime()), task.getAppointmentStore(), value(task.getAppointmentItem()), task.getVisitType(), task.getVoucherRedeemed(),
         task.getExperienceProject(), task.getProjectType(), task.getHistoricalExperienceCount(), task.getCustomerReport(), operator, id);
   }
   public void updateManualReports(long id, String reports) {

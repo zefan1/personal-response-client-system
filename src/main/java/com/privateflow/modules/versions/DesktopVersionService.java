@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -196,6 +197,16 @@ public class DesktopVersionService {
     }
     result.put("reportIntervalHours", intConfig("version.report_interval_hours", 24));
     return result;
+  }
+
+  public DesktopReleaseInfo latestRelease(DesktopPlatform platform) {
+    return repository.latestPublished(platform)
+        .map(version -> new DesktopReleaseInfo(version.version(), version.fileSize(), version.changelog(), version.publishedAt()))
+        .orElse(null);
+  }
+
+  public Optional<String> latestDownloadUrl(DesktopPlatform platform) {
+    return repository.latestPublished(platform).map(DesktopVersion::downloadUrl);
   }
 
   @Transactional

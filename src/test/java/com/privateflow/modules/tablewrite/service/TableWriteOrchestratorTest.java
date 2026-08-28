@@ -167,6 +167,24 @@ class TableWriteOrchestratorTest {
   }
 
   @Test
+  void recognizedFactsFromAssignmentAreProjectedToTheCustomerMaster() {
+    CustomerMasterProjectionService master = mock(CustomerMasterProjectionService.class);
+    TableWriteOrchestrator handler = new TableWriteOrchestrator(
+        customerQueryService, newCustomerRowCreator, existingCustomerUpdater, queueManager,
+        master, null, null, new ObjectMapper());
+    Customer customer = customer(45L, "ASSIGNMENT:sheet-a", "assignment-row");
+    java.util.Map<String, Object> fields = java.util.Map.of(
+        "intendedProject", "产康",
+        "bodyConcerns", "腹部膨隆");
+    when(customerQueryService.getById(45L)).thenReturn(customer);
+
+    handler.onRecognizedProfileFactsUpdated(new RecognizedProfileFactsUpdatedEvent(45L, fields));
+
+    verify(master).projectFields(customer, fields);
+    verify(existingCustomerUpdater, never()).updateFields(customer, fields);
+  }
+
+  @Test
   void doesNotProjectRecognizedFactsWithoutAnExistingSourceRow() {
     Customer customer = new Customer();
     customer.setId(43L);

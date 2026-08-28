@@ -108,6 +108,59 @@ class RecognitionJobServiceTest {
   }
 
   @Test
+  void keepsOutOfOrderWorkerResultsBoundToTheirOriginalEmployeeAndSession() {
+    RecognitionJobView jobA = service.submit("keeper-a", imageRequest("reply-a"));
+    RecognitionJobView jobB = service.submit("keeper-b", imageRequest("reply-b"));
+
+    service.completeForWorker(jobB.jobId(), response("Customer B"), RecognitionJobStatus.READY);
+    service.completeForWorker(jobA.jobId(), response("Customer A"), RecognitionJobStatus.READY);
+
+    RecognitionJobView completedA = service.getOwned(jobA.jobId(), "keeper-a");
+    RecognitionJobView completedB = service.getOwned(jobB.jobId(), "keeper-b");
+    assertThat(completedA.replySessionId()).isEqualTo("reply-a");
+    assertThat(completedA.response().nickname()).isEqualTo("Customer A");
+    assertThat(completedB.replySessionId()).isEqualTo("reply-b");
+    assertThat(completedB.response().nickname()).isEqualTo("Customer B");
+    assertThatThrownBy(() -> service.getOwned(jobA.jobId(), "keeper-b"))
+        .isInstanceOf(ApiException.class)
+            .satisfies(error -> assertThat(((ApiException) error).getErrorCode())
+                .isEqualTo(ApiErrorCodes.FORBIDDEN));
+  }
+
+  @Test
+  void keepsFiveConcurrentEmployeesAndTheirOutOfOrderResultsIsolated() {
+    List<String> employees = List.of("keeper-a", "keeper-b", "keeper-c", "keeper-d", "keeper-e");
+    List<RecognitionJobView> jobs = new ArrayList<>();
+    for (int index = 0; index < employees.size(); index++) {
+      jobs.add(service.submit(employees.get(index), imageRequest("reply-" + index)));
+    }
+
+    // The fifth job is admitted when an earlier worker finishes, then receives its own result.
+    for (int index = 3; index >= 0; index--) {
+      service.completeForWorker(jobs.get(index).jobId(), response("Customer " + index), RecognitionJobStatus.READY);
+    }
+    service.completeForWorker(jobs.get(4).jobId(), response("Customer 4"), RecognitionJobStatus.READY);
+
+    for (int index = 0; index < employees.size(); index++) {
+      String employee = employees.get(index);
+      RecognitionJobView completed = service.getOwned(jobs.get(index).jobId(), employee);
+      assertThat(completed.replySessionId()).isEqualTo("reply-" + index);
+      assertThat(completed.response().nickname()).isEqualTo("Customer " + index);
+      for (int other = 0; other < employees.size(); other++) {
+        if (other == index) {
+          continue;
+        }
+        String otherEmployee = employees.get(other);
+        RecognitionJobView otherJob = jobs.get(other);
+        assertThatThrownBy(() -> service.getOwned(otherJob.jobId(), employee))
+            .isInstanceOf(ApiException.class)
+            .satisfies(error -> assertThat(((ApiException) error).getErrorCode())
+                .isEqualTo(ApiErrorCodes.FORBIDDEN));
+      }
+    }
+  }
+
+  @Test
   void returnsThePersistedRestartFailureToTheOriginalTaskOwnerAfterRestart() {
     RecognitionJobRecoveryRepository recovery = mock(RecognitionJobRecoveryRepository.class);
     Instant createdAt = Instant.parse("2026-07-24T10:00:00Z");
@@ -423,6 +476,10 @@ class RecognitionJobServiceTest {
 
   private ChatResponse response() {
     return new ChatResponse(null, "Alice", false, null, null, null, null);
+  }
+
+  private ChatResponse response(String nickname) {
+    return new ChatResponse(null, nickname, false, null, null, null, null);
   }
 
   private RecognitionJob terminalJob(String jobId, String username, long second) {

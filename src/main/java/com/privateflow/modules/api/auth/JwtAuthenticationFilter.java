@@ -25,6 +25,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       "/admin/api/v1/auth/login",
       "/api/v1/auth/logout",
       "/api/v1/wecom/smartsheet/callback");
+  private static final Set<String> PUBLIC_GETS = Set.of(
+      "/api/v1/desktop/latest",
+      "/api/v1/desktop/download");
   private static final Set<String> ALLOWED_CORS_ORIGINS = Set.of(
       "file://",
       "http://localhost:5173",
@@ -66,6 +69,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       return true;
     }
     if ("GET".equalsIgnoreCase(request.getMethod()) && "/api/v1/wecom/smartsheet/callback".equals(path)) {
+      return true;
+    }
+    if ("GET".equalsIgnoreCase(request.getMethod()) && PUBLIC_GETS.contains(path)) {
       return true;
     }
     return !path.startsWith("/api/v1/") && !path.startsWith("/admin/api/v1/")

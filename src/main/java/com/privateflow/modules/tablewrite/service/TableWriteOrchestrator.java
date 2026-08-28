@@ -138,7 +138,11 @@ public class TableWriteOrchestrator {
       return;
     }
     try {
-      existingCustomerUpdater.updateFields(customer, fields);
+      if (isAuxiliarySource(customer) && customerMasterProjectionService != null) {
+        customerMasterProjectionService.projectFields(customer, fields);
+      } else {
+        existingCustomerUpdater.updateFields(customer, fields);
+      }
     } catch (TableWriteException ex) {
       if (TableWriteErrorCodes.TABLE_WRITE_BLOCKED.equals(ex.getErrorCode())) {
         log.info("skip recognized fact projection blocked by identity, customerId={}", event.customerId());
@@ -307,6 +311,12 @@ public class TableWriteOrchestrator {
 
   private boolean blank(String value) {
     return value == null || value.isBlank();
+  }
+
+  private boolean isAuxiliarySource(Customer customer) {
+    return customer != null && customer.getSourceTable() != null
+        && (customer.getSourceTable().startsWith("ASSIGNMENT:")
+            || customer.getSourceTable().startsWith("ARRIVAL:"));
   }
 
   private String message(RuntimeException ex) {

@@ -18,9 +18,11 @@ import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +68,10 @@ public class ManualAppointmentService {
     // Keep template-only identity data available even when the arrival-table
     // mapping does not expose the field as an editable form control.
     values.putIfAbsent("customerName", text(customer.getCustomerName()));
+    values.put("appointmentTime", appointmentTime(customer));
+    // Appointment project is not collected in the arrival form. Never send a
+    // hidden blank value back to the unique fact database.
+    values.remove("appointmentItem");
     if (mappings.stream().anyMatch(mapping -> "assignedKeeper".equals(mapping.targetField()))) {
       values.put("assignedKeeper", currentAccountName(customer));
     }
@@ -97,7 +103,7 @@ public class ManualAppointmentService {
         }).orElseGet(() -> tasks.createManual(task, AuthContext.username()));
     handover.syncOne(tasks.find(taskId).orElseThrow(() -> new IllegalStateException("预约记录保存失败")));
     ArrivalHandoverTask latest = tasks.find(taskId).orElseThrow();
-    return result(latest, taskId, customerVersion, changed.keySet());
+    return result(latest, current, mappings, taskId, customerVersion, changed.keySet());
   }
 
   @Transactional
@@ -113,9 +119,11 @@ public class ManualAppointmentService {
     return new ArrivalHandoverCompletionResult(true, "SYNCED".equals(latest.getSyncStatus()), latest.getWecomRowId(), latest.getSyncError());
   }
 
-  private ManualAppointmentResult result(ArrivalHandoverTask task, long taskId, int customerVersion, Set<String> changed) {
+  private ManualAppointmentResult result(ArrivalHandoverTask task, Customer customer, List<MappedField> mappings,
+      long taskId, int customerVersion, Set<String> changed) {
     return new ManualAppointmentResult(true, "SYNCED".equals(task.getSyncStatus()), taskId, task.getWecomRowId(),
-        task.getSyncError(), customerVersion, changed.stream().map(this::label).toList(), configuredTemplate());
+        task.getSyncError(), customerVersion, changed.stream().map(this::label).toList(), configuredTemplate(),
+        templateValues(customer, mappings));
   }
   private Customer require(long id) {
     Customer customer = customers.getById(id);
@@ -126,13 +134,22 @@ public class ManualAppointmentService {
   }
   private List<ManualAppointmentField> formFields(List<MappedField> mappings) {
     Map<String, WecomSmartSheetField> catalog = fieldCatalog.visibleFields(arrivalTarget(), timeout());
-    return mappings.stream().filter(mapping -> !HIDDEN_FORM_FIELDS.contains(mapping.targetField())).map(mapping -> {
+    List<ManualAppointmentField> fields = new ArrayList<>(mappings.stream()
+        .filter(mapping -> !HIDDEN_FORM_FIELDS.contains(mapping.targetField()) && !"appointmentItem".equals(mapping.targetField()))
+        .map(mapping -> {
       WecomSmartSheetField remote = catalog.get(mapping.sourceField());
       String type = "customerReport".equals(mapping.targetField()) ? "FIELD_TYPE_IMAGE" : remote == null ? "FIELD_TYPE_TEXT" : remote.type();
       List<String> options = remote == null ? List.of() : List.copyOf(remote.optionIdsByText().keySet());
       return new ManualAppointmentField(mapping.targetField(), mapping.sourceField(), type,
           !"phone".equals(mapping.targetField()) && !"assignedKeeper".equals(mapping.targetField()), options);
-    }).toList();
+    }).toList());
+    int dateIndex = -1;
+    for (int index = 0; index < fields.size(); index += 1) {
+      if ("appointmentDate".equals(fields.get(index).key())) { dateIndex = index; break; }
+    }
+    fields.add(dateIndex < 0 ? 0 : dateIndex + 1,
+        new ManualAppointmentField("appointmentTime", "到店时间", "FIELD_TYPE_TIME", true, List.of()));
+    return List.copyOf(fields);
   }
   private List<MappedField> mappings() {
     String sourceTable = "ARRIVAL:" + arrivalTarget().sheetId();
@@ -146,6 +163,17 @@ public class ManualAppointmentService {
     for (MappedField mapping : mappings) result.put(mapping.targetField(), value(customer, mapping.targetField()));
     return result;
   }
+  private Map<String, String> templateValues(Customer customer, List<MappedField> mappings) {
+    Map<String, String> result = values(customer, mappings);
+    String appointmentTime = appointmentTime(customer);
+    result.put("customerName", text(customer.getCustomerName()));
+    result.put("appointmentDate", value(customer, "appointmentDate"));
+    result.put("appointmentTime", appointmentTime);
+    result.put("appointmentItem", value(customer, "appointmentItem"));
+    result.put("appointmentStore", value(customer, "appointmentStore"));
+    result.put("appointmentDateTime", appointmentTime.isBlank() ? "" : value(customer, "appointmentDateTime"));
+    return result;
+  }
   private Map<String, Object> changedValues(Customer customer, List<MappedField> mappings, Map<String, String> before, Map<String, String> incoming) {
     Map<String, Object> changed = new LinkedHashMap<>(); Set<String> seen = new HashSet<>();
     for (MappedField mapping : mappings) {
@@ -154,13 +182,28 @@ public class ManualAppointmentService {
       String submitted = text(incoming.get(key));
       if ("phone".equals(key)) {
         if (!same(before.get(key), submitted)) throw new IllegalArgumentException("手机号用于匹配当前客户，不能在预约表单中修改");
+      } else if ("appointmentItem".equals(key) || "appointmentTime".equals(key)) {
+        continue;
       } else if ("appointmentDateTime".equals(key)) {
         applyAppointmentDateTime(changed, customer, submitted);
       } else if (profileFields.supports(key) && !same(before.get(key), submitted)) {
         changed.put(key, dateValueOrText(key, submitted));
       }
     }
+    applyAppointmentTime(changed, customer, incoming);
     return changed;
+  }
+  private void applyAppointmentTime(Map<String, Object> changed, Customer customer, Map<String, String> incoming) {
+    if (!incoming.containsKey("appointmentTime")) return;
+    String submitted = text(incoming.get("appointmentTime"));
+    if (submitted.isBlank()) {
+      if (!text(customer.getAppointmentTime()).isBlank()) changed.put("appointmentTime", "");
+      return;
+    }
+    LocalTime value;
+    try { value = parseAppointmentTime(submitted); } catch (DateTimeParseException ex) { throw new IllegalArgumentException("到店时间格式不正确"); }
+    String formatted = value.format(DateTimeFormatter.ofPattern("HH:mm"));
+    if (!same(text(customer.getAppointmentTime()), formatted)) changed.put("appointmentTime", formatted);
   }
   private void applyAppointmentDateTime(Map<String, Object> changed, Customer customer, String submitted) {
     if (submitted.isBlank()) {
@@ -172,6 +215,15 @@ public class ManualAppointmentService {
     try { value = LocalDateTime.parse(submitted); } catch (DateTimeParseException ex) { throw new IllegalArgumentException("首次预约时间格式不正确"); }
     if (!same(value(customer, "appointmentDate"), value.toLocalDate().toString())) changed.put("appointmentDate", value.toLocalDate());
     if (!same(text(customer.getAppointmentTime()), value.toLocalTime().toString())) changed.put("appointmentTime", value.toLocalTime().toString());
+  }
+  private LocalTime parseAppointmentTime(String submitted) {
+    String normalized = submitted.trim().replace('：', ':').replaceAll("\\s+", "");
+    if (normalized.startsWith("上午")) return LocalTime.parse(normalized.substring(2), DateTimeFormatter.ofPattern("h:mm"));
+    if (normalized.startsWith("下午")) {
+      LocalTime time = LocalTime.parse(normalized.substring(2), DateTimeFormatter.ofPattern("h:mm"));
+      return time.plusHours(time.getHour() == 12 ? 0 : 12);
+    }
+    return LocalTime.parse(normalized, DateTimeFormatter.ofPattern("H:mm"));
   }
   private Object dateValueOrText(String key, String value) {
     ProfileFieldRegistry.FieldSpec spec = profileFields.spec(key);
@@ -195,6 +247,12 @@ public class ManualAppointmentService {
     Object raw = profileFields.readValue(customer, key);
     if (raw instanceof LocalDateTime time) return FORM_DATE_TIME.format(time);
     return raw == null ? "" : String.valueOf(raw);
+  }
+  private static String appointmentTime(Customer customer) {
+    String value = text(customer.getAppointmentTime());
+    // Older date-only submissions materialized midnight. It is not a real
+    // appointment time and must be collected again instead of shown as one.
+    return "00:00".equals(value) ? "" : value;
   }
   private String label(String field) { return mappings().stream().filter(mapping -> mapping.targetField().equals(field)).findFirst().map(MappedField::sourceField).orElse("appointmentStatus".equals(field) ? "预约状态" : field); }
   private String currentAccountName(Customer customer) {

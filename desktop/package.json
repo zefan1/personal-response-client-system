@@ -14,11 +14,9 @@
     "renderer:smoke": "npm run build && node scripts/renderer-smoke.mjs",
     "test": "vitest run",
     "package:dir": "npm run build && node scripts/package-dir.mjs",
+    "package:installer": "npm run build && electron-builder --win nsis",
     "package:verify": "npm run package:dir && node scripts/package-verify.mjs",
     "package:verify:signed": "npm run build && node -e \"process.env.PDA_REQUIRE_SIGNED_PACKAGE='1'; import('./scripts/package-dir.mjs')\" && node -e \"process.env.PDA_REQUIRE_SIGNED_PACKAGE='1'; import('./scripts/package-verify.mjs')\""
-  },
-  "build": {
-    "extends": null
   },
   "dependencies": {
     "get-windows": "9.3.0",

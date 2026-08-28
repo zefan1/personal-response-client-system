@@ -6,6 +6,7 @@ import {
   notifyReplyTask,
   onReplyTaskOpen,
   openAdminConsole,
+  openAssignmentTable,
   toggleAlwaysOnTop,
   writeClipboardText
 } from './desktopBridge';
@@ -40,6 +41,31 @@ describe('desktopBridge admin console launcher', () => {
       success: false,
       error: 'DESKTOP_BRIDGE_STALE'
     });
+    expect(windowOpenSpy).not.toHaveBeenCalled();
+  });
+
+  it('opens a validated assignment table through the Electron bridge', async () => {
+    const openAssignmentTableMock = vi.fn(async () => ({ success: true }));
+    (window as unknown as { desktopBridge: { openAssignmentTable: typeof openAssignmentTableMock } }).desktopBridge = {
+      openAssignmentTable: openAssignmentTableMock
+    };
+
+    await expect(openAssignmentTable('https://doc.weixin.qq.com/sheet/abc')).resolves.toMatchObject({ success: true });
+    expect(openAssignmentTableMock).toHaveBeenCalledWith('https://doc.weixin.qq.com/sheet/abc');
+  });
+
+  it('rejects non-WeCom assignment links before invoking any browser bridge', async () => {
+    const openAssignmentTableMock = vi.fn(async () => ({ success: true }));
+    const windowOpenSpy = vi.spyOn(window, 'open');
+    (window as unknown as { desktopBridge: { openAssignmentTable: typeof openAssignmentTableMock } }).desktopBridge = {
+      openAssignmentTable: openAssignmentTableMock
+    };
+
+    await expect(openAssignmentTable('https://example.com/not-wecom')).resolves.toMatchObject({
+      success: false,
+      error: 'ASSIGNMENT_TABLE_OPEN_FAILED'
+    });
+    expect(openAssignmentTableMock).not.toHaveBeenCalled();
     expect(windowOpenSpy).not.toHaveBeenCalled();
   });
 

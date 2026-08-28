@@ -63,6 +63,25 @@ class JwtAuthenticationFilterTest {
   }
 
   @Test
+  void desktopReleaseEndpointsArePublicForTheLoginPage() throws Exception {
+    JwtService jwtService = mock(JwtService.class);
+    JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtService, mock(AccountRepository.class), new ObjectMapper());
+    FilterChain chain = mock(FilterChain.class);
+
+    MockHttpServletRequest latestRequest = new MockHttpServletRequest("GET", "/api/v1/desktop/latest");
+    MockHttpServletResponse latestResponse = new MockHttpServletResponse();
+    filter.doFilter(latestRequest, latestResponse, chain);
+
+    MockHttpServletRequest downloadRequest = new MockHttpServletRequest("GET", "/api/v1/desktop/download");
+    MockHttpServletResponse downloadResponse = new MockHttpServletResponse();
+    filter.doFilter(downloadRequest, downloadResponse, chain);
+
+    verify(chain).doFilter(latestRequest, latestResponse);
+    verify(chain).doFilter(downloadRequest, downloadResponse);
+    verify(jwtService, never()).verify(any());
+  }
+
+  @Test
   void authFailureIncludesCorsHeadersForLocalFrontend() throws Exception {
     JwtService jwtService = mock(JwtService.class);
     JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtService, mock(AccountRepository.class), new ObjectMapper());

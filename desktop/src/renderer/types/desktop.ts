@@ -42,6 +42,7 @@ type DesktopBridge = {
   writeClipboardText: (text: string) => Promise<BridgeResult>;
   writeClipboardImage: (imageUrl: string) => Promise<BridgeResult>;
   openAdminConsole: (url?: string) => Promise<BridgeResult>;
+  openAssignmentTable: (url: string) => Promise<BridgeResult>;
   toggleAlwaysOnTop: () => Promise<AlwaysOnTopResult>;
   getAlwaysOnTop: () => Promise<AlwaysOnTopResult>;
   getOnlineStatus: () => Promise<OnlineStatusPayload>;

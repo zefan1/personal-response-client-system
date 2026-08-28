@@ -21,6 +21,6 @@ describe('Electron main process startup', () => {
   });
 
   it('smoke checks the unified speech-library sidebar action', () => {
-    expect(source).toContain("actionLabels.join('|') !== '识别|话术库|批量'");
+    expect(source).toContain("actionLabels.join('|') !== '识别|话术库|批量|预约'");
   });
 });

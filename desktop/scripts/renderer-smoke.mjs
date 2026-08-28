@@ -10,6 +10,7 @@ const rendererFile = join(root, 'dist', 'renderer', 'index.html');
 const smokeUserDataDir = join(tmpdir(), `pda-renderer-smoke-${process.pid}-${Date.now()}`);
 const screenshotDir = process.env.PDA_RENDERER_SMOKE_SCREENSHOT_DIR ?? join(root, '..', '.tools', 'screenshots');
 const apiBaseUrl = process.env.PDA_SMOKE_API_BASE_URL ?? 'http://localhost:8080';
+const rendererSmokeTarget = process.argv[2]?.trim() || process.env.PDA_RENDERER_SMOKE_TARGET || 'desktop';
 const accessToken = await loginForSmoke(apiBaseUrl);
 
 if (!existsSync(mainFile) || !existsSync(rendererFile)) {
@@ -30,6 +31,7 @@ const child = spawn(command, args, {
     PDA_ELECTRON_SMOKE: '1',
     PDA_ELECTRON_SMOKE_AUTO_QUIT: '0',
     PDA_RENDERER_SMOKE: '1',
+    PDA_RENDERER_SMOKE_TARGET: rendererSmokeTarget,
     PDA_RENDERER_SMOKE_ACCESS_TOKEN: accessToken,
     PDA_RENDERER_SMOKE_SCREENSHOT_DIR: screenshotDir,
     PDA_SMOKE_API_BASE_URL: apiBaseUrl,

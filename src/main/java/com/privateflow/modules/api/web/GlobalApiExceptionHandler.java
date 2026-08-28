@@ -3,6 +3,7 @@ package com.privateflow.modules.api.web;
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.match.ApiResponse;
+import com.privateflow.modules.profile.ProfileUpdateException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.slf4j.Logger;
@@ -50,6 +51,12 @@ public class GlobalApiExceptionHandler {
   })
   public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception ex) {
     return ResponseEntity.badRequest().body(ApiResponse.error(ApiErrorCodes.BAD_REQUEST, "request parameter invalid"));
+  }
+
+  @ExceptionHandler(ProfileUpdateException.class)
+  public ResponseEntity<ApiResponse<Void>> handleProfileUpdate(ProfileUpdateException ex) {
+    return ResponseEntity.status(HttpStatus.CONFLICT)
+        .body(ApiResponse.error(ex.getErrorCode(), ex.getMessage()));
   }
 
   @ExceptionHandler(Exception.class)

@@ -12,8 +12,10 @@ import type {
 const PENDING_SEND_STORAGE_KEY = 'copy_backfill_pending_send';
 const REMINDER_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_REMINDERS = 5;
+const TOAST_DISMISS_MS = 4000;
 
 let reminderTimer: number | null = null;
+let toastTimer: number | null = null;
 
 export const copyBackfillState = reactive({
   pendingSendDecision: restorePendingSendDecision(),
@@ -68,7 +70,7 @@ export function discardPendingSendDecision(): void {
   stopReminderTimer();
   copyBackfillState.pendingSendDecision = null;
   localStorage.removeItem(PENDING_SEND_STORAGE_KEY);
-  copyBackfillState.toast = '已标记为未发送，不更新客户表格';
+  setToast('已标记为未发送，不更新客户表格');
 }
 
 export async function confirmPendingSendDecision(): Promise<boolean> {
@@ -100,9 +102,9 @@ export async function confirmPendingSendDecision(): Promise<boolean> {
     stopReminderTimer();
     copyBackfillState.pendingSendDecision = null;
     localStorage.removeItem(PENDING_SEND_STORAGE_KEY);
-    copyBackfillState.toast = '已确认发送，客户表格正在更新';
+    setToast('已确认发送，客户表格正在更新');
     if (!pending.phone) {
-      copyBackfillState.toast = '已确认发送，聊天已归档；表格因缺少唯一字段暂未同步';
+      setToast('已确认发送，聊天已归档；表格因缺少唯一字段暂未同步');
     }
     eventBus.emit('reply:send-confirmed', { phone, customerId: pending.customerId });
     return true;
@@ -285,6 +287,15 @@ function stopReminderTimer(): void {
     window.clearTimeout(reminderTimer);
     reminderTimer = null;
   }
+}
+
+function setToast(message: string): void {
+  if (toastTimer !== null) window.clearTimeout(toastTimer);
+  copyBackfillState.toast = message;
+  toastTimer = window.setTimeout(() => {
+    copyBackfillState.toast = '';
+    toastTimer = null;
+  }, TOAST_DISMISS_MS);
 }
 
 function restorePendingSendDecision(): PendingSendDecision | null {

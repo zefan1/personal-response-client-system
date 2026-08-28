@@ -14,6 +14,8 @@ import com.privateflow.modules.tablewrite.PendingTableWrite;
 import com.privateflow.modules.tablewrite.PendingWritePayload;
 import com.privateflow.modules.tablewrite.TableWriteActionType;
 import com.privateflow.modules.tablewrite.client.WecomTableClient;
+import com.privateflow.modules.tablewrite.client.AuxiliarySmartSheetWriter;
+import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget;
 import com.privateflow.modules.tablewrite.config.TableConfig;
 import com.privateflow.modules.tablewrite.config.TableConfigProvider;
 import com.privateflow.modules.tablewrite.infra.PendingTableWriteRepository;
@@ -27,6 +29,43 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class QueueRetryManagerTest {
+
+  @Test
+  void retriesAssignmentAgainstTheTargetCapturedWhenTheWriteWasQueued() throws Exception {
+    PendingTableWriteRepository repository = mock(PendingTableWriteRepository.class);
+    TableConfigProvider config = mock(TableConfigProvider.class);
+    TableFieldMappingResolver mapping = mock(TableFieldMappingResolver.class);
+    AuxiliarySmartSheetWriter writer = mock(AuxiliarySmartSheetWriter.class);
+    Map<String, Object> fields = Map.of("phone", "13800000000");
+    PendingTableWrite item = new PendingTableWrite();
+    item.setId(10L);
+    item.setPhone("13800000000");
+    item.setActionType(TableWriteActionType.UPDATE);
+    item.setRetryCount(0);
+    item.setPayload(new ObjectMapper().writeValueAsString(new PendingWritePayload(
+        "ASSIGNMENT", null, fields, "old-doc", "old-sheet", "old-view")));
+    item.setNextRetryAt(LocalDateTime.now());
+    when(repository.due(100)).thenReturn(List.of(item));
+    when(repository.countStaleFailed(1)).thenReturn(0);
+    when(config.get()).thenReturn(new TableConfig("", "", 5000, 3, 30, 1, "ADMIN", 50, 500));
+    when(mapping.toSourceFields("ASSIGNMENT:old-sheet", fields))
+        .thenReturn(Map.of("联系方式", "13800000000"));
+    when(mapping.sourceFieldFor("ASSIGNMENT:old-sheet", "phone")).thenReturn("联系方式");
+    AuxiliarySmartSheetTarget currentTarget = new AuxiliarySmartSheetTarget(
+        "ASSIGNMENT", "new-doc", "new-sheet", "new-view", "联系方式", "");
+
+    QueueRetryManager manager = new QueueRetryManager(
+        repository, mock(WecomTableClient.class), config, new ObjectMapper(),
+        mock(CustomerQueryService.class), mock(NewCustomerRowCreator.class), mapping, null,
+        writer, Optional.of(currentTarget), Optional.empty());
+
+    manager.retryDueWrites();
+
+    verify(writer).upsert(
+        new AuxiliarySmartSheetTarget("ASSIGNMENT", "old-doc", "old-sheet", "old-view", "联系方式", ""),
+        Map.of("联系方式", "13800000000"), "联系方式", Duration.ofMillis(5000));
+    verify(repository).markResolved(10L);
+  }
 
   @Test
   void retryRevalidatesPayloadAndWritesOnlyAcceptedFields() throws Exception {

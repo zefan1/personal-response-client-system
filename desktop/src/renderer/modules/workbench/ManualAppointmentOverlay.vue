@@ -28,6 +28,14 @@
             <label :class="{ 'manual-appointment-wide': isLongText(field) }">
               <span>{{ field.label }}</span>
               <input v-if="field.key === 'assignedKeeper'" v-model="state.form.values[field.key]" type="text" readonly />
+              <div v-else-if="field.key === 'appointmentTime'" class="manual-appointment-time-control">
+                <select :value="appointmentPeriod" aria-label="到店时间上下午" @change="updateAppointmentTimePart('period', ($event.target as HTMLSelectElement).value)">
+                  <option value="">请选择</option><option value="AM">上午</option><option value="PM">下午</option>
+                </select>
+                <input :value="appointmentHour" aria-label="到店时间小时" type="number" min="1" max="12" inputmode="numeric" placeholder="时" @input="updateAppointmentTimePart('hour', ($event.target as HTMLInputElement).value)" />
+                <span class="manual-appointment-time-separator">:</span>
+                <input :value="appointmentMinute" aria-label="到店时间分钟" type="number" min="0" max="59" inputmode="numeric" placeholder="分" @input="updateAppointmentTimePart('minute', ($event.target as HTMLInputElement).value)" />
+              </div>
               <template v-else-if="isSuggestedInputField(field)">
                 <div class="manual-appointment-combobox" :class="{ 'is-open': isSuggestedFieldOpen(field) }" @focusout="closeSuggestedFieldLater(field.key)">
                   <input v-model="state.form.values[field.key]" type="text" role="combobox" aria-autocomplete="list" :aria-expanded="isSuggestedFieldOpen(field)" :aria-controls="suggestionListId(field)" :placeholder="suggestedInputPlaceholder(field)" :readonly="!field.editable" @focus="openSuggestedField(field)" @keydown.esc="closeSuggestedField(field.key)" @keydown.down.prevent="openSuggestedField(field)" />
@@ -79,13 +87,43 @@ const dragging = ref(false);
 const openedSuggestedField = ref<string | null>(null);
 const customerLabel = computed(() => state.form.nickname || state.nickname || '当前客户');
 const reportField = computed(() => state.form.fields.find((field) => field.type === 'FIELD_TYPE_IMAGE'));
-const hiddenFieldKeys = new Set(['arrived', 'transactionAmount', 'transactionAt', 'transactionPrimaryReason']);
+const appointmentTimeParts = computed(() => splitAppointmentTime(state.form.values.appointmentTime));
+const appointmentPeriod = computed(() => appointmentTimeParts.value.period);
+const appointmentHour = computed(() => appointmentTimeParts.value.hour);
+const appointmentMinute = computed(() => appointmentTimeParts.value.minute);
+const hiddenFieldKeys = new Set([
+  'arrived',
+  'transactionAmount',
+  'transactionAt',
+  'transactionPrimaryReason',
+  'appointmentDateTime',
+  'appointmentItem'
+]);
 const editableFields = computed(() => state.form.fields.filter((field) => field.type !== 'FIELD_TYPE_IMAGE' && !hiddenFieldKeys.has(field.key)));
 function inputType(field: ManualAppointmentField): string {
   if (field.type === 'FIELD_TYPE_DATE_TIME') return field.key === 'appointmentDate' ? 'date' : 'datetime-local';
   if (field.type === 'FIELD_TYPE_NUMBER') return 'number';
   if (field.type === 'FIELD_TYPE_PHONE_NUMBER') return 'tel';
   return 'text';
+}
+function splitAppointmentTime(value: string | undefined): { period: string; hour: string; minute: string } {
+  const match = String(value ?? '').trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return { period: '', hour: '', minute: '' };
+  const hours = Number(match[1]);
+  if (!Number.isFinite(hours) || hours < 0 || hours > 23) return { period: '', hour: '', minute: '' };
+  return { period: hours >= 12 ? 'PM' : 'AM', hour: String(hours % 12 || 12), minute: match[2] };
+}
+function updateAppointmentTimePart(part: 'period' | 'hour' | 'minute', rawValue: string): void {
+  const current = appointmentTimeParts.value;
+  const period = part === 'period' ? rawValue : current.period;
+  const hour = part === 'hour' ? rawValue.replace(/\D/g, '').slice(0, 2) : current.hour;
+  const minute = part === 'minute' ? rawValue.replace(/\D/g, '').slice(0, 2) : current.minute;
+  if (!period || !hour || !minute) { state.form.values.appointmentTime = ''; return; }
+  const hourNumber = Number(hour);
+  const minuteNumber = Number(minute);
+  if (hourNumber < 1 || hourNumber > 12 || minuteNumber < 0 || minuteNumber > 59) return;
+  const hours24 = period === 'PM' ? (hourNumber % 12) + 12 : hourNumber % 12;
+  state.form.values.appointmentTime = `${String(hours24).padStart(2, '0')}:${String(minuteNumber).padStart(2, '0')}`;
 }
 function isLongText(field: ManualAppointmentField): boolean { return ['客户主诉', '私域客情', '成交主因'].includes(field.label); }
 function isSuggestedInputField(field: ManualAppointmentField): boolean { return ['receptionTeacher', 'receptionConsultant', 'sourceChannel', 'arrivalExperienceProject'].includes(field.key); }

@@ -1,7 +1,10 @@
 <template>
   <section class="workbench-panel">
     <header class="panel-header workbench-hero">
-      <p class="workbench-sync-status">{{ state.lastFetchAt ? `上次同步 ${formatDateTime(state.lastFetchAt)}` : '先处理待跟进和新客资' }}</p>
+      <div>
+        <h2>今日工作台</h2>
+        <p class="workbench-sync-status">{{ state.lastFetchAt ? `数据更新于 ${formatDateTime(state.lastFetchAt)}` : '先处理逾期和今天到期的跟进' }}</p>
+      </div>
       <button
         class="secondary small workbench-refresh-button"
         type="button"
@@ -26,21 +29,6 @@
       </button>
     </div>
 
-    <div v-if="visibleWorkbenchNotices.length" class="workbench-notices" aria-label="系统公告">
-      <article
-        v-for="notice in visibleWorkbenchNotices"
-        :key="notice.noticeId"
-        :class="['workbench-notice', `level-${notice.level.toLowerCase()}`]"
-      >
-        <div>
-          <strong>{{ notice.title }}</strong>
-          <p>{{ notice.content }}</p>
-          <small>{{ noticeLevelLabel(notice.level) }} · 有效至 {{ formatNoticeTime(notice.expireAt) }}</small>
-        </div>
-        <button class="secondary small" type="button" @click="dismissWorkbenchNotice(notice.noticeId)">知道了</button>
-      </article>
-    </div>
-
     <div class="metric-grid">
       <button v-for="card in metricCards" :key="card.key" class="metric-card" type="button" @click="openMetricQueue(card.key)">
         <span class="metric-icon" aria-hidden="true">{{ card.icon }}</span>
@@ -53,9 +41,12 @@
     </div>
 
     <div class="workbench-columns">
-      <section class="workbench-section">
+      <section class="workbench-section workbench-priority-section">
         <header class="section-inline-head">
-          <h3>今日跟进</h3>
+          <div>
+            <h3>优先跟进</h3>
+            <p>先处理逾期，再处理今天到期</p>
+          </div>
           <button class="link-button" @click="openAllFollowups">查看全部</button>
         </header>
         <div v-if="state.loading && !state.loaded" class="loading-skeleton">
@@ -72,14 +63,16 @@
             <strong>{{ item.nickname || `客户 ${item.phone.slice(-4)}` }}</strong>
             <span>{{ maskPhone(item.phoneFull ?? item.phone) }} · {{ leadTypeLabel(item.leadType) }} · {{ followupText(item) }}</span>
           </button>
-          <button class="secondary small" @click="openWorkbenchCustomer(item.phoneFull ?? item.phone, item.leadType)">查看</button>
         </article>
         <p v-else class="empty-panel visual-empty">今天没有待跟进客户</p>
       </section>
 
       <section class="workbench-section">
         <header class="section-inline-head">
-          <h3>新客资</h3>
+          <div>
+            <h3>新客资</h3>
+            <p>刚刚进入的客户，及时确认</p>
+          </div>
           <button class="link-button" @click="openAllNewLeads">查看全部</button>
         </header>
         <article
@@ -98,11 +91,26 @@
             :disabled="isLeadValidityUpdating(lead)"
             @click.stop="void toggleLeadInvalid(lead)"
           >{{ lead.leadInvalid ? '有效' : '无效' }}</button>
-          <button class="secondary small" @click="openWorkbenchCustomer(lead.phoneFull ?? lead.phone, lead.leadType)">查看</button>
         </article>
         <p v-if="recentNewLeads.length === 0" class="empty-panel visual-empty">暂无新客资</p>
       </section>
     </div>
+
+    <section v-if="visibleWorkbenchNotices.length" class="workbench-notices" aria-label="系统公告">
+      <div class="workbench-subsection-label">系统公告</div>
+      <article
+        v-for="notice in visibleWorkbenchNotices"
+        :key="notice.noticeId"
+        :class="['workbench-notice', `level-${notice.level.toLowerCase()}`]"
+      >
+        <div>
+          <strong>{{ notice.title }}</strong>
+          <p>{{ notice.content }}</p>
+          <small>{{ noticeLevelLabel(notice.level) }} · 有效至 {{ formatNoticeTime(notice.expireAt) }}</small>
+        </div>
+        <button class="secondary small" type="button" @click="dismissWorkbenchNotice(notice.noticeId)">知道了</button>
+      </article>
+    </section>
   </section>
 </template>
 

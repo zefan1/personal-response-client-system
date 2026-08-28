@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveAdminConsoleUrl } from './adminConsoleUrl.js';
+import { resolveAssignmentTableUrl } from '../shared/assignmentTableUrl.js';
 import {
   captureForegroundWindow,
   resolveDisplayIdFromPhysicalPoint,
@@ -225,9 +226,21 @@ async function runRendererSmoke(window: BrowserWindow) {
           const actionButtons = [...document.querySelectorAll('.sidebar-quick-actions button')];
           const actionLabels = [...document.querySelectorAll('.sidebar-quick-actions .action-label')]
             .map((item) => item.textContent.trim());
-          if (actionLabels.join('|') !== '识别|话术库|批量') {
+          if (actionLabels.join('|') !== '识别|话术库|批量|预约') {
             throw new Error('sidebar quick actions mismatch: ' + actionLabels.join('|'));
           }
+          const assignmentPanel = await waitForSelector('.assignment-table-panel');
+          if ([...assignmentPanel.querySelectorAll('button')].some((button) => button.textContent.includes('创建新表'))) {
+            throw new Error('workbench must not expose assignment table creation');
+          }
+          if (!findButton('打开表格', assignmentPanel)) {
+            throw new Error('workbench assignment table open action is missing');
+          }
+          if (${JSON.stringify(rendererSmokeTarget === 'assignment')}) {
+            return 'assignment_smoke_ready';
+          }
+          window.resizeTo(420, 760);
+          await delay(250);
           const replyTaskSidebar = await waitForSelector('.reply-task-sidebar');
           if (!(document.querySelector('.sidebar-quick-actions').compareDocumentPosition(replyTaskSidebar)
             & Node.DOCUMENT_POSITION_FOLLOWING)) {
@@ -422,7 +435,10 @@ async function runRendererSmoke(window: BrowserWindow) {
         }
         await waitForSelector('.desktop-sidebar');
         await waitForText('工作台');
-        await assertDesktopSmoke();
+        const desktopSmokeResult = await assertDesktopSmoke();
+        if (desktopSmokeResult === 'assignment_smoke_ready') {
+          return desktopSmokeResult;
+        }
           await waitForSelector('.sidebar-quick-actions');
           await waitForSelector('.desktop-mode-tools');
           const alertBell = document.querySelector('.alert-bell');
@@ -486,6 +502,12 @@ async function runRendererSmoke(window: BrowserWindow) {
       })();
     `);
     if (result === 'renderer_smoke_reloaded') {
+      return;
+    }
+    if (result === 'assignment_smoke_ready') {
+      await captureRendererSmokeScreenshot(window, 'assignment-table-smoke.png');
+      console.log('renderer_smoke=passed target=assignment');
+      app.quit();
       return;
     }
     console.log('renderer_smoke=passed');
@@ -587,6 +609,22 @@ async function runAdminRendererSmoke(window: BrowserWindow) {
         }
 
         await waitForSelector('.ops-admin-shell');
+
+        subnavByText('配置中心')?.click();
+        const assignmentCard = await waitForSelector('.ops-smart-sheet-card:nth-child(2)');
+        const tableManagerButton = buttonByText('表格管理', assignmentCard);
+        if (!tableManagerButton) throw new Error('assignment table manager action is missing');
+        tableManagerButton.click();
+        const tableManagerModal = await waitForSelector('.assignment-table-manager-modal');
+        const tableManagerRect = tableManagerModal.getBoundingClientRect();
+        if (tableManagerRect.left < -1 || tableManagerRect.right > window.innerWidth + 1) {
+          throw new Error('assignment table manager overflows the desktop viewport');
+        }
+        await waitForCondition(() => Boolean(tableManagerModal.querySelector('input') || tableManagerModal.querySelector('.admin-message.error')), 'assignment table manager content loaded');
+        const tableManagerName = tableManagerModal.querySelector('input');
+        if (!tableManagerName) throw new Error('assignment table manager name input is missing');
+        tableManagerModal.querySelector('button[aria-label="关闭表格管理"]')?.click();
+        await waitForCondition(() => !document.querySelector('.assignment-table-manager-modal'), 'assignment table manager closed');
 
         subnavByText('客户数据对接')?.click();
         await waitForSelector('.ops-table-row.customer-search');
@@ -945,6 +983,7 @@ app.whenReady().then(async () => {
   registerOnlineStatusIpc();
   registerWindowControlIpc();
   registerAdminOpenExternal();
+  registerAssignmentTableOpenExternal();
   registerReplyTaskNotificationIpc();
   registerScreenshotCapture();
   registerClipboardWriteText();
@@ -1038,6 +1077,27 @@ function adminConsoleUrl(requestedUrl?: string): string {
     devServerUrl: process.env.VITE_DEV_SERVER_URL,
     isDev
   });
+}
+
+function registerAssignmentTableOpenExternal() {
+  ipcMain.handle('assignment-table:open-external', async (_event, payload?: { url?: string }) => {
+    try {
+      const url = assignmentTableUrl(payload?.url);
+      if (isSmoke) return { success: true, url };
+      await openExternalBrowser(url);
+      return { success: true, url };
+    } catch (error) {
+      return {
+        success: false,
+        error: 'ASSIGNMENT_TABLE_OPEN_FAILED',
+        message: error instanceof Error ? error.message : '无法打开企业微信表格'
+      };
+    }
+  });
+}
+
+function assignmentTableUrl(rawUrl?: string): string {
+  return resolveAssignmentTableUrl(rawUrl);
 }
 
 function isAllowedAdminConsoleUrl(rawUrl: string): boolean {

@@ -70,4 +70,18 @@ describe('newLeadFlowStore', () => {
     expect(newLeadFlowState.open).toBe(false);
     expect(newLeadFlowState.error).toBe('该客户的微信昵称已被其他人填写，请确认后再提交');
   });
+
+  it('automatically clears the post-save toast', async () => {
+    vi.useFakeTimers();
+    const { confirmLeadContact, newLeadFlowState } = await import('./newLeadFlowStore');
+    newLeadFlowState.item = { phone: '13537442729', phoneFull: '13537442729', customerVersion: 5, nickname: null };
+    newLeadFlowState.nicknameDraft = '微信昵称';
+    postJsonMock.mockResolvedValueOnce({ success: true, data: { version: 6 }, errorCode: null, message: null });
+
+    await confirmLeadContact();
+    expect(newLeadFlowState.toast).toContain('昵称已保存');
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(newLeadFlowState.toast).toBe('');
+    vi.useRealTimers();
+  });
 });

@@ -1,6 +1,7 @@
 package com.privateflow.modules.tablewrite.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.ArrayList;
@@ -8,11 +9,17 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Consumer;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 /** Creates an API-owned Smart Sheet and prepares its default sheet for controlled acceptance. */
+@Component
 public final class WecomSmartSheetProvisioningService {
 
   static final String UNIQUE_FIELD_TITLE = "联系方式";
+  private static final List<String> UNIQUE_FIELD_ALIASES = List.of(
+      "手机号码", "手机号", "联系方式", "联系电话", "电话");
   private static final String FORMULA_FIELD_TYPE = "FIELD_TYPE_FORMULA";
   private static final List<Map<String, Object>> BUSINESS_FIELDS = List.of(
       field("姓名", "FIELD_TYPE_TEXT"),
@@ -25,17 +32,243 @@ public final class WecomSmartSheetProvisioningService {
 
   private final WecomSmartSheetApiClient apiClient;
   private final Duration timeout;
+  private final ObjectMapper objectMapper;
+
+  @Autowired
+  public WecomSmartSheetProvisioningService(WecomSmartSheetApiClient apiClient) {
+    this(apiClient, Duration.ofSeconds(60), new ObjectMapper());
+  }
 
   public WecomSmartSheetProvisioningService(WecomSmartSheetApiClient apiClient, Duration timeout) {
+    this(apiClient, timeout, new ObjectMapper());
+  }
+
+  WecomSmartSheetProvisioningService(
+      WecomSmartSheetApiClient apiClient, Duration timeout, ObjectMapper objectMapper) {
     this.apiClient = Objects.requireNonNull(apiClient, "apiClient is required");
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must be positive");
     }
     this.timeout = timeout;
+    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper is required");
   }
 
   public ProvisionedSheet provision(String documentName) {
     return prepare(createDocument(documentName));
+  }
+
+  /** Creates a new document from the configured assignment table's readable field metadata. */
+  public ProvisionedSheet provisionFromTemplate(
+      String documentName, com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget template) {
+    return provisionFromTemplate(documentName, template, created -> { });
+  }
+
+  /**
+   * Creates a document from a verified template schema and reports the document as soon as it exists.
+   * This lets the caller retain a recovery link when a later field operation fails.
+   */
+  public ProvisionedSheet provisionFromTemplate(
+      String documentName,
+      com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget template,
+      Consumer<CreatedDocument> documentCreated) {
+    Objects.requireNonNull(template, "template is required");
+    Objects.requireNonNull(documentCreated, "documentCreated is required");
+    if (!template.configured()) {
+      throw new IllegalArgumentException("当前分配表尚未配置完整，无法复制其结构");
+    }
+    JsonNode sourceFields = fields(template.documentId(), template.sheetId(), template.viewId());
+    if (sourceFields == null || !sourceFields.isArray() || sourceFields.isEmpty()) {
+      throw new IllegalStateException("当前分配表没有可复制的字段");
+    }
+    List<TemplateField> desired = copyableFields(sourceFields);
+    if (desired.isEmpty()) {
+      throw new IllegalStateException("当前分配表没有可复制的字段");
+    }
+    String resolvedUnique = resolveUniqueFieldTitle(sourceFields, template.uniqueFieldTitle());
+    CreatedDocument created = createDocument(documentName);
+    documentCreated.accept(created);
+    try {
+      return prepareFromFields(created, desired, resolvedUnique);
+    } catch (RuntimeException failure) {
+      throw new IllegalStateException("新分配表创建后结构校验失败：" + safeMessage(failure), failure);
+    }
+  }
+
+  /** Resumes a failed provisioning attempt whose WeCom document was already recorded. */
+  public ProvisionedSheet provisionExistingFromTemplate(
+      CreatedDocument created,
+      com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTarget template) {
+    Objects.requireNonNull(created, "created document is required");
+    Objects.requireNonNull(template, "template is required");
+    JsonNode sourceFields = fields(template.documentId(), template.sheetId(), template.viewId());
+    List<TemplateField> desired = copyableFields(sourceFields);
+    if (desired.isEmpty()) {
+      throw new IllegalStateException("当前分配表没有可复制的字段");
+    }
+    String resolvedUnique = resolveUniqueFieldTitle(sourceFields, template.uniqueFieldTitle());
+    try {
+      return prepareFromFields(created, desired, resolvedUnique);
+    } catch (RuntimeException failure) {
+      throw new IllegalStateException("新分配表恢复校验失败：" + safeMessage(failure), failure);
+    }
+  }
+
+  private ProvisionedSheet prepareFromFields(
+      CreatedDocument createdDocument, List<TemplateField> desired, String uniqueFieldTitle) {
+    String documentId = required(createdDocument.documentId(), "created document identifier");
+    String documentUrl = required(createdDocument.documentUrl(), "created document URL");
+    JsonNode sheet = firstMatching(call("get_sheet", Map.of("docid", documentId)).get("sheet_list"),
+        "type", "smartsheet", "Smart Sheet child sheet");
+    String sheetId = requiredText(sheet.get("sheet_id"), "child sheet identifier");
+    Map<String, Object> viewRequest = new LinkedHashMap<>();
+    viewRequest.put("docid", documentId);
+    viewRequest.put("sheet_id", sheetId);
+    viewRequest.put("offset", 0);
+    viewRequest.put("limit", 1000);
+    JsonNode view = firstMatching(call("get_views", viewRequest).get("views"),
+        "view_type", "VIEW_TYPE_GRID", "grid view");
+    String viewId = requiredText(view.get("view_id"), "view identifier");
+
+    JsonNode targetFields = fields(documentId, sheetId, viewId);
+    if (targetFields == null || !targetFields.isArray() || targetFields.isEmpty()) {
+      throw new IllegalStateException("新分配表没有返回默认字段");
+    }
+    Map<String, String> currentTypes = fieldTypes(targetFields);
+    TemplateField firstDesired = desired.get(0);
+    String firstCurrentType = currentTypes.get(firstDesired.title());
+    if (firstCurrentType == null) {
+      JsonNode firstTarget = targetFields.get(0);
+      Map<String, Object> update = target(documentId, sheetId);
+      update.put("fields", List.of(Map.of(
+          "field_id", requiredText(firstTarget.get("field_id"), "default field identifier"),
+          "field_title", firstDesired.title(),
+          "field_type", firstDesired.type())));
+      call("update_fields", update);
+      currentTypes.put(firstDesired.title(), firstDesired.type());
+    } else if (!firstDesired.type().equals(firstCurrentType)) {
+      throw new IllegalStateException("字段类型不匹配：" + firstDesired.title()
+          + "（期望 " + firstDesired.type() + "，实际 " + firstCurrentType + "）");
+    }
+    for (int index = 1; index < desired.size(); index++) {
+      TemplateField field = desired.get(index);
+      String currentType = currentTypes.get(field.title());
+      if (currentType != null) {
+        if (!field.type().equals(currentType)) {
+          throw new IllegalStateException("字段类型不匹配：" + field.title()
+              + "（期望 " + field.type() + "，实际 " + currentType + "）");
+        }
+        continue;
+      }
+      Map<String, Object> add = target(documentId, sheetId);
+      add.put("fields", List.of(field.request()));
+      call("add_fields", add);
+      currentTypes.put(field.title(), field.type());
+    }
+
+    JsonNode verifiedFields = fields(documentId, sheetId, viewId);
+    verifyFields(desired, verifiedFields);
+    String resolvedUnique = uniqueFieldTitle == null || uniqueFieldTitle.isBlank()
+        ? desired.get(0).title() : uniqueFieldTitle.trim();
+    if (findFieldByTitle(verifiedFields, resolvedUnique) == null) {
+      throw new IllegalStateException("新分配表缺少手机号列：" + resolvedUnique);
+    }
+    return new ProvisionedSheet(documentId, documentUrl, sheetId, viewId, sheetId, resolvedUnique);
+  }
+
+  private JsonNode fields(String documentId, String sheetId, String viewId) {
+    return call("get_fields", Map.of(
+        "docid", documentId, "sheet_id", sheetId, "view_id", viewId,
+        "offset", 0, "limit", 1000)).get("fields");
+  }
+
+  private List<TemplateField> copyableFields(JsonNode sourceFields) {
+    if (sourceFields == null || !sourceFields.isArray()) {
+      throw new IllegalStateException("当前分配表没有可复制的字段");
+    }
+    List<TemplateField> result = new ArrayList<>();
+    for (JsonNode source : sourceFields) {
+      if (source == null || !source.isObject()) continue;
+      String title = source.path("field_title").asText("").trim();
+      String type = source.path("field_type").asText("").trim();
+      if (title.isBlank() || type.isBlank()) {
+        throw new IllegalStateException("当前分配表存在缺少名称或类型的字段");
+      }
+      // WeCom member fields cannot reliably be created from metadata returned by get_fields.
+      // The application only needs the assigned keeper's display name, so retain the business
+      // column as text instead of silently dropping it or preventing a new monthly table.
+      if ("管家".equals(title)) {
+        result.add(new TemplateField(title, "FIELD_TYPE_TEXT", Map.of(
+            "field_title", title, "field_type", "FIELD_TYPE_TEXT")));
+        continue;
+      }
+      Map<String, Object> request = new LinkedHashMap<>();
+      request.put("field_title", title);
+      request.put("field_type", type);
+      source.fields().forEachRemaining(entry -> {
+        if (entry.getKey().startsWith("property_")) {
+          request.put(entry.getKey(), objectMapper.convertValue(entry.getValue(), Object.class));
+        }
+      });
+      // The WeCom schema may explicitly contain a null property value. Keep the exact
+      // metadata for the request without Map.copyOf rejecting that valid JSON shape.
+      result.add(new TemplateField(title, type,
+          java.util.Collections.unmodifiableMap(new LinkedHashMap<>(request))));
+    }
+    return result;
+  }
+
+  private void verifyFields(List<TemplateField> desired, JsonNode actual) {
+    Map<String, String> actualTypes = fieldTypes(actual);
+    for (TemplateField expected : desired) {
+      String actualType = actualTypes.get(expected.title());
+      if (!expected.type().equals(actualType)) {
+        throw new IllegalStateException("字段未完整复制：" + expected.title()
+            + "（期望 " + expected.type() + "，实际 "
+            + (actualType == null ? "未返回" : actualType) + "）");
+      }
+    }
+  }
+
+  private String resolveUniqueFieldTitle(JsonNode sourceFields, String configuredTitle) {
+    String requested = configuredTitle == null ? "" : configuredTitle.trim();
+    JsonNode exact = findFieldByTitle(sourceFields, requested);
+    if (isUniqueCandidate(exact)) {
+      return requested;
+    }
+    if (UNIQUE_FIELD_ALIASES.contains(requested)) {
+      for (String alias : UNIQUE_FIELD_ALIASES) {
+        JsonNode candidate = findFieldByTitle(sourceFields, alias);
+        if (isUniqueCandidate(candidate)) {
+          return alias;
+        }
+      }
+    }
+    throw new IllegalStateException("当前分配表缺少可用的唯一字段："
+        + (requested.isBlank() ? "未配置" : requested)
+        + "。请确认表中存在“手机号码”“手机号”或“联系方式”文本列");
+  }
+
+  private boolean isUniqueCandidate(JsonNode field) {
+    if (field == null || !field.isObject()) {
+      return false;
+    }
+    return switch (field.path("field_type").asText("")) {
+      case "FIELD_TYPE_TEXT", "FIELD_TYPE_PHONE_NUMBER", "FIELD_TYPE_EMAIL" -> true;
+      default -> false;
+    };
+  }
+
+  private JsonNode findFieldByTitle(JsonNode fields, String title) {
+    if (fields == null || !fields.isArray()) return null;
+    for (JsonNode field : fields) {
+      if (title.equals(field.path("field_title").asText(""))) return field;
+    }
+    return null;
+  }
+
+  private String safeMessage(RuntimeException failure) {
+    String message = failure.getMessage();
+    return message == null || message.isBlank() ? "远程表格接口未返回可用结果" : message;
   }
 
   public CreatedDocument createDocument(String documentName) {
@@ -187,4 +420,6 @@ public final class WecomSmartSheetProvisioningService {
       String viewId,
       String sourceTable,
       String uniqueFieldTitle) {}
+
+  private record TemplateField(String title, String type, Map<String, Object> request) {}
 }

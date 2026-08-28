@@ -25,6 +25,14 @@
       </label>
       <p v-if="loginError" class="admin-message error">{{ loginError }}</p>
       <button class="primary" type="submit" :disabled="loginLoading">{{ loginLoading ? '登录中' : '登录' }}</button>
+      <div v-if="!isElectronRuntime" class="desktop-download-area">
+        <a v-if="desktopRelease.version" class="desktop-download-link" :href="desktopDownloadUrl">下载桌面工作台</a>
+        <span v-if="desktopRelease.loading" class="desktop-download-meta">正在获取最新版本...</span>
+        <span v-else-if="desktopRelease.version" class="desktop-download-meta">最新版 {{ desktopRelease.version }}</span>
+        <span v-else-if="desktopRelease.error" class="desktop-download-meta error">版本信息获取失败</span>
+        <span v-else class="desktop-download-meta">管理员发布新版本后，这里会自动更新</span>
+        <button v-if="desktopRelease.error" class="desktop-download-retry" type="button" @click="loadDesktopRelease">重新获取</button>
+      </div>
     </form>
   </main>
 
@@ -81,7 +89,6 @@
           type="button"
           @click="selectDesktopPanel(item.key)"
         >
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
           <span class="nav-copy">
             <span class="nav-label">{{ item.title }}</span>
             <small>{{ item.description }}</small>
@@ -90,19 +97,15 @@
       </nav>
       <nav class="sidebar-quick-actions" aria-label="全局快捷操作">
         <button class="primary sidebar-quick-button" type="button" title="识别当前聊天" @click="recognizeFromAnywhere">
-          <span class="action-icon" aria-hidden="true">识</span>
           <strong class="action-label">{{ recognitionState.isRecognizePending ? '继续识别' : '识别' }}</strong>
         </button>
         <button class="secondary sidebar-quick-button" type="button" title="打开话术库" @click="openTemplateLibrary">
-          <span class="action-icon" aria-hidden="true">话</span>
           <strong class="action-label">话术库</strong>
         </button>
         <button class="secondary sidebar-quick-button" type="button" title="打开待办队列" @click="openTaskQueue()">
-          <span class="action-icon" aria-hidden="true">批</span>
           <strong class="action-label">批量</strong>
         </button>
         <button class="secondary sidebar-quick-button" type="button" title="预约当前微信客户" @click="openManualAppointment()">
-          <span class="action-icon" aria-hidden="true">约</span>
           <strong class="action-label">预约</strong>
         </button>
       </nav>
@@ -236,7 +239,7 @@ import {
   replySuggestionState,
   restoreArchivedReplySession
 } from './modules/reply-suggestions/replySuggestionStore';
-import { postJson } from './shared/apiClient';
+import { getJson, postJson } from './shared/apiClient';
 import { captureScreenshot, getAlwaysOnTop, openAdminConsole, toggleAlwaysOnTop } from './shared/desktopBridge';
 import { clearDesktopNotice, desktopNoticeState, setDesktopNotice } from './shared/desktopNoticeStore';
 import { desktopStatusState, loadDesktopStatus, resetDesktopStatus } from './shared/desktopStatusStore';
@@ -269,6 +272,13 @@ type LoginPayload = {
     role?: string;
     permissions?: string[];
   };
+};
+
+type DesktopReleaseInfo = {
+  version: string;
+  fileSize?: number | null;
+  changelog?: string;
+  publishedAt?: string;
 };
 
 type DesktopPanelKey = 'workbench' | 'customer' | 'reply' | 'communication';
@@ -317,6 +327,11 @@ const profileReturnContext = ref<ProfileReturnContext | null>(null);
 const alwaysOnTop = ref(false);
 const loginLoading = ref(false);
 const loginError = ref('');
+const desktopRelease = reactive({
+  loading: false,
+  version: '',
+  error: ''
+});
 const loginForm = reactive({
   apiBaseUrl: config.apiBaseUrl,
   username: config.accountUsername,
@@ -330,6 +345,10 @@ const session = reactive({
   accountName: config.accessToken ? '当前账号' : '',
   role: resolveInitialRole(config),
   permissions: normalizePermissions(config.accountPermissions)
+});
+const desktopDownloadUrl = computed(() => {
+  const apiBaseUrl = loginForm.apiBaseUrl.trim().replace(/\/$/, '');
+  return apiBaseUrl ? `${apiBaseUrl}/api/v1/desktop/download?platform=WINDOWS` : '';
 });
 const activeDesktopNav = computed(() => desktopNavItems.find((item) => item.key === activeDesktopPanel.value) ?? desktopNavItems[0]);
 const replyTaskItems = computed(() => buildReplyTaskItems(
@@ -370,6 +389,9 @@ onMounted(() => {
   window.addEventListener('hashchange', syncModeFromHash);
   initializeAbnormalAlertRouter();
   initializeStageSuggestionHandler();
+  if (!session.accessToken && !hasDesktopBridge()) {
+    void loadDesktopRelease();
+  }
   if (session.accessToken) {
     void initializeAuthenticatedSession();
   }
@@ -596,6 +618,23 @@ async function initializeAuthenticatedSession(): Promise<void> {
   if (authenticatedEpoch !== sessionEpoch) return;
   connectWsMessageBus();
   scheduleSessionRefresh();
+}
+
+async function loadDesktopRelease() {
+  desktopRelease.loading = true;
+  desktopRelease.error = '';
+  try {
+    const response = await getJson<DesktopReleaseInfo | null>('/api/v1/desktop/latest?platform=WINDOWS');
+    if (!response.success) {
+      throw new Error(response.message ?? response.errorCode ?? '版本信息获取失败');
+    }
+    desktopRelease.version = response.data?.version ?? '';
+  } catch {
+    desktopRelease.version = '';
+    desktopRelease.error = '版本信息获取失败';
+  } finally {
+    desktopRelease.loading = false;
+  }
 }
 
 function scheduleSessionRefresh(): void {

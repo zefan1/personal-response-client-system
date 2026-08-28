@@ -218,11 +218,11 @@ public class QueueRetryManager {
       return true;
     }
     if ("ASSIGNMENT".equals(payload.sourceTable())) {
-      writeAuxiliary(currentAssignmentTarget(), payload, timeout);
+      writeAuxiliary(targetForPayload(payload, "ASSIGNMENT"), payload, timeout);
       return true;
     }
     if ("ARRIVAL".equals(payload.sourceTable())) {
-      writeAuxiliary(currentArrivalTarget(), payload, timeout);
+      writeAuxiliary(targetForPayload(payload, "ARRIVAL"), payload, timeout);
       return true;
     }
     return false;
@@ -241,7 +241,8 @@ public class QueueRetryManager {
     Map<String, Object> fields = new java.util.LinkedHashMap<>(payload.fields());
     fields.put("customerStage", stageOptionService.normalizeForCustomer(
         customer, String.valueOf(fields.get("customerStage"))));
-    return new PendingWritePayload(payload.sourceTable(), payload.sourceRowId(), fields);
+    return new PendingWritePayload(payload.sourceTable(), payload.sourceRowId(), fields,
+        payload.targetDocumentId(), payload.targetSheetId(), payload.targetViewId());
   }
 
   private Optional<AuxiliarySmartSheetTarget> currentAssignmentTarget() {
@@ -250,6 +251,16 @@ public class QueueRetryManager {
 
   private Optional<AuxiliarySmartSheetTarget> currentArrivalTarget() {
     return auxiliaryTargets == null ? arrivalTarget : auxiliaryTargets.arrival();
+  }
+
+  private Optional<AuxiliarySmartSheetTarget> targetForPayload(
+      PendingWritePayload payload, String role) {
+    if (payload != null && payload.hasTargetSnapshot()) {
+      String uniqueField = "ARRIVAL".equals(role) ? "手机号码" : "联系方式";
+      return Optional.of(new AuxiliarySmartSheetTarget(
+          role, payload.targetDocumentId(), payload.targetSheetId(), payload.targetViewId(), uniqueField, ""));
+    }
+    return "ARRIVAL".equals(role) ? currentArrivalTarget() : currentAssignmentTarget();
   }
 
   private void writeAuxiliary(
@@ -280,7 +291,8 @@ public class QueueRetryManager {
     if (customer == null || blank(customer.getSourceTable()) || blank(customer.getSourceRowId())) {
       throw new IllegalStateException("customer source table or row id is still missing");
     }
-    return new PendingWritePayload(customer.getSourceTable(), customer.getSourceRowId(), payload.fields());
+    return new PendingWritePayload(customer.getSourceTable(), customer.getSourceRowId(), payload.fields(),
+        payload.targetDocumentId(), payload.targetSheetId(), payload.targetViewId());
   }
 
   private MapPayload remotePayload(PendingWritePayload payload, TagExchangeResult exchange) {

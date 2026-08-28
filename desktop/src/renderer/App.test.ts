@@ -622,7 +622,8 @@ describe('App route shell', () => {
     expect([...host.querySelectorAll('.sidebar-quick-actions .action-label')].map((item) => item.textContent)).toEqual([
       '识别',
       '话术库',
-      '批量'
+      '批量',
+      '预约'
     ]);
     const recognizeButton = actionButtons[0];
     expect(recognizeButton).toBeTruthy();
@@ -727,6 +728,25 @@ describe('App route shell', () => {
     eventBus.emit('communication:return-profile', { phone: '18800001111' });
     await flushUi();
     expect((host.querySelector('.customer-panel') as HTMLElement).style.display).not.toBe('none');
+    app.unmount();
+  });
+
+  it('shows the current desktop download link on the web login page', async () => {
+    apiMocks.getJson.mockResolvedValueOnce({
+      success: true,
+      data: { version: '2.0.0', fileSize: 1234, changelog: 'new release' },
+      errorCode: null,
+      message: null
+    });
+
+    const { app, host } = await mountAppWithToken('#/admin', { accessToken: '' });
+    await flushUi();
+
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/api/v1/desktop/latest?platform=WINDOWS');
+    const link = host.querySelector('.desktop-download-link') as HTMLAnchorElement | null;
+    expect(link?.textContent).toContain('下载桌面工作台');
+    expect(link?.href).toBe('http://localhost:8080/api/v1/desktop/download?platform=WINDOWS');
+    expect(host.textContent).toContain('最新版 2.0.0');
     app.unmount();
   });
 

@@ -98,7 +98,8 @@ public class AuxiliarySmartSheetProjectionService {
     } catch (RuntimeException failure) {
       try {
         queueManager.enqueue(customer.getId(), customer.getPhone(), TableWriteActionType.UPDATE,
-            new PendingWritePayload(target.role(), null, fields), message(failure));
+            new PendingWritePayload(target.role(), null, fields,
+                target.documentId(), target.sheetId(), target.viewId()), message(failure));
         audit(customer, target, fields, "QUEUED", message(failure));
       } catch (RuntimeException queueFailure) {
         audit(customer, target, fields, "FAILED", message(queueFailure));

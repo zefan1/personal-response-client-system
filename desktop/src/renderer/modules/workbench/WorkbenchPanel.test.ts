@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FollowupItem } from './types';
 
 const apiMocks = vi.hoisted(() => ({
-  getJson: vi.fn()
+  getJson: vi.fn(),
+  postJson: vi.fn()
 }));
 
 vi.mock('../../shared/apiClient', () => ({
-  getJson: apiMocks.getJson
+  getJson: apiMocks.getJson,
+  postJson: apiMocks.postJson
 }));
 
 type MountedPanel = {
@@ -64,7 +66,12 @@ describe('WorkbenchPanel', () => {
     installMemoryLocalStorage();
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-03T12:00:00Z'));
-    apiMocks.getJson.mockResolvedValue({
+    apiMocks.getJson.mockImplementation(async (path: string) => path === '/api/v1/assignment-tables' ? {
+      success: true,
+      data: [],
+      errorCode: null,
+      message: null
+    } : ({
       success: true,
       data: {
         items: [
@@ -76,7 +83,7 @@ describe('WorkbenchPanel', () => {
       },
       errorCode: null,
       message: null
-    });
+    }));
   });
 
   afterEach(() => {
@@ -84,17 +91,19 @@ describe('WorkbenchPanel', () => {
     vi.useRealTimers();
     localStorage.clear();
     apiMocks.getJson.mockReset();
+    apiMocks.postJson.mockReset();
   });
 
   it('renders loaded metrics, urgent followups, and new leads from the API', async () => {
     const { app, host } = await mountPanel();
 
     expect(apiMocks.getJson).toHaveBeenCalledWith('/api/v1/followups/today', 5000);
+    expect(apiMocks.getJson).not.toHaveBeenCalledWith('/api/v1/assignment-tables');
     expect(host.querySelectorAll('.metric-card')).toHaveLength(3);
     expect(host.textContent).toContain('Overdue A');
     expect(host.textContent).toContain('Due B');
     expect(host.textContent).toContain('Lead D');
-    expect(host.textContent).toContain('手机号 18800000004');
+    expect(host.textContent).toContain('手机号 188****0004');
     expect(host.textContent).toContain('来源 sheet-a');
     expect(host.textContent).not.toContain('admin');
 
@@ -147,6 +156,9 @@ describe('WorkbenchPanel', () => {
   it('shows a retry action after load failure and reloads manually', async () => {
     let followupCalls = 0;
     apiMocks.getJson.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/assignment-tables') {
+        return { success: true, data: [], errorCode: null, message: null };
+      }
       if (path === '/api/v1/notices/active') {
         return { success: true, data: [], errorCode: null, message: null };
       }

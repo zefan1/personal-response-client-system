@@ -6,11 +6,19 @@ files:
   - dist/**
   - package.json
 asar: true
+npmRebuild: false
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 win:
   target:
-    - dir
+    - nsis
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
   signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
 mac:
   target:
     - dir

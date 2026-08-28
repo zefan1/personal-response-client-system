@@ -2,13 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   captureScreenshot: vi.fn(),
+  getJson: vi.fn(),
   postJson: vi.fn(),
   postForm: vi.fn(),
-  writeClipboardText: vi.fn()
+  writeClipboardText: vi.fn(),
+  resolveQuickSearchTemplate: vi.fn()
 }));
 
 vi.mock('../../shared/apiClient', () => ({
-  getJson: vi.fn(),
+  getJson: mocks.getJson,
   postForm: mocks.postForm,
   postJson: mocks.postJson
 }));
@@ -19,7 +21,7 @@ vi.mock('../../shared/desktopBridge', () => ({
 }));
 
 vi.mock('../quick-search/templateVariables', () => ({
-  resolveQuickSearchTemplate: vi.fn((content: string) => content)
+  resolveQuickSearchTemplate: mocks.resolveQuickSearchTemplate
 }));
 
 vi.mock('./workbenchStore', () => ({
@@ -31,6 +33,8 @@ describe('manual appointment matching', () => {
     vi.resetModules();
     mocks.captureScreenshot.mockResolvedValue({ success: true, imageBase64: 'capture' });
     mocks.postJson.mockReset();
+    mocks.resolveQuickSearchTemplate.mockImplementation((content: string) => content);
+    mocks.writeClipboardText.mockResolvedValue({ success: true });
   });
 
   afterEach(() => {
@@ -64,5 +68,80 @@ describe('manual appointment matching', () => {
     expect(store.manualAppointmentState.nickname).toBe('微信客户');
     expect(store.manualAppointmentState.error).toBe('');
     expect(mocks.postJson).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries once with the latest customer version without clearing entered values', async () => {
+    mocks.postJson
+      .mockResolvedValueOnce({ success: false, data: null, errorCode: '50-10002', message: '档案已被更新，请刷新后重试' })
+      .mockResolvedValueOnce({ success: true, data: { synced: true, taskId: 9, templateContent: null }, errorCode: null, message: null });
+    mocks.getJson.mockResolvedValueOnce({
+      success: true,
+      data: { customerId: 8, customerVersion: 12, nickname: '客户', phone: '18800001111', values: {}, fields: [] },
+      errorCode: null,
+      message: null
+    });
+
+    const store = await import('./manualAppointmentStore');
+    store.manualAppointmentState.form = {
+      customerId: 8,
+      customerVersion: 11,
+      nickname: '客户',
+      phone: '18800001111',
+      values: { sourceChannel: '抖音' },
+      fields: []
+    };
+
+    await store.submitManualAppointment();
+
+    expect(mocks.postJson).toHaveBeenCalledTimes(2);
+    expect(mocks.postJson.mock.calls[1][1]).toEqual({ customerVersion: 12, values: { sourceChannel: '抖音' } });
+  });
+
+  it('copies the latest saved customer values instead of the stale form values', async () => {
+    mocks.postJson.mockResolvedValueOnce({
+      success: true,
+      data: {
+        synced: true,
+        taskId: 9,
+        templateContent: '客户名称：{{客户名称}}\n预约项目：{{预约项目}}',
+        templateValues: { customerName: '江怀', appointmentItem: '产后修复', appointmentStore: '万江店' }
+      },
+      errorCode: null,
+      message: null
+    });
+
+    const store = await import('./manualAppointmentStore');
+    store.manualAppointmentState.form = {
+      customerId: 8,
+      customerVersion: 11,
+      nickname: '微信昵称',
+      phone: '18800001111',
+      values: { customerName: '', appointmentItem: '' },
+      fields: []
+    };
+
+    await store.submitManualAppointment();
+
+    expect(mocks.resolveQuickSearchTemplate).toHaveBeenCalledWith(
+      '客户名称：{{客户名称}}\n预约项目：{{预约项目}}',
+      expect.objectContaining({ customerName: '江怀', appointmentItem: '产后修复', appointmentStore: '万江店', nickname: '微信昵称' }),
+      '18800001111'
+    );
+  });
+
+  it('does not copy unresolved appointment placeholders to the customer', async () => {
+    mocks.postJson.mockResolvedValueOnce({
+      success: true,
+      data: { synced: true, taskId: 9, templateContent: '客户名称：江怀\n预约时间：{{预约时间}}\n预约项目：{{预约项目}}\n欢迎到店', templateValues: {} },
+      errorCode: null,
+      message: null
+    });
+
+    const store = await import('./manualAppointmentStore');
+    store.manualAppointmentState.form = { customerId: 8, customerVersion: 11, nickname: '微信昵称', phone: '18800001111', values: {}, fields: [] };
+
+    await store.submitManualAppointment();
+
+    expect(mocks.writeClipboardText).toHaveBeenCalledWith('客户名称：江怀\n欢迎到店');
   });
 });

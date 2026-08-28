@@ -22,6 +22,10 @@ vi.mock('../../shared/apiClient', () => ({
   deleteJson: apiMocks.deleteJson
 }));
 
+vi.mock('../../shared/desktopBridge', () => ({
+  openAssignmentTable: vi.fn().mockResolvedValue({ success: true })
+}));
+
 type MountedConsole = {
   app: App<Element>;
   host: HTMLDivElement;
@@ -174,12 +178,17 @@ const apiData: Record<string, unknown> = {
   '/admin/api/v1/datasources': {
     items: [{ id: 10, name: '企微客资表', sheetId: 'sheet-a', sourceTable: 'leads', enabled: true }]
   },
+  '/api/v1/assignment-tables': [
+    { id: 90, tableName: '8月分配', monthKey: '2026-08', documentUrl: 'https://doc.weixin.qq.com/assignment', status: 'ACTIVE' }
+  ],
   '/admin/api/v1/customer-fields': {
     items: [
       { key: 'phone', label: '手机号' },
       { key: 'nickname', label: '客户昵称' },
       { key: 'intentLevel', label: '意向等级' },
-      { key: 'customerStage', label: '客户阶段' }
+      { key: 'customerStage', label: '客户阶段' },
+      { key: 'bodyConcerns', label: '身体关注', category: '客户档案' },
+      { key: 'followupNotes', label: '跟进记录', category: '跟进' }
     ]
   },
   '/admin/api/v1/datasources/sync-status': {
@@ -1221,6 +1230,13 @@ describe('AdminConsole product surface', () => {
     expect(smartSheetRoleSelect).toBeTruthy();
     const assignmentCard = [...host.querySelectorAll('.ops-smart-sheet-card')]
       .find((card) => card.textContent?.includes('分配表')) as HTMLElement;
+    findButton(assignmentCard, '表格管理').click();
+    await flushSave();
+    expect(host.querySelector('.assignment-table-manager-modal')).toBeTruthy();
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/api/v1/assignment-tables');
+    (host.querySelector('button[aria-label="关闭表格管理"]') as HTMLButtonElement).click();
+    await flushUi();
+    expect(host.querySelector('.assignment-table-manager-modal')).toBeNull();
     findButton(assignmentCard, '配置这张表').click();
     await flushUi();
     expect(smartSheetRoleSelect.value).toBe('ASSIGNMENT');
@@ -1263,6 +1279,60 @@ describe('AdminConsole product surface', () => {
     const promptEditor = host.querySelector('.configuration-prompt-editor') as HTMLElement;
     expect(promptEditor.textContent).toContain('每行一条，按回车换行，不使用分号');
     expect(promptEditor.textContent).toContain('已有默认内容时通常无需修改');
+
+    app.unmount();
+  });
+
+  it('automatically refreshes the selected assignment table configuration after creation succeeds', async () => {
+    const originalConfigs = apiData['/admin/api/v1/configs'] as Record<string, unknown>;
+    const refreshedConfigs = {
+      ...originalConfigs,
+      'table.assignment_document_url': 'https://doc.weixin.qq.com/smartsheet/new-assignment?scode=updated',
+      'table.assignment.document_id': 'new-assignment-doc',
+      'table.assignment.sheet_id': 'new-assignment-sheet',
+      'table.assignment.view_id': 'new-assignment-view',
+      'table.assignment.unique_field_title': '手机号码'
+    };
+    let useRefreshedConfigs = false;
+    apiMocks.getJson.mockImplementation(async (path: string) => ({
+      success: true,
+      data: path === '/admin/api/v1/configs' && useRefreshedConfigs
+        ? refreshedConfigs
+        : apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] },
+      errorCode: null,
+      message: null
+    }));
+    apiMocks.postJson.mockImplementation(async (path: string) => path === '/api/v1/assignment-tables'
+      ? {
+          success: true,
+          data: { id: 91, tableName: '9月新客分配', monthKey: '2026-09', documentUrl: 'https://doc.weixin.qq.com/smartsheet/new-assignment?scode=updated', status: 'ACTIVE' },
+          errorCode: null,
+          message: null
+        }
+      : { success: true, data: apiData[path] ?? {}, errorCode: null, message: null });
+
+    const { app, host } = await mountConsole();
+    findSubnavButton(host, '配置中心').click();
+    await flushSave();
+    const assignmentCard = [...host.querySelectorAll('.ops-smart-sheet-card')]
+      .find((card) => card.textContent?.includes('分配表')) as HTMLElement;
+    findButton(assignmentCard, '配置这张表').click();
+    await flushUi();
+    findButton(assignmentCard, '表格管理').click();
+    await flushSave();
+
+    useRefreshedConfigs = true;
+    (host.querySelector('.assignment-table-manager-create') as HTMLFormElement).dispatchEvent(new Event('submit'));
+    await flushSave();
+    await flushSave();
+
+    expect((host.querySelector('input[aria-label="企业微信智能表格链接"]') as HTMLInputElement).value)
+      .toBe('https://doc.weixin.qq.com/smartsheet/new-assignment?scode=updated');
+    expect((host.querySelector('input[aria-label="智能表格文档 ID"]') as HTMLInputElement).value).toBe('new-assignment-doc');
+    expect((host.querySelector('input[aria-label="智能表格查找列名称"]') as HTMLInputElement).value).toBe('手机号码');
+    expect(mainText(host)).toContain('分配表配置已自动更新');
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/datasources');
+    expect(apiMocks.getJson).toHaveBeenCalledWith('/admin/api/v1/datasources/sync-status');
 
     app.unmount();
   });
@@ -2146,7 +2216,7 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
-  it('inserts Chinese customer placeholders into quick-search content', async () => {
+  it('searches and inserts every field returned by the unique-fact field catalog', async () => {
     const { app, host } = await mountConsole();
 
     findSubnavButton(host, '速搜内容管理').click();
@@ -2157,13 +2227,16 @@ describe('AdminConsole product surface', () => {
     const drawer = host.querySelector('.ops-drawer') as HTMLElement;
     const variableButtons = [...drawer.querySelectorAll('.ops-variable-bar button')] as HTMLButtonElement[];
     expect(variableButtons.map((button) => button.textContent?.trim())).toEqual([
-      '客户昵称', '手机号', '意向门店', '意向项目', '客户阶段', '意向等级',
-      '下次跟进时间', '预约日期', '预约项目', '预约门店', '是否到店', '分配管家'
+      '手机号', '客户昵称', '意向等级', '客户阶段', '身体关注', '跟进记录'
     ]);
-    variableButtons.find((button) => button.textContent?.includes('意向等级'))?.click();
+    const fieldSearch = drawer.querySelector('input[type="search"]') as HTMLInputElement;
+    setInputValue(fieldSearch, '关注');
+    await flushUi();
+    expect([...drawer.querySelectorAll('.ops-variable-bar button')].map((button) => button.textContent?.trim())).toEqual(['身体关注']);
+    (drawer.querySelector('.ops-variable-bar button') as HTMLButtonElement).click();
     await flushUi();
 
-    expect((drawer.querySelector('textarea') as HTMLTextAreaElement).value).toBe('{{意向等级}}');
+    expect((drawer.querySelector('textarea') as HTMLTextAreaElement).value).toBe('{{客户关注点}}');
     expect(drawer.textContent).toContain('{{客户昵称}}、{{意向门店}}');
 
     app.unmount();

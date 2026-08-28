@@ -1,7 +1,10 @@
 package com.privateflow.modules.versions;
 
 import com.privateflow.modules.match.ApiResponse;
+import java.net.URI;
 import java.util.Map;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -81,6 +84,18 @@ public class DesktopVersionController {
       @RequestParam("currentVersion") String currentVersion,
       @RequestParam("clientId") String clientId) {
     return ApiResponse.ok(service.versionCheck(platform, currentVersion, clientId));
+  }
+
+  @GetMapping("/api/v1/desktop/latest")
+  public ApiResponse<DesktopReleaseInfo> latest(@RequestParam("platform") DesktopPlatform platform) {
+    return ApiResponse.ok(service.latestRelease(platform));
+  }
+
+  @GetMapping("/api/v1/desktop/download")
+  public ResponseEntity<Void> download(@RequestParam("platform") DesktopPlatform platform) {
+    return service.latestDownloadUrl(platform)
+        .map(url -> ResponseEntity.status(HttpStatus.FOUND).location(URI.create(url)).<Void>build())
+        .orElseGet(() -> ResponseEntity.notFound().build());
   }
 
   @PostMapping("/api/v1/desktop/version-report")

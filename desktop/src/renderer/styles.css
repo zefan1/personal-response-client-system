@@ -154,31 +154,17 @@ textarea {
 
 .desktop-nav-button {
   width: 100%;
-  height: 42px;
-  min-height: 42px;
+  height: 36px;
+  min-height: 36px;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
+  justify-content: center;
   border-color: #d7dde7;
   border-radius: 8px;
-  padding: 6px;
+  padding: 4px 6px;
   text-align: left;
   background: #fff;
   overflow: hidden;
-}
-
-.nav-icon {
-  flex: 0 0 22px;
-  width: 22px;
-  height: 22px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 8px;
-  color: #1f2937;
-  background: #eef2f7;
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .nav-copy {
@@ -204,11 +190,6 @@ textarea {
   color: #12395b;
   background: #edf5ff;
   box-shadow: inset 3px 0 0 #1f4e79;
-}
-
-.desktop-nav-button.active .nav-icon {
-  color: #fff;
-  background: #1f4e79;
 }
 
 .desktop-nav-button.active .nav-label {
@@ -256,19 +237,10 @@ textarea {
   min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 5px;
+  justify-content: center;
   border-radius: 8px;
   padding: 0 6px;
   overflow: hidden;
-}
-
-.sidebar-quick-button .action-icon {
-  flex: 0 0 20px;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  font-size: 11px;
 }
 
 .sidebar-quick-button .action-label {
@@ -447,6 +419,78 @@ textarea {
 .workbench-panel {
   gap: 9px;
 }
+
+.assignment-table-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #cdd9d1;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f6fbf7;
+}
+
+.assignment-table-panel h2,
+.assignment-table-panel p {
+  margin: 0;
+}
+
+.assignment-table-panel h2 { font-size: 15px; }
+.assignment-table-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.assignment-table-active {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.assignment-table-active {
+  border: 1px solid #b7dec5;
+  border-radius: 6px;
+  padding: 9px;
+  background: #fff;
+}
+
+.assignment-table-active > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.assignment-table-active strong { overflow-wrap: anywhere; }
+.assignment-table-active small { color: #627268; font-size: 12px; }
+.assignment-table-label { color: #176b3a; font-size: 11px; font-weight: 700; }
+.assignment-table-loading { color: #627268; font-size: 13px; }
+
+.assignment-table-manager-modal { width: min(640px, calc(100vw - 32px)); }
+.assignment-table-manager-content { display: grid; gap: 16px; }
+.assignment-table-manager-current,
+.assignment-table-manager-create,
+.assignment-table-manager-history {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid #d9c4ae;
+  border-radius: 8px;
+  background: #fffaf5;
+}
+.assignment-table-manager-current { grid-template-columns: 1fr auto; align-items: center; }
+.assignment-table-manager-current > span,
+.assignment-table-manager-current > strong,
+.assignment-table-manager-current > small { grid-column: 1; }
+.assignment-table-manager-current > span { color: #8b4f2a; font-size: 12px; font-weight: 700; }
+.assignment-table-manager-current > strong { color: var(--admin-ink); overflow-wrap: anywhere; }
+.assignment-table-manager-current > small,
+.assignment-table-manager-create > p,
+.assignment-table-manager-history small { color: var(--admin-muted); font-size: 12px; line-height: 1.5; }
+.assignment-table-manager-current > button { grid-column: 2; grid-row: 1 / span 3; }
+.assignment-table-manager-create label { display: grid; gap: 6px; color: var(--admin-ink); font-size: 13px; font-weight: 700; }
+.assignment-table-manager-create input { width: 100%; min-height: 38px; border: 1px solid #b9a58f; border-radius: 6px; padding: 0 10px; color: var(--admin-ink); background: #fff; }
+.assignment-table-manager-create > p { margin: 0; }
+.assignment-table-manager-history > div { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.assignment-table-manager-history > div > strong { color: var(--admin-ink); font-size: 13px; }
+.assignment-table-manager-history article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; border-top: 1px solid #ead9c9; }
+.assignment-table-manager-history article > div { display: grid; gap: 3px; min-width: 0; }
+.assignment-table-manager-history article strong { color: var(--admin-ink); overflow-wrap: anywhere; }
+.assignment-table-manager-history article span { color: var(--admin-muted); font-size: 12px; }
+.assignment-table-manager-history .assignment-table-manager-failure { color: #a04426; overflow-wrap: anywhere; }
+.assignment-table-manager-history-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 14px; }
 
 .arrival-handover-panel {
   display: flex;
@@ -3508,6 +3552,56 @@ details.profile-detail-module > .field-grid,
   border-color: #a95018;
 }
 
+.desktop-download-area {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px 8px;
+  padding-top: 2px;
+  text-align: center;
+}
+
+.desktop-download-link {
+  color: #1f4e79;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.desktop-download-link:hover {
+  text-decoration: underline;
+}
+
+.desktop-download-link:focus-visible {
+  outline: 2px solid #1f4e79;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.desktop-download-retry {
+  border: 0;
+  padding: 0;
+  color: #1f4e79;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.desktop-download-retry:hover {
+  text-decoration: underline;
+}
+
+.desktop-download-meta {
+  flex-basis: 100%;
+  color: #667085;
+  font-size: 12px;
+}
+
+.desktop-download-meta.error {
+  color: #a53a2b;
+}
+
 .desktop-mode-bar {
   position: sticky;
   top: 0;
@@ -5810,8 +5904,8 @@ details.profile-detail-module > .field-grid,
   }
 
   .desktop-nav-button {
-    height: 54px;
-    min-height: 54px;
+    height: 36px;
+    min-height: 36px;
     font-size: 12px;
   }
 
@@ -6062,6 +6156,148 @@ details.profile-detail-module > .field-grid,
   gap: 0;
   padding-block: 0;
   grid-template-columns: minmax(180px, 0.8fr) minmax(180px, 1.4fr) minmax(140px, 0.9fr) minmax(190px, 1.1fr) 100px;
+}
+
+/* Workbench reading order: orient the eye toward the next action first. */
+.workbench-panel {
+  gap: 18px;
+  padding: 18px 20px 22px;
+  border-color: #d9e0e8;
+  background: #fff;
+}
+
+.workbench-hero {
+  min-height: 42px;
+  align-items: center;
+  padding-bottom: 4px;
+}
+
+.workbench-hero h2 {
+  margin: 0;
+  color: #172b4d;
+  font-size: 21px;
+  line-height: 1.2;
+}
+
+.workbench-hero p {
+  margin: 5px 0 0;
+  color: #667085;
+  font-size: 13px;
+}
+
+.metric-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  border-top: 1px solid #edf0f4;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.metric-card {
+  min-height: 74px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  padding: 12px 16px;
+  border: 0;
+  border-right: 1px solid #edf0f4;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.metric-card:last-child { border-right: 0; }
+.metric-card:hover { background: #f8fafc; }
+.metric-icon { display: none; }
+.metric-copy { gap: 2px; }
+.metric-card .metric-copy > span { color: #667085; font-size: 12px; }
+.metric-card strong { color: #172b4d; font-size: 26px; line-height: 1; }
+.metric-card small { color: #8a95a5; font-size: 11px; }
+
+.workbench-columns {
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, .85fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.workbench-section {
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.section-inline-head {
+  align-items: flex-start;
+  padding-bottom: 3px;
+}
+
+.section-inline-head h3 {
+  color: #172b4d;
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.section-inline-head p {
+  margin: 4px 0 0;
+  color: #8a95a5;
+  font-size: 12px;
+}
+
+.workbench-row {
+  min-height: 64px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid #e4e7ec;
+  border-left-width: 1px;
+  border-radius: 6px;
+  background: #fff;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.workbench-row:hover {
+  border-color: #b8c7d9;
+  background: #f8fbff;
+}
+
+.workbench-row.overdue { border-left-color: #d92d20; }
+.workbench-row.due_today,
+.workbench-row.new-lead { border-left-color: #5b8def; }
+.workbench-row-main { gap: 5px; }
+.workbench-row-main strong { color: #1d2939; font-size: 14px; }
+.workbench-row-main span { color: #667085; font-size: 12px; }
+
+.workbench-notices {
+  gap: 8px;
+  padding-top: 2px;
+  border-top: 1px solid #edf0f4;
+}
+
+.workbench-subsection-label {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workbench-notice {
+  border: 1px solid #e4e7ec;
+  border-left-width: 1px;
+  border-radius: 6px;
+  padding: 9px 11px;
+  background: #fafbfc;
+}
+
+.workbench-notice.level-info { border-color: #c7d7ea; background: #f7faff; }
+.workbench-notice.level-warn { border-color: #ead7ad; background: #fffaf0; }
+.workbench-notice.level-error { border-color: #efc5c0; background: #fff8f7; }
+
+@media (max-width: 560px) {
+  .workbench-panel { padding: 14px 12px 18px; gap: 14px; }
+  .workbench-hero h2 { font-size: 19px; }
+  .metric-card { min-height: 66px; padding: 10px 7px; }
+  .metric-card strong { font-size: 23px; }
+  .workbench-columns { grid-template-columns: 1fr; gap: 18px; }
+  .workbench-row { min-height: 60px; }
 }
 
 .ops-table-row.customer-master-fields > span {
@@ -7621,6 +7857,9 @@ textarea:focus-visible { outline: 3px solid #f4c9a5; outline-offset: 2px; }
 .manual-appointment-customer strong { min-width: 0; color: #263842; overflow-wrap: anywhere; }
 .manual-appointment-customer span { flex: 0 0 auto; color: #657780; font-size: 13px; }
 .manual-appointment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.manual-appointment-time-control { display: grid; grid-template-columns: minmax(86px, 1fr) minmax(60px, .8fr) auto minmax(60px, .8fr); gap: 8px; align-items: center; }
+.manual-appointment-time-control input, .manual-appointment-time-control select { min-width: 0; }
+.manual-appointment-time-separator { font-weight: 700; color: #263842; text-align: center; }
 .manual-appointment-grid label,
 .manual-appointment-report { display: grid; min-width: 0; gap: 6px; color: #465963; font-size: 13px; font-weight: 700; }
 .manual-appointment-grid input,

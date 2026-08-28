@@ -119,4 +119,27 @@ class DesktopVersionControllerTest {
         .andExpect(jsonPath("$.data.hasUpdate").value(true))
         .andExpect(jsonPath("$.data.latestVersion.version").value("2.0.0"));
   }
+
+  @Test
+  void latestReleaseIsPubliclyReadable() throws Exception {
+    when(service.latestRelease(DesktopPlatform.WINDOWS)).thenReturn(new DesktopReleaseInfo(
+        "2.0.0", 123L, "new release", LocalDateTime.now()));
+
+    mockMvc.perform(get("/api/v1/desktop/latest").param("platform", "WINDOWS"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.data.version").value("2.0.0"))
+        .andExpect(jsonPath("$.data.fileSize").value(123));
+  }
+
+  @Test
+  void downloadRedirectsToTheCurrentPublishedPackage() throws Exception {
+    when(service.latestDownloadUrl(DesktopPlatform.WINDOWS))
+        .thenReturn(java.util.Optional.of("/downloads/desktop-releases/2026-08-28/WINDOWS-installer.exe"));
+
+    mockMvc.perform(get("/api/v1/desktop/download").param("platform", "WINDOWS"))
+        .andExpect(status().isFound())
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+            .string("Location", "/downloads/desktop-releases/2026-08-28/WINDOWS-installer.exe"));
+  }
 }
