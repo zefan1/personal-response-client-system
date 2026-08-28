@@ -1,0 +1,31 @@
+services:
+  private-domain-assistant:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: private-domain-assistant:production
+    container_name: private-domain-assistant
+    user: "999:988"
+    restart: unless-stopped
+    init: true
+    env_file:
+      - /opt/private-domain-assistant/config/production.env
+    environment:
+      SERVER_PORT: "8080"
+      SPRING_DATASOURCE_URL: "jdbc:mysql://127.0.0.1:3306/private_domain_assistant_prod?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false"
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      VERSION_STORAGE_ROOT: /data/private-domain-assistant/uploads/desktop-releases
+    network_mode: host
+    volumes:
+      - /data/private-domain-assistant:/data/private-domain-assistant
+    tmpfs:
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "5"
