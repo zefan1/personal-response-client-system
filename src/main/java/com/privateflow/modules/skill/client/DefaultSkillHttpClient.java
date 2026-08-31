@@ -6,6 +6,8 @@ import com.privateflow.modules.skill.SkillErrorCodes;
 import com.privateflow.modules.skill.SkillGatewayException;
 import com.privateflow.modules.skill.config.SkillConfig;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
+import com.privateflow.modules.skill.service.SkillConnection;
+import com.privateflow.modules.skill.service.SkillSceneConnectionResolver;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -29,10 +31,15 @@ public class DefaultSkillHttpClient implements SkillHttpClient {
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
   private final SkillConfigProvider configProvider;
+  private final SkillSceneConnectionResolver connectionResolver;
 
-  public DefaultSkillHttpClient(ObjectMapper objectMapper, SkillConfigProvider configProvider) {
+  public DefaultSkillHttpClient(
+      ObjectMapper objectMapper,
+      SkillConfigProvider configProvider,
+      SkillSceneConnectionResolver connectionResolver) {
     this.objectMapper = objectMapper;
     this.configProvider = configProvider;
+    this.connectionResolver = connectionResolver;
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(3))
         .version(HttpClient.Version.HTTP_1_1)
@@ -41,7 +48,9 @@ public class DefaultSkillHttpClient implements SkillHttpClient {
 
   @Override
   public String call(Map<String, Object> payload, int timeoutMs) {
-    SkillConfig config = configProvider.get();
+    SkillConfig config = connectionResolver.resolve(payload)
+        .map(connection -> withSceneConnection(configProvider.get(), connection))
+        .orElseGet(configProvider::get);
     if (config.apiBaseUrl() == null || config.apiBaseUrl().isBlank()) {
       throw new SkillGatewayException(SkillErrorCodes.SKILL_UNREACHABLE, "Skill API base URL is not configured", false);
     }
@@ -49,6 +58,30 @@ public class DefaultSkillHttpClient implements SkillHttpClient {
       return callMcp(payload, timeoutMs, config);
     }
     return callOpenAiCompatible(payload, timeoutMs, config);
+  }
+
+  private SkillConfig withSceneConnection(SkillConfig fallback, SkillConnection connection) {
+    return new SkillConfig(
+        connection.baseUrl(),
+        connection.apiKey(),
+        fallback.phoneTransferMode(),
+        fallback.phoneEncryptionKey(),
+        fallback.timeoutMs(),
+        fallback.circuitBreakerWindowS(),
+        fallback.circuitBreakerFailureRate(),
+        fallback.circuitBreakerMinCalls(),
+        fallback.circuitBreakerOpenS(),
+        fallback.fallbackReply(),
+        fallback.tuanSkillGroupId(),
+        fallback.xiansuoSkillGroupId(),
+        fallback.defaultSkillId(),
+        fallback.systemPromptTemplate(),
+        fallback.redLines(),
+        fallback.alertFailureRate(),
+        fallback.alertFailureDurationMinutes(),
+        fallback.profileExtractTimeoutMs(),
+        fallback.regenerateMaxCount(),
+        connection.protocol());
   }
 
   private String callOpenAiCompatible(Map<String, Object> payload, int timeoutMs, SkillConfig config) {

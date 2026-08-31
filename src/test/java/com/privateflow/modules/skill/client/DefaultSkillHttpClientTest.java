@@ -7,12 +7,14 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.skill.config.SkillConfig;
 import com.privateflow.modules.skill.config.SkillConfigProvider;
+import com.privateflow.modules.skill.service.SkillSceneConnectionResolver;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,8 +42,10 @@ class DefaultSkillHttpClientTest {
   @Test
   void callsMcpSkillUsingStreamableHttpSessionAndReturnsToolText() {
     SkillConfigProvider provider = mock(SkillConfigProvider.class);
+    SkillSceneConnectionResolver connectionResolver = mock(SkillSceneConnectionResolver.class);
     when(provider.get()).thenReturn(config("MCP_STREAMABLE_HTTP"));
-    DefaultSkillHttpClient client = new DefaultSkillHttpClient(new ObjectMapper(), provider);
+    when(connectionResolver.resolve(org.mockito.ArgumentMatchers.any())).thenReturn(Optional.empty());
+    DefaultSkillHttpClient client = new DefaultSkillHttpClient(new ObjectMapper(), provider, connectionResolver);
 
     String result = client.call(Map.of(
         "scene", "CHAT_RECOGNIZE",

@@ -37,6 +37,11 @@ UPDATE system_configs
 SET config_value = '${JWT_SECRET}'
 WHERE config_key = 'system.jwt_secret';
 
+UPDATE system_configs
+SET config_value = 'DIRECT'
+WHERE config_key = 'wecom.connection_mode'
+  AND config_value IN ('', 'RELAY');
+
 UPDATE accounts
 SET password_hash = '${ADMIN_HASH}',
     updated_at = NOW()

@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.api.audit.AuditLogger;
 import com.privateflow.modules.api.ws.WsPushService;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
+import com.privateflow.modules.llm.LlmReplyGenerationService;
 import com.privateflow.modules.profile.service.ProfileAnalysisContextBuilder;
 import com.privateflow.modules.profile.service.TagAnalysisDecisionValidator;
 import com.privateflow.modules.skill.ProfileAnalysisContext;
@@ -19,6 +20,8 @@ import com.privateflow.modules.skill.ProfileAnalysisResult;
 import com.privateflow.modules.skill.ProfileExtractRequest;
 import com.privateflow.modules.skill.ProfileUpdates;
 import com.privateflow.modules.skill.Scene;
+import com.privateflow.modules.skill.SkillResponse;
+import com.privateflow.modules.skill.Suggestion;
 import com.privateflow.modules.skill.client.SkillHttpClient;
 import com.privateflow.modules.skill.parser.SkillProfileAnalysisResponseParser;
 import com.privateflow.modules.skill.parser.SkillResponseParser;
@@ -41,6 +44,7 @@ class SkillAdminServiceTest {
   private ProfileAnalysisContextBuilder profileContextBuilder;
   private SkillProfileAnalysisResponseParser profileParser;
   private TagAnalysisDecisionValidator decisionValidator;
+  private LlmReplyGenerationService llmReplyGenerationService;
   private SkillAdminService service;
 
   @BeforeEach
@@ -53,11 +57,13 @@ class SkillAdminServiceTest {
     profileContextBuilder = mock(ProfileAnalysisContextBuilder.class);
     profileParser = mock(SkillProfileAnalysisResponseParser.class);
     decisionValidator = mock(TagAnalysisDecisionValidator.class);
+    llmReplyGenerationService = mock(LlmReplyGenerationService.class);
     service = new SkillAdminService(
         bindingRepository,
         requestBuilder,
         skillHttpClient,
         new SkillResponseParser(new ObjectMapper()),
+        llmReplyGenerationService,
         profileContextBuilder,
         profileParser,
         decisionValidator,
@@ -74,9 +80,26 @@ class SkillAdminServiceTest {
     when(bindingRepository.findById(9L)).thenReturn(Optional.of(binding()));
     when(bindingRepository.existsInGroup("skill-a", Scene.OPENING, "PENDING", null)).thenReturn(false);
 
-    service.create(new SkillBindingRequest("skill-a", "Skill A", Scene.OPENING, "PENDING", 1));
+    service.create(new SkillBindingRequest(
+        "skill-a", "Skill A", Scene.OPENING, "PENDING", 1,
+        "https://skill.example.com", "skill-key", "OPENAI_COMPATIBLE"));
 
     verify(auditLogger).log(eq("SKILL_BINDING_CREATE"), any(), eq("skill"), eq("9"), any());
+  }
+
+  @Test
+  void createGeneratesTheInternalSkillIdFromSceneWhenTheOperatorDoesNotChooseOne() {
+    when(bindingRepository.create(any())).thenReturn(9L);
+    when(bindingRepository.findById(9L)).thenReturn(Optional.of(binding()));
+
+    service.create(new SkillBindingRequest(
+        "", "开场白 Skill", Scene.OPENING, "GENERAL", 10,
+        "https://opening-skill.example.com", "opening-key", "MCP_STREAMABLE_HTTP"));
+
+    verify(bindingRepository).create(org.mockito.ArgumentMatchers.argThat(request ->
+        "scene-opening-general".equals(request.skillId())
+            && "开场白 Skill".equals(request.skillName())
+            && "https://opening-skill.example.com".equals(request.baseUrl())));
   }
 
   @Test
@@ -88,11 +111,51 @@ class SkillAdminServiceTest {
     when(skillHttpClient.call(any(), eq(3210))).thenReturn("""
         {"suggestions":[{"text":"hello","direction":"OPENING","reason":"test"}]}
         """);
+    when(llmReplyGenerationService.enabled()).thenReturn(false);
 
     service.test(9L, new SkillTestRequest("hello"));
 
     verify(skillHttpClient).call(any(), eq(3210));
     verify(bindingRepository).markTested(9L);
+  }
+
+  @Test
+  void onlineTestKeepsSkillGuidanceAndReturnsFinalReplySuggestions() {
+    Suggestion finalSuggestion = new Suggestion("可以先了解一下您的情况", "OPENING", "自然开场");
+    when(bindingRepository.findById(9L)).thenReturn(Optional.of(binding()));
+    when(requestBuilder.build(any())).thenReturn(new java.util.HashMap<>(Map.of("messages", List.of())));
+    when(skillHttpClient.call(any(), eq(12000))).thenReturn("""
+        {"result":"先确认客户当前需求，再以轻松语气邀请继续沟通。"}
+        """);
+    when(llmReplyGenerationService.enabled()).thenReturn(true);
+    when(llmReplyGenerationService.tryGenerate(any(), any())).thenReturn(Optional.of(
+        new SkillResponse(List.of(finalSuggestion, finalSuggestion, finalSuggestion), null, null, null)));
+
+    SkillTestResponse response = service.test(9L, new SkillTestRequest("我想先了解一下"));
+
+    assertThat(response.rawResponse().guidance()).contains("先确认客户当前需求");
+    assertThat(response.suggestions()).isEmpty();
+    assertThat(response.finalReply().success()).isTrue();
+    assertThat(response.finalReply().suggestions()).hasSize(3);
+  }
+
+  @Test
+  void onlineTestReturnsNonfatalFinalReplyStatusWhenGenerationFails() {
+    when(bindingRepository.findById(9L)).thenReturn(Optional.of(binding()));
+    when(requestBuilder.build(any())).thenReturn(new java.util.HashMap<>(Map.of("messages", List.of())));
+    when(skillHttpClient.call(any(), eq(12000))).thenReturn("""
+        {"result":"先确认客户当前需求。"}
+        """);
+    when(llmReplyGenerationService.enabled()).thenReturn(true);
+    when(llmReplyGenerationService.tryGenerate(any(), any()))
+        .thenThrow(new IllegalStateException("provider unavailable"));
+
+    SkillTestResponse response = service.test(9L, new SkillTestRequest("我想先了解一下"));
+
+    assertThat(response.rawResponse().guidance()).contains("先确认客户当前需求");
+    assertThat(response.finalReply().attempted()).isTrue();
+    assertThat(response.finalReply().success()).isFalse();
+    assertThat(response.finalReply().message()).contains("LLM 调用监控");
   }
 
   @Test
@@ -131,6 +194,7 @@ class SkillAdminServiceTest {
     assertThat(response.suggestions()).isEmpty();
     assertThat(response.rawResponse()).isNull();
     assertThat(response.profileAnalysis()).isSameAs(validated);
+    assertThat(response.finalReply()).isNull();
     verify(requestBuilder).buildProfileExtract(any(ProfileExtractRequest.class));
     verify(profileParser).parse("strict-profile-json");
     verify(decisionValidator).validate(eq(parsed), any(ProfileExtractRequest.class));

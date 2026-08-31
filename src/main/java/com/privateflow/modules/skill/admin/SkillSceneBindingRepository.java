@@ -1,6 +1,7 @@
 package com.privateflow.modules.skill.admin;
 
 import com.privateflow.modules.skill.Scene;
+import com.privateflow.modules.api.security.SecretCipher;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -16,9 +17,11 @@ public class SkillSceneBindingRepository {
   private static final String GROUP_INDEX = "idx_scene_lead";
   private static final RowMapper<SkillSceneBinding> ROW_MAPPER = new BindingRowMapper();
   private final JdbcTemplate jdbcTemplate;
+  private final SecretCipher secretCipher;
 
-  public SkillSceneBindingRepository(JdbcTemplate jdbcTemplate) {
+  public SkillSceneBindingRepository(JdbcTemplate jdbcTemplate, SecretCipher secretCipher) {
     this.jdbcTemplate = jdbcTemplate;
+    this.secretCipher = secretCipher;
   }
 
   public List<SkillSceneBinding> findAll(Scene scene, String leadType) {
@@ -62,29 +65,56 @@ public class SkillSceneBindingRepository {
 
   public long create(SkillBindingRequest request) {
     jdbcTemplate.update("""
-        INSERT INTO skill_scene_bindings (skill_id, skill_name, scene, lead_type, priority, enabled)
-        VALUES (?, ?, ?, ?, ?, 1)
+        INSERT INTO skill_scene_bindings
+          (skill_id, skill_name, scene, lead_type, priority, enabled, skill_base_url, skill_api_key, skill_api_key_last4, skill_protocol)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
         """,
         request.skillId().trim(),
         request.skillName().trim(),
         request.scene().name(),
         normalizedLeadType(request.leadType()),
-        request.priority() == null ? 0 : request.priority());
+        request.priority() == null ? 10 : request.priority(),
+        request.baseUrl().trim(),
+        secretCipher.encrypt(request.apiKey().trim()),
+        last4(request.apiKey()),
+        request.protocol());
     Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     return id == null ? 0L : id;
   }
 
   public void update(long id, SkillBindingRequest request) {
+    if (request.apiKey() == null || request.apiKey().isBlank()) {
+      jdbcTemplate.update("""
+          UPDATE skill_scene_bindings
+          SET skill_id = ?, skill_name = ?, scene = ?, lead_type = ?, priority = ?,
+              skill_base_url = ?, skill_protocol = ?, updated_at = NOW()
+          WHERE id = ?
+          """,
+          request.skillId().trim(),
+          request.skillName().trim(),
+          request.scene().name(),
+          normalizedLeadType(request.leadType()),
+          request.priority() == null ? 10 : request.priority(),
+          request.baseUrl().trim(),
+          request.protocol(),
+          id);
+      return;
+    }
     jdbcTemplate.update("""
         UPDATE skill_scene_bindings
-        SET skill_id = ?, skill_name = ?, scene = ?, lead_type = ?, priority = ?, updated_at = NOW()
+        SET skill_id = ?, skill_name = ?, scene = ?, lead_type = ?, priority = ?,
+            skill_base_url = ?, skill_api_key = ?, skill_api_key_last4 = ?, skill_protocol = ?, updated_at = NOW()
         WHERE id = ?
         """,
         request.skillId().trim(),
         request.skillName().trim(),
         request.scene().name(),
         normalizedLeadType(request.leadType()),
-        request.priority() == null ? 0 : request.priority(),
+        request.priority() == null ? 10 : request.priority(),
+        request.baseUrl().trim(),
+        secretCipher.encrypt(request.apiKey().trim()),
+        last4(request.apiKey()),
+        request.protocol(),
         id);
   }
 
@@ -112,6 +142,11 @@ public class SkillSceneBindingRepository {
     return leadType == null ? "" : leadType.trim();
   }
 
+  private static String last4(String apiKey) {
+    String value = apiKey == null ? "" : apiKey.trim();
+    return value.length() <= 4 ? value : value.substring(value.length() - 4);
+  }
+
   private static final class BindingRowMapper implements RowMapper<SkillSceneBinding> {
     @Override
     public SkillSceneBinding mapRow(ResultSet rs, int rowNum) throws SQLException {
@@ -123,6 +158,9 @@ public class SkillSceneBindingRepository {
           rs.getString("lead_type"),
           rs.getInt("priority"),
           rs.getInt("enabled") == 1,
+          rs.getString("skill_base_url"),
+          rs.getString("skill_api_key_last4"),
+          rs.getString("skill_protocol"),
           rs.getTimestamp("last_tested_at") == null ? null : rs.getTimestamp("last_tested_at").toLocalDateTime(),
           rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime(),
           rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime());

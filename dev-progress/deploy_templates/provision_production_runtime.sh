@@ -42,12 +42,11 @@ SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 
-# Fill these values before starting the application. Production uses the Relay
-# so the enterprise WeCom application secret stays on the Relay server.
-WECOM_TRANSPORT_MODE=RELAY
-WECOM_RELAY_BASE_URL=
-WECOM_RELAY_KEY_ID=
-WECOM_RELAY_SECRET=
+# Fill these values before enabling the WeCom Smart Sheet integration. The
+# production server calls the official WeCom API directly from its own egress IP.
+WECOM_TRANSPORT_MODE=DIRECT
+WECOM_CORP_ID=
+WECOM_APP_SECRET=
 WECOM_SMARTSHEET_DOC_ID=
 WECOM_SMARTSHEET_SHEET_ID=
 WECOM_SMARTSHEET_VIEW_ID=

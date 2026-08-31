@@ -5427,6 +5427,33 @@ details.profile-detail-module > .field-grid,
   margin: 0;
 }
 
+.ops-skill-test-result-section {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid #e4e7ec;
+}
+
+.ops-skill-test-result-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ops-skill-test-suggestions {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 22px;
+  color: #344054;
+  line-height: 1.55;
+}
+
+.ops-skill-test-suggestions li {
+  overflow-wrap: anywhere;
+}
+
 .ops-profile-test-decision {
   display: grid;
   gap: 3px;

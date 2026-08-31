@@ -1,3 +1,5 @@
+name: private-domain-assistant
+
 services:
   private-domain-assistant:
     build:
@@ -29,3 +31,29 @@ services:
       options:
         max-size: 50m
         max-file: "5"
+
+  private-domain-assistant-frontend:
+    build:
+      context: .
+      dockerfile: desktop/Dockerfile.web
+      args:
+        VITE_DEFAULT_API_BASE_URL: https://sy.xn--15tq51d.top
+    image: private-domain-assistant-frontend:production
+    container_name: private-domain-assistant-frontend
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/cache/nginx:mode=0755
+      - /var/run:mode=0755
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - private-domain-assistant
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"

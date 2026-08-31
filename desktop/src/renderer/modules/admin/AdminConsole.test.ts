@@ -777,11 +777,10 @@ describe('AdminConsole product surface', () => {
 
     const drawer = host.querySelector('.ops-drawer') as HTMLElement | null;
     expect(drawer).toBeTruthy();
-    expect(drawer?.textContent).toContain('Skill 场景绑定');
+    expect(drawer?.textContent).toContain('场景 Skill');
     expect(drawer?.textContent).not.toContain('请求体 JSON');
 
     const textInputs = [...drawer!.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
-    const priorityInput = drawer!.querySelector('input[type="number"]') as HTMLInputElement;
     const selects = [...drawer!.querySelectorAll('select')] as HTMLSelectElement[];
     expect([...selects[0].options].map((option) => option.value)).toEqual([
       'CHAT_RECOGNIZE',
@@ -792,9 +791,10 @@ describe('AdminConsole product surface', () => {
     ]);
     setInputValue(selects[0], 'PROFILE_EXTRACT');
     setInputValue(selects[1], 'XIAN_SUO');
-    setInputValue(selects[2], 'skill_reply');
     setInputValue(textInputs[0], '主动回复助手');
-    setInputValue(priorityInput, '77');
+    setInputValue(textInputs[1], 'https://reply-skill.example.com');
+    setInputValue(controlByLabel<HTMLInputElement>(drawer!, 'API 密钥'), 'reply-key');
+    setInputValue(selects[2], 'MCP_STREAMABLE_HTTP');
 
     findButton(drawer!, '保存').click();
     await flushUi();
@@ -802,9 +802,11 @@ describe('AdminConsole product surface', () => {
     expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/skills', {
       scene: 'PROFILE_EXTRACT',
       leadType: 'XIAN_SUO',
-      skillId: 'skill_reply',
       skillName: '主动回复助手',
-      priority: 77
+      priority: 10,
+      baseUrl: 'https://reply-skill.example.com',
+      apiKey: 'reply-key',
+      protocol: 'MCP_STREAMABLE_HTTP'
     });
 
     app.unmount();
@@ -878,7 +880,27 @@ describe('AdminConsole product surface', () => {
   it('lets the operator choose a test binding before running a Skill test', async () => {
     apiMocks.postJson.mockImplementation(async (path: string) => {
       if (path === '/admin/api/v1/skills/1/test') {
-        return { success: true, data: { responseTimeMs: 12, suggestions: [] }, errorCode: null, message: null };
+        return {
+          success: true,
+          data: {
+            responseTimeMs: 52,
+            suggestions: [],
+            rawResponse: { guidance: '先确认客户的当前需求，再自然邀请继续沟通。' },
+            finalReply: {
+              attempted: true,
+              success: true,
+              responseTimeMs: 31,
+              suggestions: [
+                { text: '当然可以，您最想先了解哪一部分呢？' },
+                { text: '我先根据您的情况简单说明，再帮您安排合适的方案。' },
+                { text: '方便说说您目前最关心的问题吗？' }
+              ],
+              message: ''
+            }
+          },
+          errorCode: null,
+          message: null
+        };
       }
       return { success: true, data: apiData[path] ?? apiData[path.split('?')[0]] ?? { items: [] }, errorCode: null, message: null };
     });
@@ -897,6 +919,11 @@ describe('AdminConsole product surface', () => {
     await flushSave();
 
     expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/skills/1/test', { testMessage: '客户明确表达目标' });
+    expect(testPanel.textContent).toContain('Skill 指导');
+    expect(testPanel.textContent).toContain('先确认客户的当前需求，再自然邀请继续沟通。');
+    expect(testPanel.textContent).toContain('最终回复话术');
+    expect(testPanel.textContent).toContain('当然可以，您最想先了解哪一部分呢？');
+    expect(testPanel.textContent).toContain('方便说说您目前最关心的问题吗？');
 
     app.unmount();
   });
@@ -1280,6 +1307,77 @@ describe('AdminConsole product surface', () => {
     expect(promptEditor.textContent).toContain('每行一条，按回车换行，不使用分号');
     expect(promptEditor.textContent).toContain('已有默认内容时通常无需修改');
 
+    app.unmount();
+  });
+
+  it('opens one direct Skill configuration for a scene without environment or capability controls', async () => {
+    const { app, host } = await mountConsole();
+
+    expect(mainText(host)).toContain('每个场景独立配置 Skill');
+    findButton(host, '新增绑定').click();
+    await flushUi();
+
+    const drawer = host.querySelector('.ops-drawer') as HTMLElement;
+    expect(drawer.textContent).toContain('场景 Skill');
+    expect(drawer.textContent).not.toContain('环境名称');
+    expect(drawer.textContent).not.toContain('使用能力');
+    expect(drawer.textContent).not.toContain('技能标识');
+    expect(controlByLabel<HTMLInputElement>(drawer, '显示名称')).toBeTruthy();
+    expect(controlByLabel<HTMLInputElement>(drawer, '服务地址')).toBeTruthy();
+    expect(controlByLabel<HTMLInputElement>(drawer, 'API 密钥')).toBeTruthy();
+    expect(controlByLabel<HTMLSelectElement>(drawer, '接口协议')).toBeTruthy();
+    app.unmount();
+  });
+
+  it('saves one direct scene Skill configuration in a single request', async () => {
+    const { app, host } = await mountConsole();
+
+    findButton(host, '新增 Skill 绑定').click();
+    await flushUi();
+    const bindingDrawer = host.querySelector('.ops-drawer') as HTMLElement;
+    expect(bindingDrawer.textContent).toContain('场景 Skill');
+    expect((controlByLabel<HTMLInputElement>(bindingDrawer, '服务地址')).value).toBe('');
+    expect(controlByLabel<HTMLInputElement>(bindingDrawer, 'API 密钥')).toBeTruthy();
+    expect(controlByLabel<HTMLSelectElement>(bindingDrawer, '接口协议')).toBeTruthy();
+
+    setInputValue(controlByLabel<HTMLInputElement>(bindingDrawer, '服务地址'), 'https://skill-new.example.com');
+    setInputValue(controlByLabel<HTMLInputElement>(bindingDrawer, 'API 密钥'), 'skill-key-new');
+    setInputValue(controlByLabel<HTMLInputElement>(bindingDrawer, '显示名称'), '新的开场白助手');
+    findButton(bindingDrawer, '保存').click();
+    await flushSave();
+
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/skills', {
+      skillName: '新的开场白助手',
+      scene: 'OPENING',
+      leadType: 'GENERAL',
+      priority: 10,
+      baseUrl: 'https://skill-new.example.com',
+      apiKey: 'skill-key-new',
+      protocol: 'OPENAI_COMPATIBLE'
+    });
+    expect(apiMocks.postJson).not.toHaveBeenCalledWith('/admin/api/v1/skill-environments', expect.anything());
+    app.unmount();
+  });
+
+  it('edits a scene Skill without resending its saved API key', async () => {
+    const { app, host } = await mountConsole();
+
+    const bindingRow = [...host.querySelectorAll('.ops-table-row')]
+      .find((row) => row.textContent?.includes('开场白助手')) as HTMLElement;
+    findButton(bindingRow, '编辑').click();
+    await flushUi();
+    const drawer = host.querySelector('.ops-drawer') as HTMLElement;
+    setInputValue(controlByLabel<HTMLInputElement>(drawer, '显示名称'), '更新后的开场白 Skill');
+    setInputValue(controlByLabel<HTMLInputElement>(drawer, '服务地址'), 'https://opening-skill.example.com');
+    findButton(drawer, '保存').click();
+    await flushSave();
+
+    expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/skills/1', expect.objectContaining({
+      skillName: '更新后的开场白 Skill',
+      baseUrl: 'https://opening-skill.example.com'
+    }));
+    expect(apiMocks.putJson.mock.calls.find((call) => call[0] === '/admin/api/v1/skills/1')?.[1]).not.toHaveProperty('apiKey');
+    expect(apiMocks.putJson).not.toHaveBeenCalledWith('/admin/api/v1/skill-environments/1', expect.anything());
     app.unmount();
   });
 

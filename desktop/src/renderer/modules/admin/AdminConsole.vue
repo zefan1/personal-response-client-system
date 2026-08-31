@@ -53,7 +53,13 @@
               <h2>Skill 场景绑定</h2>
               <p>按业务场景和线索类型维护 AI 路由，停用高风险项前会二次确认。</p>
             </div>
-            <button class="primary small" type="button" @click="openForm('skill')">新增绑定</button>
+            <button class="primary small" type="button" @click="openSkillBindingForm">
+              新增绑定
+            </button>
+          </div>
+          <div class="ops-detail-box">
+            <strong>每个场景独立配置 Skill</strong>
+            <p>新增或编辑时直接填写显示名称、服务地址、API Key 和接口协议。不同场景可以使用不同的 Skill 服务。</p>
           </div>
           <div class="ops-filter-bar three">
             <select v-model="skillSceneFilter" @change="loadSkillAi">
@@ -74,7 +80,7 @@
             <div class="ops-table-row head">
               <span>场景</span>
               <span>线索类型</span>
-              <span>技能名称</span>
+              <span>显示名称</span>
               <span>优先级</span>
               <span>状态</span>
               <span>操作</span>
@@ -100,24 +106,24 @@
           <div class="ops-panel-head">
             <div>
               <h2>在线测试与调用监控</h2>
-              <p>输入一条真实业务话术，点击任意绑定的“测试”即可验证返回质量。</p>
+              <p>测试会依次验证 Skill 指导和最终回复话术。测试内容会发送给所选 Skill 与最终回复模型。</p>
             </div>
             <button class="secondary small" type="button" @click="loadSkillAnalytics">刷新监控</button>
           </div>
           <div class="ops-form-grid ops-skill-test-panel">
             <label>
-              选择测试能力
-              <select v-model="selectedSkillTestBindingId" aria-label="选择测试能力">
-                <option value="">请选择要测试的能力</option>
+              选择场景配置
+              <select v-model="selectedSkillTestBindingId" aria-label="选择场景配置">
+                <option value="">请选择要测试的场景配置</option>
                 <option v-for="item in skillBindings" :key="item.id" :value="String(item.id)">
                   {{ sceneLabel(item.scene) }} / {{ leadTypeLabel(item.leadType) }} / {{ skillBindingName(item) }}
                 </option>
               </select>
-              <small>先选能力，再输入测试消息；列表里的“测试”也会自动选中对应能力。</small>
+              <small>先选场景配置，再输入测试消息；列表里的“测试”也会自动选中对应配置。</small>
             </label>
             <label>
               测试消息
-              <textarea v-model="skillTestMessage" rows="4" placeholder="输入客户最近一句话，验证对应 Skill 的回复效果"></textarea>
+              <textarea v-model="skillTestMessage" rows="4" placeholder="输入客户最近一句话，验证 Skill 指导和最终回复话术"></textarea>
             </label>
             <div class="ops-detail-box">
               <strong>调用监控</strong>
@@ -125,8 +131,8 @@
               <small>{{ skillAnalytics ? `统计窗口：近 ${skillAnalyticsDays} 天` : '尚未加载调用统计' }}</small>
             </div>
             <div class="ops-detail-box ops-skill-test-action-box">
-              <strong>{{ selectedSkillTestBinding ? '待测试能力' : '未选择能力' }}</strong>
-              <p>{{ selectedSkillTestBinding ? `${sceneLabel(selectedSkillTestBinding.scene)} / ${leadTypeLabel(selectedSkillTestBinding.leadType)} / ${skillBindingName(selectedSkillTestBinding)}` : '请选择上方能力后再执行。' }}</p>
+              <strong>{{ selectedSkillTestBinding ? '待测试场景配置' : '未选择场景配置' }}</strong>
+              <p>{{ selectedSkillTestBinding ? `${sceneLabel(selectedSkillTestBinding.scene)} / ${leadTypeLabel(selectedSkillTestBinding.leadType)} / ${skillBindingName(selectedSkillTestBinding)}` : '请选择上方场景配置后再执行。' }}</p>
               <button class="primary small" type="button" :disabled="loading || !selectedSkillTestBinding || !skillTestMessage.trim()" @click="runSelectedSkillTest">执行测试</button>
             </div>
           </div>
@@ -134,7 +140,6 @@
             <article v-for="(result, key) in skillTestResults" :key="key" class="ops-content-card">
               <strong>{{ displaySafeName(result.skillName || key, '测试结果') }}</strong>
               <span>{{ result.responseTimeMs ? `${result.responseTimeMs}ms` : '已完成' }}</span>
-              <p>{{ summarizeSkillTest(result) }}</p>
               <div v-if="result.profileAnalysis" class="ops-profile-test-details">
                 <p v-for="(update, field) in profileFieldUpdates(result)" :key="`field-${String(field)}`">
                   {{ profileFieldLine(String(field), update) }}
@@ -148,6 +153,24 @@
                   <small>依据：{{ decision.evidence || '未提供' }}</small>
                 </div>
               </div>
+              <template v-else>
+                <section class="ops-skill-test-result-section">
+                  <strong>Skill 指导</strong>
+                  <p>{{ skillGuidanceSummary(result) }}</p>
+                </section>
+                <section class="ops-skill-test-result-section">
+                  <div class="ops-skill-test-result-heading">
+                    <strong>最终回复话术</strong>
+                    <span v-if="finalReplyResponseTime(result)">{{ finalReplyResponseTime(result) }}</span>
+                  </div>
+                  <ol v-if="finalReplySuggestions(result).length" class="ops-skill-test-suggestions">
+                    <li v-for="(suggestion, index) in finalReplySuggestions(result)" :key="`final-reply-${index}`">
+                      {{ suggestionText(suggestion) }}
+                    </li>
+                  </ol>
+                  <p v-else>{{ finalReplyMessage(result) }}</p>
+                </section>
+              </template>
             </article>
           </div>
           <p v-else class="ops-empty">还没有测试结果。先在上方列表选择一条绑定测试。</p>
@@ -2914,7 +2937,14 @@
             <textarea v-else-if="field.type === 'textarea'" v-model="formDraft[field.key]" :placeholder="field.placeholder" :disabled="field.disabled" rows="5"></textarea>
             <input v-else-if="field.type === 'checkbox'" v-model="formDraft[field.key]" class="ops-switch" type="checkbox" :disabled="field.disabled" />
             <input v-else-if="field.type === 'number'" v-model.number="formDraft[field.key]" type="number" :placeholder="field.placeholder" :disabled="field.disabled" :min="field.min" :max="field.max" :step="field.step" />
-            <input v-else v-model="formDraft[field.key]" :type="field.type" :placeholder="field.placeholder" :disabled="field.disabled" />
+            <input
+              v-else
+              v-model="formDraft[field.key]"
+              :type="field.type"
+              :placeholder="field.placeholder"
+              :disabled="field.disabled"
+              :autocomplete="field.key === 'apiKey' ? 'new-password' : activeForm === 'skill' && field.key === 'baseUrl' ? 'off' : undefined"
+            />
             <small v-if="field.help">{{ field.help }}</small>
           </label>
           </template>
@@ -4434,6 +4464,8 @@ const appointmentSuccessTemplate = computed(() => friendRequestSourceTemplates.v
   (item) => String(item.id) === appointmentTemplateSavedSelection.value
 ) ?? null);
 const selectedSkillTestBinding = computed(() => skillBindings.value.find((item) => String(item.id) === selectedSkillTestBindingId.value) || null);
+const activeSkillEnvironment = computed(() => skillEnvironments.value.find((environment) => isActiveEnvironment(environment)) || null);
+const hasActiveSkillEnvironment = computed(() => activeSkillEnvironment.value !== null);
 const smartSheetCards = computed(() => SMART_SHEET_ROLES.map((role) => {
   const configuredUrl = configValue(role.configKey);
   const documentId = configValue(`${role.prefix}.document_id`);
@@ -4602,7 +4634,7 @@ async function refreshActiveSection() {
 }
 
 function startPrimaryAction() {
-  if (activeSectionKey.value === 'skill-scenes') openForm('skill');
+  if (activeSectionKey.value === 'skill-scenes') openSkillBindingForm();
   if (activeSectionKey.value === 'configuration-center') openForm('skillEnv');
   if (activeSectionKey.value === 'data-integration') goToSmartSheetSetup();
   if (activeSectionKey.value === 'single-source-of-truth') openCustomerMasterSearch();
@@ -4627,6 +4659,22 @@ function goToSmartSheetSetup() {
   smartSheetConnectionDraft.role = smartSheetConnectionDraft.role || 'PRIMARY';
   closeForm();
   void refreshActiveSection();
+}
+
+function openSkillBindingForm() {
+  openForm('skill');
+}
+
+function goToSkillEnvironmentSetup() {
+  activeSectionKey.value = 'configuration-center';
+  advancedConfigurationExpanded.value = true;
+  activeAdvancedConfiguration.value = 'skillEnvironment';
+  closeForm();
+  void refreshActiveSection();
+}
+
+function openSkillEnvironmentEditor() {
+  openForm('skillEnv', activeSkillEnvironment.value ?? undefined);
 }
 
 function goToConversionTargetSettings() {
@@ -5843,7 +5891,7 @@ async function submitForm(kind: FormKind) {
   loading.value = true;
   try {
     if (kind === 'skill') {
-      const payload = pickDraft(['skillId', 'skillName', 'scene', 'leadType', 'priority']);
+      const payload = pickDraft(['skillName', 'scene', 'leadType', 'baseUrl', 'apiKey', 'protocol', 'priority']);
       if (editingItem.value?.id) await putJson(`/admin/api/v1/skills/${editingItem.value.id}`, payload);
       else await postJson('/admin/api/v1/skills', payload);
     } else if (kind === 'skillEnv') {
@@ -6063,7 +6111,15 @@ function noticeUpdatePayload() {
 
 function initialDraft(kind: FormKind, item?: AnyRecord): AnyRecord {
   const suffix = Date.now().toString().slice(-6);
-  if (kind === 'skill') return { skillId: item?.skillId ?? '', skillName: item?.skillName ?? '', scene: item?.scene ?? 'OPENING', leadType: item?.leadType ?? 'GENERAL', priority: item?.priority ?? 90 };
+  if (kind === 'skill') return {
+    skillName: item?.skillName ?? '',
+    scene: item?.scene ?? 'OPENING',
+    leadType: item?.leadType ?? 'GENERAL',
+    priority: item?.priority ?? 10,
+    baseUrl: item?.baseUrl ?? '',
+    apiKey: '',
+    protocol: item?.protocol ?? 'OPENAI_COMPATIBLE'
+  };
   if (kind === 'skillEnv') return { envName: item?.envName ?? '', baseUrl: item?.baseUrl ?? '', apiKey: '', protocol: item?.protocol ?? 'OPENAI_COMPATIBLE' };
   if (kind === 'imageEnv') return { envName: item?.envName ?? '', baseUrl: item?.baseUrl ?? '', apiKey: '' };
   if (kind === 'llmEnv') return {
@@ -6154,14 +6210,13 @@ function formMeta(kind: FormKind | null): { title: string; description: string; 
     scene: SKILL_SCENE_OPTIONS,
     leadType: LEAD_TYPE_OPTIONS
   };
-  if (kind === 'skill') return { title: 'Skill 场景绑定', description: '选择场景、线索类型和技能，保存后立即用于对应业务场景。', fields: [
+  if (kind === 'skill') return { title: '场景 Skill', description: '为一个业务场景直接配置它对应的 Skill 服务。', fields: [
+    { key: 'skillName', label: '显示名称', type: 'text', placeholder: '例如：开场白 Skill' },
     { key: 'scene', label: '场景', type: 'select', options: commonOptions.scene },
     { key: 'leadType', label: '线索类型', type: 'select', options: commonOptions.leadType, help: '选“全部客资”时作为兜底绑定；具体线索类型优先于全部客资。' },
-    availableSkills.value.length
-      ? { key: 'skillId', label: '技能', type: 'select', options: availableSkills.value.map((skill) => ({ label: skillBindingName(skill), value: skill.skillId })) }
-      : { key: 'skillId', label: '技能标识', type: 'text', placeholder: '选择或填写已登记的技能标识' },
-    { key: 'skillName', label: '显示名称', type: 'text' },
-    { key: 'priority', label: '优先级（数字越小越先尝试）', type: 'number', min: 0, max: 999, step: 1, help: '建议主用 10，备用 20，测试 90。相同场景和线索类型会先用数字最小的启用项。' }
+    { key: 'baseUrl', label: '服务地址', type: 'text', placeholder: 'https://api.example.com' },
+    { key: 'apiKey', label: 'API 密钥', type: 'password', help: editingItem.value?.apiKeyLast4 ? '当前密钥已保存；留空不会修改。' : '新建时必须填写。' },
+    { key: 'protocol', label: '接口协议', type: 'select', options: [{ label: 'OpenAI 兼容接口', value: 'OPENAI_COMPATIBLE' }, { label: 'MCP 流式 HTTP', value: 'MCP_STREAMABLE_HTTP' }] }
   ] };
   if (kind === 'skillEnv' || kind === 'imageEnv') return { title: kind === 'skillEnv' ? 'Skill 环境' : '识图模型环境', description: 'API 密钥保存后只展示脱敏信息。', fields: [
     { key: 'envName', label: '环境名称', type: 'text', placeholder: '生产环境 / 备份环境' },
@@ -7961,7 +8016,11 @@ function dataFromResponse(response: ApiResponse<unknown>): unknown {
 
 function recordFromResponse(response: ApiResponse<unknown>): AnyRecord {
   const data = dataFromResponse(response);
-  return data && !Array.isArray(data) && typeof data === 'object' ? data as AnyRecord : {};
+  return recordValue(data);
+}
+
+function recordValue(value: unknown): AnyRecord {
+  return value && !Array.isArray(value) && typeof value === 'object' ? value as AnyRecord : {};
 }
 
 function listFrom(value: unknown, preferredKey?: string): AnyRecord[] {
@@ -9070,7 +9129,7 @@ function displaySafeName(value: unknown, fallback: string) {
 }
 
 function skillBindingName(item: AnyRecord) {
-  return displaySafeName(item?.skillName || item?.skillId, '未命名 Skill');
+  return displaySafeName(item?.skillName || item?.skillId, `${sceneLabel(String(item?.scene ?? ''))} Skill`);
 }
 
 function hasBrokenEncoding(value: string) {
@@ -9106,14 +9165,43 @@ function translateValue(value: unknown): string {
   return TRANSLATED_VALUE_LABELS[text] ?? text;
 }
 
+function skillGuidanceSummary(value: AnyRecord) {
+  const raw = recordValue(value.rawResponse);
+  const guidance = String(raw.guidance ?? '').trim();
+  if (guidance) return guidance;
+  const suggestions = listFrom(value, 'suggestions');
+  if (suggestions.length) return suggestions.map(suggestionText).join('；');
+  return 'Skill 未返回可用指导，请检查 Skill 调用监控后重试。';
+}
+
 function summarizeSkillTest(value: AnyRecord) {
   if (value.profileAnalysis) {
     return `档案字段 ${Object.keys(profileFieldUpdates(value)).length} 项 · 标签判断 ${profileTagDecisions(value).length} 项`;
   }
   const suggestions = listFrom(value, 'suggestions');
-  if (suggestions.length) return suggestions.map((item) => item.text || item.content || item.reply || summarizeObject(item)).join('；');
+  if (suggestions.length) return suggestions.map(suggestionText).join('；');
   if (value.rawResponse) return summarizeObject(value.rawResponse);
   return summarizeObject(value);
+}
+
+function finalReplySuggestions(value: AnyRecord): AnyRecord[] {
+  return listFrom(recordValue(value.finalReply), 'suggestions');
+}
+
+function finalReplyResponseTime(value: AnyRecord) {
+  const responseTimeMs = Number(recordValue(value.finalReply).responseTimeMs ?? 0);
+  return responseTimeMs > 0 ? `${responseTimeMs}ms` : '';
+}
+
+function finalReplyMessage(value: AnyRecord) {
+  const finalReply = recordValue(value.finalReply);
+  const message = String(finalReply.message ?? '').trim();
+  if (message) return message;
+  return '尚未执行最终回复生成，请重新运行测试。';
+}
+
+function suggestionText(value: AnyRecord) {
+  return String(value.text || value.content || value.reply || summarizeObject(value));
 }
 
 function profileFieldUpdates(value: AnyRecord): AnyRecord {

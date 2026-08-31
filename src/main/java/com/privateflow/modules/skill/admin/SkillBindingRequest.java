@@ -7,6 +7,12 @@ public record SkillBindingRequest(
     String skillName,
     Scene scene,
     String leadType,
-    Integer priority
+    Integer priority,
+    String baseUrl,
+    String apiKey,
+    String protocol
 ) {
+  public SkillBindingRequest(String skillId, String skillName, Scene scene, String leadType, Integer priority) {
+    this(skillId, skillName, scene, leadType, priority, null, null, null);
+  }
 }

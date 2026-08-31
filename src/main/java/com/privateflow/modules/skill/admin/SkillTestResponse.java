@@ -9,9 +9,10 @@ public record SkillTestResponse(
     List<Suggestion> suggestions,
     long responseTimeMs,
     SkillResponse rawResponse,
-    ProfileAnalysisResult profileAnalysis
+    ProfileAnalysisResult profileAnalysis,
+    FinalReplyTestResult finalReply
 ) {
   public SkillTestResponse(List<Suggestion> suggestions, long responseTimeMs, SkillResponse rawResponse) {
-    this(suggestions, responseTimeMs, rawResponse, null);
+    this(suggestions, responseTimeMs, rawResponse, null, null);
   }
 }

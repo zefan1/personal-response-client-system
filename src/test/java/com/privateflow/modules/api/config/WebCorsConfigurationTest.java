@@ -17,6 +17,10 @@ class WebCorsConfigurationTest {
     Map<String, CorsConfiguration> mappings = registry.configurations();
     assertThat(mappings.get("/api/v1/**").checkOrigin("file://")).isEqualTo("file://");
     assertThat(mappings.get("/admin/api/v1/**").checkOrigin("file://")).isEqualTo("file://");
+    assertThat(mappings.get("/api/v1/**").checkOrigin("https://sy.xn--15tq51d.top"))
+        .isEqualTo("https://sy.xn--15tq51d.top");
+    assertThat(mappings.get("/admin/api/v1/**").checkOrigin("https://sy.xn--15tq51d.top"))
+        .isEqualTo("https://sy.xn--15tq51d.top");
     assertThat(mappings.get("/api/v1/**").checkOrigin("https://untrusted.example")).isNull();
   }
 

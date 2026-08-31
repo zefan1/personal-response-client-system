@@ -7,6 +7,7 @@ import com.privateflow.modules.api.auth.AuthContext;
 import com.privateflow.modules.api.ws.WsMessage;
 import com.privateflow.modules.api.ws.WsPushService;
 import com.privateflow.modules.customer.infra.SystemConfigRepository;
+import com.privateflow.modules.llm.LlmReplyGenerationService;
 import com.privateflow.modules.profile.service.ProfileAnalysisContextBuilder;
 import com.privateflow.modules.profile.service.TagAnalysisDecisionValidator;
 import com.privateflow.modules.skill.ProfileAnalysisContext;
@@ -21,7 +22,9 @@ import com.privateflow.modules.skill.parser.SkillResponseParser;
 import com.privateflow.modules.skill.service.SkillRequestBuilder;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
@@ -42,6 +45,7 @@ public class SkillAdminService {
   private final SkillRequestBuilder requestBuilder;
   private final SkillHttpClient skillHttpClient;
   private final SkillResponseParser responseParser;
+  private final LlmReplyGenerationService llmReplyGenerationService;
   private final ProfileAnalysisContextBuilder profileContextBuilder;
   private final SkillProfileAnalysisResponseParser profileResponseParser;
   private final TagAnalysisDecisionValidator decisionValidator;
@@ -56,6 +60,7 @@ public class SkillAdminService {
       SkillRequestBuilder requestBuilder,
       SkillHttpClient skillHttpClient,
       SkillResponseParser responseParser,
+      LlmReplyGenerationService llmReplyGenerationService,
       ProfileAnalysisContextBuilder profileContextBuilder,
       SkillProfileAnalysisResponseParser profileResponseParser,
       TagAnalysisDecisionValidator decisionValidator,
@@ -68,6 +73,7 @@ public class SkillAdminService {
     this.requestBuilder = requestBuilder;
     this.skillHttpClient = skillHttpClient;
     this.responseParser = responseParser;
+    this.llmReplyGenerationService = llmReplyGenerationService;
     this.profileContextBuilder = profileContextBuilder;
     this.profileResponseParser = profileResponseParser;
     this.decisionValidator = decisionValidator;
@@ -83,8 +89,9 @@ public class SkillAdminService {
   }
 
   public SkillSceneBinding create(SkillBindingRequest request) {
-    validate(request, null);
-    long id = bindingRepository.create(request);
+    SkillBindingRequest normalized = normalizeRequest(request, null);
+    validate(normalized, null);
+    long id = bindingRepository.create(normalized);
     publishRefresh("skill_scene_bindings");
     SkillSceneBinding saved = bindingRepository.findById(id).orElseThrow();
     audit("SKILL_BINDING_CREATE", saved, bindingDetail(saved));
@@ -94,8 +101,9 @@ public class SkillAdminService {
   public SkillSceneBinding update(long id, SkillBindingRequest request) {
     SkillSceneBinding existing = bindingRepository.findById(id)
         .orElseThrow(() -> new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "Skill 绑定不存在"));
-    validate(request, id);
-    bindingRepository.update(id, request);
+    SkillBindingRequest normalized = normalizeRequest(request, existing);
+    validate(normalized, id);
+    bindingRepository.update(id, normalized);
     publishRefresh("skill_scene_bindings");
     SkillSceneBinding saved = bindingRepository.findById(id).orElseThrow();
     Map<String, Object> detail = bindingDetail(saved);
@@ -167,13 +175,53 @@ public class SkillAdminService {
         List.of(Map.of("role", "customer", "content", request.testMessage())),
         AuthContext.username() + ":ADMIN_TEST");
     Map<String, Object> payload = requestBuilder.build(skillRequest);
-    payload.put("skill_id", binding.skillId());
     String raw = skillHttpClient.call(payload, testTimeoutMs());
     SkillResponse response = responseParser.parseReplies(raw);
+    FinalReplyTestResult finalReply = generateFinalReply(skillRequest, response);
     return new SkillTestResponse(
         response.suggestions(),
         System.currentTimeMillis() - start,
-        response);
+        response,
+        null,
+        finalReply);
+  }
+
+  private FinalReplyTestResult generateFinalReply(SkillRequest skillRequest, SkillResponse skillResponse) {
+    if (!llmReplyGenerationService.enabled()) {
+      return new FinalReplyTestResult(
+          false,
+          false,
+          0,
+          List.of(),
+          "未启用最终回复生成。请在配置中心启用回复生成后重新测试。");
+    }
+    long start = System.currentTimeMillis();
+    Optional<SkillResponse> generated;
+    try {
+      generated = llmReplyGenerationService.tryGenerate(skillRequest, skillResponse);
+    } catch (RuntimeException ex) {
+      return new FinalReplyTestResult(
+          true,
+          false,
+          System.currentTimeMillis() - start,
+          List.of(),
+          "最终回复模型调用失败，请检查 LLM 调用监控后重试。");
+    }
+    long responseTimeMs = System.currentTimeMillis() - start;
+    if (generated.isEmpty() || generated.get().suggestions() == null || generated.get().suggestions().isEmpty()) {
+      return new FinalReplyTestResult(
+          true,
+          false,
+          responseTimeMs,
+          List.of(),
+          "最终回复模型未返回可用话术，请检查 LLM 调用监控后重试。");
+    }
+    return new FinalReplyTestResult(
+        true,
+        true,
+        responseTimeMs,
+        generated.get().suggestions(),
+        "");
   }
 
   private SkillTestResponse testProfileExtract(
@@ -191,8 +239,6 @@ public class SkillAdminService {
         caller,
         context);
     Map<String, Object> payload = requestBuilder.buildProfileExtract(profileRequest);
-    payload.put("skill_id", binding.skillId());
-    payload.put("skill_group_id", binding.skillId());
     String raw = skillHttpClient.call(payload, testTimeoutMs());
     ProfileAnalysisResult analysis = decisionValidator.validate(
         profileResponseParser.parse(raw),
@@ -201,7 +247,8 @@ public class SkillAdminService {
         List.of(),
         System.currentTimeMillis() - start,
         null,
-        analysis);
+        analysis,
+        null);
   }
 
   private int testMessageMaxChars() {
@@ -233,7 +280,7 @@ public class SkillAdminService {
       throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "skillId 必填且不能超过 100 字符");
     }
     if (request.skillName() == null || request.skillName().isBlank() || request.skillName().length() > 100) {
-      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "skillName 必填且不能超过 100 字符");
+      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "显示名称必填且不能超过 100 字符");
     }
     if (request.scene() == null) {
       throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "scene 必填");
@@ -245,9 +292,44 @@ public class SkillAdminService {
     if (!LEAD_TYPES.contains(leadType)) {
       throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "线索类型必须是全部客资、团购客资、线索客资或待确认");
     }
+    if (request.baseUrl() == null || request.baseUrl().isBlank() || request.baseUrl().length() > 500) {
+      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "Skill 服务地址必填且不能超过 500 字符");
+    }
+    if (existingId == null && (request.apiKey() == null || request.apiKey().isBlank())) {
+      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "新建场景 Skill 时必须填写 API 密钥");
+    }
+    if (request.apiKey() != null && request.apiKey().length() > 500) {
+      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "新建场景 Skill 时必须填写 API 密钥，且密钥不能超过 500 字符");
+    }
+    if (request.protocol() == null || !("OPENAI_COMPATIBLE".equals(request.protocol()) || "MCP_STREAMABLE_HTTP".equals(request.protocol()))) {
+      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "接口协议必须是 OpenAI 兼容接口或 MCP 流式 HTTP");
+    }
     if (bindingRepository.existsInGroup(request.skillId().trim(), request.scene(), leadType, existingId)) {
       throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "同一场景和线索类型下不能重复绑定同一个 Skill");
     }
+  }
+
+  private SkillBindingRequest normalizeRequest(SkillBindingRequest request, SkillSceneBinding existing) {
+    if (request == null) {
+      throw new SkillAdminException(SkillAdminErrorCodes.BAD_REQUEST, "请求体不能为空");
+    }
+    String leadType = request.leadType() == null ? "" : request.leadType().trim();
+    String skillId = request.skillId() == null ? "" : request.skillId().trim();
+    if (skillId.isBlank() && existing != null) {
+      skillId = existing.skillId();
+    }
+    if (skillId.isBlank() && request.scene() != null) {
+      skillId = "scene-" + request.scene().name().toLowerCase(Locale.ROOT) + "-" + leadType.toLowerCase(Locale.ROOT);
+    }
+    return new SkillBindingRequest(
+        skillId,
+        request.skillName(),
+        request.scene(),
+        leadType,
+        request.priority(),
+        request.baseUrl(),
+        request.apiKey(),
+        request.protocol() == null || request.protocol().isBlank() ? "OPENAI_COMPATIBLE" : request.protocol().trim());
   }
 
   private void publishRefresh(String key) {
@@ -263,6 +345,8 @@ public class SkillAdminService {
     detail.put("scene", binding.scene().name());
     detail.put("leadType", binding.leadType());
     detail.put("priority", binding.priority());
+    detail.put("baseUrl", binding.baseUrl());
+    detail.put("protocol", binding.protocol());
     detail.put("enabled", binding.enabled());
     return detail;
   }

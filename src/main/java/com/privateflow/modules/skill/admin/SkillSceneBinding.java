@@ -11,8 +11,25 @@ public record SkillSceneBinding(
     String leadType,
     int priority,
     boolean enabled,
+    String baseUrl,
+    String apiKeyLast4,
+    String protocol,
     LocalDateTime lastTestedAt,
     LocalDateTime createdAt,
     LocalDateTime updatedAt
 ) {
+  public SkillSceneBinding(
+      long id,
+      String skillId,
+      String skillName,
+      Scene scene,
+      String leadType,
+      int priority,
+      boolean enabled,
+      LocalDateTime lastTestedAt,
+      LocalDateTime createdAt,
+      LocalDateTime updatedAt) {
+    this(id, skillId, skillName, scene, leadType, priority, enabled, null, null, null,
+        lastTestedAt, createdAt, updatedAt);
+  }
 }

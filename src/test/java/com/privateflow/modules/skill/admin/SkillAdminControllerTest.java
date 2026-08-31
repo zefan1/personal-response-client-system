@@ -152,7 +152,10 @@ class SkillAdminControllerTest {
   void testBindingReturnsSuggestionsAndRawResponse() throws Exception {
     Suggestion suggestion = new Suggestion("hello", "OPENING", "acceptance");
     SkillResponse raw = new SkillResponse(List.of(suggestion), null, null, ProfileUpdates.empty());
-    when(service.test(eq(4L), any())).thenReturn(new SkillTestResponse(List.of(suggestion), 123L, raw, null));
+    FinalReplyTestResult finalReply = new FinalReplyTestResult(
+        true, true, 45L, List.of(suggestion), "");
+    when(service.test(eq(4L), any())).thenReturn(new SkillTestResponse(
+        List.of(suggestion), 123L, raw, null, finalReply));
 
     mockMvc.perform(post("/admin/api/v1/skills/4/test")
             .contentType(MediaType.APPLICATION_JSON)
@@ -161,7 +164,9 @@ class SkillAdminControllerTest {
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.responseTimeMs").value(123))
         .andExpect(jsonPath("$.data.suggestions[0].text").value("hello"))
-        .andExpect(jsonPath("$.data.rawResponse.suggestions[0].direction").value("OPENING"));
+        .andExpect(jsonPath("$.data.rawResponse.suggestions[0].direction").value("OPENING"))
+        .andExpect(jsonPath("$.data.finalReply.success").value(true))
+        .andExpect(jsonPath("$.data.finalReply.responseTimeMs").value(45));
   }
 
   @Test
@@ -170,7 +175,8 @@ class SkillAdminControllerTest {
         List.of(),
         88L,
         null,
-        ProfileAnalysisResult.empty()));
+        ProfileAnalysisResult.empty(),
+        null));
 
     mockMvc.perform(post("/admin/api/v1/skills/4/test")
             .contentType(MediaType.APPLICATION_JSON)

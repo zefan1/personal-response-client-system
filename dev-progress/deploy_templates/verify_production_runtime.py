@@ -27,9 +27,9 @@ def require_production_environment():
   jwt_secret = values.get("SYSTEM_JWT_SECRET", "")
   if len(jwt_secret) < 64 or jwt_secret == "change-me-in-production":
     failures.append("jwt_secret_is_not_production_ready")
-  if values.get("WECOM_TRANSPORT_MODE", "").upper() != "RELAY":
-    failures.append("wecom_transport_mode_must_be_relay")
-  for key in ("WECOM_RELAY_BASE_URL", "WECOM_RELAY_KEY_ID", "WECOM_RELAY_SECRET"):
+  if values.get("WECOM_TRANSPORT_MODE", "").upper() != "DIRECT":
+    failures.append("wecom_transport_mode_must_be_direct")
+  for key in ("WECOM_CORP_ID", "WECOM_APP_SECRET"):
     value = values.get(key, "")
     if not value or value == "replace-me":
       failures.append(f"missing_{key.lower()}")

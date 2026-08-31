@@ -68,6 +68,16 @@ class SkillRuntimeRouterTest {
     assertThat(router.route(Scene.ACTIVE_REPLY, "TUAN_GOU", config()).orElseThrow()).isEqualTo("legacy-tuan");
   }
 
+  @Test
+  void generatedSceneBindingKeepsTheLegacyProviderToolId() {
+    jdbcTemplate.update("""
+        INSERT INTO skill_scene_bindings (skill_id, skill_name, scene, lead_type, priority, enabled)
+        VALUES ('scene-active_reply-general', '主动回复', 'ACTIVE_REPLY', 'GENERAL', 10, 1)
+        """);
+
+    assertThat(router.route(Scene.ACTIVE_REPLY, "GENERAL", config()).orElseThrow()).isEqualTo("legacy-default");
+  }
+
   private SkillConfig config() {
     return new SkillConfig(
         "",

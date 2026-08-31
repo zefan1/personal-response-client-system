@@ -22,11 +22,11 @@ public class SkillRuntimeRouter {
     String normalizedLeadType = normalizeLeadType(leadType);
     Optional<String> exact = configuredRoute(scene, normalizedLeadType);
     if (exact.isPresent()) {
-      return exact;
+      return Optional.of(providerSkillId(exact.get(), normalizedLeadType, config));
     }
     Optional<String> general = configuredRoute(scene, "GENERAL");
     if (general.isPresent()) {
-      return general;
+      return Optional.of(providerSkillId(general.get(), normalizedLeadType, config));
     }
     return Optional.ofNullable(fallbackSkillId(normalizedLeadType, config))
         .filter(value -> !value.isBlank());
@@ -65,6 +65,15 @@ public class SkillRuntimeRouter {
       return config.xiansuoSkillGroupId();
     }
     return config.defaultSkillId();
+  }
+
+  // Scene-generated IDs identify local bindings; existing MCP servers still need their registered tool ID.
+  private String providerSkillId(String configuredSkillId, String leadType, SkillConfig config) {
+    if (!configuredSkillId.startsWith("scene-")) {
+      return configuredSkillId;
+    }
+    String fallback = fallbackSkillId(leadType, config);
+    return fallback == null || fallback.isBlank() ? configuredSkillId : fallback;
   }
 
   private String normalizeLeadType(String leadType) {

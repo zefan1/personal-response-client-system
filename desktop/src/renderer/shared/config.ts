@@ -53,8 +53,13 @@ export type DesktopConfig = {
 
 const WS_PATH = '/ws/v1/desktop';
 
+const defaultApiBaseUrl = typeof import.meta.env.VITE_DEFAULT_API_BASE_URL === 'string'
+  && import.meta.env.VITE_DEFAULT_API_BASE_URL.trim()
+  ? import.meta.env.VITE_DEFAULT_API_BASE_URL.trim()
+  : 'http://localhost:8080';
+
 const defaults: DesktopConfig = {
-  apiBaseUrl: 'http://localhost:8080',
+  apiBaseUrl: defaultApiBaseUrl,
   accessToken: '',
   refreshToken: '',
   accountUsername: '',
