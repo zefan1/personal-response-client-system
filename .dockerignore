@@ -7,8 +7,6 @@ backups
 desktop/node_modules
 desktop/release-installer
 node_modules
-target/classes
-target/test-classes
-target/surefire-reports
+target
 *.log
 *.env
