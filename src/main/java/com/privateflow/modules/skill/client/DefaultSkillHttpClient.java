@@ -130,12 +130,16 @@ public class DefaultSkillHttpClient implements SkillHttpClient {
       sendMcp(config.apiBaseUrl(), config.apiKey(), skillId, sessionId,
           Map.of("jsonrpc", "2.0", "method", "notifications/initialized", "params", Map.of()), timeoutMs);
 
+      HttpResponse<String> toolListResponse = sendMcp(config.apiBaseUrl(), config.apiKey(), skillId, sessionId,
+          Map.of("jsonrpc", "2.0", "id", 2, "method", "tools/list", "params", Map.of()), timeoutMs);
+      String toolName = resolveMcpToolName(parseSseJson(toolListResponse.body()), skillId);
+
       Map<String, Object> arguments = new LinkedHashMap<>();
       arguments.put("query", buildMcpQuery(payload));
       arguments.put("context", payload);
       HttpResponse<String> toolResponse = sendMcp(config.apiBaseUrl(), config.apiKey(), skillId, sessionId,
-          Map.of("jsonrpc", "2.0", "id", 2, "method", "tools/call", "params", Map.of(
-              "name", mcpToolName(skillId),
+          Map.of("jsonrpc", "2.0", "id", 3, "method", "tools/call", "params", Map.of(
+              "name", toolName,
               "arguments", arguments)), timeoutMs);
       JsonNode root = parseSseJson(toolResponse.body());
       JsonNode error = root.path("error");
@@ -248,6 +252,39 @@ public class DefaultSkillHttpClient implements SkillHttpClient {
   private String mcpToolName(String skillId) {
     String normalized = skillId.trim().replaceAll("[^A-Za-z0-9]+", "_").replaceAll("^_+|_+$", "").toLowerCase();
     return normalized + "__query";
+  }
+
+  private String resolveMcpToolName(JsonNode toolList, String skillId) {
+    JsonNode error = toolList.path("error");
+    if (error.isObject()) {
+      throw new SkillGatewayException(SkillErrorCodes.SKILL_UNREACHABLE,
+          error.path("message").asText("MCP tool discovery failed"), false);
+    }
+    JsonNode tools = toolList.path("result").path("tools");
+    if (!tools.isArray()) {
+      throw new SkillGatewayException(SkillErrorCodes.SKILL_RESPONSE_INVALID,
+          "MCP tool discovery returned an invalid tool list", true);
+    }
+    String expected = mcpToolName(skillId);
+    String queryTool = "";
+    for (JsonNode tool : tools) {
+      String name = tool.path("name").asText("").trim();
+      if (expected.equals(name)) {
+        return name;
+      }
+      if (name.endsWith("__query")) {
+        if (!queryTool.isBlank()) {
+          throw new SkillGatewayException(SkillErrorCodes.SKILL_ROUTE_NOT_CONFIGURED,
+              "Skill 服务提供了多个查询工具，无法自动确定当前场景应调用哪一个", false, false);
+        }
+        queryTool = name;
+      }
+    }
+    if (!queryTool.isBlank()) {
+      return queryTool;
+    }
+    throw new SkillGatewayException(SkillErrorCodes.SKILL_ROUTE_NOT_CONFIGURED,
+        "Skill 服务没有提供可调用的查询工具", false, false);
   }
 
   private String stringValue(Object value) {

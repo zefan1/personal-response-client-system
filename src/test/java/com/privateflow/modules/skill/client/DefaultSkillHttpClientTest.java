@@ -24,6 +24,7 @@ class DefaultSkillHttpClientTest {
 
   private HttpServer server;
   private String lastRequestBody;
+  private String lastToolListRequestBody;
   private String lastToolRequestBody;
 
   @BeforeEach
@@ -40,7 +41,7 @@ class DefaultSkillHttpClientTest {
   }
 
   @Test
-  void callsMcpSkillUsingStreamableHttpSessionAndReturnsToolText() {
+  void discoversTheRemoteToolInsteadOfGuessingFromTheLocalSceneBindingId() {
     SkillConfigProvider provider = mock(SkillConfigProvider.class);
     SkillSceneConnectionResolver connectionResolver = mock(SkillSceneConnectionResolver.class);
     when(provider.get()).thenReturn(config("MCP_STREAMABLE_HTTP"));
@@ -50,12 +51,13 @@ class DefaultSkillHttpClientTest {
     String result = client.call(Map.of(
         "scene", "CHAT_RECOGNIZE",
         "client_message", "客户说预算比较紧",
-        "skill_id", "sales-champion-coach",
+        "skill_id", "scene-active_reply-general",
         "system_prompt", "只返回 JSON",
         "customer", Map.of("lead_type", "GENERAL")), 5000);
 
     assertThat(result).isEqualTo("{\"suggestions\":[{\"text\":\"收到\"}]}");
     assertThat(lastRequestBody).contains("\"method\":\"initialize\"");
+    assertThat(lastToolListRequestBody).contains("\"method\":\"tools/list\"");
     assertThat(lastToolRequestBody).contains("sales_champion_coach__query");
     assertThat(lastToolRequestBody).contains("客户说预算比较紧");
     assertThat(lastToolRequestBody).contains("CHAT_RECOGNIZE");
@@ -99,9 +101,15 @@ class DefaultSkillHttpClientTest {
       exchange.close();
       return;
     }
+    if (body.contains("\"method\":\"tools/list\"")) {
+      lastToolListRequestBody = body;
+      exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+      write(exchange, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"sales_champion_coach__query\"}]}}\n\n");
+      return;
+    }
     lastToolRequestBody = body;
     exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-    write(exchange, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"suggestions\\\":[{\\\"text\\\":\\\"收到\\\"}]}\"}]}}\n\n");
+    write(exchange, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"suggestions\\\":[{\\\"text\\\":\\\"收到\\\"}]}\"}]}}\n\n");
   }
 
   private void write(HttpExchange exchange, String body) throws IOException {
