@@ -1132,8 +1132,9 @@ describe('AdminConsole product surface', () => {
 
     const modal = host.querySelector('.ops-profile-test-modal') as HTMLElement;
     expect(modal).toBeTruthy();
+    expect(modal.textContent).toContain('当前模型：LLM 备用');
     expect(modal.textContent).toContain('不会写入客户档案');
-    expect(modal.textContent).toContain('业务测试通过但没有更新是正常结果');
+    expect(modal.textContent).toContain('“不更新”也是正常结果');
     const leadTypeSelect = modal.querySelector('select') as HTMLSelectElement;
     const messageInputs = [...modal.querySelectorAll('textarea')] as HTMLTextAreaElement[];
     setInputValue(leadTypeSelect, 'TUAN_GOU');

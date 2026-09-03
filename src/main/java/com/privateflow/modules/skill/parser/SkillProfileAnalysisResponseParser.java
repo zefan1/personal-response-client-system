@@ -77,30 +77,53 @@ public class SkillProfileAnalysisResponseParser {
         throw invalid("tag_decisions 项必须是对象", null);
       }
       String categoryCode = requiredText(node, "category_code");
-      JsonNode tagCodesNode = node.get("tag_codes");
-      if (tagCodesNode == null || !tagCodesNode.isArray()) {
-        throw invalid("tag_codes 必须是数组", null);
-      }
-      List<String> tagCodes = new ArrayList<>();
-      for (JsonNode codeNode : tagCodesNode) {
-        if (!codeNode.isTextual() || codeNode.asText().isBlank()) {
-          throw invalid("tag_codes 只能包含非空标签编码", null);
-        }
-        tagCodes.add(codeNode.asText().trim());
-      }
+      TagAnalysisResultType resultType = enumValue(
+          TagAnalysisResultType.class,
+          requiredText(node, "result_type"),
+          "result_type");
+      List<String> tagCodes = tagCodes(node.get("tag_codes"), resultType);
       JsonNode confidenceNode = node.get("confidence");
       if (confidenceNode == null || !confidenceNode.isNumber()) {
         throw invalid("confidence 必须是数值", null);
       }
+      TagAnalysisAction requestedAction = requestedAction(node.get("requested_action"), resultType);
       decisions.add(new TagAnalysisDecision(
           categoryCode,
           tagCodes,
           confidenceNode.decimalValue(),
-          requiredText(node, "evidence"),
-          enumValue(TagAnalysisResultType.class, requiredText(node, "result_type"), "result_type"),
-          enumValue(TagAnalysisAction.class, requiredText(node, "requested_action"), "requested_action")));
+          optionalText(node.get("evidence")),
+          resultType,
+          requestedAction));
     }
     return List.copyOf(decisions);
+  }
+
+  private List<String> tagCodes(JsonNode node, TagAnalysisResultType resultType) {
+    if (node == null || !node.isArray()) {
+      if (resultType != TagAnalysisResultType.UPDATE) {
+        return List.of();
+      }
+      throw invalid("tag_codes 必须是数组", null);
+    }
+    List<String> tagCodes = new ArrayList<>();
+    for (JsonNode codeNode : node) {
+      if (!codeNode.isTextual() || codeNode.asText().isBlank()) {
+        throw invalid("tag_codes 只能包含非空标签编码", null);
+      }
+      tagCodes.add(codeNode.asText().trim());
+    }
+    return List.copyOf(tagCodes);
+  }
+
+  private TagAnalysisAction requestedAction(JsonNode node, TagAnalysisResultType resultType) {
+    String value = text(node);
+    if (value == null) {
+      if (resultType != TagAnalysisResultType.UPDATE) {
+        return TagAnalysisAction.NONE;
+      }
+      throw invalid("requested_action 必填", null);
+    }
+    return enumValue(TagAnalysisAction.class, value, "requested_action");
   }
 
   private String requiredText(JsonNode node, String field) {
@@ -109,6 +132,11 @@ public class SkillProfileAnalysisResponseParser {
       throw invalid(field + " 必填", null);
     }
     return value;
+  }
+
+  private String optionalText(JsonNode node) {
+    String value = text(node);
+    return value == null ? "" : value;
   }
 
   private String text(JsonNode node) {

@@ -2709,7 +2709,7 @@
         <header>
           <div>
             <h2>档案提取业务测试</h2>
-            <p>当前模型：{{ llmProfileTestEnvironment?.envName || '未选择' }}</p>
+            <p>当前模型：{{ llmProfileTestEnvironment ? environmentDisplayName(llmProfileTestEnvironment, '未选择') : '未选择' }}</p>
           </div>
           <button class="icon-close-button" type="button" aria-label="关闭档案提取测试" title="关闭测试" :disabled="llmProfileTestSubmitting" @click="closeLlmProfileTest">
             <span aria-hidden="true">×</span>
@@ -2740,10 +2740,8 @@
           </label>
         </div>
         <div class="ops-detail-box warning">
-          <strong>怎样判断这次测试的结果</strong>
-          <p><b>连通性测试通过</b>，只代表模型能收到请求并回复；<b>业务测试通过</b>，还代表返回结构、字段、标签和依据都符合“档案提取”规则。</p>
-          <p><b>业务测试通过但没有更新</b>是正常结果，表示聊天内容和目标字段无关，或证据不足。真正失败才是地址、API Key、模型不可用、超时，或返回内容不符合规则。</p>
-          <p>本测试不会写入客户档案、不会改标签、不会发消息。需要确认模型能否连接，请关闭此窗口后点击“测试连通性”。</p>
+          <strong>业务测试只检查处理结果</strong>
+          <p>模型按规则返回即通过；“不更新”也是正常结果。本测试不会写入客户档案、标签或消息。</p>
         </div>
         <div v-if="llmProfileTestSubmitting" class="ops-profile-test-progress" role="status" aria-live="polite">
           <strong>正在进行业务测试</strong>

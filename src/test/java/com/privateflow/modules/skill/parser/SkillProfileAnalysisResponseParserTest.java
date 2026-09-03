@@ -67,6 +67,23 @@ class SkillProfileAnalysisResponseParserTest {
     assertInvalid("not-json");
   }
 
+  @Test
+  void acceptsMissingOptionalFieldsForNoChangeResult() {
+    var result = parser.parse("""
+        {"profile_updates":{"fields":{},"tag_decisions":[{
+          "category_code":"intent_level",
+          "confidence":0.2,
+          "result_type":"UNABLE_TO_DETERMINE"
+        }]}}
+        """);
+
+    assertThat(result.tagDecisions()).singleElement().satisfies(decision -> {
+      assertThat(decision.tagCodes()).isEmpty();
+      assertThat(decision.evidence()).isEmpty();
+      assertThat(decision.requestedAction()).isEqualTo(TagAnalysisAction.NONE);
+    });
+  }
+
   private void assertInvalid(String raw) {
     assertThatThrownBy(() -> parser.parse(raw))
         .isInstanceOf(SkillGatewayException.class)

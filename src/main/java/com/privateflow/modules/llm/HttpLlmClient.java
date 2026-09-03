@@ -62,7 +62,7 @@ public class HttpLlmClient implements LlmClient {
       throws IOException, InterruptedException {
     try {
       return httpClient(config).send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    } catch (java.net.http.HttpConnectTimeoutException | IOException firstFailure) {
+    } catch (IOException firstFailure) {
       return httpClient(config).send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
   }

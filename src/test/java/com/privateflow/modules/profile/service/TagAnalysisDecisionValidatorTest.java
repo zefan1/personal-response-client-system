@@ -76,9 +76,17 @@ class TagAnalysisDecisionValidatorTest {
   }
 
   @Test
-  void rejectsIllegalActionOrValuesForNoChangeResults() {
-    assertRejected(decision("intent_level", List.of("HIGH"), "0.30", "保持当前", TagAnalysisResultType.KEEP_CURRENT, TagAnalysisAction.NONE));
-    assertRejected(decision("intent_level", List.of(), "0.30", "保持当前", TagAnalysisResultType.KEEP_CURRENT, TagAnalysisAction.ADD));
+  void normalizesModelOnlyValuesForNoChangeResults() {
+    ProfileAnalysisResult validated = validator.validate(new ProfileAnalysisResult(
+        ProfileUpdates.empty(),
+        List.of(
+            decision("intent_level", List.of("HIGH"), "0.30", "", TagAnalysisResultType.KEEP_CURRENT, TagAnalysisAction.ADD),
+            decision("custom_goal", List.of("GOAL_B"), "0.20", "", TagAnalysisResultType.UNABLE_TO_DETERMINE, TagAnalysisAction.ADD))), request());
+
+    assertThat(validated.tagDecisions()).allSatisfy(decision -> {
+      assertThat(decision.tagCodes()).isEmpty();
+      assertThat(decision.requestedAction()).isEqualTo(TagAnalysisAction.NONE);
+    });
     assertRejected(decision("intent_level", List.of("HIGH"), "0.95", "客户明确表示预约", TagAnalysisResultType.UPDATE, TagAnalysisAction.ADD));
   }
 

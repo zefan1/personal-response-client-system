@@ -13,8 +13,10 @@ import com.privateflow.modules.tags.TagSelectionContext;
 import com.privateflow.modules.tags.TagSelectionValidationResult;
 import com.privateflow.modules.tags.TagSelectionValidator;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.stereotype.Component;
@@ -41,6 +43,7 @@ public class TagAnalysisDecisionValidator {
         .add(tag.tagCode()));
     Set<String> decidedCategories = new HashSet<>();
 
+    List<TagAnalysisDecision> normalized = new ArrayList<>();
     for (TagAnalysisDecision decision : result.tagDecisions()) {
       if (decision == null || decision.categoryCode() == null || decision.categoryCode().isBlank()) {
         throw invalid("Skill 返回的分类编码不能为空");
@@ -48,12 +51,12 @@ public class TagAnalysisDecisionValidator {
       if (!decidedCategories.add(decision.categoryCode())) {
         throw invalid("同一分类只能返回一条标签判断");
       }
-      validateDecision(decision, candidates.get(decision.categoryCode()), currentCodes, context.effectiveMessageCount());
+      normalized.add(validateDecision(decision, candidates.get(decision.categoryCode()), currentCodes, context.effectiveMessageCount()));
     }
-    return result;
+    return new ProfileAnalysisResult(result.profileUpdates(), normalized);
   }
 
-  private void validateDecision(
+  private TagAnalysisDecision validateDecision(
       TagAnalysisDecision decision,
       ProfileAnalysisContext.CategoryCandidate candidate,
       Map<String, Set<String>> currentCodes,
@@ -66,16 +69,22 @@ public class TagAnalysisDecisionValidator {
         || decision.confidence().compareTo(BigDecimal.ONE) > 0) {
       throw invalid("Skill 返回的把握度必须在 0 到 1 之间");
     }
-    if (decision.evidence() == null || decision.evidence().isBlank()) {
-      throw invalid("Skill 返回的判断依据不能为空");
-    }
     if (decision.resultType() == TagAnalysisResultType.UPDATE) {
+      if (decision.evidence() == null || decision.evidence().isBlank()) {
+        throw invalid("Skill 返回的更新依据不能为空");
+      }
       validateUpdate(decision, candidate, currentCodes, effectiveMessageCount);
-      return;
+      return decision;
     }
-    if (!decision.tagCodes().isEmpty() || decision.requestedAction() != TagAnalysisAction.NONE) {
-      throw invalid("无法判断或保持当前时不能返回标签值或更新动作");
-    }
+    // A no-change result never writes data. Discard model-only tag/action fields so
+    // an otherwise safe "cannot determine" answer cannot fail the whole analysis.
+    return new TagAnalysisDecision(
+        decision.categoryCode(),
+        java.util.List.of(),
+        decision.confidence(),
+        decision.evidence() == null ? "" : decision.evidence(),
+        decision.resultType(),
+        TagAnalysisAction.NONE);
   }
 
   private void validateUpdate(
