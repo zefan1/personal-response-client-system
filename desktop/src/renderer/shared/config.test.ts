@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { deriveWsUrl, loadDesktopConfig, saveDesktopConfig } from './config';
+import { deriveWsUrl, loadDesktopConfig, resolveApiUrl, saveDesktopConfig } from './config';
 
 function installMemoryLocalStorage(): void {
   const store = new Map<string, string>();
@@ -22,7 +22,9 @@ describe('desktop config', () => {
   it('derives websocket URL from the configured API base URL', () => {
     installMemoryLocalStorage();
 
-    expect(deriveWsUrl('https://ops.example.com/api')).toBe('wss://ops.example.com/ws/v1/desktop');
+  expect(deriveWsUrl('https://ops.example.com/api')).toBe('wss://ops.example.com/ws/v1/desktop');
+  expect(resolveApiUrl('/', '/api/v1/auth/login')).toBe('/api/v1/auth/login');
+  expect(resolveApiUrl('https://ops.example.com/', '/api/v1/auth/login')).toBe('https://ops.example.com/api/v1/auth/login');
 
     const config = saveDesktopConfig({ apiBaseUrl: 'https://ops.example.com/' });
 

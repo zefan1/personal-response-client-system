@@ -61,5 +61,5 @@ VALUES
 ON DUPLICATE KEY UPDATE description = VALUES(description);
 
 INSERT INTO accounts (username, password_hash, display_name, role, leader_id, is_enabled)
-VALUES ('admin', '{plain}admin123', 'System Admin', 'ADMIN', NULL, 1)
+VALUES ('admin', '$2a$12$87CHl6pLsOs3QAWm2DF8/.b2EIijrgS4ycdkHwsg/8eBI.wo4QjUO', 'System Admin', 'ADMIN', NULL, 1)
 ON DUPLICATE KEY UPDATE role = VALUES(role), is_enabled = VALUES(is_enabled);

@@ -93,8 +93,14 @@ public class ProfileAnalysisContextBuilder {
   }
 
   public ProfileAnalysisContext buildForOnlineTest(String leadType, String testMessage) {
-    List<ProfileAnalysisContext.ConversationMessage> recentMessages = recentMessages(normalizeMessages(List.of(
-        new CustomerMessageSentEvent.ChatMessage("client", testMessage, null))));
+    List<CustomerMessageSentEvent.ChatMessage> testMessages = java.util.Arrays.stream(
+            (testMessage == null ? "" : testMessage).split("\\r?\\n+"))
+        .map(String::trim)
+        .filter(message -> !message.isBlank())
+        .map(message -> new CustomerMessageSentEvent.ChatMessage("client", message, null))
+        .toList();
+    List<ProfileAnalysisContext.ConversationMessage> normalizedMessages = normalizeMessages(testMessages);
+    List<ProfileAnalysisContext.ConversationMessage> recentMessages = recentMessages(normalizedMessages);
     Map<String, Object> profile = leadType == null || leadType.isBlank()
         ? Map.of()
         : Map.of("leadType", leadType.trim());
@@ -105,7 +111,7 @@ public class ProfileAnalysisContextBuilder {
     return new ProfileAnalysisContext(
         0,
         0,
-        recentMessages.size(),
+        (int) normalizedMessages.stream().filter(message -> "client".equals(message.role())).count(),
         recentMessages,
         profile,
         List.of(),

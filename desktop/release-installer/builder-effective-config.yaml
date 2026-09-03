@@ -1,0 +1,10 @@
+directories:
+  output: release-installer
+  buildResources: build
+extends: null
+win:
+  target: nsis
+npmRebuild: false
+buildDependenciesFromSource: false
+files: []
+electronVersion: 40.10.2

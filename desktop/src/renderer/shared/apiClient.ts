@@ -1,4 +1,4 @@
-import { loadDesktopConfig } from './config';
+import { loadDesktopConfig, resolveApiUrl } from './config';
 import { eventBus } from './eventBus';
 import { recordApiNetworkFailure, recordApiSuccess } from './offlineManager';
 
@@ -59,7 +59,7 @@ export async function getBlob(
   signal?.addEventListener('abort', abort, { once: true });
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${config.apiBaseUrl}${path}`, {
+    const response = await fetch(resolveApiUrl(config.apiBaseUrl, path), {
       method: 'GET',
       headers: {
         ...(config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : {})
@@ -100,7 +100,7 @@ export async function postBlob(
   signal?.addEventListener('abort', abort, { once: true });
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${config.apiBaseUrl}${path}`, {
+    const response = await fetch(resolveApiUrl(config.apiBaseUrl, path), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -143,7 +143,7 @@ export async function postForm<T>(
   signal?.addEventListener('abort', abort, { once: true });
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${config.apiBaseUrl}${path}`, {
+    const response = await fetch(resolveApiUrl(config.apiBaseUrl, path), {
       method: 'POST',
       headers: {
         ...(config.accessToken ? { Authorization: `Bearer ${config.accessToken}` } : {})
@@ -152,7 +152,7 @@ export async function postForm<T>(
       signal: controller.signal
     });
     recordApiSuccess();
-    const payload = await response.json() as ApiResponse<T>;
+    const payload = await readJsonPayload<T>(response);
     emitAuthExpiredIfNeeded(path, config.accessToken, response.status, payload);
     return payload;
   } catch (error) {
@@ -179,7 +179,7 @@ async function requestJson<T>(
     ? window.setTimeout(() => controller.abort(), timeoutMs)
     : undefined;
   try {
-    const response = await fetch(`${config.apiBaseUrl}${path}`, {
+    const response = await fetch(resolveApiUrl(config.apiBaseUrl, path), {
       method,
       headers: {
         'Content-Type': 'application/json',
@@ -189,7 +189,7 @@ async function requestJson<T>(
       signal: controller.signal
     });
     recordApiSuccess();
-    const payload = await response.json() as ApiResponse<T>;
+    const payload = await readJsonPayload<T>(response);
     emitAuthExpiredIfNeeded(path, config.accessToken, response.status, payload);
     return payload;
   } catch (error) {
@@ -226,6 +226,18 @@ async function readErrorPayload(response: Response): Promise<ApiResponse<unknown
       errorCode: null,
       message: `下载失败：${response.status}`
     };
+  }
+}
+
+async function readJsonPayload<T>(response: Response): Promise<ApiResponse<T>> {
+  if (typeof response.text !== 'function') {
+    return await response.json() as ApiResponse<T>;
+  }
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as ApiResponse<T>;
+  } catch {
+    throw new Error(text.trim() || `请求失败：${response.status}`);
   }
 }
 

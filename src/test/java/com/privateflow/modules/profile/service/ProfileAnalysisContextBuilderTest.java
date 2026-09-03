@@ -63,6 +63,33 @@ class ProfileAnalysisContextBuilderTest {
   }
 
   @Test
+  void treatsEachNonEmptyTestLineAsOneClientMessage() {
+    TagCategory dynamic = category(
+        1L,
+        "custom_goal",
+        "Custom goal",
+        TagSelectionMode.MULTI,
+        TagAutoUpdateMode.ADD_ONLY,
+        List.of(value(11L, 1L, "custom_goal", "GOAL_A", "Goal A")));
+    TagDirectoryService directoryService = mock(TagDirectoryService.class);
+    when(directoryService.getSnapshot()).thenReturn(TagDirectorySnapshot.from(
+        List.of(dynamic),
+        Instant.parse("2026-07-15T04:00:00Z")));
+    ProfileAnalysisContextBuilder builder = new ProfileAnalysisContextBuilder(
+        new TagCandidateBuilder(directoryService),
+        directoryService,
+        mock(CustomerTagFoundationRepository.class));
+
+    ProfileAnalysisContext context = builder.buildForOnlineTest(
+        "TUAN_GOU",
+        "第一条客户消息\n\n第二条客户消息");
+
+    assertThat(context.effectiveMessageCount()).isEqualTo(2);
+    assertThat(context.recentMessages()).extracting(ProfileAnalysisContext.ConversationMessage::text)
+        .containsExactly("第一条客户消息", "第二条客户消息");
+  }
+
+  @Test
   void buildsSanitizedDynamicContextAndExcludesLockedCategoriesFromCandidates() {
     TagCategory dynamic = category(
         1L,

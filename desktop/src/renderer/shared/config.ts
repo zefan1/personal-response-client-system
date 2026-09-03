@@ -139,8 +139,14 @@ function normalizeConfig(config: DesktopConfig, explicitWsUrl = false): DesktopC
 }
 
 export function deriveWsUrl(apiBaseUrl: string): string {
+  const normalizedBase = trimTrailingSlash(apiBaseUrl || defaults.apiBaseUrl);
+  if (!normalizedBase.startsWith('http://') && !normalizedBase.startsWith('https://')) {
+    if (typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol)) {
+      return deriveWsUrl(window.location.origin);
+    }
+  }
   try {
-    const url = new URL(trimTrailingSlash(apiBaseUrl || defaults.apiBaseUrl));
+    const url = new URL(normalizedBase);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     url.pathname = WS_PATH;
     url.search = '';
@@ -149,6 +155,13 @@ export function deriveWsUrl(apiBaseUrl: string): string {
   } catch {
     return 'ws://localhost:8080/ws/v1/desktop';
   }
+}
+
+export function resolveApiUrl(apiBaseUrl: string, path: string): string {
+  const base = apiBaseUrl.trim();
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  if (!base || base === '/') return normalizedPath;
+  return `${base.replace(/\/+$/, '')}${normalizedPath}`;
 }
 
 function trimTrailingSlash(value: string): string {

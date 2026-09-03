@@ -47,5 +47,5 @@ ALTER TABLE skill_prompt_versions
 INSERT INTO system_configs (config_key, config_value, description)
 VALUES
   ('quicksearch.storage.public_base_url', '/uploads/quick-search', 'Quick search uploaded image public base URL'),
-  ('quicksearch.storage.root', 'uploads/quick-search', 'Quick search uploaded image local storage root')
+  ('quicksearch.storage.root', '', 'Quick search uploaded image local storage root; supplied by deployment environment')
 ON DUPLICATE KEY UPDATE description = VALUES(description);

@@ -10,3 +10,11 @@ node_modules
 target
 *.log
 *.env
+uploads/
+desktop/dist/
+desktop/release/
+desktop/release-installer/
+dev-progress/
+backups/
+.worktrees/
+.superpowers/

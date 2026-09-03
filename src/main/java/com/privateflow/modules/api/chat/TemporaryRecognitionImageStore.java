@@ -13,6 +13,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -45,8 +46,9 @@ public class TemporaryRecognitionImageStore {
   @Autowired
   public TemporaryRecognitionImageStore(
       SystemConfigRepository configRepository,
-      ImageConfigProvider imageConfigProvider) {
-    this(configRepository, imageConfigProvider, Clock.systemUTC());
+      ImageConfigProvider imageConfigProvider,
+      @Value("${chat.recognition.application-temp-root:${CHAT_RECOGNITION_APPLICATION_TEMP_ROOT:uploads/temporary-recognition}}") String applicationTempRoot) {
+    this(configRepository, imageConfigProvider, Clock.systemUTC(), Path.of(applicationTempRoot));
   }
 
   TemporaryRecognitionImageStore(

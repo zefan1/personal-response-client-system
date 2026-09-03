@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.privateflow.modules.api.ApiErrorCodes;
 import com.privateflow.modules.api.ApiException;
 import com.privateflow.modules.api.Role;
+import com.privateflow.modules.api.config.CorsOriginPolicy;
 import com.privateflow.modules.match.ApiResponse;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -28,36 +29,36 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   private static final Set<String> PUBLIC_GETS = Set.of(
       "/api/v1/desktop/latest",
       "/api/v1/desktop/download");
-  private static final Set<String> ALLOWED_CORS_ORIGINS = Set.of(
-      "file://",
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      "http://localhost:5174",
-      "http://127.0.0.1:5174",
-      "http://localhost:5175",
-      "http://127.0.0.1:5175",
-      "http://localhost:4173",
-      "http://127.0.0.1:4173",
-      "https://sy.xn--15tq51d.top");
   private final JwtService jwtService;
   private final AccountRepository accountRepository;
   private final AccountPermissionRepository permissionRepository;
   private final ObjectMapper objectMapper;
+  private final CorsOriginPolicy corsOriginPolicy;
 
   @Autowired
   public JwtAuthenticationFilter(
       JwtService jwtService,
       AccountRepository accountRepository,
       AccountPermissionRepository permissionRepository,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      CorsOriginPolicy corsOriginPolicy) {
     this.jwtService = jwtService;
     this.accountRepository = accountRepository;
     this.permissionRepository = permissionRepository;
     this.objectMapper = objectMapper;
+    this.corsOriginPolicy = corsOriginPolicy;
+  }
+
+  JwtAuthenticationFilter(
+      JwtService jwtService,
+      AccountRepository accountRepository,
+      AccountPermissionRepository permissionRepository,
+      ObjectMapper objectMapper) {
+    this(jwtService, accountRepository, permissionRepository, objectMapper, CorsOriginPolicy.defaults());
   }
 
   JwtAuthenticationFilter(JwtService jwtService, AccountRepository accountRepository, ObjectMapper objectMapper) {
-    this(jwtService, accountRepository, null, objectMapper);
+    this(jwtService, accountRepository, null, objectMapper, CorsOriginPolicy.defaults());
   }
 
   @Override
@@ -128,7 +129,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
   private void applyCorsHeaders(HttpServletRequest request, HttpServletResponse response) {
     String origin = request.getHeader("Origin");
-    if (origin == null || !ALLOWED_CORS_ORIGINS.contains(origin)) {
+    if (!corsOriginPolicy.allows(origin)) {
       return;
     }
     response.setHeader("Access-Control-Allow-Origin", origin);

@@ -1,9 +1,12 @@
-FROM node:20-alpine AS build
+FROM docker.m.daocloud.io/library/node:20-alpine AS build
 
 WORKDIR /workspace/desktop
 
 COPY desktop/package.json desktop/package-lock.json ./
-RUN npm ci --ignore-scripts
+# npm ci is overly strict with this Electron dependency tree on the server's
+# npm version (it rejects valid platform-specific lock entries). npm install
+# still honors package-lock.json while resolving those entries portably.
+RUN npm install --ignore-scripts --no-audit --no-fund
 
 COPY desktop ./
 
@@ -11,7 +14,7 @@ ARG VITE_DEFAULT_API_BASE_URL
 ENV VITE_DEFAULT_API_BASE_URL=${VITE_DEFAULT_API_BASE_URL}
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM docker.m.daocloud.io/library/nginx:1.27-alpine
 
 COPY desktop/nginx.production.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /workspace/desktop/dist/renderer /usr/share/nginx/html

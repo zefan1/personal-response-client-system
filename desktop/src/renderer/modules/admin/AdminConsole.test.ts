@@ -1629,6 +1629,7 @@ describe('AdminConsole product surface', () => {
     await flushSave();
 
     expect(mainText(host)).toContain('模型返回缺少 tag_decisions');
+    expect(profileModal.textContent).toContain('模型返回缺少 tag_decisions');
     expect(llmPanel.textContent).not.toContain('未知模型');
 
     app.unmount();

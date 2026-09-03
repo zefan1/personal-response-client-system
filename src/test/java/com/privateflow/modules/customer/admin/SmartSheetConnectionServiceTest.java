@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -14,6 +16,8 @@ import com.privateflow.modules.tablewrite.client.WecomSmartSheetFieldCatalog;
 import com.privateflow.modules.tablewrite.config.AuxiliarySmartSheetTargets;
 import com.privateflow.modules.tablewrite.config.WecomSmartSheetConfig;
 import java.time.Duration;
+import java.util.Map;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 
 class SmartSheetConnectionServiceTest {
@@ -87,6 +91,36 @@ class SmartSheetConnectionServiceTest {
         "https://doc.weixin.qq.com/smartsheet/s3_document?tab=sheet-1"));
 
     org.mockito.Mockito.verify(catalog).invalidate();
+  }
+
+  @Test
+  void savesDistinctBrowserUrlKeysForAssignmentAndArrivalTargets() throws Exception {
+    WecomSmartSheetApiClient client = mock(WecomSmartSheetApiClient.class);
+    ConfigAdminService configs = mock(ConfigAdminService.class);
+    WecomSmartSheetConfig smartSheetConfig = new WecomSmartSheetConfig(
+        "https://qyapi.weixin.qq.com", "corp", "secret", "primary-doc", "", "", "", "");
+    SmartSheetConnectionService service = new SmartSheetConnectionService(
+        smartSheetConfig, new AuxiliarySmartSheetTargets(), client, configs);
+    when(client.postWithApplicationCredentials(eq("get_sheet"), any(), any(Duration.class)))
+        .thenReturn(json("{\"sheet_list\":[{\"sheet_id\":\"sheet-1\",\"title\":\"target\"}]}"));
+    when(client.postWithApplicationCredentials(eq("get_views"), any(), any(Duration.class)))
+        .thenReturn(json("{\"views\":[{\"view_id\":\"view-1\"}]}"));
+    when(client.postWithApplicationCredentials(eq("get_fields"), any(), any(Duration.class)))
+        .thenReturn(json("{\"fields\":[{\"field_id\":\"f-1\",\"field_title\":\"手机号\"}]}"));
+
+    service.verifyAndSave(new SmartSheetConnectionRequest(
+        "https://doc.weixin.qq.com/smartsheet/s3_assignment?tab=sheet-1",
+        "ASSIGNMENT", "assignment-doc", "sheet-1", "view-1", "手机号"));
+    service.verifyAndSave(new SmartSheetConnectionRequest(
+        "https://doc.weixin.qq.com/smartsheet/s3_arrival?tab=sheet-1",
+        "ARRIVAL", "arrival-doc", "sheet-1", "view-1", "手机号"));
+
+    ArgumentCaptor<Map<String, String>> captor = ArgumentCaptor.forClass(Map.class);
+    verify(configs, times(2)).updateAll(captor.capture());
+    assertThat(captor.getAllValues().get(0))
+        .containsEntry("table.assignment_document_url", "https://doc.weixin.qq.com/smartsheet/s3_assignment?tab=sheet-1");
+    assertThat(captor.getAllValues().get(1))
+        .containsEntry("table.arrival_document_url", "https://doc.weixin.qq.com/smartsheet/s3_arrival?tab=sheet-1");
   }
 
   private JsonNode json(String value) throws Exception {

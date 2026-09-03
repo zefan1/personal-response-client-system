@@ -18,6 +18,7 @@ public class ProfileAnalysisPromptBuilder {
       intendedProject 的判断优先使用明确的当前聊天意向，允许替换已有意向；不得把 lochiaPeriod（恶露状态）当成否定产康意向的理由，恶露状态只用于后续服务安排。
       只能返回 target_fields 中的非标签档案字段；标签判断必须使用 candidateCategories 中当前提供的分类和标签编码。
       UPDATE 表示证据充分且满足分类策略；信息不足返回 UNABLE_TO_DETERMINE；当前值仍正确返回 KEEP_CURRENT。
+      先比较 profile_analysis_context.effectiveMessageCount 与每个候选分类的 minEvidenceMessages；消息数不足时禁止 UPDATE，必须返回 UNABLE_TO_DETERMINE、空 tag_codes 和 NONE。不要把“待判断”标签当成消息不足时的替代答案。
       多选 ADD_ONLY 只能返回尚未存在的新增标签并使用 ADD；单选 REPLACE 使用 REPLACE；不修改时使用 NONE。
       """;
   private static final String PROFILE_ANALYSIS_OUTPUT_CONTRACT = """

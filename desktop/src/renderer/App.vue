@@ -243,7 +243,7 @@ import { getJson, postJson } from './shared/apiClient';
 import { captureScreenshot, getAlwaysOnTop, openAdminConsole, toggleAlwaysOnTop } from './shared/desktopBridge';
 import { clearDesktopNotice, desktopNoticeState, setDesktopNotice } from './shared/desktopNoticeStore';
 import { desktopStatusState, loadDesktopStatus, resetDesktopStatus } from './shared/desktopStatusStore';
-import { loadDesktopConfig, saveDesktopConfig } from './shared/config';
+import { loadDesktopConfig, resolveApiUrl, saveDesktopConfig } from './shared/config';
 import { eventBus } from './shared/eventBus';
 import { connectWsMessageBus, disconnectWsMessageBus } from './shared/wsMessageBus';
 import { cleanupStageSuggestionHandler, initializeStageSuggestionHandler } from './modules/stage-suggestion/stageSuggestionHandler';
@@ -348,7 +348,7 @@ const session = reactive({
 });
 const desktopDownloadUrl = computed(() => {
   const apiBaseUrl = loginForm.apiBaseUrl.trim().replace(/\/$/, '');
-  return apiBaseUrl ? `${apiBaseUrl}/api/v1/desktop/download?platform=WINDOWS` : '';
+  return apiBaseUrl ? resolveApiUrl(apiBaseUrl, '/api/v1/desktop/download?platform=WINDOWS') : '';
 });
 const activeDesktopNav = computed(() => desktopNavItems.find((item) => item.key === activeDesktopPanel.value) ?? desktopNavItems[0]);
 const replyTaskItems = computed(() => buildReplyTaskItems(

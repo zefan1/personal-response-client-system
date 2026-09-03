@@ -2726,6 +2726,7 @@
           <strong>当前只支持这项后台业务测试</strong>
           <p>识图目前只能测试连接；回复生成、跟进建议、异常识别和总结补位需要到工作台验收。</p>
         </div>
+        <p v-if="llmProfileTestError" class="admin-message error">{{ llmProfileTestError }}</p>
         <div v-if="llmProfileTestEnvironment && llmProfileTestResults[String(llmProfileTestEnvironment.id)]" class="ops-profile-test-result ops-detail-box">
           <strong>测试结果</strong>
           <p>{{ summarizeSkillTest(llmProfileTestResults[String(llmProfileTestEnvironment.id)]) }}</p>
@@ -2740,7 +2741,7 @@
         </div>
         <footer>
           <button class="secondary" type="button" @click="closeLlmProfileTest">关闭</button>
-          <button class="primary" type="submit" :disabled="loading || !llmProfileTestMessage.trim()">开始测试</button>
+          <button class="primary" type="submit" :disabled="loading || !llmProfileTestMessage.trim()">{{ loading ? '正在测试…' : '开始测试' }}</button>
         </footer>
       </form>
     </div>
@@ -3483,6 +3484,7 @@ const selectedSkillTestBindingId = ref('');
 const llmProfileTestLeadType = ref('PENDING');
 const llmProfileTestMessage = ref('客户明确说想了解适合自己的改善方案');
 const llmProfileTestModalOpen = ref(false);
+const llmProfileTestError = ref('');
 const activeLlmCapability = ref<LlmCapabilityKey | null>(null);
 const advancedConfigurationExpanded = ref(false);
 const activeAdvancedConfiguration = ref<AdvancedConfigurationKey | null>(null);
@@ -6906,12 +6908,14 @@ function openLlmProfileTest(env: AnyRecord) {
   llmProfileTestEnvironment.value = env;
   llmProfileTestModalOpen.value = true;
   llmProfileTestMessage.value = '';
+  llmProfileTestError.value = '';
   llmProfileTestLeadType.value = LLM_PROFILE_LEAD_TYPE_OPTIONS[0]?.value ?? 'PENDING';
 }
 
 function closeLlmProfileTest() {
   llmProfileTestModalOpen.value = false;
   llmProfileTestEnvironment.value = null;
+  llmProfileTestError.value = '';
 }
 
 async function submitLlmProfileTest() {
@@ -6931,6 +6935,7 @@ async function submitLlmProfileTest() {
 }
 
 async function testLlmEnvironment(env: AnyRecord) {
+  llmProfileTestError.value = '';
   await runWithNotice(async () => {
     const response = recordFromResponse(await postJson<unknown>(`/admin/api/v1/llm-environments/${env.id}/test`, {
       scene: 'PROFILE_EXTRACTION',
@@ -6950,6 +6955,9 @@ async function testLlmEnvironment(env: AnyRecord) {
     };
     await loadSkillAi();
   }, 'LLM 档案分析测试完成');
+  if (noticeKind.value === 'error') {
+    llmProfileTestError.value = notice.value;
+  }
 }
 
 async function selectDatasource(item: AnyRecord) {

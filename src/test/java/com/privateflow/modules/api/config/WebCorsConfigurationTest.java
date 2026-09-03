@@ -24,6 +24,20 @@ class WebCorsConfigurationTest {
     assertThat(mappings.get("/api/v1/**").checkOrigin("https://untrusted.example")).isNull();
   }
 
+  @Test
+  void allowsTheConfiguredProductionOrigin() {
+    ExposedCorsRegistry registry = new ExposedCorsRegistry();
+    new WebCorsConfiguration(new CorsOriginPolicy("http://39.108.221.95:18080"))
+        .addCorsMappings(registry);
+
+    assertThat(mappings(registry).get("/admin/api/v1/**").checkOrigin("http://39.108.221.95:18080"))
+        .isEqualTo("http://39.108.221.95:18080");
+  }
+
+  private Map<String, CorsConfiguration> mappings(ExposedCorsRegistry registry) {
+    return registry.configurations();
+  }
+
   private static final class ExposedCorsRegistry extends CorsRegistry {
     Map<String, CorsConfiguration> configurations() {
       return getCorsConfigurations();
