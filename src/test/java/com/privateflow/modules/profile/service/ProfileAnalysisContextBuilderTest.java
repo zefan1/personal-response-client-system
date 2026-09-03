@@ -90,6 +90,35 @@ class ProfileAnalysisContextBuilderTest {
   }
 
   @Test
+  void preservesCustomerAndEmployeeRolesForStructuredOnlineTestMessages() {
+    TagCategory dynamic = category(
+        1L,
+        "custom_goal",
+        "Custom goal",
+        TagSelectionMode.MULTI,
+        TagAutoUpdateMode.ADD_ONLY,
+        List.of(value(11L, 1L, "custom_goal", "GOAL_A", "Goal A")));
+    TagDirectoryService directoryService = mock(TagDirectoryService.class);
+    when(directoryService.getSnapshot()).thenReturn(TagDirectorySnapshot.from(
+        List.of(dynamic),
+        Instant.parse("2026-07-15T04:00:00Z")));
+    ProfileAnalysisContextBuilder builder = new ProfileAnalysisContextBuilder(
+        new TagCandidateBuilder(directoryService),
+        directoryService,
+        mock(CustomerTagFoundationRepository.class));
+
+    ProfileAnalysisContext context = builder.buildForOnlineTest(
+        "TUAN_GOU",
+        List.of(
+            new CustomerMessageSentEvent.ChatMessage("client", "我想先试用一盒", null),
+            new CustomerMessageSentEvent.ChatMessage("keeper", "可以先安排试用装", null)));
+
+    assertThat(context.effectiveMessageCount()).isEqualTo(1);
+    assertThat(context.recentMessages()).extracting(ProfileAnalysisContext.ConversationMessage::role)
+        .containsExactly("client", "keeper");
+  }
+
+  @Test
   void buildsSanitizedDynamicContextAndExcludesLockedCategoriesFromCandidates() {
     TagCategory dynamic = category(
         1L,

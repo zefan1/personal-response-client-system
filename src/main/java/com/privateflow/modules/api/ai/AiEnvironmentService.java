@@ -19,6 +19,7 @@ import com.privateflow.modules.llm.LlmScene;
 import com.privateflow.modules.llm.LlmService;
 import com.privateflow.modules.profile.config.ProfileConfigProvider;
 import com.privateflow.modules.profile.service.ProfileAnalysisContextBuilder;
+import com.privateflow.common.events.CustomerMessageSentEvent;
 import com.privateflow.modules.skill.ProfileAnalysisContext;
 import com.privateflow.modules.skill.ProfileExtractRequest;
 import java.awt.Color;
@@ -213,22 +214,17 @@ public class AiEnvironmentService {
     if (request.scene() != LlmScene.PROFILE_EXTRACTION) {
       throw new ApiException(ApiErrorCodes.BAD_REQUEST, "当前只支持 PROFILE_EXTRACTION 在线测试");
     }
-    if (request.testMessage() == null
-        || request.testMessage().isBlank()
-        || request.testMessage().length() > 2000) {
-      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "testMessage 必填且不能超过 2000 字符");
-    }
+    List<CustomerMessageSentEvent.ChatMessage> messages = onlineTestMessages(request);
     AiEnvironment environment = repository.find(AiEnvironmentType.LLM, id)
         .orElseThrow(() -> new ApiException(ApiErrorCodes.BAD_REQUEST, "environment not found"));
     if (profileContextBuilder == null || profileConfigProvider == null || profileExtractionService == null) {
       throw new ApiException(ApiErrorCodes.CONFIG_INVALID, "LLM 档案分析测试组件未配置");
     }
     String leadType = request.leadType() == null ? "" : request.leadType().trim();
-    ProfileAnalysisContext context = profileContextBuilder.buildForOnlineTest(
-        leadType,
-        request.testMessage().trim());
+    ProfileAnalysisContext context = profileContextBuilder.buildForOnlineTest(leadType, messages);
     ProfileExtractRequest profileRequest = new ProfileExtractRequest(
-        request.testMessage().trim(),
+        messages.stream().map(CustomerMessageSentEvent.ChatMessage::text).reduce("", (left, right) ->
+            left.isBlank() ? right : left + "\n" + right),
         context.customerProfile(),
         profileConfigProvider.get().extractFields(),
         adminTestCaller(),
@@ -236,7 +232,6 @@ public class AiEnvironmentService {
     LlmProfileExtractionTestResult result = profileExtractionService.test(
         profileRequest,
         llmConfig(environment, id));
-    repository.markLlmTest(id, result.success());
     if (!result.success()) {
       return new ImageEnvironmentTestResponse(
           false,
@@ -297,6 +292,45 @@ public class AiEnvironmentService {
     if (type == AiEnvironmentType.SKILL) {
       validateSkill(request);
     }
+  }
+
+  private List<CustomerMessageSentEvent.ChatMessage> onlineTestMessages(LlmEnvironmentTestRequest request) {
+    List<CustomerMessageSentEvent.ChatMessage> messages = request.messages() == null || request.messages().isEmpty()
+        ? legacyOnlineTestMessages(request.testMessage())
+        : request.messages().stream()
+            .filter(message -> message != null && message.content() != null && !message.content().isBlank())
+            .map(message -> new CustomerMessageSentEvent.ChatMessage(message.role(), message.content().trim(), null))
+            .toList();
+    if (messages.isEmpty() || messages.size() > 10) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "请填写 1 到 10 条脱敏测试聊天记录");
+    }
+    int totalChars = messages.stream().map(CustomerMessageSentEvent.ChatMessage::text).mapToInt(String::length).sum();
+    if (totalChars > 2000) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "测试聊天记录合计不能超过 2000 字符");
+    }
+    boolean hasInvalidRole = messages.stream().anyMatch(message -> !isOnlineTestRole(message.role()));
+    if (hasInvalidRole) {
+      throw new ApiException(ApiErrorCodes.BAD_REQUEST, "测试记录角色只能是客户或员工");
+    }
+    return messages;
+  }
+
+  private List<CustomerMessageSentEvent.ChatMessage> legacyOnlineTestMessages(String testMessage) {
+    if (testMessage == null) {
+      return List.of();
+    }
+    return java.util.Arrays.stream(testMessage.split("\\r?\\n+"))
+        .map(String::trim)
+        .filter(message -> !message.isBlank())
+        .map(message -> new CustomerMessageSentEvent.ChatMessage("client", message, null))
+        .toList();
+  }
+
+  private boolean isOnlineTestRole(String role) {
+    return "client".equalsIgnoreCase(role)
+        || "customer".equalsIgnoreCase(role)
+        || "keeper".equalsIgnoreCase(role)
+        || "staff".equalsIgnoreCase(role);
   }
 
   private void validateSkill(AiEnvironmentRequest request) {

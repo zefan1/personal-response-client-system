@@ -99,6 +99,12 @@ public class ProfileAnalysisContextBuilder {
         .filter(message -> !message.isBlank())
         .map(message -> new CustomerMessageSentEvent.ChatMessage("client", message, null))
         .toList();
+    return buildForOnlineTest(leadType, testMessages);
+  }
+
+  public ProfileAnalysisContext buildForOnlineTest(
+      String leadType,
+      List<CustomerMessageSentEvent.ChatMessage> testMessages) {
     List<ProfileAnalysisContext.ConversationMessage> normalizedMessages = normalizeMessages(testMessages);
     List<ProfileAnalysisContext.ConversationMessage> recentMessages = recentMessages(normalizedMessages);
     Map<String, Object> profile = leadType == null || leadType.isBlank()

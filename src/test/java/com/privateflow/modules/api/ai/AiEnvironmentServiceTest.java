@@ -2,7 +2,9 @@ package com.privateflow.modules.api.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -230,7 +232,7 @@ class AiEnvironmentServiceTest {
         List.of());
     when(repository.find(AiEnvironmentType.LLM, 12L)).thenReturn(Optional.of(llmEnvironment(12L, false)));
     when(repository.decryptApiKey(AiEnvironmentType.LLM, 12L)).thenReturn("llm-secret");
-    when(contextBuilder.buildForOnlineTest("TUAN_GOU", "客户真实原话")).thenReturn(context);
+    when(contextBuilder.buildForOnlineTest(org.mockito.ArgumentMatchers.eq("TUAN_GOU"), anyList())).thenReturn(context);
     when(profileConfigProvider.get()).thenReturn(new ProfileConfig(
         List.of("nickname", "bodyConcerns"),
         8000,
@@ -265,7 +267,10 @@ class AiEnvironmentServiceTest {
     ImageEnvironmentTestResponse response = service.testLlm(12L, new LlmEnvironmentTestRequest(
         LlmScene.PROFILE_EXTRACTION,
         "TUAN_GOU",
-        "客户真实原话"));
+        null,
+        List.of(
+            new LlmEnvironmentTestMessage("client", "客户真实原话"),
+            new LlmEnvironmentTestMessage("keeper", "员工补充说明"))));
 
     assertThat(response.success()).isTrue();
     assertThat(response.elapsedMs()).isEqualTo(135L);
@@ -278,9 +283,10 @@ class AiEnvironmentServiceTest {
     verify(profileExtractionService).test(requestCaptor.capture(), configCaptor.capture());
     assertThat(requestCaptor.getValue().analysisContext()).isSameAs(context);
     assertThat(requestCaptor.getValue().targetFields()).containsExactly("nickname", "bodyConcerns");
+    assertThat(requestCaptor.getValue().conversationText()).isEqualTo("客户真实原话\n员工补充说明");
     assertThat(configCaptor.getValue().apiBaseUrl()).isEqualTo("https://llm.example.com");
     assertThat(configCaptor.getValue().apiKey()).isEqualTo("llm-secret");
-    verify(repository).markLlmTest(12L, true);
+    verify(repository, never()).markLlmTest(12L, true);
   }
 
   private AiEnvironment environment(long id, String baseUrl) {

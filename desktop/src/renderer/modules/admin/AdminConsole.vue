@@ -292,13 +292,19 @@
               <strong>{{ environmentDisplayName(env, `LLM 环境 #${env.id}`) }}</strong>
               <span>{{ env.baseUrl }}</span>
               <small>{{ llmEnvironmentLabel(env) }}</small>
+              <p v-if="llmConnectionTestResults[String(env.id)]" class="ops-inline-test-result" :class="llmConnectionTestResults[String(env.id)].success === true ? 'ok-text' : 'warn-text'">
+                {{ llmConnectionTestSummary(llmConnectionTestResults[String(env.id)]) }}
+              </p>
             </div>
             <div class="ops-row-actions">
               <button class="secondary small" type="button" :disabled="isActiveEnvironment(env)" @click="confirmActivateEnvironment('llm', env)">
                 {{ isActiveEnvironment(env) ? '当前使用' : '启用' }}
               </button>
               <button class="secondary small" type="button" @click="openForm('llmEnv', env)">编辑</button>
-              <button class="secondary small" type="button" @click="openLlmProfileTest(env)">后台测试</button>
+              <button class="secondary small" type="button" :disabled="loading || llmConnectionTestingId === String(env.id)" @click="testLlmConnectivity(env)">
+                {{ llmConnectionTestingId === String(env.id) ? '连通性测试中…' : '测试连通性' }}
+              </button>
+              <button class="secondary small" type="button" @click="openLlmProfileTest(env)">档案提取测试</button>
               <button class="secondary small danger" type="button" :disabled="!canDeleteEnvironment('llm', env)" @click="confirmDeleteEnvironment('llm', env)">删除</button>
             </div>
           </div>
@@ -351,7 +357,7 @@
                 <strong>档案提取</strong>
                 <span>从对话中给出客户资料更新建议，结果仍需人工确认。</span>
               </div>
-              <span class="ops-capability-test-slot"><button class="secondary small ops-capability-test-action" type="button" :disabled="!defaultLlmEnvironment" @click="openDefaultLlmProfileTest">后台测试</button></span>
+              <span class="ops-capability-test-slot"><button class="secondary small ops-capability-test-action" type="button" :disabled="!defaultLlmEnvironment" @click="openDefaultLlmProfileTest">业务测试</button></span>
               <span class="ops-capability-status" :class="llmProfileDraft.enabled ? 'ok-text' : 'muted-text'">{{ llmProfileDraft.enabled ? '已启用' : '未启用' }}</span>
               <label class="ops-inline-switch">
                 <span>启用档案提取</span>
@@ -2702,7 +2708,7 @@
       <form class="ops-drawer ops-modal-form ops-profile-test-modal" @submit.prevent="submitLlmProfileTest">
         <header>
           <div>
-            <h2>档案提取后台测试</h2>
+            <h2>档案提取业务测试</h2>
             <p>当前模型：{{ llmProfileTestEnvironment?.envName || '未选择' }}</p>
           </div>
           <button class="icon-close-button" type="button" aria-label="关闭档案提取测试" title="关闭测试" @click="closeLlmProfileTest">
@@ -2717,14 +2723,25 @@
             </select>
           </label>
           <label>
-            <span class="ops-label-title">输入脱敏测试消息</span>
-            <textarea v-model="llmProfileTestMessage" rows="6" maxlength="2000" placeholder="例如：客户表示最近睡眠不好，想了解调理方案。"></textarea>
-            <small>不会写入客户档案、不会改标签、不会发消息；内容会发送到所选 LLM，请使用脱敏文本。</small>
+            <span class="ops-label-title">脱敏聊天记录</span>
+            <div class="ops-test-message-list">
+              <div v-for="(message, index) in llmProfileTestMessages" :key="message.id" class="ops-test-message-row">
+                <span>第 {{ index + 1 }} 条</span>
+                <select v-model="message.role" :aria-label="`第 ${index + 1} 条消息角色`">
+                  <option value="client">客户</option>
+                  <option value="keeper">员工</option>
+                </select>
+                <textarea v-model="message.content" rows="3" maxlength="400" :placeholder="message.role === 'client' ? '例如：这款产品现在多少钱？' : '例如：目前有试用装，可以先了解。'"></textarea>
+                <button class="secondary small" type="button" :disabled="llmProfileTestMessages.length <= 1" @click="removeLlmProfileTestMessage(index)">移除</button>
+              </div>
+              <button class="secondary small" type="button" :disabled="llmProfileTestMessages.length >= 10" @click="addLlmProfileTestMessage">添加一条聊天记录</button>
+            </div>
+            <small>每一条都会作为独立聊天记录发送。不会写入客户档案、不会改标签、不会发消息；请使用脱敏文本。</small>
           </label>
         </div>
         <div class="ops-detail-box warning">
-          <strong>当前只支持这项后台业务测试</strong>
-          <p>识图目前只能测试连接；回复生成、跟进建议、异常识别和总结补位需要到工作台验收。</p>
+          <strong>这是业务测试，不是连通性测试</strong>
+          <p>它验证模型能否按“档案提取”规则理解聊天记录并返回合格结果。模型是否能连接，请关闭此窗口后点击“测试连通性”。</p>
         </div>
         <p v-if="llmProfileTestError" class="admin-message error">{{ llmProfileTestError }}</p>
         <div v-if="llmProfileTestEnvironment && llmProfileTestResults[String(llmProfileTestEnvironment.id)]" class="ops-profile-test-result ops-detail-box">
@@ -2741,7 +2758,7 @@
         </div>
         <footer>
           <button class="secondary" type="button" @click="closeLlmProfileTest">关闭</button>
-          <button class="primary" type="submit" :disabled="loading || !llmProfileTestMessage.trim()">{{ loading ? '正在测试…' : '开始测试' }}</button>
+          <button class="primary" type="submit" :disabled="loading || !hasLlmProfileTestMessage">{{ loading ? '正在测试…' : '开始业务测试' }}</button>
         </footer>
       </form>
     </div>
@@ -3482,9 +3499,10 @@ const skillAnalyticsDays = ref(7);
 const skillTestMessage = ref('请基于当前客户状态生成一条跟进回复');
 const selectedSkillTestBindingId = ref('');
 const llmProfileTestLeadType = ref('PENDING');
-const llmProfileTestMessage = ref('客户明确说想了解适合自己的改善方案');
+const llmProfileTestMessages = ref<Array<{ id: number; role: 'client' | 'keeper'; content: string }>>([]);
 const llmProfileTestModalOpen = ref(false);
 const llmProfileTestError = ref('');
+const llmConnectionTestingId = ref<string | null>(null);
 const activeLlmCapability = ref<LlmCapabilityKey | null>(null);
 const advancedConfigurationExpanded = ref(false);
 const activeAdvancedConfiguration = ref<AdvancedConfigurationKey | null>(null);
@@ -3595,6 +3613,7 @@ const skillEnvironments = ref<AnyRecord[]>([]);
 const imageEnvironments = ref<AnyRecord[]>([]);
 const llmEnvironments = ref<AnyRecord[]>([]);
 const llmProfileTestResults = reactive<Record<string, AnyRecord>>({});
+const llmConnectionTestResults = reactive<Record<string, AnyRecord>>({});
 const llmRoutes = ref<AnyRecord[]>([]);
 const llmRouteScenes = ref<string[]>([]);
 const llmAnalytics = ref<AnyRecord | null>(null);
@@ -6907,9 +6926,13 @@ function openDefaultLlmProfileTest() {
 function openLlmProfileTest(env: AnyRecord) {
   llmProfileTestEnvironment.value = env;
   llmProfileTestModalOpen.value = true;
-  llmProfileTestMessage.value = '';
+  llmProfileTestMessages.value = [
+    { id: Date.now(), role: 'client', content: '' },
+    { id: Date.now() + 1, role: 'client', content: '' }
+  ];
   llmProfileTestError.value = '';
   llmProfileTestLeadType.value = LLM_PROFILE_LEAD_TYPE_OPTIONS[0]?.value ?? 'PENDING';
+  delete llmProfileTestResults[String(env.id)];
 }
 
 function closeLlmProfileTest() {
@@ -6920,31 +6943,70 @@ function closeLlmProfileTest() {
 
 async function submitLlmProfileTest() {
   const environment = llmProfileTestEnvironment.value;
-  const message = llmProfileTestMessage.value.trim();
-  if (!environment || !message) {
-    noticeKind.value = 'error';
-    notice.value = '请先输入一段脱敏测试消息。';
+  const messages = llmProfileTestMessages.value
+    .map((message) => ({ role: message.role, content: message.content.trim() }))
+    .filter((message) => message.content);
+  if (!environment || !messages.length) {
+    llmProfileTestError.value = '请至少填写一条脱敏聊天记录。';
     return;
   }
-  if (message.length > 2000) {
-    noticeKind.value = 'error';
-    notice.value = '测试消息最多 2000 字。';
+  if (messages.reduce((total, message) => total + message.content.length, 0) > 2000) {
+    llmProfileTestError.value = '测试聊天记录合计最多 2000 字。';
     return;
   }
-  await testLlmEnvironment(environment);
+  await testLlmEnvironment(environment, messages);
 }
 
-async function testLlmEnvironment(env: AnyRecord) {
+function addLlmProfileTestMessage() {
+  llmProfileTestMessages.value.push({ id: Date.now(), role: 'client', content: '' });
+}
+
+function removeLlmProfileTestMessage(index: number) {
+  llmProfileTestMessages.value.splice(index, 1);
+}
+
+const hasLlmProfileTestMessage = computed(() => llmProfileTestMessages.value.some((message) => message.content.trim()));
+
+async function testLlmConnectivity(env: AnyRecord) {
+  const key = String(env.id);
+  llmConnectionTestingId.value = key;
+  delete llmConnectionTestResults[key];
+  try {
+    const response = recordFromResponse(await postJson<unknown>(`/admin/api/v1/llm-environments/${env.id}/test`, undefined));
+    llmConnectionTestResults[key] = response.success === true
+      ? { ...response, success: true }
+      : {
+          ...response,
+          success: false,
+          errorMessage: [response.errorMessage, response.suggestion].filter(Boolean).join('；') || '模型未返回可用结果'
+        };
+    await loadSkillAi();
+  } catch (error) {
+    llmConnectionTestResults[key] = { success: false, errorMessage: humanizeError(error) };
+  } finally {
+    llmConnectionTestingId.value = null;
+  }
+}
+
+function llmConnectionTestSummary(result: AnyRecord) {
+  if (result.success === true) {
+    const model = result.result && typeof result.result === 'object' ? (result.result as AnyRecord).model : result.model;
+    return `连通性已通过${model ? ` · ${model}` : ''}${result.elapsedMs ? ` · ${result.elapsedMs}ms` : ''}`;
+  }
+  return `连通性未通过：${String(result.errorMessage || '请检查模型配置后重试')}`;
+}
+
+async function testLlmEnvironment(env: AnyRecord, messages: Array<{ role: string; content: string }>) {
   llmProfileTestError.value = '';
-  await runWithNotice(async () => {
+  try {
     const response = recordFromResponse(await postJson<unknown>(`/admin/api/v1/llm-environments/${env.id}/test`, {
       scene: 'PROFILE_EXTRACTION',
       leadType: llmProfileTestLeadType.value,
-      testMessage: llmProfileTestMessage.value.trim()
+      messages
     }));
     if (response.success !== true) {
-      const detail = [response.errorMessage, response.suggestion].filter(Boolean).join('；');
-      throw new Error(detail || 'LLM 档案分析测试失败');
+      llmProfileTestError.value = [response.errorMessage, response.suggestion].filter(Boolean).join('；') || '档案提取业务测试失败。';
+      return;
     }
     const result = response.result && typeof response.result === 'object' ? response.result as AnyRecord : {};
     llmProfileTestResults[String(env.id)] = {
@@ -6954,9 +7016,8 @@ async function testLlmEnvironment(env: AnyRecord) {
       success: response.success
     };
     await loadSkillAi();
-  }, 'LLM 档案分析测试完成');
-  if (noticeKind.value === 'error') {
-    llmProfileTestError.value = notice.value;
+  } catch (error) {
+    llmProfileTestError.value = humanizeError(error);
   }
 }
 

@@ -1080,8 +1080,22 @@ describe('AdminConsole product surface', () => {
   });
 
   it('groups image and LLM environments and keeps profile testing in an on-demand modal', async () => {
-    apiMocks.postJson.mockImplementation(async (path: string) => path === '/admin/api/v1/llm-environments/5/test'
-      ? {
+    apiMocks.postJson.mockImplementation(async (path: string, body?: unknown) => path === '/admin/api/v1/llm-environments/5/test'
+      ? body === undefined
+        ? {
+            success: true,
+            data: {
+              success: true,
+              elapsedMs: 88,
+              result: { model: 'qwen-plus', protocol: 'OPENAI_COMPATIBLE', content: 'OK' },
+              errorCode: null,
+              errorMessage: null,
+              suggestion: null
+            },
+            errorCode: null,
+            message: null
+          }
+        : {
           success: true,
           data: {
             success: true,
@@ -1103,29 +1117,38 @@ describe('AdminConsole product surface', () => {
     expect([...host.querySelectorAll('button')].some((button) => button.textContent?.includes('管理不同 Skill'))).toBe(false);
     const llmPanel = host.querySelector('.llm-environment-panel') as HTMLElement;
     expect(llmPanel).toBeTruthy();
-    expect(llmPanel.textContent).toContain('后台测试');
+    expect(llmPanel.textContent).toContain('测试连通性');
+    expect(llmPanel.textContent).toContain('档案提取测试');
     expect(llmPanel.querySelector('textarea')).toBeFalsy();
 
     const backupCard = [...llmPanel.querySelectorAll('.ops-env-card')]
       .find((card) => card.textContent?.includes('LLM 备用')) as HTMLElement;
-    findButton(backupCard, '后台测试').click();
+    findButton(backupCard, '测试连通性').click();
+    await flushSave();
+    expect(backupCard.textContent).toContain('连通性已通过 · qwen-plus · 88ms');
+
+    findButton(backupCard, '档案提取测试').click();
     await flushUi();
 
     const modal = host.querySelector('.ops-profile-test-modal') as HTMLElement;
     expect(modal).toBeTruthy();
     expect(modal.textContent).toContain('不会写入客户档案');
     const leadTypeSelect = modal.querySelector('select') as HTMLSelectElement;
-    const messageInput = modal.querySelector('textarea') as HTMLTextAreaElement;
+    const messageInputs = [...modal.querySelectorAll('textarea')] as HTMLTextAreaElement[];
     setInputValue(leadTypeSelect, 'TUAN_GOU');
-    setInputValue(messageInput, '客户明确说想改善核心力量');
+    setInputValue(messageInputs[0], '客户明确说想改善核心力量');
+    setInputValue(messageInputs[1], '客户想先了解试用方案');
     await flushUi();
-    findButton(modal, '开始测试').click();
+    findButton(modal, '开始业务测试').click();
     await flushSave();
 
     expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/llm-environments/5/test', {
       scene: 'PROFILE_EXTRACTION',
       leadType: 'TUAN_GOU',
-      testMessage: '客户明确说想改善核心力量'
+      messages: [
+        { role: 'client', content: '客户明确说想改善核心力量' },
+        { role: 'client', content: '客户想先了解试用方案' }
+      ]
     });
     expect(modal.textContent).toContain('测试结果');
     app.unmount();
@@ -1572,22 +1595,31 @@ describe('AdminConsole product surface', () => {
     await flushSave();
     expect(apiMocks.putJson).toHaveBeenCalledWith('/admin/api/v1/llm-environments/5/activate', {});
 
-    findButton(backupCard, '后台测试').click();
+    findButton(backupCard, '测试连通性').click();
+    await flushSave();
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/llm-environments/5/test', undefined);
+    expect(backupCard.textContent).toContain('连通性已通过 · qwen-plus · 135ms');
+
+    findButton(backupCard, '档案提取测试').click();
     await flushUi();
     const profileModal = host.querySelector('.ops-profile-test-modal') as HTMLElement;
     const leadTypeSelect = profileModal.querySelector('select') as HTMLSelectElement;
-    const profileMessage = profileModal.querySelector('textarea') as HTMLTextAreaElement;
+    const profileMessages = [...profileModal.querySelectorAll('textarea')] as HTMLTextAreaElement[];
     expect(leadTypeSelect).toBeTruthy();
-    expect(profileMessage).toBeTruthy();
+    expect(profileMessages).toHaveLength(2);
     setInputValue(leadTypeSelect, 'TUAN_GOU');
-    setInputValue(profileMessage, '客户明确说想改善核心力量');
+    setInputValue(profileMessages[0], '客户明确说想改善核心力量');
+    setInputValue(profileMessages[1], '客户想先了解试用方案');
     await flushUi();
-    findButton(profileModal, '开始测试').click();
+    findButton(profileModal, '开始业务测试').click();
     await flushSave();
     expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/llm-environments/5/test', {
       scene: 'PROFILE_EXTRACTION',
       leadType: 'TUAN_GOU',
-      testMessage: '客户明确说想改善核心力量'
+      messages: [
+        { role: 'client', content: '客户明确说想改善核心力量' },
+        { role: 'client', content: '客户想先了解试用方案' }
+      ]
     });
     expect(llmPanel.textContent).toContain('档案字段 nickname：Alice（HIGH）');
     expect(llmPanel.textContent).toContain('custom_goal：更新 · 新增 · GOAL_B · 95%');
@@ -1620,15 +1652,20 @@ describe('AdminConsole product surface', () => {
     const backupCard = [...llmPanel.querySelectorAll('.ops-env-card')]
       .find((card) => card.textContent?.includes('LLM 备用')) as HTMLElement;
 
-    findButton(backupCard, '后台测试').click();
+    findButton(backupCard, '档案提取测试').click();
     await flushUi();
     const profileModal = host.querySelector('.ops-profile-test-modal') as HTMLElement;
     setInputValue(profileModal.querySelector('textarea') as HTMLTextAreaElement, '客户明确说想改善核心力量');
     await flushUi();
-    findButton(profileModal, '开始测试').click();
+    findButton(profileModal, '开始业务测试').click();
     await flushSave();
+    await flushUi();
 
-    expect(mainText(host)).toContain('模型返回缺少 tag_decisions');
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/llm-environments/5/test', {
+      scene: 'PROFILE_EXTRACTION',
+      leadType: 'TUAN_GOU',
+      messages: [{ role: 'client', content: '客户明确说想改善核心力量' }]
+    });
     expect(profileModal.textContent).toContain('模型返回缺少 tag_decisions');
     expect(llmPanel.textContent).not.toContain('未知模型');
 

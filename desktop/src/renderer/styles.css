@@ -4234,6 +4234,52 @@ details.profile-detail-module > .field-grid,
   margin-inline: 20px;
 }
 
+.ops-inline-test-result {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.ops-test-message-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ops-test-message-row {
+  display: grid;
+  grid-template-columns: auto minmax(96px, 130px) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.ops-test-message-row > span {
+  min-width: 52px;
+  padding-top: 9px;
+  color: #475467;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ops-test-message-row select,
+.ops-test-message-row textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.ops-test-message-row textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.ops-test-message-row > button {
+  align-self: center;
+}
+
 .ops-profile-test-result {
   border-color: #cfe0d3;
   background: #f6fbf7;
@@ -5878,6 +5924,24 @@ details.profile-detail-module > .field-grid,
 
   .ops-tag-detail-grid > div.span-2 {
     grid-column: auto;
+  }
+
+  .ops-test-message-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .ops-test-message-row > span,
+  .ops-test-message-row select,
+  .ops-test-message-row textarea {
+    grid-column: 1 / -1;
+  }
+
+  .ops-test-message-row > span {
+    padding-top: 0;
+  }
+
+  .ops-test-message-row > button {
+    grid-column: 2;
   }
 
   .configuration-center-layout .image-environment-panel,
