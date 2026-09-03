@@ -4234,6 +4234,23 @@ details.profile-detail-module > .field-grid,
   margin-inline: 20px;
 }
 
+.ops-profile-test-progress {
+  display: grid;
+  gap: 4px;
+  margin: 0 20px;
+  padding: 12px;
+  border: 1px solid #b7d4c1;
+  border-radius: 8px;
+  background: #f2fbf5;
+}
+
+.ops-profile-test-progress p,
+.ops-profile-test-progress small {
+  margin: 0;
+  color: #475467;
+  line-height: 1.5;
+}
+
 .ops-inline-test-result {
   margin: 2px 0 0;
   font-size: 13px;

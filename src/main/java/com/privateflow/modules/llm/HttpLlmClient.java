@@ -17,17 +17,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class HttpLlmClient implements LlmClient {
 
+  private static final long CONNECT_TIMEOUT_MIN_MS = 5_000;
+  private static final long CONNECT_TIMEOUT_MAX_MS = 8_000;
+
   private final LlmConfigProvider configProvider;
   private final ObjectMapper objectMapper;
-  private final HttpClient httpClient;
-
   public HttpLlmClient(LlmConfigProvider configProvider, ObjectMapper objectMapper) {
     this.configProvider = configProvider;
     this.objectMapper = objectMapper;
-    this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(3))
-        .version(HttpClient.Version.HTTP_1_1)
-        .build();
   }
 
   @Override
@@ -47,7 +44,7 @@ public class HttpLlmClient implements LlmClient {
           .header("Authorization", "Bearer " + config.apiKey())
           .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload(request, config)), StandardCharsets.UTF_8))
           .build();
-      HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+      HttpResponse<String> response = sendWithConnectionRetry(httpRequest, config);
       return handleResponse(response, config, elapsed(start));
     } catch (java.net.http.HttpTimeoutException ex) {
       return LlmResponse.failed(LlmErrorCodes.TIMEOUT, "LLM 请求超时", safeModel(config), safeProtocol(config), elapsed(start));
@@ -59,6 +56,24 @@ public class HttpLlmClient implements LlmClient {
       Thread.currentThread().interrupt();
       return LlmResponse.failed(LlmErrorCodes.UNREACHABLE, "LLM 请求被中断", safeModel(config), safeProtocol(config), elapsed(start));
     }
+  }
+
+  private HttpResponse<String> sendWithConnectionRetry(HttpRequest request, LlmConfig config)
+      throws IOException, InterruptedException {
+    try {
+      return httpClient(config).send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    } catch (java.net.http.HttpConnectTimeoutException | IOException firstFailure) {
+      return httpClient(config).send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    }
+  }
+
+  private HttpClient httpClient(LlmConfig config) {
+    long configuredTimeout = config == null ? CONNECT_TIMEOUT_MAX_MS : config.timeoutMs();
+    long connectTimeout = Math.max(CONNECT_TIMEOUT_MIN_MS, Math.min(configuredTimeout, CONNECT_TIMEOUT_MAX_MS));
+    return HttpClient.newBuilder()
+        .connectTimeout(Duration.ofMillis(connectTimeout))
+        .version(HttpClient.Version.HTTP_1_1)
+        .build();
   }
 
   private Map<String, Object> payload(LlmRequest request, LlmConfig config) {
@@ -98,6 +113,9 @@ public class HttpLlmClient implements LlmClient {
     }
     if (status == 429) {
       return LlmResponse.failed(LlmErrorCodes.RATE_LIMITED, "LLM 服务触发限流", config.model(), config.protocol(), elapsedMs);
+    }
+    if (status == 404) {
+      return LlmResponse.failed(LlmErrorCodes.UNREACHABLE, "LLM 服务地址不正确：该地址不是兼容 LLM 的服务地址，请检查是否误填了系统后台地址", config.model(), config.protocol(), elapsedMs);
     }
     if (status < 200 || status >= 300) {
       return LlmResponse.failed(LlmErrorCodes.UNREACHABLE, "LLM 服务请求失败：HTTP " + status, config.model(), config.protocol(), elapsedMs);

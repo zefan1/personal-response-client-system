@@ -1133,6 +1133,7 @@ describe('AdminConsole product surface', () => {
     const modal = host.querySelector('.ops-profile-test-modal') as HTMLElement;
     expect(modal).toBeTruthy();
     expect(modal.textContent).toContain('不会写入客户档案');
+    expect(modal.textContent).toContain('业务测试通过但没有更新是正常结果');
     const leadTypeSelect = modal.querySelector('select') as HTMLSelectElement;
     const messageInputs = [...modal.querySelectorAll('textarea')] as HTMLTextAreaElement[];
     setInputValue(leadTypeSelect, 'TUAN_GOU');
@@ -1330,6 +1331,60 @@ describe('AdminConsole product surface', () => {
     expect(promptEditor.textContent).toContain('每行一条，按回车换行，不使用分号');
     expect(promptEditor.textContent).toContain('已有默认内容时通常无需修改');
 
+    app.unmount();
+  });
+
+  it('shows a real waiting state and prevents duplicate profile test submissions', async () => {
+    let completeProfileTest: ((response: unknown) => void) | null = null;
+    apiMocks.postJson.mockImplementation((path: string, body?: unknown) => {
+      if (path === '/admin/api/v1/llm-environments/5/test' && body !== undefined) {
+        return new Promise((resolve) => {
+          completeProfileTest = resolve;
+        });
+      }
+      return Promise.resolve({ success: true, data: {}, errorCode: null, message: null });
+    });
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '配置中心').click();
+    await flushSave();
+    const llmPanel = host.querySelector('.llm-environment-panel') as HTMLElement;
+    const backupCard = [...llmPanel.querySelectorAll('.ops-env-card')]
+      .find((card) => card.textContent?.includes('LLM 备用')) as HTMLElement;
+    findButton(backupCard, '档案提取测试').click();
+    await flushUi();
+
+    const modal = host.querySelector('.ops-profile-test-modal') as HTMLElement;
+    const messageInput = modal.querySelector('textarea') as HTMLTextAreaElement;
+    setInputValue(messageInput, '客户明确说想改善核心力量');
+    await flushUi();
+    const submitButton = findButton(modal, '开始业务测试') as HTMLButtonElement;
+    submitButton.click();
+    await flushUi();
+
+    expect(modal.textContent).toContain('正在进行业务测试');
+    expect(modal.textContent).toContain('已提交 1 条聊天记录');
+    expect(modal.textContent).toContain('当前模型单次请求最长等待 15 秒');
+    expect(submitButton.disabled).toBe(true);
+    expect(messageInput.disabled).toBe(true);
+    expect(findButton(modal, '关闭')).toHaveProperty('disabled', true);
+    submitButton.click();
+    expect(apiMocks.postJson).toHaveBeenCalledTimes(1);
+
+    (completeProfileTest as ((response: unknown) => void) | null)?.({
+      success: true,
+      data: {
+        success: true,
+        elapsedMs: 118,
+        result: { scene: 'PROFILE_EXTRACTION', model: 'qwen-plus', profileAnalysis: { profileUpdates: { fields: {} }, tagDecisions: [] } }
+      },
+      errorCode: null,
+      message: null
+    });
+    await flushSave();
+
+    expect(modal.textContent).not.toContain('正在进行业务测试');
+    expect(submitButton.disabled).toBe(false);
     app.unmount();
   });
 

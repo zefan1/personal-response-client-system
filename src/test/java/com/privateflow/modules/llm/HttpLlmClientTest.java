@@ -54,6 +54,18 @@ class HttpLlmClientTest {
   }
 
   @Test
+  void explainsWhenTheConfiguredUrlIsNotAnLlmEndpoint() throws Exception {
+    server = startServer(404, "{}");
+    HttpLlmClient client = client(config(baseUrl(), "secret", "gpt-4.1-mini"));
+
+    LlmResponse response = client.generate(LlmRequest.singleTurn("system", "hello"));
+
+    assertThat(response.success()).isFalse();
+    assertThat(response.errorCode()).isEqualTo(LlmErrorCodes.UNREACHABLE);
+    assertThat(response.message()).contains("不是兼容 LLM 的服务地址");
+  }
+
+  @Test
   void returnsConfigMissingWhenRuntimeConfigIsIncomplete() {
     HttpLlmClient client = client(new LlmConfig("", "", "", "OPENAI_COMPATIBLE", 10000, 0.2, 1024));
 
