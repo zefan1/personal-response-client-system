@@ -2557,37 +2557,27 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
-  it.each([
-    ['LOCATION', 'https://map.example.com/shop', '地图/定位链接'],
-    ['MINI_PROGRAM', 'pages/booking/index', '小程序路径/链接']
-  ])('shows and saves %s entry links', async (contentType, entryLink, fieldLabel) => {
+  it('hides temporary quick-search content types from filters and creation', async () => {
     const { app, host } = await mountConsole();
 
     findSubnavButton(host, '速搜内容管理').click();
     await flushUi();
+
+    const filterSelect = host.querySelector('.ops-filter-bar select') as HTMLSelectElement;
+    expect([...filterSelect.options].map((option) => option.value)).toEqual(['', 'TEMPLATE', 'IMAGE']);
+    expect(filterSelect.textContent).not.toContain('知识片段');
+    expect(filterSelect.textContent).not.toContain('门店定位');
+    expect(filterSelect.textContent).not.toContain('小程序引导');
+
     findButton(host, '新增内容').click();
     await flushUi();
 
     const drawer = host.querySelector('.ops-modal-form') as HTMLElement;
     const selects = [...drawer.querySelectorAll('select')] as HTMLSelectElement[];
-    setInputValue(selects[0], contentType);
-    await flushUi();
-    expect(drawer.textContent).toContain(fieldLabel);
-    const textInputs = [...drawer.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
-    setInputValue(textInputs[0], '门店入口');
-    setInputValue(textInputs[1], 'entry01');
-    setInputValue(textInputs[2], entryLink);
-    setInputValue(drawer.querySelector('textarea') as HTMLTextAreaElement, '发送给客户的内容');
-    drawer.dispatchEvent(new Event('submit'));
-    await flushSave();
-
-    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/quick-search/items', expect.objectContaining({
-      contentType,
-      title: '门店入口',
-      shortcutCode: 'entry01',
-      content: '发送给客户的内容',
-      imageUrl: entryLink
-    }));
+    expect([...selects[0].options].map((option) => option.value)).toEqual(['TEMPLATE', 'IMAGE']);
+    expect(drawer.textContent).not.toContain('知识片段');
+    expect(drawer.textContent).not.toContain('门店定位');
+    expect(drawer.textContent).not.toContain('小程序引导');
 
     app.unmount();
   });

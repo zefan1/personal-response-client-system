@@ -1233,7 +1233,7 @@
           <div class="ops-panel-head">
             <div>
               <h2>速搜内容</h2>
-              <p>管理话术模板、知识片段、门店定位、图片素材和小程序引导。</p>
+              <p>管理话术模板和图片素材。</p>
             </div>
           </div>
           <section class="workbench-template-config" aria-label="工作台话术配置">
@@ -1329,11 +1329,7 @@
             <input v-model="quickSearchKeyword" placeholder="搜索标题、快线码或正文" @change="resetQuickSearchPageAndLoad" />
             <select v-model="quickSearchType" @change="resetQuickSearchPageAndLoad">
               <option value="">全部类型</option>
-              <option value="TEMPLATE">话术模板</option>
-              <option value="KNOWLEDGE">知识片段</option>
-              <option value="LOCATION">门店定位</option>
-              <option value="IMAGE">图片素材</option>
-              <option value="MINI_PROGRAM">小程序引导</option>
+              <option v-for="option in QUICK_SEARCH_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
             <select v-model="quickSearchEnabledFilter" @change="resetQuickSearchPageAndLoad">
               <option value="">全部状态</option>
@@ -3301,7 +3297,7 @@ const sections: AdminSection[] = [
   { key: 'configuration-center', groupKey: 'config-center', group: '运营 B', module: 'B', title: '配置中心', subtitle: 'AI、LLM、识图、提示词', description: '集中管理 Skill 环境、LLM 模型环境、识图模型环境、提示词模板、企业红线和降级回复。', primaryAction: '新增 Skill 环境' },
   { key: 'data-integration', groupKey: 'data-content', group: '运营 C', module: 'C', title: '客户数据对接', subtitle: '三张表、字段映射、同步', description: '先连通客户主表、分配表、到店表，再维护字段映射和同步状态。', primaryAction: '配置表格' },
   { key: 'single-source-of-truth', groupKey: 'data-content', group: '运营 C1', module: 'C1', title: '唯一事实数据库', subtitle: '字段、真实值、客户查找', description: '只读查看客户主档案的全部字段及当前真实值，按客户切换查看。', primaryAction: '查找客户' },
-  { key: 'quick-search-content', groupKey: 'data-content', group: '运营 D', module: 'D', title: '速搜内容管理', subtitle: '模板、知识、图片、小程序', description: '维护桌面端速搜可用的话术、知识片段、门店定位、图片素材和小程序引导。', primaryAction: '新增内容' },
+  { key: 'quick-search-content', groupKey: 'data-content', group: '运营 D', module: 'D', title: '速搜内容管理', subtitle: '模板、图片', description: '维护桌面端速搜可用的话术模板和图片素材。', primaryAction: '新增内容' },
   { key: 'template-promotion-candidates', groupKey: 'data-content', group: '运营 D1', module: 'D1', title: '可推广模板', subtitle: '员工候选、团队发布', description: '查阅员工保存的调整稿和使用情况，决定是否发布为全员可用模板。', primaryAction: '刷新候选' },
   { key: 'account-permissions', groupKey: 'org-rules-tags', group: '运营 E', module: 'E', title: '账号与权限', subtitle: '账号、角色、组长关系', description: '管理 ADMIN、LEADER、KEEPER 的账号权限和直属组长关系。', primaryAction: '新增账号' },
   { key: 'followup-rules', groupKey: 'org-rules-tags', group: '运营 F', module: 'F', title: '跟进规则引擎配置', subtitle: '条件、动作、启停', description: '配置跟进提醒、标签建议和通知组长的业务规则。', primaryAction: '新增规则' },
@@ -3515,6 +3511,11 @@ const QUICK_SEARCH_CONTENT_META: Record<string, { contentLabel: string; contentP
     help: '适合预约、领券、查看套餐等小程序入口。'
   }
 };
+
+const QUICK_SEARCH_TYPE_OPTIONS = [
+  { label: '话术模板', value: 'TEMPLATE' },
+  { label: '图片素材', value: 'IMAGE' }
+] as const;
 
 const allNavGroups: AdminNavGroup[] = [
   { key: 'config-center', title: '配置中心', subtitle: 'Skill、AI、识图、提示词', defaultKey: 'skill-scenes', pages: sections.filter((section) => section.groupKey === 'config-center') },
@@ -6342,7 +6343,7 @@ function formMeta(kind: FormKind | null): { title: string; description: string; 
   if (kind === 'quickSearch') {
     const meta = quickSearchContentMeta();
     return { title: '速搜内容', description: meta.help, fields: [
-    { key: 'contentType', label: '内容类型', type: 'select', options: [{ label: '话术模板', value: 'TEMPLATE' }, { label: '知识片段', value: 'KNOWLEDGE' }, { label: '门店定位', value: 'LOCATION' }, { label: '图片素材', value: 'IMAGE' }, { label: '小程序引导', value: 'MINI_PROGRAM' }] },
+    { key: 'contentType', label: '内容类型', type: 'select', options: QUICK_SEARCH_TYPE_OPTIONS.map((option) => ({ ...option })) },
     { key: 'leadType', label: '线索类型', type: 'select', options: commonOptions.leadType },
     { key: 'title', label: '标题', type: 'text', placeholder: '如：产后修复开场白' },
     { key: 'shortcutCode', label: '快线码', type: 'text', placeholder: '2-20 位字母或数字，如 hi01' },
