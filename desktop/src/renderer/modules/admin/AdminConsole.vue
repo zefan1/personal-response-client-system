@@ -3384,6 +3384,45 @@ const CUSTOMER_FIELD_LABELS: Record<string, string> = {
   appointmentStore: '预约门店'
 };
 
+const PROFILE_TAG_CATEGORY_LABELS: Record<string, string> = {
+  personality_type: '性格类型',
+  body_concerns: '身体关注',
+  worries: '客户顾虑',
+  intent_level: '意向等级'
+};
+
+const PROFILE_TAG_VALUE_LABELS: Record<string, Record<string, string>> = {
+  body_concerns: {
+    DIASTASIS_RECTI: '腹直肌分离',
+    PELVIC_FLOOR: '盆底问题',
+    URINE_LEAKAGE: '漏尿',
+    LUMBAGO: '腰痛',
+    PUBIC_PAIN: '耻骨疼痛',
+    STRETCH_MARKS: '妊娠纹',
+    BELLY_SAG: '腹部松弛',
+    WEIGHT_GAIN: '体重增加'
+  },
+  worries: {
+    FEAR_NO_EFFECT: '担心没有效果',
+    FEAR_EXPENSIVE: '担心价格高',
+    FEAR_PAIN: '担心疼痛',
+    FEAR_HARD_SELL: '担心强行推销',
+    COMPARING: '正在对比',
+    HUSBAND_DISAGREE: '丈夫不同意',
+    FAMILY_UNSUPPORT: '家人不支持',
+    NO_TIME: '没有时间',
+    TOO_FAR: '距离太远'
+  },
+  intent_level: {
+    HIGH: '高意向',
+    MEDIUM: '中意向',
+    LOW: '低意向',
+    PENDING: '待判断',
+    CLOSED: '已成交',
+    LOST: '已流失'
+  }
+};
+
 const TRANSLATED_VALUE_LABELS: Record<string, string> = {
   GENERAL: '全部客资',
   TUAN_GOU: '团购客资',
@@ -6771,6 +6810,7 @@ async function runSkillTest(item: AnyRecord) {
   selectedSkillTestBindingId.value = String(item.id ?? '');
   await runWithNotice(async () => {
     const response = recordFromResponse(await postJson<unknown>(`/admin/api/v1/skills/${item.id}/test`, { testMessage: skillTestMessage.value }));
+    void refreshTagCategoryOptionsCache();
     skillTestResults[String(item.id)] = { ...response, skillName: skillBindingName(item) };
   }, 'Skill 测试完成');
 }
@@ -7033,6 +7073,7 @@ async function testLlmEnvironment(env: AnyRecord, messages: Array<{ role: string
       return;
     }
     const result = response.result && typeof response.result === 'object' ? response.result as AnyRecord : {};
+    void refreshTagCategoryOptionsCache();
     llmProfileTestResults[String(env.id)] = {
       ...result,
       environmentName: env.envName || `#${env.id}`,
@@ -9316,14 +9357,30 @@ function profileTagDecisions(value: AnyRecord): AnyRecord[] {
 }
 
 function profileFieldLine(field: string, update: AnyRecord) {
-  return `档案字段 ${field}：${summarizeValue(update?.value)}（${String(update?.confidence ?? '-')}）`;
+  const confidence = TRANSLATED_VALUE_LABELS[String(update?.confidence ?? '')] ?? String(update?.confidence ?? '-');
+  return `档案字段 ${customerFieldLabel(field) === field ? '未命名档案字段' : customerFieldLabel(field)}：${summarizeValue(update?.value)}（置信度：${confidence}）`;
 }
 
 function profileDecisionLine(decision: AnyRecord) {
+  const categoryCode = String(decision?.categoryCode ?? '').trim();
   const tags = Array.isArray(decision?.tagCodes) && decision.tagCodes.length
-    ? decision.tagCodes.join('、')
+    ? decision.tagCodes.map(tagCode => profileTagValueLabel(categoryCode, tagCode)).join('、')
     : '无标签变更';
-  return `${decision?.categoryCode || '未知分类'}：${profileResultTypeLabel(decision?.resultType)} · ${profileActionLabel(decision?.requestedAction)} · ${tags} · ${percentLabel(Number(decision?.confidence ?? 0))}`;
+  return `${profileTagCategoryLabel(categoryCode)}：${profileResultTypeLabel(decision?.resultType)} · ${profileActionLabel(decision?.requestedAction)} · ${tags} · ${percentLabel(Number(decision?.confidence ?? 0))}`;
+}
+
+function profileTagCategoryLabel(categoryCode: string) {
+  const category = tagCategoryOptionsCache.value.find(item => String(item.categoryKey ?? '') === categoryCode);
+  return String(category?.categoryName ?? PROFILE_TAG_CATEGORY_LABELS[categoryCode] ?? '未命名标签分类');
+}
+
+function profileTagValueLabel(categoryCode: string, tagCode: unknown) {
+  const code = String(tagCode ?? '').trim();
+  const category = tagCategoryOptionsCache.value.find(item => String(item.categoryKey ?? '') === categoryCode);
+  const value = Array.isArray(category?.values)
+    ? category.values.find((item: AnyRecord) => String(item.tagValue ?? '') === code)
+    : null;
+  return String(value?.displayName ?? PROFILE_TAG_VALUE_LABELS[categoryCode]?.[code] ?? '未命名标签');
 }
 
 function profileResultTypeLabel(value: unknown) {

@@ -827,6 +827,19 @@ describe('AdminConsole product surface', () => {
               enabled: true
             }]
           }
+        : basePath === '/admin/api/v1/tags/categories'
+          ? {
+              items: [{
+                id: 91,
+                categoryKey: 'custom_goal',
+                categoryName: '自定义目标',
+                values: [{ id: 911, tagValue: 'GOAL_B', displayName: '目标 B' }]
+              }],
+              total: 1,
+              page: 1,
+              size: 100,
+              totalPages: 1
+            }
         : apiData[path] ?? apiData[basePath] ?? { items: [] };
       return { success: true, data, errorCode: null, message: null };
     });
@@ -868,10 +881,11 @@ describe('AdminConsole product surface', () => {
 
     findButton(row, '测试').click();
     await flushSave();
+    await flushUi();
 
     expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/skills/3/test', { testMessage: '客户明确表达目标' });
-    expect(host.textContent).toContain('档案字段 nickname：Alice（HIGH）');
-    expect(host.textContent).toContain('custom_goal：更新 · 新增 · GOAL_B · 95%');
+    expect(host.textContent).toContain('档案字段 客户昵称：Alice（置信度：高）');
+    expect(host.textContent).toContain('自定义目标：更新 · 新增 · 目标 B · 95%');
     expect(host.textContent).toContain('依据：客户明确表达目标');
 
     app.unmount();
@@ -1584,12 +1598,12 @@ describe('AdminConsole product surface', () => {
               profileAnalysis: {
                 profileUpdates: {
                   fields: {
-                    nickname: { value: 'Alice', confidence: 'HIGH' }
+                    postpartumMonths: { value: 3, confidence: 'HIGH' }
                   }
                 },
                 tagDecisions: [{
-                  categoryCode: 'custom_goal',
-                  tagCodes: ['GOAL_B'],
+                  categoryCode: 'body_concerns',
+                  tagCodes: ['LUMBAGO'],
                   confidence: 0.95,
                   evidence: '客户明确说想改善核心力量',
                   resultType: 'UPDATE',
@@ -1677,8 +1691,8 @@ describe('AdminConsole product surface', () => {
         { role: 'client', content: '客户想先了解试用方案' }
       ]
     });
-    expect(llmPanel.textContent).toContain('档案字段 nickname：Alice（HIGH）');
-    expect(llmPanel.textContent).toContain('custom_goal：更新 · 新增 · GOAL_B · 95%');
+    expect(llmPanel.textContent).toContain('档案字段 产后月份：3（置信度：高）');
+    expect(llmPanel.textContent).toContain('身体关注：更新 · 新增 · 腰痛 · 95%');
     expect(llmPanel.textContent).toContain('依据：客户明确说想改善核心力量');
 
     app.unmount();
