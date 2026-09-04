@@ -1235,9 +1235,8 @@
               <h2>速搜内容</h2>
               <p>管理话术模板、知识片段、门店定位、图片素材和小程序引导。</p>
             </div>
-            <button class="primary small" type="button" @click="openForm('quickSearch')">新增内容</button>
           </div>
-          <section class="workbench-template-config" aria-label="工作台自动复制话术设置">
+          <section class="workbench-template-config" aria-label="工作台话术配置">
             <button
               class="workbench-template-config-toggle"
               type="button"
@@ -1246,7 +1245,7 @@
               @click="workbenchTemplateConfigExpanded = !workbenchTemplateConfigExpanded"
             >
               <div>
-                <h3>工作台自动复制话术</h3>
+                <h3>工作台话术配置</h3>
                 <p>先在下方维护并启用速搜话术模板，再在这里指定工作台使用场景。</p>
               </div>
               <span class="workbench-template-config-chevron" aria-hidden="true"></span>
@@ -1342,10 +1341,13 @@
               <option value="0">停用</option>
             </select>
           </div>
-          <div class="ops-row-actions">
-            <button class="secondary small" type="button" :disabled="!quickSearchSelectedIds.length" @click="batchToggleQuickSearch(false)">批量停用</button>
-            <button class="secondary small" type="button" :disabled="!quickSearchSelectedIds.length" @click="batchToggleQuickSearch(true)">批量启用</button>
-            <button class="secondary small danger" type="button" :disabled="!quickSearchSelectedIds.length" @click="batchDeleteQuickSearch">批量删除</button>
+          <div class="ops-list-toolbar">
+            <div class="ops-row-actions">
+              <button class="secondary small" type="button" :disabled="!quickSearchSelectedIds.length" @click="batchToggleQuickSearch(false)">批量停用</button>
+              <button class="secondary small" type="button" :disabled="!quickSearchSelectedIds.length" @click="batchToggleQuickSearch(true)">批量启用</button>
+              <button class="secondary small danger" type="button" :disabled="!quickSearchSelectedIds.length" @click="batchDeleteQuickSearch">批量删除</button>
+            </div>
+            <button class="primary small" type="button" @click="openForm('quickSearch')">新增内容</button>
           </div>
           <div class="ops-card-grid ops-quick-search-list">
             <article v-for="item in quickSearchItems" :key="item.id" class="ops-content-card">
@@ -3672,7 +3674,7 @@ const appointmentTemplateSelection = ref('');
 const appointmentTemplateSavedSelection = ref('');
 const appointmentTemplateSaving = ref(false);
 const quickSearchVariableQuery = ref('');
-const workbenchTemplateConfigExpanded = ref(true);
+const workbenchTemplateConfigExpanded = ref(false);
 const datasources = ref<AnyRecord[]>([]);
 const syncStatuses = ref<AnyRecord[]>([]);
 const customerFields = ref<AnyRecord[]>([]);

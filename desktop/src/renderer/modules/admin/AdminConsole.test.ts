@@ -2479,6 +2479,30 @@ describe('AdminConsole product surface', () => {
     app.unmount();
   });
 
+  it('keeps workbench template settings collapsed and places quick-search creation on the list toolbar', async () => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '速搜内容管理').click();
+    await flushUi();
+
+    const templateToggle = host.querySelector('.workbench-template-config-toggle') as HTMLButtonElement;
+    expect(templateToggle.textContent).toContain('工作台话术配置');
+    expect(templateToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(host.querySelector('#workbench-template-config-content')).toBeTruthy();
+    expect((host.querySelector('#workbench-template-config-content') as HTMLElement).style.display).toBe('none');
+
+    templateToggle.click();
+    await flushUi();
+    expect(templateToggle.getAttribute('aria-expanded')).toBe('true');
+    expect((host.querySelector('#workbench-template-config-content') as HTMLElement).style.display).not.toBe('none');
+
+    const toolbar = host.querySelector('.ops-list-toolbar') as HTMLElement;
+    expect(toolbar.textContent).toContain('批量停用');
+    expect(findButton(toolbar, '新增内容')).toBeTruthy();
+
+    app.unmount();
+  });
+
   it('only offers image upload actions for image quick-search content', async () => {
     const { app, host } = await mountConsole();
 

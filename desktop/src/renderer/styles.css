@@ -4640,6 +4640,14 @@ details.profile-detail-module > .field-grid,
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.ops-list-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .ops-rule-filter-bar {
   grid-template-columns: minmax(180px, .5fr) repeat(2, minmax(0, 1fr));
 }
