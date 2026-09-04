@@ -8,7 +8,7 @@ $stage = Join-Path ([System.IO.Path]::GetTempPath()) ('pda-release-' + [guid]::N
 New-Item -ItemType Directory -Path $stage | Out-Null
 try {
   Push-Location $repo
-  $tracked = git ls-files
+  $tracked = git -c core.quotepath=false ls-files
   foreach ($relative in $tracked) {
     if ($relative -match '^(uploads/|target/|desktop/node_modules/|desktop/dist/|desktop/release/|.*\.log$|.*\.env$)') { continue }
     $source = Join-Path $repo $relative
