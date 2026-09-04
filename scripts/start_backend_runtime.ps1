@@ -80,7 +80,7 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw 'Backend startup request failed.'
   }
-  Write-Output 'Backend is starting: http://localhost:5175/#/admin'
+  Write-Output 'Backend is starting: http://127.0.0.1:5173/#/admin'
 } finally {
   foreach ($name in $allNames) {
     if ($null -eq $previous[$name]) {
