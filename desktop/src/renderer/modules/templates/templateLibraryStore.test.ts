@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { QuickSearchItem } from '../quick-search/types';
 
 const mocks = vi.hoisted(() => ({
   getJson: vi.fn(),
@@ -80,6 +81,33 @@ describe('templateLibraryStore', () => {
     expect(mocks.writeClipboardText).toHaveBeenCalledWith('Team body');
     expect(mocks.postJson).toHaveBeenCalledWith('/api/v1/templates/team/77/use', {});
     expect(mocks.postJson).not.toHaveBeenCalledWith('/api/v1/chat/send-confirm', expect.anything());
+  });
+
+  it.each([
+    ['LOCATION', 'https://surl.amap.com/shop'],
+    ['MINI_PROGRAM', 'pages/booking/index']
+  ] as const)('copies %s shortcut speech with its saved entry link', async (contentType, entryLink) => {
+    const store = await import('./templateLibraryStore');
+    mocks.writeClipboardText.mockResolvedValue({ success: true });
+    const item: QuickSearchItem = {
+      id: 22,
+      contentType,
+      scene: 'LOCATION',
+      leadType: 'GENERAL',
+      title: '西平定位',
+      shortcutCode: 'xp',
+      content: '这是西平店的地址，店门口就有大量停车位',
+      imageUrl: `  ${entryLink}  `,
+      sortOrder: 1,
+      isEnabled: true
+    };
+
+    await store.copyShortcutSpeech(item);
+
+    expect(mocks.writeClipboardText).toHaveBeenCalledWith(
+      `这是西平店的地址，店门口就有大量停车位\n${entryLink}`
+    );
+    expect(store.templateLibraryState.error).toBe('');
   });
 
   it('refreshes an open template library when an administrator changes quick-search content', async () => {

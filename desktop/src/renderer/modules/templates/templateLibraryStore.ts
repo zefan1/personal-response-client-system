@@ -161,7 +161,8 @@ export async function copyShortcutSpeech(item: QuickSearchItem): Promise<void> {
     return;
   }
   const context = templateLibraryState.customerContext;
-  await copyText(resolveQuickSearchTemplate(item.content, context?.customer ?? {}, context?.phone ?? ''));
+  const body = resolveQuickSearchTemplate(item.content, context?.customer ?? {}, context?.phone ?? '');
+  await copyText(withEntryLink(item, body));
 }
 
 export function resolveTemplateLibraryText(body: string): string {
@@ -178,6 +179,12 @@ async function copyText(body: string): Promise<boolean> {
   }
   templateLibraryState.toast = '已复制到剪贴板';
   return true;
+}
+
+function withEntryLink(item: QuickSearchItem, body: string): string {
+  if (item.contentType === 'IMAGE') return body;
+  const link = item.imageUrl?.trim();
+  return link ? `${body}\n${link}` : body;
 }
 
 async function recordUse(path: string, copyingId: string): Promise<void> {

@@ -160,7 +160,8 @@ export async function copyQuickSearchItem(item: QuickSearchItem): Promise<void> 
       context?.phone ?? ''
     );
     const link = item.imageUrl?.trim();
-    const result = await writeClipboardText(link ? `${sentText}\n${link}` : sentText);
+    const copiedText = link ? `${sentText}\n${link}` : sentText;
+    const result = await writeClipboardText(copiedText);
     if (!result.success) {
       setToast('复制失败，请重试');
       return;
@@ -170,7 +171,7 @@ export async function copyQuickSearchItem(item: QuickSearchItem): Promise<void> 
         itemId: item.id,
         title: item.title,
         scene: item.scene ?? item.shortcutCode ?? 'QUICK_SEARCH_TEMPLATE',
-        sentText
+      sentText: copiedText
       };
       setToast('已复制，请发送后确认');
       return;

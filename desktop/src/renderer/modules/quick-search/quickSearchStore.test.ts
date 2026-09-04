@@ -187,6 +187,37 @@ describe('quickSearchStore', () => {
     expect(store.quickSearchState.visible).toBe(true);
   });
 
+  it('keeps the saved entry link in a customer-bound pending record', async () => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+    store.showQuickSearch({
+      phone: '13800001111',
+      nickname: '王女士',
+      leadType: 'XIAN_SUO',
+      sourceTable: '私域客资管理表',
+      reminderType: 'DUE_TODAY',
+      returnToFollowups: true,
+      customer: { nickname: '王女士' }
+    });
+
+    await store.copyQuickSearchItem(item({
+      id: 11,
+      title: '西平定位',
+      contentType: 'LOCATION',
+      content: '这是西平店的地址，店门口就有大量停车位',
+      imageUrl: 'https://surl.amap.com/shop'
+    }));
+
+    expect(writeClipboardTextMock).toHaveBeenCalledWith(
+      '这是西平店的地址，店门口就有大量停车位\nhttps://surl.amap.com/shop'
+    );
+    expect(store.quickSearchState.pendingSend).toMatchObject({
+      itemId: 11,
+      title: '西平定位',
+      sentText: '这是西平店的地址，店门口就有大量停车位\nhttps://surl.amap.com/shop'
+    });
+  });
+
   it('copies templates with both Chinese and legacy English customer variables resolved', async () => {
     const store = await freshStore();
     store.showQuickSearch({

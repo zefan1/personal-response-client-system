@@ -43,7 +43,8 @@ async function mountOverlay(visible = true): Promise<Mounted> {
   }];
   store.templateLibraryState.shortcuts = [
     { id: 88, title: 'Shared text', content: 'Text body', contentType: 'TEMPLATE', shortcutCode: 'TX01', leadType: 'GENERAL', sortOrder: 1, isEnabled: true },
-    { id: 89, title: 'Shared image', content: 'Image body', contentType: 'IMAGE', imageUrl: 'https://example.com/image.png', shortcutCode: 'IM01', leadType: 'GENERAL', sortOrder: 2, isEnabled: true }
+    { id: 89, title: 'Shared image', content: 'Image body', contentType: 'IMAGE', imageUrl: 'https://example.com/image.png', shortcutCode: 'IM01', leadType: 'GENERAL', sortOrder: 2, isEnabled: true },
+    { id: 90, title: '西平定位', content: '这是西平店的地址', contentType: 'LOCATION', imageUrl: 'https://surl.amap.com/shop', shortcutCode: 'xp', leadType: 'GENERAL', sortOrder: 3, isEnabled: true }
   ];
   const host = document.createElement('div');
   document.body.append(host);
@@ -128,6 +129,19 @@ describe('TemplateLibraryOverlay', () => {
     openFromShortcut?.();
 
     expect(store.templateLibraryState.visible).toBe(true);
+    app.unmount();
+  });
+
+  it('shows a location entry as text and exposes its saved map link', async () => {
+    const { app, host } = await mountOverlay();
+    const locationArticle = [...host.querySelectorAll('.template-library-item')]
+      .find((article) => article.querySelector('h3')?.textContent === '西平定位');
+
+    expect(locationArticle).toBeTruthy();
+    expect(locationArticle?.querySelector('.template-library-image')).toBeNull();
+    expect(locationArticle?.querySelector('.template-library-entry-link')?.textContent).toContain(
+      'https://surl.amap.com/shop'
+    );
     app.unmount();
   });
 

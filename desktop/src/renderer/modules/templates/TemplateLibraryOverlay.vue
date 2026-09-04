@@ -51,8 +51,9 @@
             </div>
           </header>
           <p v-if="state.customerContext" class="template-library-context"><strong>将自动带入：</strong>{{ customerContextLabel }}</p>
-          <img v-if="entry.imageUrl" class="template-library-image" :src="entry.imageUrl" :alt="entry.title" />
+          <img v-if="entry.isImage && entry.imageUrl" class="template-library-image" :src="entry.imageUrl" :alt="entry.title" />
           <p class="template-library-body">{{ resolvedBody(entry) }}</p>
+          <p v-if="!entry.isImage && entry.imageUrl" class="template-library-entry-link">入口：{{ entry.imageUrl }}</p>
           <footer>
             <button :data-testid="`edit-${entry.source.toLowerCase()}-template-${entry.id}`" class="secondary small template-edit-button" type="button" @click="editCopy(entry)">编辑副本</button>
             <button :data-testid="`copy-${entry.source.toLowerCase()}-template-${entry.id}`" class="primary small reply-primary-copy" type="button" :disabled="isCopying(entry)" @click="copyEntry(entry)">
@@ -260,6 +261,7 @@ function customerIntent(customer?: Record<string, unknown>): string {
 .template-library-context { color: #607083; font-size: 12px; }
 .template-library-context strong { margin-right: 4px; color: #435267; }
 .template-library-body { color: #263445; line-height: 1.55; overflow-wrap: anywhere; }
+.template-library-entry-link { color: #607083; font-size: 12px; overflow-wrap: anywhere; }
 .template-library-image { width: min(220px, 100%); max-height: 140px; object-fit: cover; border: 1px solid #dfe6ed; border-radius: 4px; }
 .template-library-item footer { justify-content: flex-end; gap: 8px; }
 .template-edit-button { min-width: 72px; }
