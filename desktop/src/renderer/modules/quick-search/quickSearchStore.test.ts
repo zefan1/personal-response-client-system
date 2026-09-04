@@ -141,6 +141,25 @@ describe('quickSearchStore', () => {
     expect(store.quickSearchState.visible).toBe(true);
   });
 
+  it.each([
+    ['LOCATION', 'https://map.example.com/shop'],
+    ['MINI_PROGRAM', 'pages/booking/index']
+  ])('appends the saved entry link when copying %s items', async (contentType, entryLink) => {
+    const store = await freshStore();
+    writeClipboardTextMock.mockResolvedValue({ success: true });
+    store.quickSearchState.visible = true;
+
+    await store.copyQuickSearchItem(item({
+      id: 7,
+      contentType: contentType as QuickSearchItem['contentType'],
+      content: '打开入口',
+      imageUrl: `  ${entryLink}  `
+    }));
+
+    expect(writeClipboardTextMock).toHaveBeenCalledWith(`打开入口\n${entryLink}`);
+    expect(store.quickSearchState.toast).toContain('已复制');
+  });
+
   it('keeps a customer-bound copy pending until the operator confirms or declines sending', async () => {
     const store = await freshStore();
     writeClipboardTextMock.mockResolvedValue({ success: true });

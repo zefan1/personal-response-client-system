@@ -1359,6 +1359,9 @@
                 <strong>{{ item.title }}</strong>
                 <span>{{ contentTypeLabel(item.contentType) }} · {{ item.shortcutCode }}</span>
                 <p>{{ item.content || item.imageUrl || '无内容' }}</p>
+                <p v-if="(item.contentType === 'LOCATION' || item.contentType === 'MINI_PROGRAM') && item.imageUrl" class="ops-content-link">
+                  入口：{{ item.imageUrl }}
+                </p>
               </div>
               <div v-if="item.contentType === 'IMAGE' && item.imageUrl" class="ops-image-preview">
                 <img :src="item.imageUrl" alt="图片素材预览" />
@@ -1369,7 +1372,7 @@
                   上传图片
                   <input type="file" accept="image/*" @change="uploadQuickSearchImage($event, item)" />
                 </label>
-                <button v-if="item.imageUrl" class="secondary small" type="button" @click="clearQuickSearchImage(item)">清除图片</button>
+                <button v-if="item.contentType === 'IMAGE' && item.imageUrl" class="secondary small" type="button" @click="clearQuickSearchImage(item)">清除图片</button>
                 <button class="secondary small" type="button" @click="toggleQuickSearchItem(item)">{{ item.enabled === false ? '启用' : '停用' }}</button>
                 <button class="secondary small danger" type="button" @click="confirmDeleteQuickSearchItem(item)">删除</button>
               </div>
@@ -2920,8 +2923,13 @@
           </section>
           <template v-for="field in activeForm === 'rule' ? [] : activeFormFields" :key="field.key">
           <label
-            v-if="activeForm !== 'quickSearch' || field.key !== 'imageUrl' || formDraft.contentType === 'IMAGE'"
-            :class="{ 'ops-form-span-2': field.type === 'textarea', 'ops-boolean-field': field.type === 'checkbox', 'ops-quick-search-image-field': activeForm === 'quickSearch' && field.key === 'imageUrl' }"
+            v-if="activeForm !== 'quickSearch' || field.key !== 'imageUrl' || quickSearchSupportsLink(formDraft.contentType)"
+            :class="{
+              'ops-form-span-2': field.type === 'textarea',
+              'ops-boolean-field': field.type === 'checkbox',
+              'ops-quick-search-image-field': activeForm === 'quickSearch' && field.key === 'imageUrl' && formDraft.contentType === 'IMAGE',
+              'ops-quick-search-link-field': activeForm === 'quickSearch' && field.key === 'imageUrl' && formDraft.contentType !== 'IMAGE'
+            }"
           >
             <span class="ops-label-title">{{ field.label }}</span>
             <div v-if="activeForm === 'quickSearch' && field.key === 'content'" class="ops-variable-bar ops-template-variable-picker">
@@ -2943,7 +2951,7 @@
                 <span v-if="!filteredQuickSearchVariables.length" class="ops-template-variable-empty">没有匹配的唯一事实数据库字段</span>
               </div>
             </div>
-            <div v-if="activeForm === 'quickSearch' && field.key === 'imageUrl'" class="ops-quick-search-image-control">
+            <div v-if="activeForm === 'quickSearch' && field.key === 'imageUrl' && formDraft.contentType === 'IMAGE'" class="ops-quick-search-image-control">
               <div v-if="formDraft.imageUrl" class="ops-image-preview">
                 <img :src="String(formDraft.imageUrl)" alt="图文素材预览" />
               </div>
@@ -2954,7 +2962,7 @@
                 </label>
                 <button v-if="formDraft.imageUrl" class="secondary small" type="button" @click="formDraft.imageUrl = ''">移除图片</button>
               </div>
-              <small>仅图文素材需要图片，其他速搜内容直接填写文字即可。</small>
+              <small>仅图文素材上传图片；门店定位和小程序引导可直接填写入口链接或路径。</small>
             </div>
             <select v-else-if="field.type === 'select'" v-model="formDraft[field.key]" :disabled="field.disabled" @change="onFormFieldChange(field.key)">
               <option v-for="option in field.options ?? []" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
@@ -5956,11 +5964,17 @@ async function submitActiveForm() {
   }
 }
 
+const QUICK_SEARCH_LINK_TYPES = new Set(['IMAGE', 'LOCATION', 'MINI_PROGRAM']);
+
+function quickSearchSupportsLink(contentType: unknown) {
+  return QUICK_SEARCH_LINK_TYPES.has(String(contentType));
+}
+
 function onFormFieldChange(key: string) {
   if (key === 'role' && formDraft.role === 'ADMIN') {
     formDraft.tagManagementPermission = true;
   }
-  if (key === 'contentType' && formDraft.contentType !== 'IMAGE') {
+  if (key === 'contentType' && !quickSearchSupportsLink(formDraft.contentType)) {
     formDraft.imageUrl = '';
   }
 }

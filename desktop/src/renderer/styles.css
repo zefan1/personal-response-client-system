@@ -5618,6 +5618,13 @@ details.profile-detail-module > .field-grid,
   background: #fff8f0;
 }
 
+.ops-content-link {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: #7d6653;
+  font-size: 12px;
+}
+
 .ops-tag-list {
   display: flex;
   flex-wrap: wrap;

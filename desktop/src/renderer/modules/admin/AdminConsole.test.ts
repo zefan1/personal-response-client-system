@@ -2544,7 +2544,7 @@ describe('AdminConsole product surface', () => {
     setInputValue(contentType, 'IMAGE');
     await flushUi();
     expect(drawer.querySelector('.ops-quick-search-image-field input[type="file"]')).toBeTruthy();
-    expect(drawer.textContent).toContain('仅图文素材需要图片');
+    expect(drawer.textContent).toContain('仅图文素材上传图片');
     apiMocks.postForm.mockResolvedValueOnce({ success: true, data: { imageUrl: '/uploads/quick-search-demo.png' }, errorCode: null, message: null });
     const fileInput = drawer.querySelector('.ops-quick-search-image-field input[type="file"]') as HTMLInputElement;
     const file = new File(['image'], 'quick-search.png', { type: 'image/png' });
@@ -2553,6 +2553,41 @@ describe('AdminConsole product surface', () => {
     await flushUi();
     expect(apiMocks.postForm).toHaveBeenCalledWith('/admin/api/v1/upload/image', expect.any(FormData));
     expect(drawer.querySelector('.ops-quick-search-image-field img')?.getAttribute('src')).toBe('/uploads/quick-search-demo.png');
+
+    app.unmount();
+  });
+
+  it.each([
+    ['LOCATION', 'https://map.example.com/shop', '地图/定位链接'],
+    ['MINI_PROGRAM', 'pages/booking/index', '小程序路径/链接']
+  ])('shows and saves %s entry links', async (contentType, entryLink, fieldLabel) => {
+    const { app, host } = await mountConsole();
+
+    findSubnavButton(host, '速搜内容管理').click();
+    await flushUi();
+    findButton(host, '新增内容').click();
+    await flushUi();
+
+    const drawer = host.querySelector('.ops-modal-form') as HTMLElement;
+    const selects = [...drawer.querySelectorAll('select')] as HTMLSelectElement[];
+    setInputValue(selects[0], contentType);
+    await flushUi();
+    expect(drawer.textContent).toContain(fieldLabel);
+    const textInputs = [...drawer.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
+    setInputValue(textInputs[0], '门店入口');
+    setInputValue(textInputs[1], 'entry01');
+    setInputValue(textInputs[2], entryLink);
+    setInputValue(drawer.querySelector('textarea') as HTMLTextAreaElement, '发送给客户的内容');
+    drawer.dispatchEvent(new Event('submit'));
+    await flushSave();
+
+    expect(apiMocks.postJson).toHaveBeenCalledWith('/admin/api/v1/quick-search/items', expect.objectContaining({
+      contentType,
+      title: '门店入口',
+      shortcutCode: 'entry01',
+      content: '发送给客户的内容',
+      imageUrl: entryLink
+    }));
 
     app.unmount();
   });

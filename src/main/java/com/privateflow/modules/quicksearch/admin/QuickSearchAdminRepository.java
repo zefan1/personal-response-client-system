@@ -80,7 +80,7 @@ public class QuickSearchAdminRepository {
         request.title().trim(),
         request.shortcutCode().trim(),
         request.content().trim(),
-        imageUrl(request),
+        linkUrl(request),
         request.sortOrder() == null ? 0 : request.sortOrder(),
         Boolean.FALSE.equals(request.enabled()) ? 0 : 1,
         operator);
@@ -105,7 +105,7 @@ public class QuickSearchAdminRepository {
         blankToNull(request.title()),
         blankToNull(request.shortcutCode()),
         blankToNull(request.content()),
-        request.imageUrl(),
+        blankToNull(request.imageUrl()),
         request.sortOrder(),
         request.enabled() == null ? null : (request.enabled() ? 1 : 0),
         id);
@@ -150,8 +150,13 @@ public class QuickSearchAdminRepository {
     return leadType == null || leadType.isBlank() ? "GENERAL" : leadType.trim().toUpperCase();
   }
 
-  private String imageUrl(QuickSearchItemRequest request) {
-    return request.contentType() == ContentType.IMAGE ? request.imageUrl() : null;
+  private String linkUrl(QuickSearchItemRequest request) {
+    if (request.contentType() != ContentType.IMAGE
+        && request.contentType() != ContentType.LOCATION
+        && request.contentType() != ContentType.MINI_PROGRAM) {
+      return null;
+    }
+    return blankToNull(request.imageUrl());
   }
 
   private String blankToNull(String value) {

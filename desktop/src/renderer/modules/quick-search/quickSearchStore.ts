@@ -159,7 +159,8 @@ export async function copyQuickSearchItem(item: QuickSearchItem): Promise<void> 
       context?.customer ?? {},
       context?.phone ?? ''
     );
-    const result = await writeClipboardText(sentText);
+    const link = item.imageUrl?.trim();
+    const result = await writeClipboardText(link ? `${sentText}\n${link}` : sentText);
     if (!result.success) {
       setToast('复制失败，请重试');
       return;
