@@ -23,6 +23,10 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  servlet:
+    multipart:
+      max-file-size: ${APP_UPLOAD_MAX_FILE_SIZE:25MB}
+      max-request-size: ${APP_UPLOAD_MAX_REQUEST_SIZE:26MB}
   threads:
     virtual:
       enabled: false

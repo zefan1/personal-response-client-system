@@ -1,5 +1,8 @@
 <template>
   <section v-if="state.visible" class="template-library-overlay" @click.self="closeTemplateLibrary" @keydown.esc="closeTemplateLibrary">
+    <Transition name="template-toast">
+      <p v-if="state.toast" class="template-library-toast" role="status" aria-live="polite">{{ state.toast }}</p>
+    </Transition>
     <aside class="template-library-shell" aria-label="话术库">
       <header class="template-library-head">
         <div>
@@ -32,7 +35,6 @@
       </nav>
 
       <p v-if="state.error" class="template-library-notice error">{{ state.error }}</p>
-      <p v-else-if="state.toast" class="template-library-notice">{{ state.toast }}</p>
 
       <div v-if="state.loading" class="template-library-loading" aria-label="正在加载话术">
         <span></span><span></span><span></span>
@@ -51,7 +53,7 @@
             </div>
           </header>
           <p v-if="state.customerContext" class="template-library-context"><strong>将自动带入：</strong>{{ customerContextLabel }}</p>
-          <img v-if="entry.isImage && entry.imageUrl" class="template-library-image" :src="entry.imageUrl" :alt="entry.title" />
+          <img v-if="entry.isImage && entry.imageUrl" class="template-library-image" :src="resolveResourceUrl(entry.imageUrl)" :alt="entry.title" />
           <p class="template-library-body">{{ resolvedBody(entry) }}</p>
           <p v-if="!entry.isImage && entry.imageUrl" class="template-library-entry-link">入口：{{ entry.imageUrl }}</p>
           <footer>
@@ -70,6 +72,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { onQuickSearchHide, onQuickSearchShow } from '../../shared/desktopBridge';
+import { resolveResourceUrl } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
 import {
   closeTemplateLibrary,
@@ -246,6 +249,27 @@ function customerIntent(customer?: Record<string, unknown>): string {
 .template-library-filters button.active { border-color: #5487b6; color: #163b66; background: #eef6ff; font-weight: 700; }
 .template-library-notice { margin: 0 0 10px; color: #2e6b48; font-size: 13px; }
 .template-library-notice.error { color: #b42318; }
+.template-library-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 90;
+  width: min(360px, calc(100vw - 48px));
+  margin: 0;
+  border: 1px solid #b7dec5;
+  border-left: 4px solid #2e9b63;
+  border-radius: 6px;
+  padding: 9px 12px;
+  background: #f0faf3;
+  color: #176b3a;
+  font-size: 13px;
+  line-height: 1.35;
+  box-shadow: 0 10px 28px rgb(16 24 40 / 16%);
+}
+.template-toast-enter-active,
+.template-toast-leave-active { transition: opacity 0.16s ease, transform 0.16s ease; }
+.template-toast-enter-from,
+.template-toast-leave-to { opacity: 0; transform: translateY(8px); }
 .template-library-flow { display: grid; align-content: start; gap: 10px; min-height: 0; overflow-y: auto; padding: 2px 2px 16px; }
 .template-library-item { display: grid; gap: 10px; padding: 14px; border: 1px solid #dfe6ed; border-radius: 6px; background: #ffffff; }
 .template-library-item-head { align-items: flex-start; justify-content: space-between; gap: 10px; }

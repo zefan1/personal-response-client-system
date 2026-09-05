@@ -42,7 +42,7 @@
             :class="['quick-item', { selected: selectedItemId === item.id }]"
             @mouseenter="selectQuickSearchItem(item)"
           >
-            <img v-if="item.contentType === 'IMAGE' && item.imageUrl" class="quick-item-thumb" :src="item.imageUrl" :alt="item.title" />
+            <img v-if="item.contentType === 'IMAGE' && item.imageUrl" class="quick-item-thumb" :src="resolveResourceUrl(item.imageUrl)" :alt="item.title" />
             <div class="quick-item-copy">
               <strong>{{ item.title }}</strong>
               <em>{{ contentTypeLabel(item.contentType) }} · {{ leadTypeLabel(item.leadType) }} · {{ item.scene || item.shortcutCode || '-' }}</em>
@@ -74,6 +74,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { onQuickSearchHide, onQuickSearchShow } from '../../shared/desktopBridge';
+import { resolveResourceUrl } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
 import {
   cleanupQuickSearchStore,

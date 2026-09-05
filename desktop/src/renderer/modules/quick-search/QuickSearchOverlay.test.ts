@@ -151,14 +151,14 @@ describe('QuickSearchOverlay', () => {
     input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await flushUi();
 
-    expect(mocks.writeClipboardImage).toHaveBeenCalledWith('https://example.test/image.png');
-    expect(host.textContent).toContain('图片已复制');
+    expect(mocks.writeClipboardImage).toHaveBeenCalledWith('https://example.test/image.png', 'Image content');
+    expect(host.textContent).toContain('图片和文字已复制');
 
     await vi.advanceTimersByTimeAsync(3000);
     await flushUi();
 
     expect(host.querySelector('.quick-search-overlay')).toBeTruthy();
-    expect(host.textContent).not.toContain('图片已复制');
+    expect(host.textContent).not.toContain('图片和文字已复制');
 
     (host.querySelector('.icon-close-button') as HTMLButtonElement | null)?.click();
     await flushUi();

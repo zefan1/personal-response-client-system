@@ -41,7 +41,8 @@ type AlwaysOnTopResult = {
 const api = {
   captureScreenshot: (): Promise<ScreenshotResult> => ipcRenderer.invoke('screenshot:capture'),
   writeClipboardText: (text: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('clipboard:write-text', { text }),
-  writeClipboardImage: (imageUrl: string): Promise<{ success: boolean; error?: string; message?: string }> => ipcRenderer.invoke('clipboard:write-image', { imageUrl }),
+  writeClipboardImage: (imageUrl: string, text?: string): Promise<{ success: boolean; error?: string; message?: string }> =>
+    ipcRenderer.invoke('clipboard:write-image', { imageUrl, text }),
   openAdminConsole: (url?: string): Promise<{ success: boolean; error?: string; message?: string; url?: string }> => ipcRenderer.invoke('admin:open-external', { url }),
   openAssignmentTable: (url: string): Promise<{ success: boolean; error?: string; message?: string; url?: string }> => ipcRenderer.invoke('assignment-table:open-external', { url }),
   toggleAlwaysOnTop: (): Promise<AlwaysOnTopResult> => ipcRenderer.invoke('window:toggle-always-on-top'),

@@ -55,11 +55,11 @@ export async function writeClipboardText(text: string): Promise<BridgeResult> {
   return { success: fallbackCopyText(text), error: 'CLIPBOARD_FALLBACK' };
 }
 
-export async function writeClipboardImage(imageUrl: string): Promise<BridgeResult> {
+export async function writeClipboardImage(imageUrl: string, text?: string): Promise<BridgeResult> {
   if (window.desktopBridge) {
-    return window.desktopBridge.writeClipboardImage(imageUrl);
+    return window.desktopBridge.writeClipboardImage(imageUrl, text);
   }
-  return writeClipboardText(imageUrl);
+  return writeClipboardText(text?.trim() ? `${text}\n${imageUrl}` : imageUrl);
 }
 
 export async function captureScreenshot(): Promise<BridgeResult> {

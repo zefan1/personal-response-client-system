@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, nativeImage, net, Notification, screen, shell } from 'electron';
 import { activeWindow } from 'get-windows';
 import crypto from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, promises as promises, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveAdminConsoleUrl } from './adminConsoleUrl.js';
@@ -1219,26 +1219,102 @@ function registerClipboardWriteText() {
 }
 
 function registerClipboardWriteImage() {
-  ipcMain.handle('clipboard:write-image', async (_event, payload: { imageUrl?: string }) => {
+  ipcMain.handle('clipboard:write-image', async (_event, payload: { imageUrl?: string; text?: string }) => {
     try {
       if (!payload.imageUrl) {
         return { success: false, error: 'IMAGE_LOAD_FAILED', message: 'Missing imageUrl' };
       }
-      const response = await net.fetch(payload.imageUrl);
-      if (!response.ok) {
+      const buffer = await loadClipboardImage(payload.imageUrl);
+      if (!buffer.length) {
         return { success: false, error: 'IMAGE_LOAD_FAILED', message: 'Image download failed' };
       }
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const image = nativeImage.createFromBuffer(buffer);
-      if (image.isEmpty()) {
-        return { success: false, error: 'IMAGE_LOAD_FAILED', message: 'Image decode failed' };
+      const text = payload.text?.trim();
+      if (text) {
+        const imagePath = saveClipboardImageFile(buffer, payload.imageUrl);
+        const html = `<div><img src="${imagePath}">${escapeHtml(text).replace(/\r?\n/g, '<br>')}</div>`;
+        clipboard.write({
+          html,
+          text
+        });
+      } else {
+        const image = nativeImage.createFromBuffer(buffer);
+        if (image.isEmpty()) {
+          return { success: false, error: 'IMAGE_LOAD_FAILED', message: 'Image decode failed' };
+        }
+        clipboard.writeImage(image);
       }
-      clipboard.writeImage(image);
       return { success: true };
     } catch {
       return { success: false, error: 'IMAGE_LOAD_FAILED', message: 'Image load failed' };
     }
   });
+}
+
+async function loadClipboardImage(imageUrl: string): Promise<Buffer> {
+  const extension = getImageExtension(imageUrl, '');
+  if (extension) {
+    const cachedPath = getClipboardCachePath(imageUrl, extension);
+    if (existsSync(cachedPath)) {
+      return await promises.readFile(cachedPath);
+    }
+  }
+
+  const response = await net.fetch(imageUrl);
+  if (!response.ok) {
+    return Buffer.alloc(0);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length && getImageExtension(imageUrl, response.headers.get('content-type') ?? '')) {
+    const cachePath = getClipboardCachePath(imageUrl, getImageExtension(imageUrl, response.headers.get('content-type') ?? ''));
+    await promises.mkdir(path.dirname(cachePath), { recursive: true });
+    await promises.writeFile(cachePath, buffer);
+  }
+  return buffer;
+}
+
+function getImageExtension(imageUrl: string, contentType: string): string {
+  try {
+    const pathname = new URL(imageUrl).pathname.toLowerCase();
+    const urlExtension = path.extname(pathname);
+    if (/^\.(jpe?g|png|gif|webp|bmp)$/i.test(urlExtension)) {
+      return urlExtension === '.jpeg' ? '.jpg' : urlExtension;
+    }
+  } catch {
+    // Fall back to the response content type.
+  }
+
+  const type = contentType.toLowerCase();
+  if (type.includes('jpeg') || type.includes('jpg')) return '.jpg';
+  if (type.includes('png')) return '.png';
+  if (type.includes('gif')) return '.gif';
+  if (type.includes('webp')) return '.webp';
+  if (type.includes('bmp')) return '.bmp';
+  return '';
+}
+
+function getClipboardCachePath(imageUrl: string, extension: string): string {
+  const urlHash = crypto.createHash('sha256').update(imageUrl).digest('hex').slice(0, 32);
+  return path.join(app.getPath('userData'), 'clipboard-media', `${urlHash}${extension}`);
+}
+
+function saveClipboardImageFile(buffer: Buffer, imageUrl: string): string {
+  const directory = path.dirname(getClipboardCachePath(imageUrl, '.png'));
+  mkdirSync(directory, { recursive: true });
+  const extension = getImageExtension(imageUrl, '');
+  const imagePath = extension ? getClipboardCachePath(imageUrl, extension) : path.join(directory, `${crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 32)}.png`);
+  if (!existsSync(imagePath)) {
+    writeFileSync(imagePath, buffer);
+  }
+  return imagePath;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function registerQuickSearchIpc() {

@@ -69,4 +69,25 @@ class QuickSearchAdminRepositoryTest {
     verify(jdbc).update(anyString(), values.capture());
     assertThat(values.getValue()[5]).isNull();
   }
+
+  @Test
+  void updateChangesContentTypeWhenRequested() {
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    QuickSearchAdminRepository repository = new QuickSearchAdminRepository(jdbc);
+
+    repository.update(23L, new QuickSearchItemRequest(
+        ContentType.IMAGE,
+        "GENERAL",
+        "活动",
+        "aaaaa",
+        "这是我们最新的活动",
+        "/uploads/quick-search/activity.jpg",
+        99,
+        true,
+        null));
+
+    ArgumentCaptor<Object[]> values = ArgumentCaptor.forClass(Object[].class);
+    verify(jdbc).update(anyString(), values.capture());
+    assertThat(values.getValue()[0]).isEqualTo("IMAGE");
+  }
 }

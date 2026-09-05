@@ -163,4 +163,26 @@ describe('TemplateLibraryOverlay', () => {
     expect(store.templateEditorState.draft.body).toBe('Team body');
     app.unmount();
   });
+
+  it('shows a copy success toast as a popup and clears it after three seconds', async () => {
+    vi.useFakeTimers();
+    const { app, host } = await mountOverlay();
+    mocks.writeClipboardText.mockResolvedValue({ success: true });
+    mocks.postJson.mockResolvedValue({ success: true, data: { recorded: true }, errorCode: null, message: null });
+
+    (host.querySelector('[data-testid="copy-personal-template-41"]') as HTMLButtonElement).click();
+    await vi.advanceTimersByTimeAsync(0);
+    await nextTick();
+    const toast = host.querySelector('.template-library-toast');
+
+    expect(toast).toBeTruthy();
+    expect(toast?.textContent).toContain('已复制到剪贴板');
+
+    await vi.advanceTimersByTimeAsync(3200);
+    await nextTick();
+
+    expect(host.querySelector('.template-library-toast')).toBeFalsy();
+    vi.useRealTimers();
+    app.unmount();
+  });
 });

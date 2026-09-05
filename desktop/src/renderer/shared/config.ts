@@ -164,6 +164,12 @@ export function resolveApiUrl(apiBaseUrl: string, path: string): string {
   return `${base.replace(/\/+$/, '')}${normalizedPath}`;
 }
 
+export function resolveResourceUrl(value: string): string {
+  const resource = value.trim();
+  if (!resource || /^(https?:|data:|blob:)/i.test(resource)) return resource;
+  return resolveApiUrl(loadDesktopConfig().apiBaseUrl, resource);
+}
+
 function trimTrailingSlash(value: string): string {
   let normalized = value.trim();
   while (normalized.endsWith('/') && normalized.length > 1) {

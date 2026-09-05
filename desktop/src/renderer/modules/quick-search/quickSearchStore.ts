@@ -1,6 +1,6 @@
 import { computed, reactive } from 'vue';
 import { getJson, postJson } from '../../shared/apiClient';
-import { loadDesktopConfig } from '../../shared/config';
+import { loadDesktopConfig, resolveResourceUrl } from '../../shared/config';
 import { writeClipboardImage, writeClipboardText } from '../../shared/desktopBridge';
 import { eventBus } from '../../shared/eventBus';
 import { resolveQuickSearchTemplate } from './templateVariables';
@@ -147,7 +147,13 @@ export async function copyQuickSearchItem(item: QuickSearchItem): Promise<void> 
       setToast('图片素材缺少链接');
       return;
     }
-    const result = await writeClipboardImage(item.imageUrl);
+    const context = quickSearchState.customerContext;
+    const copiedText = resolveQuickSearchTemplate(
+      item.content,
+      context?.customer ?? {},
+      context?.phone ?? ''
+    );
+    const result = await writeClipboardImage(resolveResourceUrl(item.imageUrl), copiedText);
     if (!result.success) {
       setToast('图片加载失败，请检查网络');
       return;
@@ -177,7 +183,7 @@ export async function copyQuickSearchItem(item: QuickSearchItem): Promise<void> 
       return;
     }
   }
-  setToast(item.contentType === 'IMAGE' ? '图片已复制' : '已复制；未关联客户，本次不记录跟进');
+  setToast(item.contentType === 'IMAGE' ? '图片和文字已复制' : '已复制；未关联客户，本次不记录跟进');
 }
 
 export function declineQuickSearchSend(): void {

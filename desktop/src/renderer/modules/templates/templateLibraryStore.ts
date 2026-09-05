@@ -1,5 +1,6 @@
 import { reactive } from 'vue';
 import { getJson, postJson } from '../../shared/apiClient';
+import { resolveResourceUrl } from '../../shared/config';
 import { writeClipboardImage, writeClipboardText } from '../../shared/desktopBridge';
 import { resolveQuickSearchTemplate } from '../quick-search/templateVariables';
 import type { QuickSearchCustomerContext, QuickSearchItem } from '../quick-search/types';
@@ -12,6 +13,8 @@ import type {
 } from './templateTypes';
 
 const EMPTY_METADATA: TemplateMetadata = { labels: [] };
+
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 export type TemplateLibraryScope = 'ALL' | 'TEAM' | 'PERSONAL';
 export type TemplateLibraryContentFilter = 'ALL' | 'TEXT' | 'IMAGE';
@@ -40,6 +43,7 @@ export const templateEditorState = reactive({
 
 export async function openTemplateLibrary(context?: QuickSearchCustomerContext): Promise<void> {
   templateLibraryState.visible = true;
+  clearTemplateLibraryToast();
   templateLibraryState.tab = 'PERSONAL';
   templateLibraryState.query = '';
   templateLibraryState.scope = 'ALL';
@@ -50,7 +54,28 @@ export async function openTemplateLibrary(context?: QuickSearchCustomerContext):
 
 export function closeTemplateLibrary(): void {
   templateLibraryState.visible = false;
+  clearTemplateLibraryToast();
   templateLibraryState.customerContext = null;
+}
+
+function showTemplateLibraryToast(message: string): void {
+  if (toastTimer !== null) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  templateLibraryState.toast = message;
+  toastTimer = setTimeout(() => {
+    templateLibraryState.toast = '';
+    toastTimer = null;
+  }, 3000);
+}
+
+function clearTemplateLibraryToast(): void {
+  if (toastTimer !== null) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  templateLibraryState.toast = '';
 }
 
 export function setTemplateLibraryScope(scope: TemplateLibraryScope): void {
@@ -122,7 +147,7 @@ export async function savePersonalTemplate(draft: PersonalTemplateDraft): Promis
     }
     templateLibraryState.personal = [response.data, ...templateLibraryState.personal.filter((item) => item.id !== response.data?.id)];
     templateLibraryState.visible = true;
-    templateLibraryState.toast = '已保存到我的话术';
+    showTemplateLibraryToast('已保存到我的话术');
     closePersonalTemplateEditor();
     return true;
   } catch (error) {
@@ -152,12 +177,14 @@ export async function copyShortcutSpeech(item: QuickSearchItem): Promise<void> {
       templateLibraryState.error = '图片素材缺少链接';
       return;
     }
-    const result = await writeClipboardImage(item.imageUrl);
+    const context = templateLibraryState.customerContext;
+    const copiedText = resolveQuickSearchTemplate(item.content, context?.customer ?? {}, context?.phone ?? '');
+    const result = await writeClipboardImage(resolveResourceUrl(item.imageUrl), copiedText);
     if (!result.success) {
       templateLibraryState.error = '图片复制失败，请重试';
       return;
     }
-    templateLibraryState.toast = '图片已复制到剪贴板';
+    showTemplateLibraryToast('图片和文字已复制到剪贴板');
     return;
   }
   const context = templateLibraryState.customerContext;
@@ -177,7 +204,7 @@ async function copyText(body: string): Promise<boolean> {
     templateLibraryState.error = '复制失败，请重试';
     return false;
   }
-  templateLibraryState.toast = '已复制到剪贴板';
+  showTemplateLibraryToast('已复制到剪贴板');
   return true;
 }
 

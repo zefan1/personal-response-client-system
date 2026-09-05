@@ -1360,7 +1360,7 @@
                 </p>
               </div>
               <div v-if="item.contentType === 'IMAGE' && item.imageUrl" class="ops-image-preview">
-                <img :src="item.imageUrl" alt="图片素材预览" />
+                <img :src="resolveResourceUrl(String(item.imageUrl || ''))" alt="图片素材预览" />
               </div>
               <div class="ops-row-actions">
                 <button class="secondary small" type="button" @click="openForm('quickSearch', item)">编辑</button>
@@ -2949,7 +2949,7 @@
             </div>
             <div v-if="activeForm === 'quickSearch' && field.key === 'imageUrl' && formDraft.contentType === 'IMAGE'" class="ops-quick-search-image-control">
               <div v-if="formDraft.imageUrl" class="ops-image-preview">
-                <img :src="String(formDraft.imageUrl)" alt="图文素材预览" />
+                <img :src="resolveResourceUrl(String(formDraft.imageUrl))" alt="图文素材预览" />
               </div>
               <div class="ops-row-actions">
                 <label class="secondary small file-button">
@@ -3091,7 +3091,7 @@ import {
   putJson as requestPutJson,
   type ApiResponse
 } from '../../shared/apiClient';
-import { loadDesktopConfig } from '../../shared/config';
+import { loadDesktopConfig, resolveResourceUrl } from '../../shared/config';
 import { eventBus } from '../../shared/eventBus';
 import { QUICK_SEARCH_TEMPLATE_VARIABLES } from '../quick-search/templateVariables';
 import {

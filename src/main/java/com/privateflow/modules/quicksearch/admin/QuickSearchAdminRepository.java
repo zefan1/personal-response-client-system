@@ -91,7 +91,8 @@ public class QuickSearchAdminRepository {
   public void update(long id, QuickSearchItemRequest request) {
     jdbcTemplate.update("""
         UPDATE quick_search_items
-        SET lead_type = COALESCE(?, lead_type),
+        SET content_type = COALESCE(?, content_type),
+            lead_type = COALESCE(?, lead_type),
             title = COALESCE(?, title),
             shortcut_code = COALESCE(?, shortcut_code),
             content = COALESCE(?, content),
@@ -101,6 +102,7 @@ public class QuickSearchAdminRepository {
             updated_at = NOW()
         WHERE id = ?
         """,
+        request.contentType() == null ? null : request.contentType().name(),
         request.leadType() == null ? null : normalizedLeadType(request.leadType()),
         blankToNull(request.title()),
         blankToNull(request.shortcutCode()),

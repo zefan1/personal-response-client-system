@@ -14,6 +14,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 @RestControllerAdvice
 public class GlobalApiExceptionHandler {
@@ -51,6 +52,13 @@ public class GlobalApiExceptionHandler {
   })
   public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception ex) {
     return ResponseEntity.badRequest().body(ApiResponse.error(ApiErrorCodes.BAD_REQUEST, "request parameter invalid"));
+  }
+
+  @ExceptionHandler(MaxUploadSizeExceededException.class)
+  public ResponseEntity<ApiResponse<Void>> handleMaxUploadSize(MaxUploadSizeExceededException ex) {
+    log.warn("Upload size exceeded", ex);
+    return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+        .body(ApiResponse.error(ApiErrorCodes.BAD_REQUEST, "上传文件过大，请压缩后重试"));
   }
 
   @ExceptionHandler(ProfileUpdateException.class)
